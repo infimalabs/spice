@@ -1,0 +1,48 @@
+schema = 1
+target = "x86_64-pc-windows-msvc"
+crt = "14.44.17.14"
+sdk = "10.0.26100"
+channel_manifest_sha256 = "44a3e7dc44486c945abdc1fae97e7e22de4d05e80f03b00e9302ba4b72c3e0e3"
+package_manifest_sha256 = "d1d8109899558618035724949673f69f8c1b5704f542a2e76f31d87e425d5710"
+
+[xwin]
+version = "0.10.0"
+path = "/opt/homebrew/Cellar/xwin/0.10.0/bin/xwin"
+sha256 = "853d5024b3a5ef500db9bbad8258bdbde143cf39162f48aaf8fe5496282feaa5"
+
+[clang_cl]
+version = "20.1.8"
+path = "/opt/homebrew/Cellar/llvm@20/20.1.8/bin/clang"
+sha256 = "82b1ce0298345eb96a72e9652cd08d93da2529b8baae3615a0fe124f88639866"
+
+[llvm_lib]
+version = "20.1.8"
+path = "/opt/homebrew/Cellar/llvm@20/20.1.8/bin/llvm-lib"
+sha256 = "bb4301d7f6e6609695c616d9d6531c0e881ce524b4b83c1679ba423577907c5b"
+
+[llvm_ml]
+version = "20.1.8"
+path = "/opt/homebrew/Cellar/llvm@20/20.1.8/bin/llvm-ml"
+sha256 = "f99a75d853d0d53595e78e90f234f3e9302b67180899a185f0a8ed72aeebc0b8"
+
+[lld_link]
+version = "20.1.8"
+path = "/opt/homebrew/Cellar/lld@20/20.1.8/bin/lld-link"
+sha256 = "cfcaffdd4c347d8a1b1dbe1014aeda9f46a49bed4b2ca5fd8cc15ae672c3c7c3"
+
+[host_closure]
+files = [
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldCOFF.dylib",
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldCommon.dylib",
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldELF.dylib",
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldMachO.dylib",
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldMinGW.dylib",
+  "/opt/homebrew/Cellar/lld@20/20.1.8/lib/liblldWasm.dylib",
+  "/opt/homebrew/Cellar/llvm@20/20.1.8/lib/libclang-cpp.dylib",
+  "/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib",
+  "/opt/homebrew/opt/zstd/lib/libzstd.1.dylib",
+]
+trees = [
+  "/opt/homebrew/Cellar/llvm@20/20.1.8/lib/clang/20/include",
+]
+sha256 = "2269602a7b6f61da253eece60489e1134ba86867e175e639dc8ab9513e82e86a"

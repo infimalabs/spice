@@ -1,0 +1,26 @@
+[package]
+name = "wire"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = "0.22.1"
+flate2.workspace = true
+blake3 = "1.8.3"
+jiff = { version = "0.2.35", features = ["serde"] }
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+shell-words = "1.1.1"
+thiserror = "2.0.19"
+uuid = { version = "1.24.0", features = ["serde"] }
+
+[dev-dependencies]
+toml = "1.1.4"
+
+[lints]
+workspace = true

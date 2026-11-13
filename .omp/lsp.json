@@ -1,0 +1,18 @@
+{
+  "servers": {
+    "rust-analyzer": {
+      "settings": {
+        "rust-analyzer": {
+          "cargo": {
+            "extraArgs": ["--locked"],
+            "extraEnv": { "RUSTFLAGS": "--cfg rust_analyzer" },
+            "targetDir": true
+          },
+          "check": {
+            "extraEnv": { "RUSTFLAGS": "" }
+          }
+        }
+      }
+    }
+  }
+}

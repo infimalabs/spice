@@ -1,0 +1,53 @@
+[package]
+name = "gate"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+atomic = { path = "../atomic" }
+dist = { path = "../dist" }
+gix-glob = "0.27.0"
+proc-macro2 = "1.0.107"
+regex = "1.12.2"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+rustpython-ast = { version = "0.4.0", default-features = false, features = ["num-bigint", "visitor"] }
+rustpython-parser = { version = "0.4.0", default-features = false, features = ["num-bigint"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sill = { path = "../sill" }
+toml = { version = "1.1.4", default-features = false, features = [
+    "parse",
+    "display",
+    "preserve_order",
+    "serde",
+    "std",
+] }
+wire = { path = "../wire" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parking_lot = "0.12.5"
+gix = { version = "0.86.0", default-features = false, features = ["blob-diff", "index", "revision", "sha1", "tree-editor"] }
+gix-diff = { version = "0.66.0", default-features = false, features = ["index"] }
+tree-sitter = "0.26.11"
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-language = "0.1.7"
+tree-sitter-lua = "0.5.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+syn = { version = "3.0.3", features = ["full", "visit"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+inotify = { version = "0.11.4", default-features = false }
+
+[target.'cfg(target_family = "unix")'.dependencies]
+libc = "0.2.189"
+
+[dev-dependencies]
+gix = { version = "0.86.0", default-features = false, features = ["tree-editor"] }
+
+[lints]
+workspace = true

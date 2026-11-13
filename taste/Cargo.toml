@@ -1,0 +1,26 @@
+[package]
+name = "taste"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gate = { path = "../gate" }
+listen = { path = "../listen" }
+serde = { version = "1.0.229", features = ["derive"] }
+# Decoding only, and ordered. `display` would add an encoder this crate has no
+# use for, and `preserve_order` is what makes the active set arrive in the
+# order an operator tracked it rather than in whatever order a map imposes.
+toml = { version = "1.1.4", default-features = false, features = [
+    "parse",
+    "preserve_order",
+    "serde",
+    "std",
+] }
+wire = { path = "../wire" }
+unicode-segmentation = "1.13.3"
+
+[lints]
+workspace = true

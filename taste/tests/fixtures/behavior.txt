@@ -1,0 +1,2 @@
+The timer can FALL
+BACK to polling when the event stream is quiet.

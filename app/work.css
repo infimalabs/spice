@@ -1,0 +1,1495 @@
+/* The Work list: its label and filter share the header's first row; scope or
+   context pills wrap across the rows below, then the open set is grouped by
+   holder. Each row is one native disclosure: a single grid line at desktop
+   width, two lines on a phone. Gold marks only what waits on you. */
+.app-sidebar-header:has(.work-list-header) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+}
+.app-sidebar-header:has(.work-list-header) > div,
+.work-list-header { display: contents; }
+.app-sidebar-header:has(.work-list-header) .app-sidebar-kicker {
+  grid-column: 1;
+  grid-row: 1;
+}
+.app-sidebar-header:has(.work-list-header) > .app-sidebar-close {
+  grid-column: 3;
+  grid-row: 1;
+}
+.work-scope {
+  display: flex;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.work-scope-chip,
+.work-context-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: var(--app-control-edge-width) solid var(--line);
+  border-radius: var(--app-radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: 600 var(--app-type-label)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-scope-chip { cursor: pointer; }
+.work-scope-chip:hover { color: var(--ink); }
+.work-scope-chip[aria-current="true"] { border-color: var(--ink); background: var(--control); color: var(--ink); }
+.work-scope-count { color: var(--muted); font-weight: 400; }
+.work-context-chip { padding-inline-end: 2px; color: var(--ink); }
+.work-context-chip button {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-circle);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.work-context-chip button:hover { color: var(--ink); }
+.work-filter {
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: var(--app-control-edge-width) solid var(--line);
+  border-radius: var(--app-radius-control);
+  background: var(--page);
+  color: var(--ink);
+  font-size: var(--app-type-label);
+}
+:is(.work-scope-chip, .work-context-chip button, .work-filter):focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+
+.work-list { min-width: 0; padding-block-end: 32px; }
+.work-group > ul { margin: 0; padding: 0; list-style: none; }
+.work-columns {
+  display: grid;
+  grid-template-columns: 20px 156px minmax(0, 1fr) 104px 64px 36px;
+  gap: 12px;
+  padding: 12px 16px 2px;
+  color: var(--muted);
+  font: 600 var(--app-type-xs)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.work-columns > :last-child { text-align: right; }
+.work-scope-chip[data-scope="planning"] { color: var(--work-id-design); }
+.work-scope-chip[data-scope="execution"] { color: var(--work-id-execution); }
+.work-group-heading {
+  margin: 0;
+  padding: 14px 16px 6px;
+  color: var(--muted);
+  font: 600 var(--app-type-small-copy)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.work-group[data-holder="yours"] > .work-group-heading { color: var(--work-yours); }
+.work-finished-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding-block: 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.work-finished-toggle:hover { background: var(--control-surface-soft); }
+.work-finished-toggle:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.work-row { border-bottom: var(--app-edge-soft); }
+.work-row-head {
+  display: grid;
+  grid-template-columns: 20px 156px minmax(0, 1fr) 104px 64px 36px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--app-type-body);
+  text-align: left;
+  cursor: pointer;
+}
+.work-row-head:hover { background: var(--control-surface-soft); }
+.work-row-head:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+.work-row-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-row-glyph { color: var(--muted); text-align: center; }
+.work-row-id { font: 600 var(--app-type-label)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.work-row-id[data-kind="design"] { color: var(--work-id-design); }
+.work-row-id[data-kind="execution"] { color: var(--work-id-execution); }
+/* The title's Markdown body renders inline, on the row's one line. */
+.work-row-title :is(.markdown-body, p) { display: inline; margin: 0; }
+.work-row-phase,
+.work-row-holder,
+.work-row-age { color: var(--muted); font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.work-row-phase { display: grid; gap: 2px; }
+.work-row-ownership { overflow: hidden; text-overflow: ellipsis; font-size: var(--app-type-micro); }
+.work-row-ownership[data-reserved="true"] { color: var(--focus); }
+.work-row-age { text-align: right; }
+.work-row[data-holder="yours"] .work-row-glyph,
+.work-row[data-holder="yours"] .work-row-holder { color: var(--work-yours); }
+.work-row.open { border-bottom-color: var(--line); }
+.work-row.open > .work-row-head { background: var(--control-surface-soft); }
+.work-row.open[data-holder="yours"] {
+  border: var(--app-control-edge-width) solid var(--work-yours-edge);
+  background: var(--work-yours-soft);
+}
+.work-row.open[data-holder="yours"] > .work-row-head { background: transparent; }
+.work-row-body { display: grid; gap: 14px; padding: 4px 16px 24px 48px; }
+.work-row-body > .work-detail-placeholder { padding-block: 32px; }
+.work-act { display: grid; gap: 8px; }
+.work-list-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 48px 16px;
+  color: var(--muted);
+  font-size: var(--app-type-body);
+  text-align: center;
+}
+.work-list-empty p { margin: 0; }
+.work-list-empty .work-list-empty-title { color: var(--ink); font-size: var(--app-type-subheading); font-weight: 650; }
+.work-nothing-yours { color: var(--muted); }
+
+/* One lifecycle tone palette for the opened task's evidence. */
+.work-list {
+  --work-in-flight: var(--app-semantic-live);
+  /* Waiting wears the base of the surface containing it, plum inside a
+     Design-flavored sheet and the page's green elsewhere, rather than the
+     page-resolved live tone. */
+  --work-waiting: var(--accent);
+  --work-ready: var(--focus);
+  --work-blocked: var(--danger);
+  --work-selection: var(--warning);
+  --work-deferred: var(--warning);
+  --work-terminal: var(--muted);
+  --work-completed: var(--app-semantic-live);
+  --work-deleted: var(--danger);
+}
+
+/* The opened row owns the decision and the one comment shared by resolution
+   and return. Only committed authority moves the row. */
+.work-decision { display: grid; gap: 16px; min-width: 0; font-size: var(--app-type-body); }
+.work-decision-heading,
+.work-decision-output-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.work-decision-heading > span { color: var(--work-yours); font-size: var(--app-type-detail); }
+.work-decision-summary { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.work-decision-outputs { min-width: 0; }
+.work-decision-outputs > ol { display: grid; gap: 12px; list-style: none; margin: 10px 0 0; padding: 0; }
+.work-decision .room-output-verdict-all { margin-top: 0; justify-content: flex-start; }
+.work-decision-output {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: var(--app-control-edge-width) solid var(--line);
+  border-radius: var(--app-radius-control);
+  background: var(--page);
+}
+.work-decision-output-heading { color: var(--muted); font-size: var(--app-type-detail); }
+.work-decision-output-heading > :last-child { margin-inline-start: auto; }
+.work-decision-output > p { margin: 0; line-height: 1.5; }
+.work-decision-output-decision { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.work-decision-output-verdict { display: flex; flex-direction: column; gap: 0; }
+.work-decision-output-verdict button { flex: 1; border-radius: 0; min-width: 74px; }
+.work-decision-output-verdict button:first-child { border-radius: var(--app-radius-control) var(--app-radius-control) 0 0; }
+.work-decision-output-verdict button:last-child { border-radius: 0 0 var(--app-radius-control) var(--app-radius-control); margin-block-start: -1px; }
+.work-decision-output-verdict button[aria-pressed="true"] { position: relative; border-color: var(--work-yours-edge); background: var(--work-yours-soft); color: var(--work-yours); }
+.work-decision-comment,
+.work-decision-output-comment { display: grid; gap: 6px; min-width: 0; }
+.work-decision-output-comment { color: var(--muted); font-size: var(--app-type-detail); }
+.work-decision textarea { box-sizing: border-box; width: 100%; min-width: 0; border: var(--app-control-edge-width) solid var(--line); border-radius: var(--app-radius-control); padding: 8px 10px; background: var(--page); color: var(--ink); font: inherit; }
+.work-decision textarea { resize: vertical; }
+.work-decision-output-comment textarea { line-height: 1.5; }
+.work-decision-output-acceptance {
+  display: grid;
+  gap: 10px;
+  border-block: var(--app-edge-soft);
+  padding-block: 10px;
+  font-size: var(--app-type-detail);
+}
+.work-decision-output-acceptance strong { color: var(--muted); }
+.work-decision-output-acceptance :is(ol, p) { margin: 0; line-height: 1.55; }
+.work-decision-output-acceptance ol { display: grid; gap: 8px; padding-inline-start: 20px; }
+.work-decision-actions { display: flex; justify-content: space-between; gap: 10px; border-top: var(--app-edge-soft); padding-top: 12px; }
+.work-decision-actions button { white-space: normal; }
+.work-decision-verdict { border-color: var(--work-yours-edge); background: var(--work-yours-soft); color: var(--work-yours); }
+.work-decision-sending { margin: 0; padding: 10px 12px; border: 1px dashed var(--work-yours-edge); color: var(--work-yours); }
+.work-decision-links { display: grid; gap: 8px; font-size: var(--app-type-detail); color: var(--muted); }
+.work-decision-links summary { cursor: pointer; }
+
+/* Conclude and collapse reuse the decision frame and action bar, but replace
+   output verdicts with the evidence that makes the terminal decision legible.
+   Evidence and witnesses stay in the sidebar's normal flow; witnesses reuse
+   the compact fact rows instead of reserving a second column. */
+.work-conclusion-evidence { min-width: 0; }
+.work-conclusion-evidence > strong,
+.work-conclusion-witnesses > strong { color: var(--muted); font-size: var(--app-type-detail); }
+.work-conclusion-evidence-list { display: grid; gap: 10px; list-style: none; margin: 12px 0 0; padding: 0; }
+.work-conclusion-evidence-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: var(--app-edge-soft);
+  line-height: 1.45;
+}
+/* The witness block's top rule separates it from the evidence; a last row's
+   own rule would double it. */
+.work-conclusion-evidence-row:last-child { padding-bottom: 0; border-bottom: 0; }
+.work-conclusion-evidence-row > :first-child { color: var(--link); }
+.work-conclusion-evidence-row > :nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.work-conclusion-standing { color: var(--muted); font-size: var(--app-type-detail); text-align: end; }
+.work-conclusion-review { display: block; margin-block-start: 4px; color: var(--muted); }
+.work-conclusion-review[data-review-state="final-clean"] { color: var(--work-completed); }
+.work-conclusion-review-note { display: block; color: var(--muted); }
+.work-conclusion-empty { margin: 12px 0 0; color: var(--muted); }
+.work-conclusion-witnesses { display: grid; gap: 10px; border-block-start: var(--app-edge-soft); padding-block-start: 14px; }
+.work-conclusion-witnesses > .work-conclusion-witness-facts { margin: 0; padding: 0; border-bottom: 0; }
+.work-conclusion-witnesses p { margin: 0; color: var(--muted); font-size: var(--app-type-detail); line-height: 1.5; }
+
+@media (max-width: 560px) {
+  .work-decision { padding-bottom: 90px; gap: 14px; }
+  .work-conclusion-evidence-row { grid-template-columns: auto minmax(0, 1fr); }
+  .work-conclusion-standing { grid-column: 2; text-align: start; }
+  .work-decision button { min-height: 44px; }
+  .work-decision-actions {
+    position: fixed;
+    z-index: 2;
+    inset: auto 0 0;
+    padding: 12px 14px max(14px, env(safe-area-inset-bottom));
+    background: var(--page);
+    box-shadow: 0 -8px 20px color-mix(in srgb, var(--page) 85%, transparent);
+  }
+  .work-decision-actions button { flex: 1; }
+}
+
+.work-context-link {
+  flex: none;
+  color: var(--link);
+  font: 700 var(--app-type-sm)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.work-context-link:hover { text-decoration: underline; }
+.work-context-link:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Authored task Markdown: block spacing comes from its own elements, so
+   the source newlines between them must not render as blank lines. Wide or
+   long blocks scroll inside their own box instead of stretching the detail.
+   Images and diagrams preview at the message-card size and open full size. */
+.task-text { --mosaic-image-size: 8.75rem; min-width: 0; overflow-wrap: anywhere; }
+.task-text :is(p, ul, ol, pre, blockquote, .markdown-table) { margin: 0 0 8px; }
+.task-text h5 { margin: 12px 0 6px; font-size: var(--app-type-summary); }
+/* Code scrolls only sideways; the side view owns vertical scrolling. */
+.task-text pre { overflow-x: auto; }
+.task-text img { max-width: 100%; }
+.task-text a { color: var(--accent); }
+.app-sidebar :is(.task-text, .markdown-line) .message-task-chip:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+/* The pitch is the one line that says why, under every title it follows. */
+.work-task-pitch { margin: 0; color: var(--ink); font-size: var(--app-type-detail); line-height: 1.35; overflow-wrap: anywhere; }
+.work-task-header .work-task-pitch { margin-top: 6px; }
+.work-blocker-holds { margin: 0; color: var(--muted); font-size: var(--app-type-label); overflow-wrap: anywhere; }
+.work-blocker-list { display: grid; gap: 8px; }
+.work-blocker-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px;
+  border-left: var(--app-focus-ring-strong-width) solid var(--warning);
+  border-radius: var(--app-radius-compact);
+  background: var(--panel);
+}
+.work-blocker-card--action { border-left-color: var(--danger); }
+.work-blocker-card strong { font-size: var(--app-type-body); }
+.work-blocker-card p { margin: 4px 0 0; color: var(--muted); font-size: var(--app-type-label); line-height: 1.45; }
+.work-blocker-card code { display: block; margin-top: 7px; font-size: var(--app-type-state); overflow-wrap: anywhere; }
+.work-blocker-card > button { align-self: center; min-width: 8.75rem; }
+.work-blocker-actions {
+  display: flex;
+  align-self: center;
+  gap: 6px;
+}
+.work-blocker-state {
+  color: var(--warning);
+  font-size: var(--app-type-state);
+  font-weight: 720;
+  white-space: nowrap;
+}
+.work-blocker-issue { color: var(--danger) !important; }
+
+/* A relationship clause's ids wear their kind's color. */
+.work-relation-link[data-kind="design"] { color: var(--work-id-design); }
+.work-relation-link[data-kind="execution"] { color: var(--work-id-execution); }
+
+.work-note-card {
+  padding: 10px 11px;
+  border: var(--app-edge-soft);
+  border-radius: var(--app-radius-compact);
+  background: var(--control-surface-soft);
+}
+.work-note-card header { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: var(--app-type-sm); }
+.work-note-card .work-note-body { margin-top: 7px; }
+/* The operator's closure is the task's completion evidence, not one more
+   observation, so it carries the completed tone and sits above them. */
+.work-closure-card {
+  margin-bottom: 8px;
+  border-left: var(--app-focus-ring-strong-width) solid var(--work-completed);
+}
+.work-closure-card > header > h4 { margin: 0; color: var(--ink); font-size: inherit; text-transform: none; }
+.work-closure-claim { margin: 7px 0 0; color: var(--muted); font-size: var(--app-type-control); }
+/* The observation composer mirrors the Chat composer: the draft on the left and
+   one column of equal one-word pills on the right, wide enough for the busy
+   labels so a submission never resizes the draft. It sits directly above the
+   newest-first observations, where a submission lands. */
+.work-note-composer {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 14px;
+  padding-top: 14px;
+  border: var(--app-edge-soft);
+}
+.work-note-composer > label { grid-column: 1 / -1; }
+.work-note-composer textarea { min-height: 88px; }
+.work-note-actions { align-self: start; }
+.work-note-actions .app-compact-control { min-width: calc(8ch + 2rem + 2px); color: var(--page); }
+.work-note-observe { margin-bottom: 14px; }
+.work-note-capability { margin: 0 0 8px; color: var(--muted); font-size: var(--app-type-control); }
+/* The opened task's header: its full title, then one mono meta line with its
+   track (the current step bold), claimant, review, and relationship clauses,
+   then why it matters. */
+.work-task-header { display: grid; gap: 6px; }
+.work-task-title { margin: 0; font-size: var(--app-type-copy); line-height: 1.3; }
+.work-task-meta {
+  margin: 0;
+  color: var(--muted);
+  font: var(--app-type-meta)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+.work-track strong { color: var(--ink); }
+
+/* The links line leads the task body, then the compact facts flow as one
+   header, then the conversation or the view the links line expanded; the
+   main view spans the sheet. Nothing above the links line changes with the
+   selection, and the main view reserves a full viewport below it, so a short
+   view never shortens the scroller under its scroll position and shifts the
+   line just clicked. Each label-value pair stays on one line and truncates
+   within itself, so a long value such as an origin's request never turns the
+   header back into a column. */
+.work-task-main { display: grid; align-content: start; gap: 12px; min-width: 0; min-height: 100dvh; }
+.work-task-main > .app-sheet-section { padding: 0; border-top: 0; }
+.work-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding-bottom: 8px;
+  border-bottom: var(--app-edge-soft);
+  font: var(--app-type-meta)/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-facts > div {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.work-facts dt { flex: 0 0 auto; color: var(--muted); text-transform: lowercase; }
+.work-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Invitation state and available replies must not disappear into an ellipsis. */
+.work-facts dd[data-invitation-key] {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.work-facts dd.task-deferral { display: inline-flex; align-items: center; gap: 6px; }
+.work-room { display: grid; gap: 8px; min-width: 0; }
+.work-room-heading { display: flex; align-items: baseline; gap: 10px; }
+.work-room-heading > h4 { margin: 0; font-size: var(--app-type-body); }
+.work-room-heading > span { color: var(--muted); font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.work-task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  padding-bottom: 8px;
+  border-bottom: var(--app-edge-soft);
+}
+.work-task-link,
+.work-view-back {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-task-link { color: var(--muted); }
+.work-task-link:hover,
+.work-task-link[aria-pressed="true"] { color: var(--ink); }
+.work-task-link[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 3px; }
+.work-task-link-count { margin-left: 1ch; }
+.work-view-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+  color: var(--muted);
+  font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-view-back { color: var(--link); }
+.work-view-back:hover { text-decoration: underline; }
+/* A Design room's standing as one line, its command a copyable chip. */
+.work-standing-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0;
+  color: var(--muted);
+  font: var(--app-type-meta)/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-standing-line strong { color: var(--ink); }
+.work-room-lanes > h4 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; font-size: var(--app-type-label); }
+.work-room-lanes { font-size: var(--app-type-detail); }
+.work-room-lanes ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.work-questions { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.work-questions > li { overflow-wrap: anywhere; }
+.work-question-handle { margin-right: 1ch; color: var(--muted); }
+.work-question-standing {
+  margin-right: 1ch;
+  color: var(--muted);
+  font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.work-questions > li[data-answered="true"] > .work-question-standing { color: var(--work-completed); }
+
+/* Loading and unavailable detail reserve one full sheet height, since loaded
+   evidence is usually taller than the sheet: while any of the placeholder is
+   on screen, nothing below it is, so its answer moves nothing visible. It
+   carries no prose; the problem itself toasts, and only its Retry stands at
+   the top of the space. */
+.work-detail-placeholder { display: grid; place-items: start center; min-block-size: 100dvh; padding: 56px 24px; }
+
+.room-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.room-card code {
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+}
+
+.room-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.room-inline-actions button {
+  min-height: 30px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.room-inline-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.app-fact-grid dd.task-deferral {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.task-deferral > .task-deferral-time { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.task-deferral button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  margin-block: -3px;
+  padding: 1px 7px;
+  font: inherit;
+  line-height: inherit;
+}
+.task-deferral-calendar { position: relative; display: inline-flex; flex: 0 0 auto; }
+.task-deferral-calendar svg {
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.task-deferral-calendar input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.task-deferral > .task-deferral-notice {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.room-notice { margin: 0; color: var(--muted); font-size: var(--app-type-detail); }
+
+.room-unavailable,
+.room-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: var(--app-type-detail);
+}
+.room-history > .room-empty { padding: 0; }
+
+
+
+.room-card {
+  padding: 9px 10px;
+  border: var(--app-edge-soft);
+  border-inline-start: var(--message-rail) solid var(--accent-neutral);
+  border-radius: var(--app-radius-card);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.room-card:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); }
+.room-card p:not(.markdown-body p) { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+
+.room-approval > header,
+.room-standing > header,
+.room-history > header {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+}
+:is(.room-standing, .room-approval, .room-history) > header > h4 { margin: 0; color: inherit; font-size: inherit; }
+
+.room-approval,
+.room-history { display: grid; gap: 8px; }
+
+.room-block-meta { color: var(--muted); font-weight: 400; }
+
+/* A contribution's question tail is one short link; the item's words live in
+   the Contract list it focuses, and in the link's title. */
+.room-card-face p.room-contribution-question { margin: 6px 0 0; font-size: var(--app-type-meta); }
+/* A decision card names its disposition beside tab-style verdict labels
+   carrying the shared count badge. */
+.room-decision-standing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: var(--app-type-detail);
+}
+.room-decision-badges { display: inline-flex; gap: 4px; }
+.room-decision-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: var(--app-radius-pill);
+}
+.room-decision-outputs {
+  margin: 4px 0 0;
+  padding-inline-start: 18px;
+  font-size: var(--app-type-detail);
+}
+.room-decision-outputs li { margin-block: 2px; overflow-wrap: anywhere; }
+.room-decision-output-state {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.room-decision-outputs [data-output-state="done"] .room-decision-output-state,
+.room-decision-outputs [data-output-state="concluded"] .room-decision-output-state { color: var(--app-semantic-live); }
+.room-decision-outputs [data-output-state="deleted"] .room-decision-output-state,
+.room-decision-outputs [data-output-state="missing"] .room-decision-output-state { color: var(--danger); }
+.room-decision-note {
+  margin: 4px 0 0;
+  font-size: var(--app-type-detail);
+  white-space: pre-wrap;
+}
+.room-decision-note ul { margin: 0; padding-inline-start: 18px; }
+.room-decision-note p { margin: 2px 0 0; }
+/* A room-only badge names a contribution's kind or a recorded event in words
+   on the neutral tone: contributions are evidence, never authority. */
+.team-surface .message-room-pill { --message-inline-pill-accent: var(--muted); text-transform: uppercase; }
+.room-contribution-sources ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--app-type-meta);
+}
+.room-contribution-sources li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+/* The state takes only the width its row leaves (a zero basis never wraps the
+   row) and truncates, so a source resolving in place never moves the card. */
+.room-contribution-source-state {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-contribution-sources li[data-source-state="unavailable"] .room-contribution-source-state,
+.room-card-face p.room-contribution-sources-failed { color: var(--danger); }
+.room-card-face p.room-contribution-sources-none { color: var(--muted); font-size: var(--app-type-meta); }
+
+.room-approval-outputs label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.room-approval-output-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.room-output-verdict-all { margin-top: 8px; font-size: var(--app-type-detail); }
+.room-output-verdict-all button { font: inherit; }
+
+
+.room-decision-refusal { color: var(--danger); }
+
+/* Room standing: each reason kind keeps its own rail so invitation, activity,
+   work, requests, owed duties and responsibility never read alike. */
+.room-standing {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  padding: 8px;
+  border-block-end: var(--app-edge-soft);
+  font-size: var(--app-type-meta);
+}
+
+.room-standing :is(p, dl, ul) { margin: 0; }
+.room-standing > header, .room-standing small { color: var(--muted); }
+.room-standing ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.room-standing-lanes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; }
+.room-standing-lane { font-weight: 600; }
+.room-standing-availability { color: var(--muted); }
+.room-standing-availability[data-availability="seated"] { color: var(--app-semantic-live); }
+
+.room-reason {
+  padding: 0 5px;
+  border: var(--app-edge-soft);
+  border-inline-start: 3px solid var(--accent-neutral);
+  border-radius: var(--app-radius-control);
+}
+
+.room-reason[data-reason="invitation"] { border-style: dashed; border-inline-start-color: var(--focus); }
+.room-reason[data-reason="work"] { border-inline-start-color: var(--accent); }
+.room-reason[data-reason="requested"] { border-inline-start-color: var(--focus); }
+.room-reason[data-reason="responsibility"] { border-inline-start-color: var(--danger); }
+.room-reason[data-reason="left"] { border-style: dotted; border-inline-start-color: var(--muted); color: var(--muted); overflow-wrap: anywhere; }
+
+.room-flow-card > header { gap: 6px; }
+.room-flow-route { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+/* Route lifecycle and command results keep one geometry in every state: a
+   transition rewrites content in place and never moves later cards. */
+.room-flow-statuses {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-chip {
+  display: block;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: var(--app-edge-soft);
+  border-radius: var(--app-radius-control);
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-chip[data-input] {
+  display: grid;
+  justify-self: stretch;
+}
+
+.room-chip > span { overflow: hidden; text-overflow: ellipsis; }
+
+.room-chip[data-status="pending"],
+.room-chip[data-status="unheard"],
+.room-chip[data-status="vacant"],
+.room-chip[data-status="expired"] { color: var(--warning); }
+
+.room-chip[data-status="declined"],
+.room-chip[data-status="unavailable"] { color: var(--danger); }
+
+.room-card p.room-flow-guide { color: var(--muted); font-size: var(--app-type-meta); }
+.room-flow-line-body {
+  margin: 5px 0 1px;
+  padding-inline-start: 8px;
+  border-inline-start: var(--app-edge-soft);
+  color: var(--text);
+  white-space: normal;
+}
+.room-flow-line-body > :first-child { margin-block-start: 0; }
+.room-flow-line-body > :last-child { margin-block-end: 0; }
+
+.room-flow-slot {
+  display: flex;
+  align-items: center;
+  min-block-size: 30px;
+  white-space: normal;
+}
+
+.room-flow-control {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.room-flow-control input,
+.room-flow-control textarea { flex: 1 1 8rem; min-width: 0; }
+.room-flow-control textarea { block-size: 2.5rem; resize: none; }
+
+.room-flow-control button,
+button.room-flow-control {
+  min-height: 26px;
+  padding: 3px 7px;
+  border-radius: var(--app-radius-control);
+  cursor: pointer;
+}
+
+.room-flow-control button:disabled,
+button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
+
+.room-inbox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.room-inbox > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+}
+
+.room-inbox > header > h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-inbox > header > span { flex: 0 0 auto; }
+
+.room-inbox-scroll {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  max-block-size: min(38vh, 24rem);
+  overflow: hidden auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.room-inbox-scroll > * {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.room-inbox-scroll .room-card > header {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.room-inbox-scroll .room-card > header > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* An inbox item heads like a card: the sender line leads in ink, its concern
+   and publication code follow in meta type, and the direction it answers
+   reads as a quote. */
+.room-inbox-scroll .room-flow-card > header {
+  align-items: baseline;
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+}
+
+.room-inbox-scroll .room-flow-route {
+  flex-basis: 100%;
+  color: var(--ink);
+  font-size: var(--app-type-summary);
+}
+
+.room-inbox-scroll .room-flow-route > a { color: inherit; text-decoration: none; }
+.room-inbox-scroll .room-flow-route > a:is(:hover, :focus-visible) { text-decoration: underline; }
+
+.room-inbox-scroll .room-flow-concern {
+  margin: 8px 0 0;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--accent-neutral);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.room-inbox-scroll .room-flow-concern p:last-child { margin-block-end: 0; }
+
+/* The embedded message borrows the team console's surface, which fills a
+   console's height; here it is exactly as tall as the message it carries. */
+.room-inbox-scroll .room-inbox-message-surface {
+  flex: none;
+  min-height: 0;
+  min-width: 0;
+  margin-block-start: 8px;
+}
+
+
+
+.draft-form {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--app-radius-control);
+  background: var(--control-surface-soft);
+}
+
+
+/* Field labels only: the context composer's image chooser is a label too. */
+.draft-form > label {
+  display: grid;
+  grid-template-columns: minmax(6rem, .35fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+}
+
+
+.draft-context {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.draft-context-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--app-type-fact);
+}
+
+/* A Draft's context names image attachment, so its chooser shows on every
+   pointer rather than on touch screens alone. */
+.draft-context .composer-shard-image-attach { display: grid; }
+
+.draft-form input,
+.draft-form select,
+.draft-form textarea {
+  min-width: 0;
+  font: inherit;
+}
+.draft-form textarea { resize: vertical; }
+
+.draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The textarea fills its row; the creator stacks its two creations beside
+   it in the Kind column, together exactly as tall as the textarea. */
+.draft-context-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.draft-actions button {
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: var(--app-radius-control);
+  cursor: pointer;
+}
+
+.draft-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+@media (max-width: 560px) {
+  .draft-form > label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+
+@media (max-width: 760px) {
+  .room-inline-actions { flex-wrap: wrap; justify-content: flex-end; }
+}
+
+
+@property --app-compose-sheet-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The same editor remains in the header while its native dialog changes
+   modality. Expansion adds controls below it, not another writing surface. */
+.app-compose-lane {
+  display: flex;
+  grid-area: 1 / 1;
+  align-items: flex-start;
+  min-width: 0;
+  height: var(--app-header-control);
+}
+/* The entry prefers the Spice menu's width and yields to the totals only down
+   to one lane's minimum, or its whole track when even that does not fit. */
+.app-compose-entry {
+  --app-compose-inset: calc(var(--app-spice-side-gap) + env(safe-area-inset-left, 0px) + var(--app-titlebar-inset-start, 0px));
+  --app-compose-end-inset: var(--app-shell-edge-end);
+  flex: 0 1 var(--app-side-view-small);
+  margin-inline-start: calc(var(--app-compose-inset) - var(--app-commandbar-inset-start));
+  margin-block-start: calc(-1 * var(--app-commandbar-block-pad));
+  min-width: min(var(--team-surface-min-inline), calc(100% - var(--app-compose-inset) + var(--app-commandbar-inset-start)));
+  height: var(--app-header-control);
+}
+.app-compose-entry:dir(rtl) {
+  --app-compose-inset: calc(var(--app-spice-side-gap) + env(safe-area-inset-right, 0px) + var(--app-titlebar-inset-start, 0px));
+  --app-compose-end-inset: calc(var(--app-shell-edge-inline) + env(safe-area-inset-left, 0px));
+}
+/* One borderless sheet hangs from the header. A separate rounded-end rail
+   carries its bottom accent without rounding the editor or curling into the
+   gutters.
+   It is laid out once, whole. Closed, its lower pixels are transparent and
+   the cut rests at the height of its Draft and Help tabs: their fill and rail,
+   no rim and no shadow, with the writing line beside the pair. Opening fades
+   those lower pixels into the already-laid-out sheet, so nothing it holds
+   moves or changes shape. The rail's stack of utility tabs, selector, action
+   and accent, one inset apart, sets the sheet's height. */
+.app-compose-dialog.app-modal {
+  --app-compose-sheet-opacity: 0;
+  --app-compose-edge: var(--app-focus-ring-width);
+  --app-compose-rail-width: 6rem;
+  --app-compose-rail-inset: 8px;
+  --app-compose-rail-action: 72px;
+  --app-compose-tab-block: 36px;
+  --app-compose-accent-edge: var(--message-rail);
+  --app-closed-edge-color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-line));
+  --app-closed-edge-thickness: var(--app-compose-accent-edge);
+  --app-closed-edge-layer: 4;
+  --app-compose-utility-layer: calc(var(--app-closed-edge-layer) + 1);
+  --app-compose-inner: calc(var(--app-compose-tab-block) - 2 * var(--app-compose-edge));
+  --app-compose-line: 22px;
+  --app-compose-line-inset: calc((var(--app-compose-tab-block) - var(--app-compose-accent-edge) - var(--app-compose-line)) / 2 - var(--app-compose-edge));
+  --app-compose-writing-start: 10px;
+  --app-compose-writing-end: var(--app-compose-writing-start);
+  --team-control-item-height: 36px;
+  --app-compose-selector-block: calc(4 * var(--team-control-item-height) + 3px);
+  --app-compose-sheet-block: calc(var(--app-compose-tab-block) + 3 * var(--app-compose-rail-inset) + var(--app-compose-selector-block) + var(--app-compose-rail-action) + var(--app-compose-accent-edge) - 2 * var(--app-compose-edge));
+  --app-compose-recipient-block: 50px;
+  --app-compose-strip-block: 28px;
+  --app-compose-open-min: min(var(--team-surface-min-inline), calc(100vw - var(--app-compose-inset) - var(--app-compose-end-inset)));
+  inset: 0 auto auto var(--app-commandbar-inset-start);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 0fr;
+  width: var(--app-compose-anchor-width, 36rem);
+  height: auto;
+  max-height: calc(100dvh - 2 * var(--app-commandbar-block-pad));
+  padding: 0;
+  overflow: clip;
+  border: 0;
+  border-radius: 0 0 var(--app-closed-edge-radius) var(--app-closed-edge-radius);
+  background: transparent;
+  box-shadow: none;
+  isolation: isolate;
+  font-family: var(--app-font, ui-sans-serif, system-ui, sans-serif);
+}
+/* The laid-out sheet and veil fade as the side view does; nothing moves or
+   scales. The closed writing line and tabs remain opaque while a mask reveals
+   only the sheet below them. Its open-only controls join the same fade, and
+   the bottom accent crossfades with the persistent closed accent. The shadow's
+   transition remains the close boundary, so the invisible sheet is cut only
+   after the fade is seen. */
+.app-compose-dialog:is([data-presented="true"], [inert]) { grid-template-rows: 1fr; }
+.app-compose-dialog[data-presented="true"] {
+  --app-compose-sheet-opacity: 1;
+  box-shadow: var(--shadow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-compose-dialog.app-modal {
+    transition:
+      --app-compose-sheet-opacity var(--app-motion-settle) var(--app-ease-standard),
+      box-shadow var(--app-motion-settle) var(--app-ease-standard);
+  }
+  .app-compose-dialog::backdrop { transition: var(--app-side-view-fade); }
+  .app-compose-surface { transition: background-color var(--app-motion-settle) var(--app-ease-standard); }
+  .app-compose-dialog :is(.app-compose-modes-row, .app-compose-details) {
+    transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+  }
+  /* The action keeps its own ink and face easing beside the shared fade. */
+  .app-compose-dialog .app-compose-submit {
+    transition: opacity var(--app-motion-settle) var(--app-ease-standard), color var(--app-motion-fast) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard);
+  }
+}
+.app-compose-surface {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--app-base-control);
+  backdrop-filter: var(--overlay-frost);
+  pointer-events: none;
+}
+.app-compose-surface,
+.app-compose-form {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0 var(--app-compose-tab-block),
+    rgb(0 0 0 / var(--app-compose-sheet-opacity)) var(--app-compose-tab-block) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0 var(--app-compose-tab-block),
+    rgb(0 0 0 / var(--app-compose-sheet-opacity)) var(--app-compose-tab-block) 100%
+  );
+  mask-mode: alpha;
+}
+.app-compose-dialog[data-presented="true"] .app-compose-surface { background-color: var(--app-control-glass-paint); }
+/* The expanded accent fades with the sheet. A second rail stays under the
+   closed writing row, so the persistent entry never blinks while the laid-out
+   sheet appears or disappears. */
+.app-compose-dialog::before {
+  position: absolute;
+  z-index: var(--app-closed-edge-layer);
+  inset: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge)) 0 auto;
+  block-size: var(--app-compose-accent-edge);
+  border-start-end-radius: var(--app-closed-edge-radius);
+  border-end-end-radius: var(--app-closed-edge-radius);
+  border-end-start-radius: var(--app-closed-edge-radius);
+  background: var(--app-closed-edge-color);
+  opacity: calc(1 - var(--app-compose-sheet-opacity));
+  content: "";
+  pointer-events: none;
+}
+.app-compose-dialog::after {
+  opacity: var(--app-compose-sheet-opacity);
+  filter: drop-shadow(0 -1px 3px transparent);
+}
+.app-compose-dialog[data-presented="true"]::after {
+  filter: drop-shadow(0 -1px 3px color-mix(in srgb, var(--app-base-accent) 34%, transparent));
+}
+@media (forced-colors: active) {
+  .app-compose-dialog::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+/* While closing, inert keeps the open-only controls unavailable as their
+   opacity fades. Settled closed state then hides them from paint and focus. */
+.app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit, .composer-shard-image-indicators > :not(.composer-shard-image-attach)),
+.app-compose-dialog[data-presented="false"]:not([inert]) .draft-context > :not(.draft-context-editor) { visibility: hidden; }
+.app-compose-dialog[data-presented="false"] :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit) { opacity: 0; }
+/* The veil stands only while the sheet is presented. */
+.app-compose-dialog[data-presented="false"]::backdrop { opacity: 0; }
+/* Open, the sheet keeps the entry's width; only an entry squeezed below a
+   lane's minimum widens to it, bounded by the viewport. The sheet is laid
+   out at that open width even while closed, so opening rewraps nothing. */
+.app-compose-dialog[data-expanded="true"] { min-width: var(--app-compose-open-min); }
+/* Admission keeps the submitted composition visible but marks its contents
+   provisional through desaturation. No control geometry changes. */
+.app-compose-dialog[data-admission-state="pending"] {
+  cursor: progress;
+}
+.app-compose-dialog[data-admission-state="pending"] .app-compose-form > fieldset {
+  filter: grayscale(1);
+  transition: filter var(--app-motion-settle) var(--app-ease-standard);
+}
+.app-compose-dialog[data-admission-state="pending"] :is(textarea, input, select, button, label) { cursor: progress; }
+/* A closed sealed composition still needs one live interaction: reopening
+   it. This transparent button covers the tab beneath its live controls
+   without granting any mutation authority. */
+.app-compose-pending-open {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+  height: var(--app-compose-tab-block);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: progress;
+}
+/* The rail's bottom action, Send or Create, is lettered at the team controls'
+   size. It rests muted on its glass face; once a press would submit something
+   it takes the team SEND's ink and backlight. */
+.app-compose-submit {
+  position: absolute;
+  inset-block-start: calc(var(--app-compose-tab-block) + 2 * var(--app-compose-rail-inset) + var(--app-compose-selector-block));
+  inset-inline-end: calc((var(--app-compose-rail-width) - var(--app-compose-rail-action)) / 2 + var(--app-compose-edge));
+  width: var(--app-compose-rail-action);
+  box-sizing: border-box;
+  height: var(--app-compose-rail-action);
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border: var(--team-control-edge);
+  border-radius: var(--app-radius-circle);
+  background: var(--team-send-glass-face);
+  box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), var(--team-control-rest), var(--team-send-glass-catch);
+  color: var(--muted);
+  font: 700 var(--app-type-primary-action)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -.025em;
+  text-transform: uppercase;
+  transition: color var(--app-motion-fast) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard);
+  cursor: pointer;
+  isolation: isolate;
+  overflow: hidden;
+}
+.app-compose-submit .team-send-label { font-size: 1.5em; }
+.app-compose-submit::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--team-send-emitter);
+  filter: blur(3px);
+  opacity: 0;
+  content: "";
+  pointer-events: none;
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+}
+.app-compose-submit[data-lit="true"]:not(:disabled) {
+  color: var(--ink);
+  backdrop-filter: blur(1.5px) saturate(1.15);
+}
+.app-compose-submit[data-lit="true"]:not(:disabled)::before { opacity: .58; }
+.app-compose-submit[data-lit="true"]:not(:disabled):is(:hover, :focus-visible)::before { opacity: .72; }
+.app-compose-submit[data-lit="true"]:not(:disabled):active::before { opacity: .46; }
+.app-compose-submit:not(:disabled):hover { background-color: color-mix(in srgb, var(--app-highlight-source) 7.5%, transparent); }
+.app-compose-submit:not(:disabled):active { box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent); }
+.app-compose-submit:disabled { color: var(--muted); cursor: not-allowed; }
+.app-compose-submit:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+/* Utility tabs run from the inline end inward, sharing the rail evenly and one
+   layer above both accents. Only the outside lower corners round. Draft wears
+   the sheet's accent when engaged but has no press in Ask; Help stays live
+   while admission seals the composition. */
+.app-compose-dialog .app-compose-utility-tabs {
+  position: absolute;
+  z-index: var(--app-compose-utility-layer);
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: row-reverse;
+  width: calc(var(--app-compose-rail-width) + var(--app-compose-edge));
+  height: var(--app-compose-tab-block);
+}
+.app-compose-dialog .app-compose-utility-tab {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: var(--app-type-compact);
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.app-compose-dialog .app-compose-utility-tab:first-child { border-end-end-radius: var(--app-radius-card); }
+.app-compose-dialog .app-compose-utility-tab:last-child { border-end-start-radius: var(--app-radius-card); }
+.app-compose-dialog .app-compose-draft[aria-pressed="true"] {
+  border-color: var(--app-base-accent);
+  background: color-mix(in srgb, var(--app-base-accent) 16%, var(--app-base-control));
+  color: var(--app-base-ink);
+}
+.app-compose-dialog .app-compose-draft:disabled {
+  opacity: 1;
+  border-color: var(--app-base-line);
+  background: color-mix(in srgb, var(--app-horn-tab-tint) 5%, var(--app-base-control));
+  color: color-mix(in srgb, var(--app-base-muted) 62%, transparent);
+  cursor: not-allowed;
+}
+.app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
+.app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
+.app-compose-dialog .app-compose-utility-tab:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+  .app-compose-dialog.app-modal,
+  .app-compose-submit,
+  .app-compose-dialog[data-admission-state="pending"] .app-compose-form > fieldset { transition: none; }
+}
+/* The trigger and context wrappers dissolve so the writing area and the
+   context's own heading, quotes and images order as one column beside the
+   rail. */
+.app-compose-dialog :is(#app-compose-trigger, .draft-context) { display: contents; }
+/* The editor keeps the writing area's own height in every mode, so the image
+   strip laid over its lower inline end never moves. */
+.app-compose-dialog .draft-context-editor {
+  position: relative;
+  order: -2;
+  align-self: start;
+  width: calc(100% - var(--app-compose-rail-width));
+}
+.app-compose-dialog .draft-context-heading { padding: 6px var(--app-spice-section-inset-inline) 0; }
+/* To and its choices stay centered in one reserved row of definite block size,
+   so recipient metrics never change the sheet when Ask replaces a work kind. */
+.app-compose-details {
+  display: grid;
+  box-sizing: border-box;
+  block-size: var(--app-compose-recipient-block);
+  min-block-size: 0;
+  align-content: center;
+  gap: 12px;
+  padding-block: 0;
+  padding-inline: var(--app-compose-writing-start) calc(var(--app-compose-rail-width) + var(--app-compose-writing-start));
+  overflow: hidden;
+}
+/* The controls form one team-style inline-end rail: the Draft and Help tabs
+   above a vertical wide-thumb destination slider, then the circular
+   Send/Create action and the bottom accent, each one rail inset below the
+   last. */
+.app-compose-modes-row {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: calc(var(--app-compose-tab-block) + var(--app-compose-rail-inset));
+  inset-inline-end: calc(var(--app-compose-rail-inset) + var(--app-compose-edge));
+  width: calc(var(--app-compose-rail-width) - 2 * var(--app-compose-rail-inset));
+  padding: 0;
+}
+.app-compose-form > fieldset { min-block-size: var(--app-compose-sheet-block); }
+.app-segment-slider.app-compose-modes {
+  --app-segment-count: 4;
+  --app-segment-face-block-size: calc((100% - 3px) / var(--app-segment-count));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(var(--app-segment-count), var(--team-control-item-height));
+  block-size: var(--app-compose-selector-block);
+  max-inline-size: none;
+  border-radius: calc(var(--team-control-item-height) / 2);
+}
+.app-compose-modes.app-segment-slider::before {
+  inset-block: auto;
+  inset-block-start: calc(var(--app-segment-stop) * (var(--app-segment-face-block-size) + 1px));
+  inset-inline: 2px;
+  inline-size: auto;
+  block-size: var(--app-segment-face-block-size);
+  transition: inset-block-start var(--app-motion-settle) var(--app-ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-compose-modes.app-segment-slider::before { transition: none; }
+}
+.app-compose-modes > .app-choice-chip {
+  min-height: 0;
+  padding: 0 6px;
+  font: 600 var(--app-type-control)/1 var(--app-font, ui-sans-serif, system-ui, sans-serif);
+  cursor: pointer;
+}
+/* The form keeps only its block inset. Its content and surface meet both inline
+   edges directly, so the accent is the sheet's only visible edge. The form
+   keeps its whole height under the sheet's cut and claims only one tab of the
+   closed row. It scrolls a composition taller than the viewport while open;
+   closed, it rests at its top. */
+.app-compose-form {
+  position: relative;
+  align-self: start;
+  box-sizing: border-box;
+  min-width: var(--app-compose-open-min);
+  min-height: var(--app-compose-tab-block);
+  max-height: calc(100dvh - 2 * var(--app-commandbar-block-pad));
+  overflow: hidden auto;
+  scrollbar-width: none;
+  background: transparent;
+  padding-block: var(--app-compose-edge);
+  padding-inline: 0;
+}
+.app-compose-dialog[data-presented="false"] .app-compose-form { overflow: clip; }
+.app-compose-form fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.app-compose-form label { display: grid; gap: 4px; min-width: 0; }
+.app-compose-form :is(label, .app-compose-recipient) > span { color: var(--muted); font-size: var(--app-type-fact); }
+/* To sits beside one never-wrapping row of recipient choices that scrolls
+   inline. Best-matched and unchosen agents wear placeholder ink. */
+.app-compose-form .app-compose-recipient { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.app-compose-recipients { display: flex; gap: 6px; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
+.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 22px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; color: color-mix(in srgb, var(--muted) 55%, var(--control)); font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
+.app-compose-recipient-choice input { margin: 0; accent-color: var(--ink); }
+.app-compose-recipient-choice:is([aria-pressed="true"], :has(input:checked)) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.app-compose-recipient-choice:has(input:checked) { color: var(--ink); }
+/* Direct images keep the team composers' strip: one bounded row that grows
+   from the writing area's lower inline end and scrolls past its bound. It
+   lies over the writing area, which clears it only while it holds an image,
+   so no count changes the sheet. */
+.app-compose-dialog .draft-context-editor > :is(textarea, .composer-shard-image-indicators) { grid-area: 1 / 1; }
+.app-compose-dialog .draft-context-editor > .composer-shard-image-indicators {
+  z-index: 1;
+  place-self: end;
+  max-width: min(222px, 100% - 2 * var(--app-compose-rail-inset));
+  margin: 0 var(--app-compose-rail-inset) var(--app-compose-rail-inset);
+}
+/* As in the team composers, only a touch screen without hover shows the
+   attach circle: it has no paste or drop. The circle centers on the first
+   writing line, which clears it. */
+.app-compose-dialog .draft-context-editor .composer-shard-image-attach {
+  --app-compose-attach-size: 22px;
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--app-compose-line-inset) + (var(--app-compose-line) - var(--app-compose-attach-size)) / 2);
+  inset-inline-end: 8px;
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .app-compose-dialog.app-modal { --app-compose-writing-end: calc(var(--app-round-control-size) + var(--app-compose-writing-start)); }
+  .app-compose-dialog .draft-context-editor .composer-shard-image-attach { display: grid; }
+}
+.app-compose-form input,
+.app-compose-form select { width: 100%; box-sizing: border-box; }
+.app-compose-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--app-compose-inner);
+  max-height: 12rem;
+  margin: 0;
+  padding: 6px 10px;
+  field-sizing: content;
+  resize: vertical;
+  background: transparent;
+}
+/* The writing area is the sheet's face: no edge or corner of its own, and a
+   first line centered in the closed tab's fill above its rail. Its geometry
+   is the same closed and open, so the tab shows that line where the open
+   sheet does. */
+.app-compose-dialog .draft-context > .draft-context-editor textarea {
+  height: calc(var(--app-compose-sheet-block) - var(--app-compose-recipient-block));
+  max-height: none;
+  padding-block: var(--app-compose-line-inset) 12px;
+  padding-inline: var(--app-compose-writing-start) var(--app-compose-writing-end);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  line-height: var(--app-compose-line);
+  field-sizing: fixed;
+  white-space: pre-wrap;
+  resize: none;
+  overflow: auto;
+}
+.app-compose-dialog .draft-context > .draft-context-editor:has(.composer-shard-image-indicator) textarea {
+  padding-block-end: calc(var(--app-compose-strip-block) + 2 * var(--app-compose-rail-inset));
+}
+/* The tab's cut falls inside the second line, so a closed tab trims the
+   writing area to its first. A closed tab too narrow for its prompt ends it
+   in an ellipsis; the prompt takes its ellipsis from the writing area. */
+.app-compose-dialog[data-presented="false"] .draft-context > .draft-context-editor textarea { overflow: hidden; }
+.app-compose-dialog[data-presented="false"]:not([inert]) .draft-context > .draft-context-editor textarea {
+  clip-path: inset(0 0 calc(100% - var(--app-compose-line-inset) - var(--app-compose-line)) 0);
+}
+.app-compose-dialog[data-expanded="false"] .draft-context > .draft-context-editor textarea { text-overflow: ellipsis; }
+.app-compose-dialog .draft-context > .draft-context-editor textarea::placeholder { white-space: pre-line; }
+.app-compose-dialog[data-expanded="false"] .draft-context > .draft-context-editor textarea::placeholder {
+  max-width: calc(var(--app-compose-anchor-width) - 2 * var(--app-compose-edge) - 20px);
+  white-space: pre;
+  overflow: hidden;
+}
+/* The open sheet and caret show where typing goes; a ring inside the sheet
+   would read as a second edge. */
+.app-compose-dialog .draft-context > .draft-context-editor textarea:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+.app-compose-dialog [hidden] { display: none !important; }
+@media (max-width: 560px) {
+  .app-compose-modes > .app-choice-chip { padding-inline: 3px; }
+}

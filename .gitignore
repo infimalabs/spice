@@ -1,0 +1,24 @@
+/target/
+# Generated release payloads are content-addressed and reconstructed by
+# the installed Spice `dev xtask -- stage-target`; they are not task-source work.
+/dist/stage/objects/
+/dist/stage/targets/
+# The one source archive a release stages every target from, written by
+# `dev xtask -- source-archive`; its bytes are the release's source identity.
+/dist/stage/source.tar
+#
+# Source archives carry the canonical build identity at this path. Checkouts
+# derive it from Git instead, so the generated record is never tracked.
+/dist/build.json
+
+# The sole browser app generation store. Each lane publishes it with
+# installed Spice `dev xtask -- app`; no resident falls back when its current generation is absent.
+# Publications into it serialize on the lock file beside it.
+/dist/stage-app/
+/dist/.stage-app.lock
+/dist/.stage-app-build-*/
+
+
+# Operator-local Windows SDK licence authority; each journal supplies its own.
+/dist/windows/msvc.local.toml
+/.spice/

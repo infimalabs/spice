@@ -1,0 +1,1380 @@
+.composer-shard-heading > button,
+.agent-menu-button,
+.composer-shard-image-attach {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: var(--app-control-edge-width) solid var(--control-line-soft);
+  border-radius: var(--app-radius-circle);
+  background: var(--control-surface-soft);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+  font-size: var(--app-type-prose);
+  line-height: 1;
+}
+.composer-shard-heading > button:hover,
+.composer-shard-heading > button:focus-visible {
+  border-color: var(--accent-slot, var(--accent));
+  background: var(--control);
+  color: var(--ink);
+}
+.composer-shard-image-attach:active,
+.composer-shard-image-attach:focus-within {
+  border-color: var(--accent-slot, var(--accent));
+  background: var(--control);
+  color: var(--accent-slot, var(--accent));
+}
+.agent-menu > .agent-menu-button:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 1px;
+}
+/* Draft image chooser in the menu's own circle frame, centred in the
+   thumbnail strip's band. Touch screens only: a pointer user pastes or drops
+   instead. The transparent input covers the frame so the platform opens its
+   chooser from a real tap. The plus is drawn, not lettered, so it sits on the
+   frame's exact center whatever the font's glyph metrics. */
+.composer-shard-image-attach {
+  position: relative;
+  display: none;
+  flex: none;
+  align-self: center;
+  overflow: hidden;
+  font-size: var(--app-type-copy);
+}
+@media (hover: none) and (pointer: coarse) {
+  .composer-shard-image-attach { display: grid; }
+}
+.composer-shard-image-attach input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.composer-shard-image-attach::before,
+.composer-shard-image-attach::after {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  content: "";
+  pointer-events: none;
+}
+.composer-shard-image-attach::after { width: 1.5px; height: 10px; }
+.composer-menu-icon {
+  display: grid;
+  width: 11px;
+  height: 8px;
+  align-content: space-between;
+}
+.composer-menu-icon > span {
+  display: block;
+  width: 100%;
+  height: 1.5px;
+  background: currentColor;
+}
+/* A lane's 22px menu control is materially smaller than the team's 32px
+   control, so its three bars keep the same hierarchy instead of reusing the
+   team glyph at full size. */
+.agent-menu-button .composer-menu-icon {
+  width: 8px;
+  height: 6px;
+}
+.agent-menu-button .composer-menu-icon > span {
+  height: 1px;
+}
+.agent-menu { position: static; }
+.agent-menu > .agent-menu-button {
+  --team-control-button-size: 22px;
+  overflow: visible;
+  list-style: none;
+  cursor: pointer;
+}
+.agent-menu-button::-webkit-details-marker { display: none; }
+/* The lane's provider mark is the menu glyph; the button carries its title. */
+.agent-menu-button > .app-provider-emblem { width: 12.5px; height: 12.5px; cursor: inherit; }
+/* Renewal keeps its recipient-colored status dot, not a colored control rim. */
+.agent-menu[data-renewal-pending="true"] > .agent-menu-button {
+  position: relative;
+}
+.agent-menu[data-renewal-pending="true"] > .agent-menu-button::after {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--app-radius-circle);
+  background: var(--accent-slot, var(--accent));
+  box-shadow: 0 0 0 2px var(--panel);
+  content: "";
+}
+.agent-menu[open] > .agent-menu-button {
+  position: relative;
+  z-index: 5;
+  color: var(--ink);
+}
+/* The open menu replaces the composer below the shard heading rather than
+   floating over the lane, and scrolls within the shard it took over. A wide
+   lane lays the sections side by side; a narrow one stacks them. */
+.agent-menu-panel {
+  position: absolute;
+  z-index: 4;
+  inset: var(--app-status-line-band) 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(17em, 100%), 1fr));
+  align-content: start;
+  align-items: start;
+  gap: 6px 12px;
+  min-width: 0;
+  padding: 6px 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font: var(--app-type-small-copy)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.agent-menu-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  white-space: nowrap;
+}
+.agent-menu-head > strong,
+.agent-menu-presence {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-menu-head > strong { color: var(--accent-slot, var(--ink)); }
+.agent-menu-presence { color: var(--muted); }
+/* The age's tick reserve trails it, so the separator sits beside the age. */
+.agent-menu-presence .team-presence-age { text-align: start; }
+/* What the agent needs from the operator leads the menu, one row per item. */
+.agent-menu-attention {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-menu-attention-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 4px 2px 7px;
+  border: var(--app-control-edge-width) solid color-mix(in srgb, var(--accent-slot, var(--accent)) 38%, var(--control-line-soft));
+  border-left: var(--quote-rail) solid var(--accent-slot, var(--accent));
+  border-radius: var(--app-radius-micro);
+  background: color-mix(in srgb, var(--accent-slot, var(--accent)) 8%, var(--panel));
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+}
+:is(button, a).agent-menu-attention-chip { cursor: pointer; }
+:is(button, a).agent-menu-attention-chip:hover {
+  background: color-mix(in srgb, var(--accent-slot, var(--accent)) 16%, var(--panel));
+}
+.agent-menu-attention-chip:focus-visible,
+.agent-menu-attention-rule:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 1px; }
+.agent-menu-attention-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-menu-attention-copy strong { font-weight: 700; }
+.agent-menu-attention-age { flex: none; color: var(--muted); white-space: nowrap; }
+.agent-menu-attention-rule {
+  flex: none;
+  min-height: 0;
+  height: 20px;
+  padding: 0 7px;
+  border: var(--app-control-edge-width) solid var(--control-line-soft);
+  border-radius: var(--app-radius-focus);
+  background: var(--panel);
+  color: var(--ink);
+  font: 700 var(--app-type-compact)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+}
+.agent-menu-attention-rule[data-answer="granted"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--control-line-soft)); }
+.agent-menu-attention-rule[data-answer="denied"] { color: var(--danger); }
+.agent-menu-attention-rule:disabled { opacity: .5; cursor: progress; }
+.agent-menu-rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: var(--app-control-edge-width) solid var(--line-soft);
+}
+/* Keys share one column sized to the longest label, OCCUPANT and WORKTREE;
+   values truncate, and a meta, when a row has one, takes an implicit column
+   at the row's end so a row without one spends no gap on it. */
+.agent-menu-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-auto-columns: auto;
+  grid-auto-flow: column;
+  align-items: baseline;
+  gap: 0 6px;
+  padding: 2px 0;
+  min-width: 0;
+}
+.agent-menu-key,
+.agent-menu-facts dt {
+  inline-size: calc(8ch + .4em);
+  color: var(--muted);
+  font-size: var(--app-type-compact);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.agent-menu-value {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-menu-row[data-empty="true"] .agent-menu-value { color: var(--muted); }
+.agent-menu-link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+.agent-menu-link:hover,
+.agent-menu-link:focus-visible { color: var(--accent-slot, var(--accent)); text-decoration: underline; }
+.agent-menu-meta { color: var(--muted); white-space: nowrap; }
+.agent-menu-facts {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.agent-menu-fact {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-menu-facts dd {
+  overflow: hidden;
+  min-width: 0;
+  margin: 0;
+}
+.agent-menu-facts code {
+  display: block;
+  overflow: hidden;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-menu-copy {
+  display: block;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: start;
+  cursor: copy;
+}
+.agent-menu-copy:hover code,
+.agent-menu-copy:focus-visible code { color: var(--accent-slot, var(--accent)); }
+.agent-menu-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: var(--app-control-edge-width) solid var(--control-line-soft);
+  border-radius: var(--app-radius-control);
+  background: var(--control-surface-soft);
+  color: var(--ink);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.agent-menu-action:not(:disabled):hover {
+  border-color: var(--accent-slot, var(--accent));
+  background: color-mix(in srgb, var(--accent-slot, var(--accent)) 14%, var(--panel));
+}
+.agent-menu-action:disabled { cursor: not-allowed; opacity: .46; }
+.agent-menu-panel :focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 1px;
+}
+
+
+/* The lane's unframed activity trace runs flush across its composer's foot,
+   behind the draft, and leaves once typing starts: the draft owns the whole
+   field. */
+.composer-shard > .composer-trace-rail {
+  position: absolute;
+  inset: auto 0 0;
+  height: 32px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--app-shadow-source) 18%, transparent));
+  pointer-events: none;
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+}
+/* The pane is the whole 32px rail; the curves themselves keep a 4px headroom
+   under its top so lifecycle markers stand clear of the highest peak. */
+.composer-shard > .composer-trace-rail > .activity-trace { inset: 0; }
+.composer-shard:has(> textarea:not(:placeholder-shown)) > .composer-trace-rail { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .composer-shard > .composer-trace-rail { transition: none; }
+}
+/* Every draft's field is see-through and stays above its shard's trace. */
+.composer-shard > textarea {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.team-surface .mosaic-composer {
+  gap: 0;
+  height: auto;
+  padding: 0;
+}
+.team-surface .mosaic-composer textarea {
+  height: 100%;
+  min-height: 0;
+  padding: 7px 9px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  line-height: 1.35;
+}
+.team-surface .mosaic-composer textarea:focus-visible { outline: none; }
+.composer-shard-prose[data-composer-drag-handle="true"] {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.composer-shard-prose[data-composer-drag-handle="true"]:active {
+  cursor: grabbing;
+}
+/* The composer rides at the foot of a slot atop the Chat plane's scroll
+   content, so the browser's own scroll moves it with the cards on every
+   engine. Sticky bounds exclude the plane's spacer padding, so its bottom can
+   never pass the content's top edge, one composer height below the plane's
+   top: no gap opens above it. Rust moves the slot's foot only where that
+   cannot be seen. */
+.team-composer-slot {
+  position: absolute; inset: 0 0 auto; z-index: 1;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  pointer-events: none;
+}
+/* The overhang is the paint's continuation below the box. Rust reads it, so
+   full collapse waits until the continuation has also left the plane. */
+.team-compose { --team-composer-overhang: 10px; }
+.team-compose .team-composer {
+  position: sticky; bottom: 100%;
+  isolation: isolate;
+  flex: none; pointer-events: auto;
+}
+/* One screen owns the full member backdrop and its masked continuation.
+   Keeping the gradient, frost, and mask on one composited layer avoids a hard
+   join between independently sampled pieces of glass. */
+.team-compose .team-composer::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 calc(-1 * var(--team-composer-overhang));
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--control) 70%, transparent) 0,
+      color-mix(in srgb, var(--control) 52%, transparent) var(--app-status-line-band),
+      transparent calc(var(--app-status-line-band) + 20px)
+    ),
+    var(--overlay-veil);
+  backdrop-filter: var(--overlay-frost);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    var(--app-mask-opaque) 0 calc(100% - var(--team-composer-overhang)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    var(--app-mask-opaque) 0 calc(100% - var(--team-composer-overhang)),
+    transparent 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+/* The paint remains nearly solid through the neighboring drafts' full height,
+   then fades only below them. Grid children stay above this pointer-inert
+   continuation without changing their containing blocks. */
+.team-composer .team-composer-controls::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 calc(-1 * var(--team-composer-overhang));
+  background: linear-gradient(
+    to bottom,
+    var(--app-control-glass-paint) 0 calc(100% - var(--team-composer-overhang)),
+    transparent 100%
+  );
+  content: "";
+  pointer-events: none;
+}
+.team-composer .team-composer-controls > * { z-index: 1; }
+/* SEND is one optical system of two layers. This lower disc is the emitter: an
+   even diffuse field behind the whole glass disc, with no drawn ring and no
+   center hotspot. Its softened edge is clipped to SEND's own circle and its
+   center follows SEND's grid position. The glass face in mosaic.css transmits
+   it and collects light in irregular catches along its curved perimeter.
+   States modulate only this field's intensity; typed rims stay separate
+   layers above both. */
+.team-composer .team-composer-controls::after {
+  --team-send-emitter-inset: 4px;
+  position: absolute;
+  z-index: 0;
+  inset-inline-start: 50%;
+  inset-block-start: calc(var(--team-control-inset) + var(--team-control-button-size) + var(--team-control-upper-gap) + var(--team-slider-groove-block) + var(--team-control-send-gap) - var(--team-send-emitter-inset));
+  inline-size: calc(var(--team-control-send-size) + 2 * var(--team-send-emitter-inset));
+  block-size: calc(var(--team-control-send-size) + 2 * var(--team-send-emitter-inset));
+  border-radius: var(--app-radius-circle);
+  background: var(--team-send-emitter);
+  filter: blur(3px);
+  opacity: .58;
+  translate: -50% 0;
+  clip-path: circle(calc(var(--team-control-send-size) / 2) at 50% 50%);
+  content: "";
+  pointer-events: none;
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+}
+.team-composer .team-composer-controls:has(.team-send:not(:disabled):is(:hover, :focus-visible))::after { opacity: .72; }
+.team-composer .team-composer-controls:has(.team-send:not(:disabled):is(:active, [data-touch-contact]))::after { opacity: .46; }
+.team-composer .team-composer-controls:has(.team-send:disabled)::after { opacity: .32; }
+/* A send awaiting durable acceptance leaves its composer read-only and its
+   content unaltered; only the cursor reports the wait. */
+.team-agent[data-send-state="sending"] textarea,
+.team-composer .team-send[data-sending="true"] { cursor: progress; }
+/* An idle team's controls carry no light: the emitter goes dark, SEND rests as
+   the same flush glass as TURBO and the menu, and each slider keeps its stop's
+   accent wash but drops the lit thumb's glass catches, halo, and cast shadow. */
+.team-composer .team-composer-controls[data-idle="true"]:has(.team-send:disabled)::after { opacity: 0; }
+.team-composer .team-composer-controls[data-idle="true"] .team-send:disabled {
+  opacity: var(--inactive-lane-opacity); cursor: default;
+  background: var(--team-control-face); box-shadow: var(--team-send-command-ring), var(--team-control-rest);
+  backdrop-filter: blur(1.5px) saturate(1.15); -webkit-backdrop-filter: blur(1.5px) saturate(1.15);
+}
+.team-composer .team-composer-controls[data-idle="true"] > .team-slider { --team-slider-light-shadow: 0 0 0 0 transparent; --team-slider-thumb-face: var(--team-control-face); --team-slider-thumb-shadow: var(--team-control-rest); }
+.team-composer .team-composer-controls[data-idle="true"] > .team-slider::after { backdrop-filter: none; -webkit-backdrop-filter: none; }
+@media (prefers-reduced-motion: reduce) {
+  .team-composer .team-composer-controls::after { transition: none; }
+}
+/* Each surface clips its controls' outer right shadow. The later console sits
+   to the left of the earlier one, so mirror that elevation inside the earlier
+   composer, where it paints as the later control frame's visible cast without
+   changing either surface's geometry. */
+.team-surface:has(+ .team-surface) .team-composer {
+  box-shadow: inset 8px 0 14px -6px color-mix(in srgb, var(--app-shadow-source) 42%, transparent);
+}
+/* Where two consoles touch, their status bands meet flush, square like the
+   flush tab strips above them. The fleet flows right to left, so the later
+   console stands to the left and its touching edge is its right one. Only the
+   later console draws the dividing rule: its band and pane share one hairline
+   end border, half the app's 1px edge, in the page colour the open tab row
+   above shows through, so the rule reads as that head continuing down the
+   seam rather than either console's flavour. The anchor token keeps the
+   body's page colour inside a flavored subtree. The earlier band has no start
+   border. The sibling selectors leave both outer fleet edges bare. */
+.team-surface + .team-surface > .team-toolbar > .team-status-row,
+.team-surface + .team-surface > .team-pane { border-inline-end: .5px solid var(--app-anchor-page); }
+.team-compose .lane-mosaic-plane {
+  padding-top: var(--team-composer-block);
+  scroll-padding-top: var(--team-composer-block);
+}
+/* Cards raise themselves for hover, focus, selection, and nested tools; their
+   track keeps every such layer below the composer. */
+.team-compose .lane-mosaic-track { z-index: 0; }
+/* The stream's top rule appears only once the composer and its continuation
+   have left the plane, and fades rather than switching on in one frame. */
+.team-compose .team-activity-grid {
+  transition: border-top-color var(--app-motion-settle) var(--app-ease-standard);
+}
+.team-compose:not([data-composer-fully-collapsed="true"]) .team-activity-grid {
+  border-top-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-compose .team-activity-grid { transition: none; }
+}
+/* An empty plane reserves the composer and its paint before the notice. */
+.team-activity-grid[data-empty="true"] .lane-mosaic-plane {
+  flex: none; height: auto; overflow: hidden;
+  padding-bottom: var(--team-composer-overhang);
+}
+.team-activity-grid[data-empty="true"] .lane-mosaic-track { display: none; }
+.team-activity-grid[data-empty="true"] .mosaic-message-empty { order: 1; }
+/* Composer drag is a visual pairwise swap over the mounted grid. Transforms
+   leave both grid slots reserved, so neither the form nor the message plane
+   reflows while the pointer crosses a neighbor. */
+.team-agents:has([data-composer-drag-source]) .team-agent {
+  transition: transform var(--app-motion-drag) ease;
+  will-change: transform;
+}
+.team-agent[data-composer-drag-source] {
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--accent-slot, var(--accent)) 58%, var(--line));
+  background: color-mix(in srgb, var(--control) 72%, transparent);
+  outline: var(--app-control-edge-width) dashed color-mix(in srgb, var(--accent-slot, var(--accent)) 58%, var(--line));
+  outline-offset: -1px;
+}
+.team-agent[data-composer-drag-source] > .agent-composer-stack {
+  visibility: hidden;
+}
+.team-agent[data-composer-drag-target] {
+  z-index: 1;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--app-shadow-source) 18%, transparent);
+}
+/* Released over another team, the lifted composer moves its agent there; the
+   destination is outlined instead of making room, since the agent appends. */
+.team-surface[data-composer-transfer-target] {
+  outline: var(--app-focus-ring-width) dashed color-mix(in srgb, var(--accent) 64%, var(--line));
+  outline-offset: -2px;
+}
+.composer-drag-ghost {
+  position: fixed;
+  z-index: 60;
+  top: -10000px;
+  left: -10000px;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border: var(--app-control-edge-width) solid color-mix(in srgb, var(--accent-slot, var(--accent)) 72%, var(--line));
+  border-radius: var(--app-radius-inset);
+  background: var(--control);
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--app-shadow-source) 32%, transparent);
+  opacity: .98;
+  pointer-events: none;
+  transform: rotate(.35deg) scale(1.015);
+  transform-origin: top left;
+}
+.composer-drag-ghost > .agent-composer-stack {
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
+}
+
+/* Whole-team pointer movement shares the composer lift convention while
+   reserving the complete source surface. */
+.team-lights[data-lane-drag-handle] { touch-action: none; }
+.team-surface[data-team-drag-source] { opacity: .38; }
+.team-surface[data-team-drop-target="swap"] {
+  outline: var(--app-focus-ring-strong-width) solid var(--accent);
+  outline-offset: -3px;
+}
+.team-surface[data-team-drop-target="join-left"] {
+  outline: var(--app-focus-ring-width) solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset 12px 0 0 color-mix(in srgb, var(--accent) 42%, transparent), var(--shadow);
+}
+.team-surface[data-team-drop-target="join-right"] {
+  outline: var(--app-focus-ring-width) solid var(--accent);
+  outline-offset: -2px;
+  box-shadow: inset -12px 0 0 color-mix(in srgb, var(--accent) 42%, transparent), var(--shadow);
+}
+.team-surface[data-team-drop-blocked] {
+  outline: var(--app-focus-ring-strong-width) dashed var(--danger);
+  outline-offset: -3px;
+  cursor: not-allowed;
+}
+.team-drag-ghost {
+  position: fixed;
+  z-index: 60;
+  max-width: min(480px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: .84;
+  transform: rotate(.75deg);
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--app-shadow-source) 32%, transparent);
+}
+/* The content clips to the card's inner edge rather than its content box: it
+   reaches through both block paddings and the inline-end padding, so an action
+   island rising into the card's top corner and pressing toward its edge, the
+   final line's descenders, and a signoff's underlined age are never cut. Text
+   still wraps at the content box. The grid also fills committed spare height
+   below the message, never above it. */
+.team-surface .mosaic-message-content {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  margin-block: calc(-1 * var(--message-card-inset));
+  margin-inline-end: calc(-1 * var(--message-card-inset));
+  padding-block: var(--message-card-inset);
+  padding-inline-end: var(--message-card-inset);
+  overflow: clip;
+}
+.team-surface .mosaic-message-content > :is(.message-flow, .message-body) { align-self: start; }
+.team-surface .message-flow { display: flow-root; min-width: 0; }
+.team-surface .message-task-chip[role="button"]:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--ink);
+  outline-offset: 2px;
+}
+/* Tables scroll inside their own box, like fenced code. The box contains its
+   inline size so a wide table cannot widen the card or detail column around
+   it. Cells keep words whole rather than inheriting overflow-wrap:anywhere,
+   which would let every column collapse to one glyph instead of overflowing.
+   The renderer marks columns (composer_markdown/tables.rs): short cells stay
+   on one line, prose wraps at words above a readable floor, and a column with
+   a token too long to keep whole breaks it above its floor. */
+.markdown-table { max-width: 100%; margin: .55em 0; overflow-x: auto; contain: inline-size; }
+.markdown-table table { margin: 0; }
+.markdown-table :is(th, td) { overflow-wrap: normal; white-space: nowrap; }
+.markdown-table :is(th, td)[data-measure="prose"] { min-width: 14ch; white-space: normal; }
+.markdown-table :is(th, td)[data-measure="token"] {
+  min-width: 18ch; overflow-wrap: anywhere; white-space: normal;
+}
+/* Each speaker owns one flow-root hunk for every direct run between nested
+   quotes. Its action island floats right; source attribution follows in DOM
+   order, then the hunk's one consolidated image row, then prose. */
+.markdown-body .message-hunk {
+  display: flow-root;
+  min-width: 0;
+}
+/* Direct-child scope excludes every hunk nested inside a quote card. */
+.team-surface .mosaic-message-card .markdown-body > .message-hunk { margin-block-start: var(--mosaic-quote-pad-block); }
+/* A top-level return from either quote shell gets one extra block-padding
+   unit; nested quote returns keep their own existing cadence. */
+.team-surface .mosaic-message-card .markdown-body > :is(blockquote, .message-quote-card) + .message-hunk {
+  margin-block-start: calc(2 * var(--mosaic-quote-pad-block));
+}
+/* A zero-width presentational prop holds the hunk's first two real lines plus
+   the image row's leading gap open. The image row clears only this prop, so it
+   alone positions the image; the action island never does. The row carries no
+   top margin, and taller attribution, pills, or inline code keep both lines
+   full-width without changing the image's top edge. */
+.markdown-body .message-hunk::before {
+  float: inline-start;
+  width: 0;
+  height: calc(2lh + .325em);
+  content: "";
+}
+.markdown-body .message-hunk + .message-hunk { margin-block-start: .45em; }
+/* Returning to the larger speaker row keeps the same leading air that the
+   next nested quote gets from its block padding. */
+.markdown-body .message-quote-card + .message-hunk {
+  padding-block-start: var(--mosaic-quote-pad-block);
+}
+/* The island moves rightward only: it docks against the card's or quote's
+   inline-end edge and starts level with its hunk's first line, so it never
+   reaches above into text it cannot reflow, such as an inner quote's last
+   line. Its flow footprint is two lines of the hunk's prose (line-height 1.25)
+   or the pair's own height where quoted type makes two lines shorter, so text
+   below always reflows beside it. The image row never clears this island, so
+   the island never positions the image; the start prop holds two lines plus
+   the image row's gap. */
+@property --message-control-size {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 35px;
+}
+.team-surface .mosaic-message-card .message-hunk > .message-controls-slot {
+  --message-control-size: var(--app-header-control);
+  --message-control-inline-offset:
+    calc(
+      var(--message-card-inset)
+      + var(--mosaic-quote-inline) * var(--message-quote-depth, 0)
+    );
+  display: block;
+  float: inline-end;
+  margin-block: 0 max(0px, 2lh - var(--message-control-size));
+  margin-inline: .5rem calc(-1 * var(--message-control-inline-offset));
+  line-height: 1.25;
+}
+/* Non-prose cards mount their one island directly in the Markdown body rather
+   than in a hunk slot. Every message island shares one action size. Ordinary
+   cards carry it through the content inset, while image covers position it
+   explicitly over the image; both let the card edge close the action pair. */
+.team-surface
+  .mosaic-message-card
+  .markdown-body > .message-controls {
+  --message-control-size: var(--app-header-control);
+}
+.team-surface
+  .mosaic-message-card:not(.mosaic-message-card--image-cover)
+  .markdown-body > .message-controls {
+  margin-inline-end: calc(-1 * var(--message-card-inset));
+}
+.team-surface .message-controls-slot > span { display: contents; }
+.team-surface .mosaic-message-card .message-controls-slot .message-controls {
+  float: none;
+  justify-content: flex-end;
+  min-height: 0;
+  margin: 0;
+}
+.message-image-shell {
+  --message-image-size: var(--mosaic-image-size);
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 var(--message-image-size);
+  width: var(--message-image-size);
+  min-width: var(--message-image-size);
+  height: var(--message-image-size);
+  aspect-ratio: 1 / 1;
+}
+.message-image-shell > .message-image {
+  --message-image-size: 100%;
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+/* An image's actions form one rail seated over its inline-end corner. The
+   rail carries the card rail's classes, so this selector must outrank the
+   in-flow `.team-surface .message-actions.app-control-rail` below. */
+.message-image-shell > .message-actions.message-image-actions.app-control-rail {
+  --message-control-size: var(--app-header-control);
+  position: absolute;
+  z-index: 3;
+  inset: 6px 0 auto auto;
+}
+/* The block box avoids the floated message actions and positions Copy.
+   Its scrolling pre shares that box, so wide code cannot detach the control. */
+.markdown-body .message-code {
+  display: flow-root;
+  position: relative;
+  margin: .55em 0;
+}
+.markdown-body .message-code > pre { margin: 0; }
+.message-code-copy {
+  --message-control-size: var(--app-header-control);
+  position: absolute;
+  z-index: 3;
+  inset: 6px var(--app-control-edge-width) auto auto;
+}
+/* Message card actions reserve exactly one full-size drawer opener in flow.
+   Every action, including Quote, lives in the absolutely positioned panel.
+   Opening moves the rounded opener toward the inline start while the panel
+   grows between it and the fixed card edge, so neither the rail nor card box
+   changes size.
+
+   Controls leave their right edge open, so adjoining actions share one seam
+   and the depth-compensated row meets the card's inline-end without another
+   line. Each control fills with the accent of the rail that contains it, the
+   card's or a quote's, at the card's 5% rest wash over the stream surface: at
+   rest a control melts into its card and only its glyph shows, and a hovered
+   card's 10% wash reveals it. The remaining static edges use the stream
+   surface colour in every state. Hovered, pressed, or speaking, the control
+   fills at the 10% hover strength and its glyph lights to ink.
+
+   An image uses the same drawer, seated flush against the image's inline edge
+   so that edge closes the open action row as the card edge does. */
+.team-surface .message-actions.app-control-rail {
+  position: relative;
+  gap: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+.team-surface .message-actions-drawer__panel > .app-card-action,
+.team-surface .message-actions-opener,
+.message-code-copy {
+  --app-card-action-accent: var(--accent-slot, var(--accent-neutral));
+  min-width: 0;
+  margin: 0;
+  border: var(--app-control-edge-width) solid var(--message-stream-surface, var(--panel));
+  border-right: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--app-card-action-accent) 5%, var(--message-stream-surface, var(--panel)));
+  box-shadow: none;
+  color: var(--muted);
+}
+/* The full opener is the drawer row's one rounded outer piece. Copy is a
+   separate one-control rail and keeps the same finger shape. */
+.team-surface .message-actions-drawer:first-child > .message-actions-opener,
+.message-code-copy {
+  border-radius: var(--app-radius-circle) 0 0 var(--app-radius-circle);
+}
+.team-surface .message-actions-drawer__panel > .app-card-action:is(:hover, :active, .active),
+.team-surface .message-actions-drawer:is([open], :hover) > .message-actions-opener,
+.message-code-copy:is(:hover, :active, .active) {
+  background: color-mix(in srgb, var(--app-card-action-accent) 10%, var(--message-stream-surface, var(--panel)));
+  color: var(--ink);
+}
+.team-surface .message-controls-slot .app-card-action,
+.team-surface
+  .mosaic-message-card
+  .markdown-body > .message-controls .app-card-action,
+.team-surface .message-image-quote, .message-code-copy {
+  width: var(--message-control-size);
+  min-width: var(--message-control-size);
+  height: var(--message-control-size);
+  min-height: var(--message-control-size);
+  padding: 0;
+  font-size: calc(var(--message-control-size) * .4);
+}
+.team-surface .message-controls-slot .app-card-action > svg.app-card-action__icon,
+.team-surface
+  .mosaic-message-card
+  .markdown-body > .message-controls .app-card-action > svg.app-card-action__icon,
+.team-surface .message-image-quote > svg.app-card-action__icon,
+.message-code-copy > svg.app-card-action__icon {
+  width: 62.5%;
+  height: 62.5%;
+}
+.team-surface .message-image-quote:focus-visible,
+.message-code-copy:focus-visible { outline-offset: -2px; }
+/* The details box contributes exactly one opener-sized footprint. Its panel is
+   pinned to that footprint's inline end. Opening grows the panel toward the
+   inline start and moves the opener by the same distance, producing
+   [rounded opener] [square actions] without changing flow. The actions sit at
+   the panel's inline end, so each holds its open position throughout while
+   the clipping edge and opener uncover it. The closed panel has no pointer or
+   focus surface. All drawers share one name, so at most one is open. */
+.team-surface .message-actions-drawer {
+  --message-actions-panel-size: var(--message-control-size);
+  position: relative;
+  z-index: 4;
+  display: block;
+  flex: 0 0 var(--message-control-size);
+  width: var(--message-control-size);
+  min-width: var(--message-control-size);
+  height: var(--message-control-size);
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.team-surface .message-actions-drawer:has(
+  > .message-actions-drawer__panel > .app-card-action:nth-child(2)
+) {
+  --message-actions-panel-size: calc(2 * var(--message-control-size));
+}
+.team-surface .message-actions-drawer:has(
+  > .message-actions-drawer__panel > .app-card-action:nth-child(3)
+) {
+  --message-actions-panel-size: calc(3 * var(--message-control-size));
+}
+.team-surface .message-actions-drawer:has(
+  > .message-actions-drawer__panel > .app-card-action:nth-child(4)
+) {
+  --message-actions-panel-size: calc(4 * var(--message-control-size));
+}
+.team-surface .message-actions-opener {
+  position: absolute;
+  z-index: 5;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: grid;
+  place-items: center;
+  width: var(--message-control-size);
+  min-width: var(--message-control-size);
+  height: var(--message-control-size);
+  min-height: var(--message-control-size);
+  padding: 0;
+  list-style: none;
+  cursor: pointer;
+  transition: inset-inline-end var(--app-motion-fast) ease;
+}
+.team-surface .message-actions-opener::-webkit-details-marker { display: none; }
+.team-surface .message-actions-opener:focus-visible { outline-offset: -2px; }
+.team-surface .message-actions-opener > svg.app-card-action__icon {
+  width: calc(var(--message-control-size) * .4);
+  height: calc(var(--message-control-size) * .4);
+}
+.team-surface .message-actions-drawer[open] > .message-actions-opener {
+  inset-inline-end: var(--message-actions-panel-size);
+}
+.team-surface .message-actions-drawer[open] > .message-actions-opener > svg.app-card-action__icon {
+  transform: rotate(180deg);
+}
+.team-surface .message-actions-drawer__panel {
+  position: absolute;
+  z-index: 4;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  width: 0;
+  height: var(--message-control-size);
+  align-items: stretch;
+  justify-content: flex-end;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width var(--app-motion-fast) ease,
+    visibility 0s linear var(--app-motion-fast);
+}
+.team-surface .message-actions-drawer[open] > .message-actions-drawer__panel {
+  width: var(--message-actions-panel-size);
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-surface :is(.message-actions-opener, .message-actions-drawer__panel) {
+    transition: none;
+  }
+}
+.markdown-body .message-attribution {
+  display: inline;
+  margin: 0;
+  vertical-align: baseline;
+}
+.markdown-body .message-hunk-content { display: contents; }
+.markdown-body .message-hunk-content > p:first-child {
+  display: inline;
+  margin-block-start: 0;
+}
+/* The first paragraph is inline so attribution can lead it. Inline boxes ignore
+   block margins, so a following paragraph owns their ordinary .7em gap. */
+.markdown-body .message-hunk-content > p:first-child + p { margin-block-start: .7em; }
+.markdown-body .message-hunk > .message-image-stack {
+  display: flex;
+  float: inline-start;
+  clear: inline-start;
+  max-width: 100%;
+  align-items: flex-end;
+  gap: var(--message-image-gap);
+  margin: 0 8px 0.125em 0;
+}
+/* A shared row floats shrink-to-fit like a single image, so prose flows beside
+   it wherever it leaves room. Each image keeps its definite preferred width,
+   which is what the float measures, so the row never waits for the images to
+   load; in a narrow hunk the squares shrink evenly to share the float. */
+.markdown-body .message-hunk > .message-image-stack:has(> .message-image-shell + .message-image-shell)
+  > .message-image-shell {
+  flex-shrink: 1;
+  min-width: 0;
+  height: auto;
+}
+.markdown-body .message-hunk > .message-image-stack:has(> .message-image-shell + .message-image-shell)
+  > .message-image-shell > .message-image > img {
+  max-width: 100%;
+  max-height: 100%;
+}
+.markdown-body .message-hunk > :last-child { margin-bottom: 0; }
+.markdown-body .message-quote-card {
+  display: flow-root;
+  margin: var(--mosaic-quote-pad-block) 0;
+  padding: var(--mosaic-quote-pad-block) var(--mosaic-quote-inline);
+  border: 0;
+  border-left: var(--mosaic-quote-rail) solid var(--accent-neutral);
+  border-radius: var(--mosaic-quote-radius);
+  color: var(--muted);
+  font-size: var(--app-type-prose);
+}
+.markdown-body :is(.message-quote-signoff, .message-signoff) {
+  display: inline;
+  color: var(--muted);
+  font-size: .8125em;
+}
+.markdown-body .message-attribution > :is(.message-quote-signoff, .message-signoff) {
+  margin: 0;
+}
+/* Attribution parts stay in the hunk's inline formatting context so long
+   recipient lists can use the first-line width beside the floated action
+   drawer. Margins preserve the former flex gaps without making either the
+   whole attribution or its signoff one atomic line box. */
+.markdown-body .message-attribution > :not(:first-child),
+.markdown-body :is(.message-quote-signoff, .message-signoff) > :not(:first-child) {
+  margin-inline-start: 4px;
+}
+/* A quoted directive's badge shares the signoff's type scale. */
+.markdown-body .message-attribution > .message-classification-group { font-size: .8125em; }
+/* A quote's text already sits at the card head's scale, so its head, pills,
+   and task tail keep that scale rather than shrinking a second time. */
+.markdown-body :is(blockquote, .message-quote-card) :is(
+  .message-quote-signoff,
+  .message-attribution > .message-classification-group,
+  .message-quote-task-tail
+) {
+  font-size: 1em;
+}
+/* A pill group spans exactly one line of the signoff's scale, centred on its
+   text, so a pill never makes an attribution line taller than the hunk's line
+   pitch; its pills stretch to that height and keep their segmented silhouette. */
+.markdown-body .message-attribution .message-classification-group {
+  align-self: center;
+  block-size: 1lh;
+}
+.markdown-body .message-attribution .message-classification-group > * { min-height: 0; }
+/* The age keeps a natural word space before the name it dates. */
+.markdown-body :is(.message-signoff > .relative-age, .message-quote-signoff > .message-quote-age-slot) {
+  margin-right: .2em;
+}
+/* The shared age control is block-level elsewhere. Inside an inline signoff it
+   keeps its fixed measure but cannot consume the rest of the first line. */
+.markdown-body :is(
+  .message-signoff > .relative-age,
+  .message-quote-signoff > .message-quote-age-slot > .relative-age
+) {
+  display: inline-block;
+}
+/* A sent packet leads with its kind, sender, arrow, and recipients when present. */
+.markdown-body .message-quote-direction {
+  color: var(--muted);
+  font-weight: 600;
+}
+.markdown-body .message-quote-recipients { display: inline; }
+.markdown-body .message-quote-recipient-separator { white-space: pre; }
+.markdown-body .message-quote-task-tail {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: .8125em;
+  vertical-align: baseline;
+}
+/* Provenance follows the speaker's final word as an ordinary inline span:
+   empty it takes no room, and once filled its leading margin supplies the
+   natural word space. The browser wraps it only when the line has no room. */
+.markdown-body .message-hunk-content .message-quote-task-tail {
+  margin-inline-start: .5em;
+}
+.markdown-body .message-quote-task-tail:empty,
+.markdown-body .message-quote-task-line:has(> .message-quote-task-tail:empty) {
+  display: none;
+}
+.markdown-body .message-quote-task-line { margin: .35em 0 0; text-align: end; }
+.markdown-body .message-signoff .message-agent-name {
+  flex: 0 1 auto;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+}
+.markdown-body .message-signoff a.message-agent-label { color: inherit; text-decoration: none; }
+.markdown-body .message-signoff a.message-agent-label:is(:hover, :focus-visible) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body .message-signoff .relative-age { color: var(--muted); }
+.markdown-body .message-quote-name {
+  --message-quote-name-accent: var(--muted);
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--message-quote-name-accent) 70%, var(--ink));
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.markdown-body .message-quote-name[data-accent] {
+  --message-quote-name-accent: var(--accent-slot);
+}
+/* A principal quote names its author's recorded initials in the same in-flow
+   author slot as agent names. */
+.markdown-body .message-quote-name[data-quote-actor="principal"] {
+  color: var(--accent-neutral);
+}
+/* Pending content loses hue, not its frames or live controls. Filter leaves,
+   never a quote or image stack: descendants cannot undo an ancestor's filter.
+   Plain Markdown quotes have direct content children; attributed quotes put
+   theirs in display:contents hunks. Both keep every nested rail and menu live.
+   Delivery changes only the inherited filter, preserving the existing nodes. */
+.team-surface .mosaic-message-card--provisional { --message-pending-filter: grayscale(1); }
+/* One solid, paint-only rail keeps geometry stable across delivery states. */
+.team-surface .mosaic-message-card[data-message-role="operator"] {
+  border-inline-start-color: transparent;
+}
+.message-delivery-rail {
+  position: absolute;
+  z-index: 4;
+  inset-block: 0;
+  inset-inline-start: calc(-1 * var(--message-rail));
+  inline-size: var(--message-rail);
+  overflow: hidden;
+  border-start-start-radius: var(--app-radius-card);
+  border-end-start-radius: var(--app-radius-card);
+  pointer-events: none;
+}
+.message-delivery-rail::after {
+  position: absolute;
+  inset: 0;
+  border-inline-start: var(--message-rail) solid var(--accent-slot, var(--accent-neutral));
+  border-radius: inherit;
+  content: "";
+}
+.team-surface .mosaic-message-card[data-message-role="operator"] .message-attribution,
+.team-surface .mosaic-message-card[data-message-role="operator"] .message-image-shell img,
+.team-surface .mosaic-message-card[data-message-role="operator"] .message-body :is(.message-hunk-content, blockquote, .message-quote-card) > :not(blockquote, .message-quote-card, .message-hunk, .message-controls-slot, .message-image-stack):not(:has(.message-controls-slot, .message-image-shell, blockquote, .message-quote-card)) {
+  filter: var(--message-pending-filter, none);
+  transition: filter var(--app-motion-settle) var(--app-ease-standard);
+}
+
+.markdown-body .message-quote-age {
+  color: var(--muted);
+  font-weight: 400;
+}
+.markdown-body .message-quote-disposition {
+  display: inline-flex;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .75em;
+  font-weight: 700;
+}
+.markdown-body .message-quote-body { display: contents; }
+.markdown-body .message-quote-body > :first-child { margin-top: 0; }
+.markdown-body .message-quote-body > :last-child { margin-bottom: 0; }
+.markdown-body .message-quote-unavailable { color: var(--muted); }
+.markdown-body .message-quote-card--unavailable { border-left-color: var(--warning); }
+
+/* An exact-one-image card uses its admitted lattice rectangle as the image
+   viewport. Aspect ratio supplies the measuring clone's height; the committed
+   card keeps the lattice-owned height so a cover never creates a gap or overlap. */
+.team-surface .mosaic-message-card--image-cover {
+  padding: 0;
+  padding-inline-start: 4px;
+  border: 0;
+  overflow: hidden;
+}
+.lane-mosaic-plane
+  .mosaic-message-card--image-cover:is(
+    [data-layout-phase="measuring"],
+    [data-mosaic-measurement-active="true"]
+  ) {
+  aspect-ratio: 1 / 1;
+}
+.team-surface .mosaic-message-card--image-cover > .mosaic-message-content {
+  display: block;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.team-surface .mosaic-message-card--image-cover
+  :is(.message-flow, .message-body) {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.team-surface .mosaic-message-card--image-cover
+  :is(.message-attachments, .message-image-stack) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+.team-surface .mosaic-message-card--image-cover :is(.message-image-shell, .message-image) {
+  --message-image-size: 100%;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  aspect-ratio: auto;
+  overflow: hidden;
+  /* The openable wrapper is a button; it must not bring button geometry, so
+     the card's own edge is the cover's only frame. */
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.team-surface .mosaic-message-card--image-cover .message-image img {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  aspect-ratio: auto;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+.team-surface .mosaic-message-card--image-cover .message-image-status {
+  border: 0;
+  border-radius: 0;
+}
+/* One card-sized square overlay owns the permanent lane rail and every
+   interaction edge above the cover. A padding reserve holds the image geometry;
+   outlining the square image or repeating the card rail creates clipped,
+   washed-out layers at the corners. A cover hides any background wash, so the
+   same overlay screens the image in the lane accent instead: at rest with the
+   rest wash, and on hover with the hover wash. */
+.team-surface .mosaic-message-card--image-cover::after {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  border-inline-start: var(--message-rail) solid var(--accent-slot, var(--accent));
+  border-radius: inherit;
+  background: var(--card-rest-wash);
+  content: "";
+  pointer-events: none;
+}
+.team-surface .mosaic-message-card--image-cover:hover::after {
+  background: var(--card-hover-wash);
+}
+.team-surface .mosaic-message-card--image-cover:is(
+  :focus-visible,
+  :has(.message-image--openable:focus-visible)
+)::after {
+  border: var(--app-focus-ring-width) solid var(--focus);
+  border-inline-start-width: var(--message-rail);
+}
+.team-surface .mosaic-message-card.mosaic-message-card--image-cover[data-message-role="operator"]::after {
+  border-inline-start-color: transparent;
+}
+.mosaic-message-card--image-cover > .message-delivery-rail { inset-inline-start: 0; }
+/* An operator cover's rail is its delivery layer, so focus recolours that. */
+.team-surface .mosaic-message-card--image-cover:is(
+  :focus-visible,
+  :has(.message-image--openable:focus-visible)
+) > .message-delivery-rail {
+  --accent-slot: var(--focus);
+}
+.team-surface .mosaic-message-card--image-cover
+  .message-image--openable:focus-visible :is(img, .message-image-status) {
+  outline: none;
+}
+.team-surface .mosaic-message-card--image-cover :is(.message-attribution, .message-signoff-line) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  max-width: calc(100% - 16px);
+  margin: 0;
+  padding: 3px 9px 6px 9px;
+  border: 0;
+  /* The signoff is docked flush to the card's top-left corner; its one free
+     corner takes the stream quote radius, as non-stream markdown keeps its own. */
+  border-radius: 0 0 var(--mosaic-quote-radius) 0;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: none;
+  backdrop-filter: blur(8px);
+}
+.team-surface .mosaic-message-card--image-cover
+  :is(.message-attribution, .message-signoff-line) .message-signoff {
+  margin: 0;
+  color: var(--ink);
+}
+/* A cover keeps its controls over the image, but presents the same unframed,
+   card-edge-docked island as every other message card. */
+.team-surface .mosaic-message-card--image-cover .message-controls {
+  position: absolute;
+  inset: var(--message-card-inset) 0 auto auto;
+  z-index: 2;
+  float: none;
+  min-height: 0;
+  margin: 0;
+}
+/* A crystallized run (mosaic_crystal) divides the cover into one cell per
+   image. Each cell's box is a fraction of the card that the browser's decode
+   of the images chooses; until then the cells read as one square image each.
+   A panel hairline separates the cells, and each fills its own cell. The
+   card-sized interaction wash stays transparent: each image button owns its
+   rest, hover, and keyboard-focus feedback, so pointing at one cell never
+   suggests that the whole crystal will open. */
+.team-surface .mosaic-message-card--crystal .mosaic-crystal {
+  background: var(--panel);
+}
+.team-surface .mosaic-message-card--crystal .message-image-shell.mosaic-crystal-cell {
+  position: absolute;
+  left: var(--crystal-cell-x, 0%);
+  top: var(--crystal-cell-y, 0%);
+  width: var(--crystal-cell-width, 100%);
+  height: var(--crystal-cell-height, 100%);
+  padding: 1px;
+}
+.team-surface .mosaic-message-card--crystal::after,
+.team-surface .mosaic-message-card--crystal:hover::after {
+  background: transparent;
+}
+.team-surface .mosaic-message-card--crystal .mosaic-crystal-cell::after {
+  position: absolute;
+  z-index: 1;
+  inset: 1px;
+  border: 0;
+  background: var(--card-rest-wash);
+  content: "";
+  pointer-events: none;
+}
+.team-surface
+  .mosaic-message-card--crystal
+  .mosaic-crystal-cell:is(:hover, :focus-visible)::after {
+  background: var(--card-hover-wash);
+}
+.team-surface
+  .mosaic-message-card--crystal
+  .mosaic-crystal-cell:focus-visible::after {
+  border: var(--app-focus-ring-width) solid var(--focus);
+}
+.team-surface
+  .mosaic-message-card--crystal:has(.mosaic-crystal-cell:focus-visible)::after {
+  border: 0;
+  border-inline-start: var(--message-rail) solid var(--accent-slot, var(--accent));
+}
+.team-surface .mosaic-message-card--image-cover.now-playing::before {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  content: "";
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--warning);
+}
+/* An open action drawer is the card's sole sharp plane. The card veil reuses
+   the overlay's exact paint and frost, while the established drawer stacking
+   stays unchanged above it; no card geometry changes. A pressed opener keeps
+   only the veil alive while the named-details group transfers `open`. */
+.team-surface
+  .mosaic-message-card:has(
+    .message-actions-drawer[open],
+    .message-actions-opener:active
+  )::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: var(--overlay-veil);
+  backdrop-filter: var(--overlay-frost);
+  content: "";
+  pointer-events: none;
+}
+.team-surface
+  .mosaic-message-card
+  :is(.message-controls, .message-image-actions):has(.message-actions-drawer[open]) {
+  z-index: 4;
+}
+.team-surface
+  .mosaic-message-card:not(.mosaic-message-card--image-cover)
+  .message-controls:has(.message-actions-drawer[open]) {
+  position: relative;
+}

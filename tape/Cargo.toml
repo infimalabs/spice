@@ -1,0 +1,17 @@
+[package]
+name = "tape"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+atomic = { path = "../atomic" }
+serde = { version = "1.0.229", features = ["derive"] }
+sill = { path = "../sill" }
+uuid = { version = "1.24.0", features = ["js", "v4"] }
+zstd-safe.workspace = true
+
+[lints]
+workspace = true

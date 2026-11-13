@@ -1,0 +1,116 @@
+[workspace]
+members = [
+    "app",
+    "artifact",
+    "atomic",
+    "board",
+    "bus",
+    "serve",
+    "consent",
+    "desktop",
+    "dialect",
+    "dist",
+    "door",
+    "gate",
+    "journal",
+    "lane",
+    "listen",
+    "proof",
+    "rack",
+    "sill",
+    "spice",
+    "steer",
+    "tape",
+    "taste",
+    "vendor",
+    "wire",
+    "windows",
+    "xtask",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+publish = false
+
+# One deflate implementation for every crate: rack archive bytes are a pure
+# function of their inputs only while every build compresses through this
+# backend.
+[workspace.dependencies]
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+# Tape archives: upstream Zstandard and its seekable-format implementation,
+# vendored and built by `cc` on every target, without the legacy decoders or
+# the dictionary builder.
+zstd-safe = { version = "7.3", default-features = false, features = ["std", "seekable"] }
+
+[workspace.lints.rust]
+warnings = "deny"
+unfulfilled_lint_expectations = "deny"
+# rust-analyzer sets `rust_analyzer` while analysing the host target; App
+# browser gates admit it so the Wasm-only modules stay navigable.
+unexpected_cfgs = { level = "deny", check-cfg = ["cfg(rust_analyzer)"] }
+
+[workspace.lints.clippy]
+all = "deny"
+disallowed_methods = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+
+# Keep line-level diagnostics while avoiding full variable debug information in
+# ordinary development artifacts. Self-hosted Spice and Gate builds inherit the
+# unoptimized development profile for a short edit/build/install loop. The
+# installed development appliance remains stripped because every hook
+# authenticates and copies its complete bytes; release assembly selects its
+# independently optimized profile with `--release`. Test builds keep every
+# workspace crate unoptimized, wire included; third-party code keeps the light
+# optimization below, and the small hashing hotspots stay fully optimized.
+[profile.dev]
+debug = 1
+
+# Third-party code is lightly optimized so the unoptimized `spice` binary's
+# `__eh_frame` stays under the 16 MiB offset range ld's compact unwind table
+# encodes; past it, ld warns on every link. Edits rebuild only workspace crates.
+# Linking with `-no_compact_unwind` instead silences the warning but breaks
+# panic unwinding: arm64 objects describe most frames only in that table.
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.dev.package.blake3]
+opt-level = 3
+
+[profile.dev.package.sha1]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.wire]
+opt-level = 3
+
+[profile.dev.package.spice]
+strip = "symbols"
+
+# Test executables carry no debug information. On macOS debug information stays
+# in each codegen unit's object file beside the executable, and Cargo never
+# removes the objects a relink stops referencing, so test debug information
+# would grow each lane's output with every edit. A panic still reports its
+# source location without it.
+[profile.test]
+debug = 0
+
+[profile.test.package.blake3]
+opt-level = 3
+
+[profile.test.package.sha1]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3
+
+[profile.test.package.wire]
+opt-level = 0
+
+[profile.test.package.spice]
+strip = "none"

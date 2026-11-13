@@ -1,0 +1,61 @@
+schema = 1
+
+# Homebrew bottles: qemu 11.1.2 and wimlib 1.14.5_2.
+[tools.qemu_system]
+path = "/opt/homebrew/Cellar/qemu/11.1.2/bin/qemu-system-aarch64"
+sha256 = "2239f9f1d01b6c06764fada9300c5701990c3f113b1c3533a19c993f08096642"
+
+[tools.qemu_img]
+path = "/opt/homebrew/Cellar/qemu/11.1.2/bin/qemu-img"
+sha256 = "e96f65bd4363b2b9a4df178e7c30d400f2a170dfdb80bd25df51e0924f1cb644"
+
+[tools.firmware]
+path = "/opt/homebrew/Cellar/qemu/11.1.2/share/qemu/edk2-aarch64-code.fd"
+sha256 = "47765fe344818cbc464b1c14ae658fb4b854f5c2ceffa982411731eb4865594d"
+
+[tools.firmware_variables]
+path = "/opt/homebrew/Cellar/qemu/11.1.2/share/qemu/edk2-arm-vars.fd"
+sha256 = "b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f"
+
+[tools.wimlib]
+path = "/opt/homebrew/Cellar/wimlib/1.14.5_2/bin/wimlib-imagex"
+sha256 = "4d96ebb9d81fb7a12120113a886b4bab2852e97db4837720704aa1572e7b3e63"
+
+[machine]
+cpus = 4
+memory_mib = 8192
+disk_gib = 64
+ssh_port = 22622
+qmp_port = 22623
+
+# Windows 11 24H2 consumer ESD (build 26100.4349, en-US, ARM64) from the
+# Media Creation Tool catalog; its catalog SHA-1 is
+# c78fd344e845d3b17cb91c40bf4a856459da1b6c.
+[image]
+url = "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/37acc189-7f4f-4e07-976c-1cf0a099ec79/26100.4349.250607-1500.ge_release_svc_refresh_CLIENTCONSUMER_RET_A64FRE_en-us.esd"
+sha256 = "c01b6f474c772093159b63fb3a168d2666556b223d288f67efc37c4fbaeddd25"
+bytes = 4527171158
+setup_media_index = 1
+preinstallation_index = 2
+setup_index = 3
+edition_index = 6
+
+[drivers]
+url = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso"
+sha256 = "303f7ae40dad495d6ae474fdc571df58958a4dbc5c37a522d80f9a203867949d"
+bytes = 877373440
+network = "NetKVM/w11/ARM64"
+serial = "vioserial/w11/ARM64"
+
+[openssh]
+url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-ARM64-v10.0.0.0.msi"
+sha256 = "7a17d0e22d004fb47ca4bfd8fef926fa305de4ebf70a6f3c7a29c39aabef0023"
+bytes = 6295552
+
+# Microsoft.VisualCpp.Redist.14 14.44.35211 x64: the runtime matching the CRT
+# that dist/windows/msvc.toml admits, taken from that declaration's pinned
+# package manifest. Rust MSVC executables load VCRUNTIME140.dll from it.
+[runtime]
+url = "https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe"
+sha256 = "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+bytes = 25635768

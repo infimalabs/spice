@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f8f4">
+  <title>spice</title>
+  <script data-app-theme>
+    (() => {
+      const key = "spice:app-theme";
+      const root = document.documentElement;
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      let stored = null;
+      try { stored = window.localStorage.getItem(key); } catch {}
+      const mode = stored === "light" || stored === "dark" ? stored : "system";
+      const apply = (next) => {
+        const effective = next === "system" ? (media.matches ? "dark" : "light") : next;
+        root.dataset.appTheme = next;
+        root.dataset.appEffectiveTheme = effective;
+        root.style.colorScheme = effective;
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.content = effective === "dark" ? "#101411" : "#f7f8f4";
+        document.querySelectorAll(".app-choice-chip").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.appTheme === next));
+        });
+      };
+      window.__spiceAppSetTheme = (next) => {
+        try {
+          if (next === "system") window.localStorage.removeItem(key);
+          else window.localStorage.setItem(key, next);
+        } catch {}
+        apply(next);
+      };
+      media.addEventListener("change", () => {
+        if (root.dataset.appTheme === "system") apply("system");
+      });
+      apply(mode);
+      // Until the app starts, a load failure may mean the resident no longer
+      // serves this document's generation: its routes then answer 410 naming
+      // the served one. Reload into it once; nothing has started to hold drafts.
+      const reloadKey = "spice:app-reload-generation:v1";
+      let probed = false;
+      const retired = () => {
+        const loaded = document.getElementById("app")?.dataset.appGeneration;
+        if (probed || !loaded) return;
+        probed = true;
+        fetch(`/_spice/app/${loaded}/app.html`, { method: "HEAD" }).then((response) => {
+          const served = response.headers.get("x-spice-app-generation");
+          if (response.status !== 410 || !served || served === loaded) return;
+          try {
+            if (window.sessionStorage.getItem(reloadKey) === served) return;
+            window.sessionStorage.setItem(reloadKey, served);
+          } catch {
+            return;
+          }
+          window.location.reload();
+        }, () => {});
+      };
+      window.addEventListener("error", retired, true);
+      window.addEventListener("TrunkApplicationStarted", () => {
+        window.removeEventListener("error", retired, true);
+      }, { once: true });
+    })();
+  </script>
+  <link data-trunk rel="css" href="style.css">
+  <link data-trunk rel="css" data-inline href="spice_sidebar.css">
+  <link data-trunk rel="css" data-inline href="mosaic.css">
+  <link data-trunk rel="css" data-inline href="team_controls.css">
+  <link data-trunk rel="css" data-inline href="lane_mosaic.css">
+  <link data-trunk rel="css" data-inline href="chrome.css">
+  <link data-trunk rel="css" data-inline href="composer.css">
+  <link data-trunk rel="css" data-inline href="work.css">
+  <link data-trunk rel="css" data-inline href="work-map.css">
+  <link data-trunk rel="css" data-inline href="responsive.css">
+<link data-trunk rel="rust">
+</head>
+<body>
+  <main id="app" data-app-generation="__SPICE_APP_GENERATION__" aria-live="polite"></main>
+</body>
+</html>

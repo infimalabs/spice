@@ -1,0 +1,115 @@
+# Packaged defaults built into this Spice release, not any repository's
+# effective configuration. The limits, flex, magic, and Markdown budgets apply
+# to every repository; a repository's tracked spice.toml supplies its own
+# document inventory and file classes in place of those below. The executable
+# ships these exact bytes at spice://spice.toml.
+
+[gate.walk]
+skip = [".git/", "target/"]
+
+[policy]
+regex_dialect = "rust-regex-1"
+name_cluster_threshold = 4
+
+[policy.repo_truth]
+docs = ["AGENTS.md"]
+
+[policy.file_shape]
+source_suffixes = [
+    ".astro",
+    ".bash",
+    ".c",
+    ".cc",
+    ".cjs",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".cts",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".less",
+    ".lua",
+    ".m",
+    ".md",
+    ".mjs",
+    ".mm",
+    ".mts",
+    ".php",
+    ".py",
+    ".pyi",
+    ".rb",
+    ".rs",
+    ".rst",
+    ".sass",
+    ".scala",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".svelte",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zsh",
+]
+
+[policy.languages]
+complexity = [".cs", ".js", ".lua", ".mjs", ".py", ".rs"]
+magic = [
+    ".c",
+    ".cc",
+    ".cpp",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".kt",
+    ".m",
+    ".mm",
+    ".rs",
+    ".scala",
+    ".swift",
+    ".ts",
+]
+
+[policy.limits]
+file_loc = 1000
+file_bytes = 80000
+routine_ccn = 20
+routine_length = 80
+commit_message_wrap = 100
+repo_truth_doc_chars = 10000
+
+[policy.flex]
+ratio = 1.5
+
+[policy.magic]
+examine_threshold = 10
+
+[policy.markdown_depth]
+base_chars = 10000
+max_bounded_chars = 30000
+deepest_chars = 120000
+
+[policy.markdown_depth_budget]
+extensions = [".md"]
+documentation_components = [
+    "[dD]oc",
+    "[dD]ocs",
+    "[dD]ocument",
+    "[dD]ocuments",
+    "[dD]ocumentation",
+    "[dD]ocumentations",
+]

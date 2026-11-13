@@ -1,0 +1,1429 @@
+:root {
+  color-scheme: light dark;
+  --page: #f7f8f4;
+  --panel: #ffffff;
+  --control: #ffffff;
+  --ink: #1f271f;
+  --muted: #647064;
+  --line: #d7ded2;
+  --accent: #2d6a4f;
+  --accent-soft: #d9eee5;
+  --focus: #1268a5;
+  --warning: #9a6400;
+  --danger: #a23932;
+  --triage: #b3402a;
+  /* Work list roles: a Design id, an execution id, and the gold only a row
+     waiting on the operator wears. */
+  --work-id-design: #6a4fc7;
+  --work-id-execution: #1f7f55;
+  --work-yours: #8a5d00;
+  --work-yours-soft: #fbf0d4;
+  --work-yours-edge: #d9b762;
+  --shadow: 0 1px 2px rgb(21 27 21 / 8%);
+  --app-radius-control: 5px; --app-radius-element: 6px; --app-radius-compact: 7px; --app-radius-inset: 8px;
+  --app-radius-hairline: 1px; --app-radius-focus: 2px; --app-radius-micro: 3px;
+  --app-radius-surface: 9px; --app-radius-frame: 10px; --app-radius-overlay: 12px;
+  --app-radius-pill: 999px;
+  --app-radius-circle: 50%;
+  --app-control-edge-width: 1px;
+  --app-focus-ring-width: 2px; --app-focus-ring-strong-width: 3px;
+  --app-motion-fast: 120ms; --app-motion-settle: 180ms; --app-ease-standard: ease-out;
+  /* A message card rounds by its rail width; work tabs share that curvature. */
+  --app-radius-card: var(--message-rail);
+  --app-type-avatar-min: .5rem;
+  --app-type-micro: .6rem;
+  --app-type-xs: .62rem;
+  --app-type-caption: .64rem;
+  --app-type-fact: .65rem;
+  --app-type-state: .66rem;
+  --app-type-kicker: .67rem;
+  --app-type-sm: .68rem;
+  --app-type-meta: .7rem;
+  --app-type-label: .72rem;
+  --app-type-control: .74rem;
+  --app-type-chip: .75rem;
+  --app-type-detail: .76rem;
+  --app-type-body: .78rem;
+  --app-type-summary: .8rem;
+  --app-type-version: .8rem;
+  --app-type-prose: .8125rem;
+  --app-type-identity: .82rem;
+  --app-type-message: .84rem;
+  --app-type-toast: .85rem;
+  --app-type-subheading: .86rem;
+  --app-type-section: .9rem;
+  --app-type-primary-action: .94rem;
+  --app-type-copy: 1rem;
+  --app-type-sheet-title: 1.15rem;
+  --app-type-badge: 11px;
+  --app-type-compact: 11px;
+  --app-type-small-copy: 11px;
+  --app-type-status: 12px;
+  --app-type-menu-icon: 15px;
+  --app-type-root: 16px;
+  --app-motion-drag: 130ms;
+  --app-motion-highlight: 2.8s;
+  --app-motion-pulse: 5s;
+  --app-status-line-band: 32px;
+  /* A work tab is a 28px tab plus one message rail on the edge it attaches
+     by: the bottom of a global total in the command bar, the top of a tab
+     rising from a team rail. Tabs carry no inline rails. */
+  --app-horn-tab-block-size: 32px;
+  --app-horn-tab-inset: 10px;
+  /* Global and team totals keep one tab footprint for every count, sized
+     around a round count badge. */
+  --app-total-badge-inline-size: 16px;
+  /* A count badge is a circle through two digits: two monospace digits plus
+     its inline padding span exactly its block size. Wider counts grow a pill. */
+  --app-count-badge-size: 1.8em;
+  --app-total-tab-inline-size: calc(2 * var(--app-horn-tab-inset) + var(--app-total-badge-inline-size));
+  --app-presence-pip-size: 8px;
+  --app-presence-member-border-width: 5px;
+  --app-provider-emblem-size: 22px;
+  --app-card-action-size: 24px;
+  --app-provider-anthropic: #d97706;
+  --app-annotation-danger: #ef4444;
+  --app-shadow-source: #000;
+  --app-highlight-source: #fff;
+  --app-mask-opaque: #000;
+  --app-sheet-frost: blur(12px);
+  --app-control-glass-depth: calc(
+    var(--app-glass-thickness) + var(--app-glass-thickness)
+  );
+  /* A single image alone in a lane message card; task cards cap at the same size. */
+  --mosaic-image-large-size: 15.75rem;
+  --accent-0: var(--accent);
+  --accent-1: #495dac;
+  --accent-2: #8b5f00;
+  --accent-3: #b3402a;
+  --accent-4: #007c89;
+  --accent-5: #8a4fbf;
+  /* Object-level surface roles. The inherited first base is an exact identity;
+     an individual object bearing a base flavor replaces them together. */
+  --app-base-accent: var(--accent-0);
+  --app-base-panel: var(--panel);
+  --app-base-control: var(--control);
+  --app-base-ink: var(--ink);
+  --app-base-muted: var(--muted);
+  --app-base-line: var(--line);
+  --app-base-ground: var(--page);
+  --app-base-focus: var(--muted);
+  /* The identity neutrals exactly as the page resolves them. Never
+     redeclared, so a flavored object rebuilds its roles from these while it
+     rebinds the primitives they came from. */
+  --app-anchor-page: var(--page);
+  --app-anchor-panel: var(--panel);
+  --app-anchor-control: var(--control);
+  --app-anchor-ink: var(--ink);
+  --app-anchor-muted: var(--muted);
+  --app-anchor-line: var(--line);
+  /* Cross-console signals and tokens keep one semantic palette for the
+     effective theme. Never redeclared: base-flavored objects inherit these
+     resolved page colors instead of following their rebound primitives. */
+  --app-semantic-live: var(--accent);
+  --app-semantic-ink: var(--app-anchor-ink);
+  --app-semantic-panel: var(--app-anchor-panel);
+  --app-semantic-focus: var(--focus);
+  /* Speaker rail widths: a message card's and a quote's. Anything that names
+     a speaker or owner with a left rail uses one of these two sizes. */
+  --message-rail: 4px;
+  --quote-rail: 2px;
+  /* The one treatment for anything shown over the interface: the page
+     beneath stays visible as frosted glass in either theme. One standard
+     glass thickness is the shared primitive for denser layered surfaces.
+     Frost and veil share legibility, so text stays readable without the frost
+     smearing edges or the veil darkening the glass toward opaque. */
+  --app-glass-thickness: 31%;
+  --overlay-veil: rgb(21 27 21 / 20%);
+  --overlay-frost: blur(10px) saturate(115%);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--app-type-root);
+  font-synthesis: none;
+  letter-spacing: 0;
+}
+
+:root[data-app-effective-theme="dark"] {
+    --page: #101411;
+    --panel: #181d19;
+    --control: #141915;
+    --ink: #eef4ec;
+    --muted: #a8b4a8;
+    --line: #30382f;
+    --accent: #74c69d;
+    --accent-soft: #203e31;
+    --focus: #67b7e8;
+    --warning: #e6b44e;
+    --danger: #ee8f88;
+    --triage: #e0734f;
+    --work-id-design: #bba4f5;
+    --work-id-execution: #6fd3a6;
+    --work-yours: #f0d68f;
+    --work-yours-soft: #1b1a15;
+    --work-yours-edge: #5a4a22;
+    --shadow: 0 1px 2px rgb(0 0 0 / 24%);
+    --accent-1: #8ea2ff;
+    --accent-2: #f2c14e;
+    --accent-3: #e0734f;
+    --accent-4: #5fd6d0;
+    --accent-5: #d1a3ff;
+    --overlay-veil: rgb(0 0 0 / var(--app-glass-thickness));
+}
+
+/* Roles derived from the primitive neutrals resolve wherever those primitives
+   are bound: on the page, and again on every base-flavored object, so a
+   flavored subtree derives them from its own base. */
+:root, [data-base-flavor] {
+  --control-surface-soft: color-mix(in srgb, var(--page) 62%, var(--control));
+  --line-soft: color-mix(in srgb, var(--line) 58%, transparent);
+  /* Control edges stay opaque as content moves beneath translucent surfaces. */
+  --control-line-soft: color-mix(in srgb, var(--line) 40%, var(--control));
+  --app-edge: 1px solid var(--line); --app-edge-soft: 1px solid var(--line-soft);
+  --app-control-edge: var(--app-control-edge-width) solid var(--control-line-soft);
+  --app-selection-shadow: inset 0 0 0 1px var(--line-soft);
+  /* The speaker accent of the operator and of the system itself: any card or
+     quote whose speaker holds no lane accent slot wears it. */
+  --accent-neutral: var(--ink);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { min-height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+}
+
+button, input, select, textarea { font: inherit; letter-spacing: 0; }
+
+button, select, input, textarea, :where(a.app-compact-control) {
+  border: var(--app-control-edge);
+  background: var(--control);
+  color: var(--ink);
+}
+
+select, input, textarea { border-radius: var(--app-radius-control); }
+
+/* A joined set: packed controls share one frame, the look of the team
+   composer's sliders over its send button. No space between controls, one
+   1px divider, and only the frame's outer corners rounded. Each control rings
+   itself into the 1px gap, so neighbours draw the same pixel and wrapped rows
+   stay single-ruled; the frame clips rings at its edge, so the rounding is
+   the frame's alone. Focus rings sit inside the control the frame clips. */
+.app-control-rail {
+  --app-control-rail-divider: color-mix(in srgb, var(--line) 36%, var(--control-surface-soft));
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 1px;
+  min-width: 0; padding: 0; overflow: clip;
+  border: var(--app-control-edge); border-radius: var(--app-radius-compact);
+  background: var(--control-surface-soft);
+}
+.app-control-rail > :is(button, details, input, select, span) {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  border: 0; border-radius: 0;
+  box-shadow: 0 0 0 1px var(--app-control-rail-divider);
+}
+.app-control-rail:empty { display: none; }
+.app-control-rail :is(button, input, select, summary):focus-visible { outline-offset: -2px; }
+
+/* Shared application materials. Placement remains with each surface; these
+   classes own the visual recipe and semantic state exactly once. */
+/* One lit thumb face serves both sliders and compact selectors; only its local
+   accent changes. The gradients and catches are the no-filter fallback too. */
+:is(.team-slider:is([data-stop="1"], [data-stop="2"]), .app-segment-slider) {
+  --app-slider-thumb-accent: var(--team-slider-accent, var(--focus));
+  --app-slider-thumb-face: radial-gradient(ellipse 82% 36% at 50% -8%, color-mix(in srgb, var(--app-highlight-source) 42%, transparent), transparent 76%), radial-gradient(ellipse 84% 42% at 50% 108%, color-mix(in srgb, var(--app-slider-thumb-accent) 28%, transparent), transparent 72%), linear-gradient(90deg, color-mix(in srgb, var(--app-slider-thumb-accent) 18%, transparent), transparent 14%, transparent 86%, color-mix(in srgb, var(--app-highlight-source) 18%, transparent)), linear-gradient(color-mix(in srgb, var(--app-highlight-source) 2.5%, transparent), color-mix(in srgb, var(--app-highlight-source) 2.5%, transparent));
+  --app-slider-thumb-shadow: var(--team-control-rest, inset 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--app-highlight-source) 8%, transparent)), inset 2px -2px 1px -1px color-mix(in srgb, var(--app-highlight-source) 58%, transparent), inset -2px 2px 1px -1px color-mix(in srgb, var(--app-highlight-source) 34%, transparent), inset 5px -4px 2px -5px color-mix(in srgb, var(--app-highlight-source) 55%, transparent), inset -5px 4px 2px -5px color-mix(in srgb, var(--app-shadow-source) 45%, transparent), inset 0 0 2px color-mix(in srgb, var(--app-shadow-source) 48%, transparent), inset 0 -4px 6px -4px color-mix(in srgb, var(--app-slider-thumb-accent) 38%, transparent), 0 2px 4px color-mix(in srgb, var(--app-shadow-source) 22%, transparent);
+}
+/* A compact selector whose chosen segment rides the lit slider thumb. Each
+   use sets its segment count; `data-stop` (or the use's own state selector)
+   names the chosen stop. Transparent buttons keep native focus and pressed
+   semantics above the thumb. */
+.app-segment-slider {
+  --app-segment-count: 3;
+  --app-segment-stop: 0;
+  --app-segment-face-inline-size: calc((100% - (var(--app-segment-count) - 1) * 1px) / var(--app-segment-count));
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--app-segment-count), minmax(0, 1fr));
+  flex-wrap: nowrap;
+  isolation: isolate;
+}
+.app-segment-slider[data-stop="1"] { --app-segment-stop: 1; }
+.app-segment-slider[data-stop="2"] { --app-segment-stop: 2; }
+.app-segment-slider[data-stop="3"] { --app-segment-stop: 3; }
+.app-segment-slider::before {
+  position: absolute;
+  z-index: 0;
+  inset-block: 2px;
+  inset-inline-start: calc(var(--app-segment-stop) * (var(--app-segment-face-inline-size) + 1px));
+  inline-size: var(--app-segment-face-inline-size);
+  box-sizing: border-box;
+  border: var(--app-control-edge-width) solid color-mix(in srgb, var(--ink) 24%, transparent);
+  border-radius: var(--app-radius-pill);
+  background: var(--app-slider-thumb-face);
+  box-shadow: var(--app-slider-thumb-shadow);
+  content: "";
+  pointer-events: none;
+  backdrop-filter: blur(2px) saturate(1.45) brightness(1.08) contrast(1.22);
+  -webkit-backdrop-filter: blur(2px) saturate(1.45) brightness(1.08) contrast(1.22);
+  transition: inset-inline-start var(--app-motion-settle) var(--app-ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-segment-slider::before { transition: none; }
+}
+.app-segment-slider > .app-choice-chip {
+  position: relative;
+  z-index: 1;
+  width: auto;
+}
+.app-segment-slider > .app-choice-chip[aria-pressed="true"] {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--app-control-rail-divider);
+}
+/* A closed edge is an attached accent rail whose radius equals its thickness.
+   That small radius closes the rail without rounding the content box into the
+   adjacent gutter. Logical-axis modifiers keep the same geometry in either
+   writing direction. Standalone cards and controls keep their own radii;
+   joined controls still square their interior corners and apply this treatment
+   only at the strip's outside edge. */
+.app-closed-edge {
+  --app-closed-edge-color: var(--app-base-line, var(--line));
+  --app-closed-edge-thickness: var(--app-control-edge-width);
+  --app-closed-edge-radius: var(--app-closed-edge-thickness);
+  --app-closed-edge-layer: 1;
+  position: relative;
+  border-radius: var(--app-closed-edge-radius);
+}
+.app-closed-edge--block-end::after {
+  position: absolute;
+  z-index: var(--app-closed-edge-layer);
+  inset: auto 0 0;
+  block-size: var(--app-closed-edge-thickness);
+  border-radius: var(--app-closed-edge-radius);
+  background: var(--app-closed-edge-color);
+  content: "";
+  pointer-events: none;
+}
+.app-closed-edge.app-closed-edge--inline-start {
+  border-inline-start: var(--app-closed-edge-thickness) solid var(--app-closed-edge-color);
+  border-radius: var(--app-closed-edge-radius);
+}
+@media (forced-colors: active) {
+  .app-closed-edge--block-end::after {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .app-closed-edge.app-closed-edge--inline-start { border-inline-start-color: CanvasText; }
+}
+.app-horn-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mosaic-gap);
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto hidden;
+  scrollbar-width: none;
+}
+.app-horn-tab {
+  --app-horn-tab-tint: var(--app-base-muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: var(--app-horn-tab-block-size);
+  padding: 0 var(--app-horn-tab-inset);
+  overflow: clip;
+  border: 0 solid var(--app-base-line);
+  background: var(--app-base-control);
+  color: var(--app-base-muted);
+  font: 500 var(--app-type-status)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-decoration: none;
+}
+a.app-horn-tab { text-decoration: none; cursor: pointer; }
+.app-horn-tab--down { border-block-end-width: var(--message-rail); border-block-end-style: solid; border-radius: 0 0 var(--app-radius-card) var(--app-radius-card); }
+.app-horn-tab--up { border-block-start-width: var(--message-rail); border-block-start-style: solid; border-radius: var(--app-radius-card) var(--app-radius-card) 0 0; }
+/* A tab's mark is a small dot seated on its count badge's rim at the top
+   inline-end diagonal, its center half a pixel outside the rim, so the round
+   badge reads as cutting through it while its thin ring clears the top of a
+   second digit, as the renewal dot sits on a lane menu's corner. A badge is a
+   circle, or a pill ending in the same half-circle, so the rim at 45° lies
+   (1 - √2/2)·r inside each edge, with r half the badge size, and each pixel
+   of lift moves the center √2/2 px outward on each axis. The dot is coloured
+   by the most actionable state its partition holds: danger for work only the
+   operator can unblock, warning for a pass awaiting decision, live for a
+   Design ready for a new pass, warning again for work the operator
+   deferred. Out of flow, it never changes the tab's box, badge, label, or
+   focus ring. */
+.app-horn-tab[data-work-mark] .app-count-badge { position: relative; }
+.app-horn-tab[data-work-mark] .app-count-badge::after {
+  --work-mark-size: 5px;
+  --work-mark-lift: .5px;
+  --work-mark-rim-inset: calc(
+    var(--app-count-badge-size) * .1464 - var(--work-mark-size) / 2 - var(--work-mark-lift) * .7071
+  );
+  position: absolute;
+  top: var(--work-mark-rim-inset);
+  inset-inline-end: var(--work-mark-rim-inset);
+  width: var(--work-mark-size);
+  height: var(--work-mark-size);
+  border-radius: var(--app-radius-circle);
+  background: var(--work-mark-color);
+  box-shadow: 0 0 0 .5px var(--app-base-control);
+  content: "";
+  pointer-events: none;
+}
+.app-horn-tab[data-work-mark="blocked"] { --work-mark-color: var(--danger); }
+.app-horn-tab[data-work-mark="decision"] { --work-mark-color: var(--warning); }
+.app-horn-tab[data-work-mark="pass"] { --work-mark-color: var(--app-semantic-live); }
+.app-horn-tab[data-work-mark="deferred"] { --work-mark-color: var(--warning); }
+@media (forced-colors: active) {
+  .app-horn-tab[data-work-mark] .app-count-badge::after { forced-color-adjust: none; background: CanvasText; box-shadow: none; }
+}
+.app-horn-tab--group { gap: 0; padding: 0; }
+.app-horn-tab--group > .app-horn-tab__target {
+  align-self: stretch;
+  min-height: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+}
+.app-horn-tab__target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.app-horn-tab--group > .app-horn-tab__target:first-child { padding-inline-start: var(--app-horn-tab-inset); }
+.app-horn-tab--group > .app-horn-tab__target:last-child { padding-inline-end: var(--app-horn-tab-inset); }
+.app-horn-tab:is([data-work-scope="all"], [data-work-scope="design"], [data-work-scope="drafts"], [data-work-scope="team"], [data-work-scope="group"]) {
+  box-sizing: border-box;
+  min-inline-size: var(--app-total-tab-inline-size);
+  justify-content: center;
+  padding-inline: 0;
+}
+.app-horn-tab:is([data-work-scope="team"], [data-work-scope="group"]) > .app-horn-tab__target { flex: 1 1 auto; justify-content: center; padding-inline: 0; }
+/* Local task and worker tabs fuse to their fixed total as one strip. The
+   reversed scroller puts its last child at the physical left edge; every
+   interior corner stays square while that child and the total keep the two
+   outside corners. Only radii change here, so the shared top rail and its
+   hover step run unbroken across the strip. */
+.team-task-rail > .team-tasks > .app-horn-tab { border-radius: 0; }
+.team-task-rail > .team-tasks > .app-horn-tab:last-child { border-start-start-radius: var(--app-radius-card); }
+.team-task-rail > :is([data-work-scope="team"], [data-work-scope="group"]) { border-start-start-radius: 0; }
+:is(.app-horn-tab:not(.app-horn-tab--group), .app-horn-tab--group > .app-horn-tab__target) {
+  background: color-mix(in srgb, var(--app-horn-tab-tint) 5%, var(--app-base-control));
+  color: var(--app-base-muted);
+}
+:is(.app-horn-tab:not(.app-horn-tab--group), .app-horn-tab--group > .app-horn-tab__target):hover {
+  background: color-mix(in srgb, var(--app-horn-tab-tint) 10%, var(--app-base-control));
+}
+/* Hover strengthens every horn tab's rail within the object's base flavor. */
+.app-horn-tab:hover { border-color: color-mix(in srgb, var(--app-base-muted) 35%, var(--app-base-line)); }
+/* A local handle in its work's accent: tinted text, background, and top rail
+   always; the rail strengthens on hover within the same accent, where the
+   base rail strengthens within the base. Totals tabs keep the base flavor. */
+.app-horn-tab__handle[data-accent] {
+  --app-horn-tab-tint: var(--accent-slot);
+  color: color-mix(in srgb, var(--accent-slot) 55%, var(--app-base-ink));
+  border-color: color-mix(in srgb, var(--accent-slot) 55%, var(--app-base-line));
+}
+.app-horn-tab__handle[data-accent]:hover {
+  border-color: color-mix(in srgb, var(--accent-slot) 80%, var(--app-base-line));
+}
+/* A team task tab is one accented shell but reads as one logical group:
+   its one-and-a-half-space outside insets frame a compact age/handle/holders
+   run. Identity keeps each claimant's accent; the work handle stays neutral.
+   Several holders follow the handle latest claim first, each name in its own
+   accent, separated by a muted comma, leaving the earliest claimant at the edge. */
+.team-task-tab > .team-task-tab__lane,
+.team-task-tab__lane > .team-task-tab__holder {
+  color: color-mix(in srgb, var(--accent-slot) 55%, var(--app-base-ink));
+  text-decoration: none;
+}
+.team-task-tab__lane > .team-task-tab__holder-separator {
+  color: var(--app-base-muted);
+  white-space: pre;
+}
+.team-task-tab > .team-task-tab__lane[data-holders] { gap: 0; }
+.team-task-tab { --app-horn-tab-inset: 1.5ch; }
+.team-task-tab > .team-task-tab__task {
+  gap: 1ch;
+  padding-inline: 1.5ch .5ch;
+  color: var(--app-base-muted);
+}
+.team-task-tab > .team-task-tab__lane { padding-inline: .5ch 1.5ch; }
+.team-task-tab__age { opacity: .72; }
+.app-horn-tabs :focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--app-base-focus);
+  outline-offset: -2px;
+}
+.app-count-badge {
+  display: inline-block;
+  box-sizing: border-box;
+  min-inline-size: var(--app-count-badge-size);
+  block-size: var(--app-count-badge-size);
+  padding: 0 .3em;
+  border-radius: var(--app-radius-pill);
+  background: var(--app-base-muted);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-base-ground) 24%, transparent);
+  color: var(--app-base-ground);
+  font-size: var(--app-type-badge);
+  font-weight: 700;
+  line-height: var(--app-count-badge-size);
+  text-align: center;
+}
+
+.app-presence-pip {
+  --app-presence-color: var(--app-semantic-live);
+  --app-presence-opacity: 1;
+  display: inline-block;
+  border-radius: var(--app-radius-circle);
+  background: var(--app-presence-color);
+  opacity: var(--app-presence-opacity);
+}
+.app-presence-pip.queued { --app-presence-color: var(--warning); }
+.app-presence-pip.bound,
+.app-presence-pip.unbound {
+  --app-presence-color: var(--app-anchor-muted);
+  --app-presence-opacity: .35;
+}
+/* Fill is the parked channel, independent of the status colour above. */
+.app-presence-pip.parked {
+  background: radial-gradient(circle, transparent 0 30%, var(--app-presence-color) 38%);
+}
+.app-presence-pip--member {
+  width: 18px;
+  height: 18px;
+  border: var(--app-presence-member-border-width) solid color-mix(in srgb, var(--app-presence-color) 25%, var(--panel));
+  box-sizing: content-box;
+}
+.app-presence-pip--status {
+  width: var(--app-presence-pip-size);
+  height: var(--app-presence-pip-size);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-semantic-live) 14%, transparent);
+}
+.app-presence-pip--status:is(.bound, .unbound) { box-shadow: none; }
+
+/* Tools wear the accent, prose lifts toward ink, and reasoning sinks toward
+   the page across a lane's composer rail. */
+.composer-trace-rail {
+  --trace-tool: var(--accent-slot);
+  --trace-prose: color-mix(in srgb, var(--accent-slot) 45%, var(--ink));
+  --trace-reasoning: color-mix(in srgb, var(--accent-slot) 45%, var(--page));
+}
+/* A lane with nobody in its seat drains to gray, as the Spice chili does while
+   Spice is disconnected, so only running lanes wear their accent. */
+.composer-trace-rail[data-lane-seated="false"] { filter: grayscale(1); }
+/* Half a CSS pixel rasterizes to one device pixel at 2x and a single
+   antialiased device pixel at 1x, returning the rest to the curve. */
+.activity-trace { position: absolute; inset: .5px; }
+.activity-trace > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.activity-trace [data-trace-kind="tool"] { --trace-color: var(--trace-tool); }
+.activity-trace [data-trace-kind="prose"] { --trace-color: var(--trace-prose); }
+.activity-trace [data-trace-kind="reasoning"] { --trace-color: var(--trace-reasoning); }
+.activity-trace stop { stop-color: var(--trace-color); }
+.activity-trace .trace-fill { stroke: none; }
+.activity-trace .trace-line { fill: none; stroke: var(--trace-color); stroke-width: 1px; stroke-linecap: round; }
+.activity-trace .trace-now { fill: var(--trace-color); stroke: none; }
+/* Glow reads as light only in a dark well; a light theme keeps the crisp line. */
+:root[data-app-effective-theme="dark"] .activity-trace .trace-lit {
+  filter: drop-shadow(0 0 1px color-mix(in srgb, var(--accent-slot) 70%, transparent));
+}
+.activity-trace [data-trace-marker] { fill: none; stroke: color-mix(in srgb, var(--ink) 40%, transparent); stroke-width: 1px; }
+.activity-trace [data-trace-marker="turn"] { stroke: color-mix(in srgb, var(--ink) 22%, transparent); }
+.activity-trace [data-trace-marker="compaction"] { stroke-dasharray: 1 1; }
+.activity-trace [data-trace-marker="failure"] { fill: var(--danger); stroke: none; }
+.activity-trace [data-trace-marker="direction"] { fill: var(--ink); stroke: none; }
+.activity-trace [data-trace-marker="direction"][data-accent] { fill: var(--accent-slot); }
+/* A settled trace is inert. At its four-second data boundary the existing
+   history crosses one sampled position briefly; transition completion mounts
+   the frame for the new instant. */
+.activity-trace .trace-flow { transform: translateX(0); }
+.activity-trace .trace-flow[data-trace-moving="true"] {
+  transform: translateX(var(--trace-flow-shift));
+  transition: transform var(--trace-flow-transition-duration) ease-out;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-trace .trace-flow[data-trace-moving="true"] {
+    transform: none;
+    transition: none;
+    will-change: auto;
+  }
+}
+
+.app-glass-control-surface {
+  --app-control-glass-paint: color-mix(
+    in srgb,
+    var(--control) min(100%, var(--app-control-glass-depth)),
+    transparent
+  );
+}
+.app-glass-control-surface:is(.team-status-row, .team-composer-controls) {
+  --app-control-glass-depth: calc(var(--app-glass-thickness) + var(--app-glass-thickness) + var(--app-glass-thickness));
+}
+.app-status-band {
+  border-block-start: var(--app-edge);
+  background: var(--message-stream-surface, var(--control-surface-soft)) padding-box;
+}
+.app-status-band.app-glass-control-surface {
+  background: var(--app-control-glass-paint) padding-box;
+  backdrop-filter: var(--overlay-frost);
+}
+.app-status-text {
+  padding: 7px 16px;
+  overflow: hidden;
+  color: var(--muted);
+  font: 500 var(--app-type-status)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-provider-emblem {
+  width: var(--app-provider-emblem-size);
+  height: var(--app-provider-emblem-size);
+  cursor: help;
+  color: color-mix(in srgb, var(--ink) 86%, var(--control));
+  opacity: .74;
+}
+.app-provider-emblem svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.app-provider-emblem__fast {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-size: var(--app-type-badge);
+  filter: drop-shadow(1px 1px .5px var(--control));
+}
+.app-provider-emblem--anthropic {
+  color: color-mix(in srgb, var(--app-provider-anthropic) 88%, var(--ink));
+  opacity: .72;
+}
+.app-provider-emblem:not([data-provider]) { opacity: .9; }
+
+.app-choice-chip {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.app-choice-chip:hover { color: var(--ink); }
+.app-choice-chip[aria-pressed="true"] {
+  background: var(--control);
+  color: var(--ink);
+  box-shadow: var(--app-selection-shadow);
+}
+
+/* Every surface raised over Chat takes its material, edge, radius, and
+   elevation from this foundation. Placement remains with the surface because
+   a seated lane panel, a sheet overlay, and a top-layer modal have different
+   geometry, but none owns another visual recipe. */
+.app-overlay-veil,
+.app-modal::backdrop {
+  background: var(--overlay-veil);
+  backdrop-filter: var(--overlay-frost);
+}
+.app-overlay-sheet {
+  border: 0;
+  border-inline-start: var(--app-control-edge);
+  background: color-mix(in srgb, var(--panel) 96%, var(--page));
+  color: var(--ink);
+}
+.app-overlay-panel {
+  background: color-mix(in srgb, var(--panel) 94%, var(--control));
+  color: var(--ink);
+}
+.app-overlay-panel--seated {
+  border-block-start: var(--app-control-edge-width) solid var(--line-soft);
+  box-shadow: none;
+}
+.app-overlay-panel--popover {
+  border-block-end: var(--app-edge);
+  box-shadow: 0 8px 16px -12px color-mix(in srgb, var(--app-shadow-source) 60%, transparent);
+}
+.app-modal {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+}
+.app-overlay-control,
+.app-overlay-status {
+  border: var(--app-edge);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--app-sheet-frost);
+}
+.app-overlay-control { border-radius: var(--app-radius-compact); }
+.app-overlay-status { border-radius: var(--app-radius-overlay); }
+
+/* One side view serves every sidebar. Content chooses a standard width, and
+   the view and its frosted veil simply fade in and out; nothing moves or
+   scales. The launcher's twin stands beside the faded surface, so it never
+   changes. The surface's fade ending is the close boundary. */
+.app-sidebar-layer,
+.app-compose-entry,
+.app-help {
+  --app-side-view-fade: opacity var(--app-motion-settle) var(--app-ease-standard);
+  --app-side-view-small: 28rem;
+  --app-side-view-large: 46rem;
+  --app-side-view-gutter: 3rem;
+}
+.app-sidebar-layer {
+  --app-side-view-width: var(--app-side-view-large);
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  min-width: 0;
+  justify-items: end;
+}
+.app-sidebar-layer[data-sidebar-width="small"] { --app-side-view-width: var(--app-side-view-small); }
+.app-sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: default;
+  transition: var(--app-side-view-fade);
+}
+.app-sidebar {
+  position: relative;
+  z-index: 1;
+  width: min(var(--app-side-view-width), calc(100vw - var(--app-side-view-gutter)));
+  height: 100%;
+  min-height: 0;
+}
+.app-sidebar-surface {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  transition: var(--app-side-view-fade);
+}
+/* The sidebar scrolls without a scrollbar, as the lane planes do. */
+.app-sidebar-frame {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+/* Scrolled content stacks beneath the sticky header, however high its own
+   controls are raised. */
+.app-sidebar-frame > :not(.app-sidebar-header) { isolation: isolate; }
+@media (prefers-reduced-motion: no-preference) {
+  .app-sidebar-layer:not([data-sidebar-state="open"]) :is(.app-sidebar-backdrop, .app-sidebar-surface, .app-spice-sidebar-readouts) { opacity: 0; }
+}
+/* The theme selector and TURBO stand beside the Spice button; the weekly
+   percentage hangs under the button outside this box. */
+.app-spice-sidebar-anchor {
+  position: absolute;
+  z-index: 3;
+  top: var(--app-spice-anchor-inset-block);
+  inset-inline-end: var(--app-spice-anchor-inset-inline);
+  display: grid;
+  grid-template-columns: auto var(--app-header-control);
+  justify-content: space-between;
+  align-items: center;
+  inline-size: var(--app-spice-anchor-inline-size);
+}
+.app-spice-sidebar-readouts {
+  display: grid;
+  grid-auto-flow: column;
+  gap: var(--app-spice-anchor-gap);
+  place-items: center;
+  transition: var(--app-side-view-fade);
+}
+/* With the Spice controls anchored in the header, its height is fixed: a row
+   level with the round controls holds the kicker with the product version on
+   its baseline, and a foot as tall as the weekly percentage beneath the Spice
+   button holds the status line. The status line runs under the theme selector
+   and TURBO and truncates just before the Spice button, so the percentage
+   stays clear of it. */
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header {
+  container: spice-header / inline-size;
+  padding-block: var(--app-spice-anchor-inset-block) 0;
+  padding-inline-end: var(--app-spice-header-reserve);
+}
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: var(--app-header-control) var(--app-spice-header-foot);
+  align-items: baseline;
+  min-width: 0;
+}
+/* The kicker is the open Spice view's title, so it reads lowercase where other
+   kickers read uppercase, and it shrinks only where the header's text room
+   cannot hold it, such as beside the Windows caption buttons. */
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-kicker {
+  font-size: min(calc(var(--app-type-copy) * 1.5), 29cqi);
+  line-height: var(--app-header-control);
+  white-space: nowrap;
+  text-transform: lowercase;
+}
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header .app-resident-summary { display: contents; }
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header .app-product-version {
+  grid-area: 1 / 2;
+  justify-self: start;
+  max-inline-size: calc(100% - 10px);
+  margin-inline-start: 10px;
+  font-size: var(--app-type-version);
+}
+.app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header .app-resident-status {
+  grid-area: 2 / 1 / 3 / -1;
+  align-self: center;
+  margin-inline-end: calc(-1 * var(--app-spice-status-overhang));
+}
+/* A header too narrow for the version beside the kicker, on a phone or beside
+   the Windows caption buttons, hides the plain version. An available update
+   stays actionable by taking the status line's place, and the status stays
+   announced. */
+@container spice-header (max-width: 12rem) {
+  .app-sidebar-header .app-resident-summary > strong.app-product-version { display: none; }
+  .app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header .app-product-version--update {
+    grid-area: 2 / 1 / 3 / -1;
+    align-self: center;
+    max-inline-size: calc(100% + var(--app-spice-status-overhang));
+    margin-inline-start: 0;
+    font-size: inherit;
+  }
+  .app-sidebar-layer[data-sidebar-anchored] .app-sidebar-header > div:has(.app-product-version--update) .app-resident-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+}
+:root:has(dialog:modal) .app-sidebar-backdrop {
+  background: transparent;
+  backdrop-filter: none;
+}
+.app-sidebar-header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 22px;
+  border-bottom: var(--app-control-edge);
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  backdrop-filter: var(--app-sheet-frost);
+}
+.app-sidebar-header h2 {
+  margin: 2px 0 0;
+  font-size: var(--app-type-sheet-title);
+  line-height: 1.25;
+}
+.app-sidebar-kicker {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--app-type-kicker);
+  font-weight: 760;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.app-sidebar-close { flex: none; }
+.app-sheet-section {
+  padding: 18px 0;
+  border-top: var(--app-edge-soft);
+}
+.app-sheet-section h3 {
+  margin: 0 0 12px;
+  font-size: var(--app-type-section);
+}
+.app-sheet-section h4 {
+  margin: 15px 0 8px;
+  color: var(--muted);
+  font-size: var(--app-type-label);
+  text-transform: uppercase;
+}
+.app-sheet-section ul { margin: 8px 0 0; padding-left: 20px; }
+.app-sheet-section ul > li + li { margin-top: 4px; }
+.app-sheet-media { --mosaic-image-size: 8.75rem; min-width: 0; }
+.app-fact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 18px; margin: 0; font-size: var(--app-type-chip); }
+.app-fact-grid > div { min-width: 0; }
+.app-fact-grid dt { color: var(--muted); font-weight: 700; }
+.app-fact-grid dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.app-fact-link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentcolor 45%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.app-fact-link:hover { text-decoration-color: currentcolor; }
+.app-fact-link:focus-visible {
+  border-radius: var(--app-radius-focus);
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Bare buttons take control geometry, so a button that frames content reads
+   as a card. Capsule geometry belongs to the compact-control role: a control
+   class that owns its shape, or app-compact-control for a compact action
+   with no class of its own. */
+button, :where(a.app-compact-control) {
+  border-radius: var(--app-radius-control);
+  min-height: 36px;
+  padding: 0 12px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+button:hover, a.app-compact-control:hover { border-color: var(--accent); }
+.app-compact-control { border-radius: var(--app-radius-pill); }
+/* A link in the compact-control role, such as a permalink, wears the same
+   face as the buttons beside it. */
+a.app-compact-control { display: inline-flex; align-items: center; color: var(--ink); text-decoration: none; }
+a.app-compact-control:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 2px; }
+button:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; opacity: .5; }
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.commandbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 56px;
+  padding: 8px var(--app-commandbar-inline-pad);
+  background: var(--panel);
+}
+
+.workspace { flex: 1 1 auto; min-width: 0; }
+
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.content {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 26px;
+}
+
+[data-accent="0"] { --accent-slot: var(--accent-0); }
+[data-accent="1"] { --accent-slot: var(--accent-1); }
+[data-accent="2"] { --accent-slot: var(--accent-2); }
+[data-accent="3"] { --accent-slot: var(--accent-3); }
+[data-accent="4"] { --accent-slot: var(--accent-4); }
+[data-accent="5"] { --accent-slot: var(--accent-5); }
+
+/* Accent slots are convenient inputs, not the boundary of the base-flavor
+   contract. Any object may instead provide its own --app-base-accent, and a
+   console names its dealt palette index as its base without wearing that
+   slot, so slotless descendants keep their own speaker accents. */
+[data-base-flavor][data-accent] {
+  --app-base-accent: var(--accent-slot);
+}
+[data-base-accent="0"] { --app-base-accent: var(--accent-0); }
+[data-base-accent="1"] { --app-base-accent: var(--accent-1); }
+[data-base-accent="2"] { --app-base-accent: var(--accent-2); }
+[data-base-accent="3"] { --app-base-accent: var(--accent-3); }
+[data-base-accent="4"] { --app-base-accent: var(--accent-4); }
+[data-base-accent="5"] { --app-base-accent: var(--accent-5); }
+/* A neutral base is the operator's own voice: the page's ink without hue, so
+   the subtree's roles are rebuilt achromatic. */
+[data-base-flavor="neutral"] { --app-base-accent: oklch(from var(--app-anchor-ink) l 0 none); }
+
+/* Rebuild every semantic role from its achromatic anchor and one object-owned
+   base, then bind the object's primitives to those roles, so everything in
+   the subtree reads the base while keeping its relationships to every other
+   role. Lane accent slots stay the page's. No hue from the product-green
+   defaults can leak into another flavor. Accent zero is the exact identity
+   because the defaults already wear it. */
+[data-base-flavor]:not([data-base-flavor="identity"]):not([data-accent="0"]):not([data-base-accent="0"]) {
+  --app-base-panel: color-mix(in oklch, var(--app-base-accent) 3%, oklch(from var(--app-anchor-panel) l 0 none));
+  --app-base-control: color-mix(in oklch, var(--app-base-accent) 3%, oklch(from var(--app-anchor-control) l 0 none));
+  --app-base-ink: color-mix(in oklch, var(--app-base-accent) 12%, oklch(from var(--app-anchor-ink) l 0 none));
+  --app-base-muted: color-mix(in oklch, var(--app-base-accent) 18%, oklch(from var(--app-anchor-muted) l 0 none));
+  --app-base-line: color-mix(in oklch, var(--app-base-accent) 24%, oklch(from var(--app-anchor-line) l 0 none));
+  --app-base-ground: color-mix(in oklch, var(--app-base-accent) 3%, oklch(from var(--app-anchor-page) l 0 none));
+  --app-base-focus: color-mix(in oklch, var(--app-base-accent) 58%, oklch(from var(--app-anchor-muted) l 0 none));
+  --page: var(--app-base-ground);
+  --panel: var(--app-base-panel);
+  --control: var(--app-base-control);
+  --ink: var(--app-base-ink);
+  --muted: var(--app-base-muted);
+  --line: var(--app-base-line);
+  --accent: var(--app-base-accent);
+  --focus: var(--app-base-focus);
+  --accent-soft: color-mix(in oklch, var(--app-base-accent) 22%, var(--app-base-ground));
+}
+
+
+
+.app-card-action {
+  display: grid;
+  place-items: center;
+  width: var(--app-card-action-size);
+  height: var(--app-card-action-size);
+  min-height: 0;
+  padding: 0;
+  border: var(--app-edge);
+  border-radius: var(--app-radius-circle);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--app-type-xs);
+  line-height: 1;
+}
+
+.app-card-action:hover { border-color: var(--accent-slot, var(--accent)); color: var(--accent-slot, var(--accent)); }
+.app-card-action__icon {
+  display: block;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.message-attachments { display: grid; gap: 8px; margin-top: 10px; }
+.message-attachments figure { margin: 0; }
+.message-attachments img {
+  display: block;
+  width: 100%;
+  height: 8.75rem;
+  border-radius: var(--app-radius-element);
+  background: var(--control-surface-soft);
+  object-fit: contain;
+}
+.message-attachments figcaption { color: var(--muted); font-size: var(--app-type-meta); }
+
+
+
+
+
+.section {
+  padding: 22px 0;
+  border-top: var(--app-edge-soft);
+}
+
+.section:first-of-type { border-top: 0; }
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 13px;
+}
+
+.section-heading h2 { margin: 0; font-size: var(--app-type-copy); }
+.section-count { color: var(--muted); font-size: var(--app-type-body); }
+
+/* Agent slots share one full-width slot height, so a roster reads as a stack
+   of equal rows. */
+.app-spice-topology { --app-topology-slot-block: 50px; }
+/* A tile's name is its finger or pen handle; it reaches past the line box so a
+   thumb finds it. */
+.app-roster-member[draggable="true"] strong[data-roster-handle] {
+  padding-block: 8px;
+  margin-block: -8px;
+}
+.app-topology-drag-ghost {
+  position: fixed;
+  z-index: 60;
+  top: -10000px;
+  left: -10000px;
+  pointer-events: none;
+  box-shadow: 0 18px 42px color-mix(in srgb, var(--app-shadow-source) 32%, transparent);
+  transform: rotate(.35deg) scale(1.015);
+  transform-origin: top left;
+}
+[data-topology-drop-target] {
+  outline: var(--app-focus-ring-width) dashed color-mix(in srgb, var(--accent) 64%, var(--line));
+  outline-offset: -2px;
+}
+/* A roster member tile: one agent, one box, two fixed lines. */
+.app-roster-tile {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  box-sizing: border-box;
+  min-width: 0;
+  min-block-size: var(--app-topology-slot-block);
+  padding: 6px 36px 6px 10px;
+  direction: ltr;
+  border: var(--app-control-edge);
+  border-left: var(--app-focus-ring-strong-width) solid var(--accent-slot, var(--accent));
+  border-radius: var(--app-radius-element);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: var(--app-type-label);
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+a.app-roster-tile { text-decoration: none; cursor: pointer; }
+a.app-roster-tile:hover { border-color: var(--accent-slot, var(--accent)); }
+a.app-roster-tile:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 2px; }
+.app-spice-topology .section-count { font-variant-numeric: tabular-nums; }
+.app-roster-tile > header { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.app-roster-tile > header .app-presence-pip--member { flex: none; width: 6px; height: 6px; border-width: var(--app-focus-ring-strong-width); }
+.app-roster-tile > header strong { flex: none; color: color-mix(in srgb, var(--accent-slot, var(--accent)) 70%, var(--ink)); font-size: var(--app-type-summary); line-height: 1.2; }
+.app-roster-tile > header span,
+.app-roster-tile > p { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-roster-tile > header span { font: var(--app-type-meta)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* The worktree yields width before the model does. */
+.app-spice-topology-agent-worktree { flex: 0 100 auto; }
+.app-spice-topology-agent-model { flex: 0 1 auto; margin-inline-start: auto; opacity: .8; }
+.app-roster-tile > p { margin: 0; }
+.app-roster-tile > p > span + span::before { content: "·"; margin-inline: .45em; color: var(--muted); }
+.app-spice-topology-agent-task { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.app-spice-topology-agent .app-provider-emblem { position: absolute; top: 50%; right: 10px; width: 18px; height: 18px; transform: translateY(-50%); }
+.app-spice-quota .section-heading { align-items: baseline; }
+.app-spice-quota > .quota-detail-group:first-of-type { margin-top: 0; }
+.quota-status {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: var(--app-control-edge);
+  border-radius: var(--app-radius-element);
+  background: var(--control-surface-soft);
+  color: var(--muted);
+  font-size: var(--app-type-detail);
+}
+.quota-status strong { color: var(--ink); }
+.app-spice-quota[data-quota-state="stale-last-good"] .quota-status strong,
+.app-spice-quota[data-quota-state="failed-attempt"] .quota-status strong,
+.app-spice-quota[data-quota-state="unsupported"] .quota-status strong,
+.quota-attempt { color: var(--triage); }
+.quota-attempt { margin: 0 0 14px; font-size: var(--app-type-control); }
+.quota-detail-group { margin-top: 18px; }
+.quota-detail-group > h3 { margin: 0 0 9px; font-size: var(--app-type-subheading); }
+.quota-empty { margin: 0; color: var(--muted); font-size: var(--app-type-detail); }
+/* No reports is boxed like one card of one limit, so a refresh that adds the
+   first report moves nothing below. */
+.quota-detail-group { --quota-account-block: 5rem; }
+.quota-detail-group > .quota-empty {
+  padding: 10px 12px;
+  border: var(--app-control-edge-width) dashed var(--control-line-soft);
+  border-radius: var(--app-radius-element);
+  font-size: var(--app-type-control);
+}
+.quota-detail-group > .quota-account-empty {
+  min-block-size: var(--quota-account-block);
+  padding: 9px 12px 10px;
+  border-radius: var(--app-radius-surface);
+  font-size: var(--app-type-detail);
+}
+.quota-simple-list li {
+  padding: 10px 12px;
+  border: var(--app-control-edge);
+  border-radius: var(--app-radius-element);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.quota-account-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(24rem, 100%), 1fr));
+  align-items: start;
+  gap: 10px;
+}
+.quota-account {
+  position: relative;
+  min-block-size: var(--quota-account-block);
+  padding: 9px 12px 10px;
+  border: var(--app-control-edge);
+  border-radius: var(--app-radius-surface);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+/* The account accent identifies the account without dominating it: a soft
+   closed rail and tint here, a muted provider label, and neutral meter fills,
+   so a fill's colour never reads as a warning or an all-clear. Matching the
+   card radius to the rail width keeps the content box visually square. */
+.quota-account[data-accent] {
+  --app-closed-edge-color: color-mix(in srgb, var(--accent-slot) 55%, var(--line));
+  --app-closed-edge-thickness: var(--app-focus-ring-strong-width);
+  background: color-mix(in srgb, var(--accent-slot) 4%, var(--panel));
+}
+.quota-account > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 10px;
+}
+.quota-account > header .app-quota-age { color: var(--muted); font-size: var(--app-type-meta); }
+.quota-account h4 { margin: 0; font-size: var(--app-type-message); }
+.quota-provider {
+  color: color-mix(in srgb, var(--accent-slot, var(--accent)) 72%, var(--muted));
+  font: 650 var(--app-type-micro)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.quota-provider-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.quota-provider-scope {
+  flex: 1 0 100%;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--app-type-caption);
+}
+.quota-account--provider-disabled {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--muted) 5%, var(--panel));
+}
+.quota-account--provider-disabled .quota-provider,
+.quota-account--provider-disabled h4 { color: var(--muted); }
+.quota-account-metadata { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0; color: var(--muted); font-size: var(--app-type-sm); }
+.quota-account-metadata div { display: flex; gap: 4px; }
+.quota-account-metadata dt { opacity: .75; }
+.quota-account-metadata dd { margin: 0; }
+.quota-limit-list {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(3rem, 1fr) max-content max-content;
+  align-items: center;
+  gap: 5px 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--app-type-control);
+}
+.quota-limit { display: contents; }
+.quota-limit strong { font-weight: 600; overflow-wrap: anywhere; }
+.quota-limit-status { margin-left: 6px; color: var(--triage); font-size: var(--app-type-caption); font-weight: 650; text-transform: uppercase; }
+.quota-meter { display: block; width: 100%; height: 6px; }
+.quota-meter-track { fill: color-mix(in srgb, var(--muted) 22%, transparent); }
+.quota-meter-fill { fill: color-mix(in srgb, var(--ink) 40%, var(--muted)); }
+.quota-limit[data-limit-status] .quota-meter-fill { fill: var(--triage); }
+.quota-limit-amount { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.quota-limit-reset { color: var(--muted); text-align: right; white-space: nowrap; }
+.quota-credit-balance { display: flex; align-items: baseline; gap: 8px; margin: 8px 0 0; font-size: var(--app-type-control); }
+.quota-credit-balance dt { font-weight: 650; }
+.quota-credit-balance dd { margin: 0; font-variant-numeric: tabular-nums; }
+.quota-reset-credits { display: flex; flex-wrap: wrap; gap: 3px 10px; margin: 8px 0 0; color: var(--muted); font-size: var(--app-type-meta); }
+.quota-reset-credits strong { color: var(--ink); }
+.quota-reset-credits-balance { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quota-reset-credit { display: flex; flex: 0 0 100%; align-items: center; min-width: 0; max-width: 100%; height: 13px; gap: 4px; }
+.quota-reset-credit-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quota-reset-credit-usability { flex: none; color: var(--warning); font-weight: 650; white-space: nowrap; }
+.quota-reset-credit-expiry { flex: none; margin-left: auto; white-space: nowrap; }
+.quota-simple-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+/* One line per row however long the account label, so a long entry holds the
+   footprint the empty line reserves; the row's title carries the full text. */
+.quota-simple-list li { display: flex; gap: 12px; font-size: var(--app-type-control); white-space: nowrap; }
+.quota-simple-list li > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.quota-simple-list strong { flex: none; max-width: 40%; }
+.quota-simple-list span { color: var(--muted); }
+.app-quota-age { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.operator-avatar {
+  position: relative;
+  container-type: inline-size;
+  display: inline-grid;
+  flex: 0 0 80px;
+  width: 80px;
+  height: 80px;
+  place-items: center;
+  overflow: hidden;
+  border: var(--app-control-edge);
+  border-radius: var(--app-radius-circle);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: 750 var(--app-type-copy)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.operator-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* A Gravatar still carries the operator badge: a band across the lower third
+   of the same circle, so the avatar never grows to make room for it. The child
+   selector outranks the host rows' generic span rules. */
+.operator-avatar > .operator-avatar-badge {
+  position: absolute;
+  inset: auto 0 0;
+  height: 34%;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  overflow: visible;
+  background: color-mix(in srgb, var(--page) 78%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: max(var(--app-type-avatar-min), 22cqi);
+  letter-spacing: .02em;
+}
+
+
+table { width: 100%; border-collapse: collapse; font-size: var(--app-type-identity); }
+th { color: var(--muted); font-size: var(--app-type-label); text-align: left; text-transform: uppercase; }
+th, td { padding: 11px 13px; border-bottom: var(--app-edge); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+.muted { color: var(--muted); }
+
+
+.empty {
+  padding: 34px 18px;
+  border: var(--app-edge-soft);
+  border-radius: var(--app-radius-compact);
+  color: var(--muted);
+  background: var(--panel);
+  text-align: center;
+}
+
+
+.form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: var(--app-edge);
+  border-radius: var(--app-radius-compact);
+  background: var(--panel);
+}
+
+.form label { color: var(--muted); font-size: var(--app-type-detail); font-weight: 650; }
+.form input, .form textarea { width: 100%; padding: 9px 10px; }
+.form textarea { min-height: 92px; resize: vertical; }
+.form button { justify-self: start; background: var(--accent); border-color: var(--accent); color: var(--app-highlight-source); }
+
+/* Every relative age reserves the same three-character slot. Ordinary labels
+   can tick without reflowing neighboring controls; an exceptional longer
+   spelling expands the slot instead of painting into its inset. The component
+   repeats the minimum width in `data-age-slot` because the app serves
+   `style-src 'self'`; CSS remains the layout authority. Tabular figures keep
+   equal-length labels equally wide. */
+[data-age-slot] {
+  display: inline-block;
+  inline-size: max-content;
+  min-inline-size: 3ch;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* Keep team overlays inside their own stacking context, below global chrome. */
+.team-surface {
+  position: relative;
+  z-index: 0;
+}
+.team-surface .mosaic-message-card.now-playing {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+/* A team's arrangement begins exactly below its toolbar and ends at its last
+   row, so no empty band covers the pane below it. It stops at the control
+   column, leaving the team menu that toggles it in reach. */
+.team-action-menu {
+  position: absolute;
+  z-index: 6;
+  inset: var(--team-header-size) var(--team-control-inline-size) auto 0;
+  max-block-size: calc(100% - var(--team-header-size));
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(148px, 100%), 1fr));
+  align-content: start;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-y: auto;
+}
+.team-action {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow: hidden;
+  border: var(--app-edge);
+  border-radius: var(--app-radius-inset);
+  background: var(--control-surface-soft);
+  color: var(--ink);
+  text-align: center;
+}
+.team-action:hover,
+.team-action:focus-visible { border-color: var(--accent); }
+.team-action:disabled { cursor: not-allowed; opacity: .52; }
+.team-action-label {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(var(--app-type-status), 7cqi, var(--app-type-copy));
+  font-weight: 400;
+  line-height: 1.14;
+  text-wrap: balance;
+}
+.team-action-detail {
+  width: 100%;
+  color: var(--muted);
+  font: clamp(var(--app-type-compact), 5.25cqi, var(--app-type-prose))/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.team-arrangement-menu { align-content: start; grid-auto-rows: minmax(48px, auto); }
+
+/* Task handles in message prose use one quiet variant: accent type on a 6%
+   tint at quote-tail scale, so a handle never outweighs surrounding words. */
+.message-task-chip-run { white-space: nowrap; }
+.message-task-chip {
+  display: inline-flex;
+  max-width: min(24ch, 100%);
+  min-width: 0;
+  min-height: auto;
+  align-items: center;
+  vertical-align: baseline;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--app-radius-pill);
+  background: color-mix(in srgb, var(--app-semantic-live) 6%, transparent);
+  box-shadow: none;
+  color: var(--app-semantic-live);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: calc(var(--app-type-prose) * .8125);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.message-task-chip:hover { filter: brightness(1.08); }
+.message-task-chip-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

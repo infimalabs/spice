@@ -1,0 +1,29 @@
+[package]
+name = "desktop"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The native window exists only where the operating system ships a webview
+# the build needs no extra system packages for: WebKit on macOS and WebView2
+# on Windows. Linux would require gtk and webkit2gtk development packages on
+# every build host, so it stays out until asked for.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+tao = { version = "0.34.8", default-features = false, features = ["rwh_06"] }
+wry = { version = "0.53.5", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSAlert", "NSAppearance", "NSApplication", "NSAttributedString", "NSBezierPath", "NSBitmapImageRep", "NSButton", "NSColor", "NSColorSpace", "NSControl", "NSFont", "NSGraphics", "NSGraphicsContext", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSResponder", "NSSavePanel", "NSScreen", "NSStringDrawing", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSAttributedString", "NSData", "NSDictionary", "NSGeometry", "NSKeyValueCoding", "NSKeyValueObserving", "NSObject", "NSString", "NSURL", "NSURLRequest", "NSUserDefaults", "NSValue"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKFrameInfo", "WKNavigationAction", "WKOpenPanelParameters", "WKUIDelegate", "WKWebView", "WKWebViewConfiguration", "WKWindowFeatures"] }
+serde_json = "1.0.151"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.3", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
+
+[lints]
+workspace = true

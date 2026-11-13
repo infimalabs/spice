@@ -1,0 +1,431 @@
+/* The lane mosaic plane: activity grid, card track, and message cards. */
+.team-activity-grid {
+  position: relative; display: flex;
+  flex: 1 1 auto; min-height: 0; flex-direction: column;
+  padding: 0; border-top: var(--app-edge);
+  background: var(--message-stream-surface);
+}
+.lane-mosaic-plane {
+  --mosaic-edge-gutter: var(--mosaic-gap);
+  --mosaic-module: 3.75rem;
+  /* Rust copies the integer geometry into custom properties through CSSOM.
+     Typed attr() collapses this plane in Firefox, while style attributes are
+     deliberately refused by the app CSP. */
+  position: relative; display: block; flex: 1 1 auto; min-height: 0; min-width: 0;
+  height: calc(var(--mosaic-plane-rows) * var(--mosaic-module) - var(--mosaic-gap));
+  max-height: none;
+  overflow-y: auto; overflow-anchor: none; scrollbar-width: none;
+}
+.lane-mosaic-plane[data-lanes="2"] { --mosaic-module: 2.5rem; }
+.lane-mosaic-plane[data-lanes="1"] { --mosaic-module: 1.25rem; }
+/* The track and measurement rack hold only absolutely positioned cards; WebKit
+   sizes such a grid's fr tracks without its gaps yet places them with the gaps,
+   pushing cards past the plane. Each column is a twelfth of what gaps leave. */
+.lane-mosaic-track, .lane-mosaic-measurements { grid-template-columns: repeat(12, calc((100% - 11 * var(--mosaic-gap)) / 12)); column-gap: var(--mosaic-gap); }
+.lane-mosaic-track {
+  position: relative; display: grid; min-width: 0;
+  width: calc(100% - var(--mosaic-edge-gutter) - var(--mosaic-edge-gutter));
+  height: calc(
+    var(--mosaic-plane-rows) * var(--mosaic-module)
+      - var(--mosaic-gap)
+      + var(--mosaic-edge-gutter)
+      + var(--mosaic-edge-gutter)
+  );
+  margin-inline: var(--mosaic-edge-gutter); row-gap: var(--mosaic-gap);
+}
+.lane-mosaic-measurements {
+  position: absolute; top: 0; left: 0; right: 0; height: 0;
+  display: grid; min-width: 0; contain: layout;
+  visibility: hidden; pointer-events: none;
+}
+.lane-mosaic-plane[data-measurement-phase="base"] {
+  /* Measurement is an enhancement, not admission. A fresh hidden or narrow
+     host cannot commit a lattice yet, but its admitted transcript must still
+     be readable while ResizeObserver waits for a real width. Keep measuring
+     cards in ordinary grid flow until the persistent plane takes ownership.
+     A measurable host skips this phase: it measures with its cards hidden,
+     so its first visible frame is the committed lattice, never a reflow. */
+  height: auto; visibility: visible; pointer-events: auto;
+}
+.lane-mosaic-plane[data-measurement-phase="base"] .lane-mosaic-track {
+  height: auto;
+  padding-block: var(--mosaic-edge-gutter);
+}
+.lane-mosaic-plane .mosaic-message-card[data-layout-phase="measuring"] {
+  visibility: hidden; pointer-events: none;
+}
+.lane-mosaic-plane .mosaic-message-card[data-mosaic-measurement-active="true"] {
+  top: var(--mosaic-edge-gutter); height: auto;
+  grid-column-start: 1;
+  grid-column-end: span var(--mosaic-measure-span);
+}
+.lane-mosaic-plane[data-measurement-phase="base"]
+  .mosaic-message-card[data-layout-phase="measuring"] {
+  position: relative; top: auto;
+  left: auto; right: auto; height: auto;
+  margin-bottom: var(--mosaic-gap);
+  visibility: visible; pointer-events: auto;
+}
+.lane-mosaic-plane .mosaic-message-card[data-mosaic-measurement-clone="true"] {
+  visibility: hidden; pointer-events: none; transition: none;
+}
+.lane-mosaic-plane .mosaic-message-card {
+  position: absolute;
+  top: calc(
+    var(--mosaic-edge-gutter)
+      + (var(--mosaic-max-row) - var(--mosaic-base) - var(--mosaic-rows))
+        * var(--mosaic-module)
+  );
+  height: calc(var(--mosaic-rows) * var(--mosaic-module) - var(--mosaic-gap));
+  grid-column-start: calc(var(--mosaic-track) + 1);
+  grid-column-end: span var(--mosaic-span);
+  left: 0; right: 0;
+  width: auto; min-width: 0; margin: 0;
+}
+.lane-mosaic-plane[data-measurement-phase="base"] .mosaic-message-card,
+.lane-mosaic-plane .mosaic-message-card[data-layout-phase="measuring"] {
+  top: var(--mosaic-edge-gutter); height: auto; grid-column-start: 1;
+  grid-column-end: span var(--mosaic-measure-span);
+}
+.lane-mosaic-plane[data-measurement-phase="base"] .mosaic-message-card {
+  top: 0;
+}
+/* Prose cards fit their content, capped at their lattice cell. Anchor the
+   card's midpoint to the cell's midpoint: opposing insets plus align-self
+   collapse the nested clipping grid in WebKit. Measurement clones and the
+   in-flow base phase keep natural geometry; boundaries and covers fill cells. */
+.lane-mosaic-plane:not([data-measurement-phase="base"])
+  .mosaic-message-card[data-layout-phase="committed"]:not(
+    [data-mosaic-measurement-active="true"],
+    .mosaic-compaction-card,
+    .mosaic-message-card--image-cover
+  ) {
+  top: calc(
+    var(--mosaic-edge-gutter)
+      + (var(--mosaic-max-row) - var(--mosaic-base) - var(--mosaic-rows) / 2)
+        * var(--mosaic-module) - var(--mosaic-gap) / 2
+  );
+  height: auto;
+  max-height: calc(var(--mosaic-rows) * var(--mosaic-module) - var(--mosaic-gap));
+  translate: 0 -50%;
+}
+.lane-mosaic-plane .mosaic-message-card.liquid { transition: opacity var(--app-motion-settle) var(--app-ease-standard); }
+.lane-mosaic-plane .mosaic-message-card.frozen { transition: none; }
+/* A reader who asked their system for less motion keeps the settled card and
+   never the fade. This governs the transition and nothing else: the plane's
+   scroll anchor in app/src/browser/watchband/mosaic_view.rs takes no motion
+   input, because dropping it would trade a tween they did not want for a
+   reading position they did. */
+@media (prefers-reduced-motion: reduce) {
+  .lane-mosaic-plane .mosaic-message-card.liquid { transition: none; }
+}
+/* Message cards paint no fill of their own: the stream field shows through,
+   and the thick left lane rail, its corners and the gutters set each card apart.
+   Every card rests in its lane's 5% rest wash; hover raises it to the 10% wash. */
+.team-surface .mosaic-message-card {
+  --card-rest-wash: color-mix(in srgb, var(--accent-slot, var(--accent)) 5%, transparent);
+  --card-hover-wash: color-mix(in srgb, var(--accent-slot, var(--accent)) 10%, transparent);
+  container-type: inline-size;
+  gap: 0;
+  margin: 0;
+  --message-card-inset: 9px;
+  padding: var(--message-card-inset);
+  border: 0;
+  border-inline-start: var(--message-rail) solid var(--accent-slot, var(--accent-neutral));
+  border-radius: var(--app-radius-card);
+  background: var(--card-rest-wash);
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;
+  font-size: var(--app-type-copy);
+  line-height: 1.25;
+  box-shadow: none;
+}
+/* The operator's direction card rests in the neutral accent the operator
+   speaks in; only its quote wears the receiving member's slot. */
+.team-surface .mosaic-message-card[data-message-role="operator"] {
+  --accent-slot: var(--accent-neutral);
+}
+.team-surface
+  .mosaic-message-card[data-layout-phase="committed"]:not(
+    .mosaic-compaction-card
+  ):not(.mosaic-message-card--crystal):hover {
+  z-index: 1;
+  background-color: var(--card-hover-wash);
+}
+.team-surface
+  .mosaic-message-card[data-layout-phase="committed"]:focus-visible:not([inert]) {
+  z-index: 1;
+}
+.team-surface
+  .mosaic-message-card[data-layout-phase="committed"]:focus-visible:not(
+    [inert],
+    .mosaic-message-card--image-cover
+  ) {
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: -2px;
+}
+.team-surface .mosaic-message-card.mosaic-compaction-card {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* A routed card announces itself, then lets go: the highlight holds long enough
+   to find the card and fades out. It is an animation without fill, so once it
+   ends the card keeps no outline of its own and hover and focus apply as usual.
+   A new target restarts it because the selector starts matching afresh. */
+.team-surface
+  .mosaic-message-card[data-layout-phase="committed"]:is(
+    :target,
+    [data-card-route-selected="true"]
+  ):not([inert]) {
+  z-index: 1;
+  scroll-margin-block: 8px;
+  animation: card-target-highlight var(--app-motion-highlight) ease-out;
+}
+@keyframes card-target-highlight {
+  from, 57% { outline: var(--app-focus-ring-width) solid var(--accent); outline-offset: -2px; }
+  to { outline: var(--app-focus-ring-width) solid transparent; outline-offset: -2px; }
+}
+/* Without motion the highlight still clears, at once instead of fading. */
+@media (prefers-reduced-motion: reduce) {
+  .team-surface
+    .mosaic-message-card[data-layout-phase="committed"]:is(
+      :target,
+      [data-card-route-selected="true"]
+    ):not([inert]) {
+    animation-timing-function: step-end;
+  }
+}
+.team-surface .mosaic-message-card p { line-height: 1.25; }
+/* Controls float at the inline end of their containing hunk or card. Narrow
+   non-hunk cards give the island its own row. */
+.team-surface .mosaic-message-card .message-controls {
+  display: flex; float: inline-end; align-items: center; gap: 6px;
+  min-width: 0; max-inline-size: 100%;
+  margin-block-end: .25rem; margin-inline-start: .5rem;
+  color: var(--muted); font-size: var(--app-type-status);
+}
+.team-surface .message-controls-meta,
+.team-surface .message-controls-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.team-surface .message-controls-meta:empty { display: none; }
+.team-surface .message-controls-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+.team-surface .message-controls-identity {
+  display: inline-flex; flex: 1 1 auto; align-items: flex-end;
+  min-width: 0; gap: 6px;
+}
+/* Narrow-column threshold: a card this narrow cannot hold the island and a
+   readable line beside it, so the island stacks above the prose as a row. */
+@container (max-width: 16rem) {
+  .team-surface .mosaic-message-card .message-controls {
+    float: none;
+    justify-content: space-between;
+    min-height: 32px;
+    margin: 0 0 .5rem;
+  }
+  .team-surface .message-controls-actions { min-height: 32px; }
+}
+.relative-age {
+  display: block;
+  width: 3ch;
+  min-width: 3ch;
+  max-width: 3ch;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  /* Mixed monospace/sans baselines must not make the flex line taller than 1lh. */
+  line-height: 1;
+  text-overflow: clip;
+  white-space: pre;
+}
+/* The fixed age clips overflow to three characters. Keep its underline inside
+   the glyph-height line box so the link affordance survives that clip. */
+a.relative-age {
+  text-decoration: underline;
+  text-underline-offset: 0;
+}
+.team-surface :is(.message-ack-pill, .message-taste-pill, .message-broadcast-pill, .message-review-pill, .message-final-pill, .message-room-pill) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.team-surface .message-agent-name {
+  display: inline-flex; justify-content: flex-end;
+  flex: 1 1 auto;
+  align-items: baseline;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  margin-left: 0;
+  padding: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  border: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accent-slot, var(--muted)) 70%, var(--ink));
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--app-type-status);
+  font-weight: 400;
+  line-height: 1.25;
+  text-align: right;
+  text-overflow: clip;
+  white-space: normal;
+}
+.team-surface .message-agent-label { min-width: 0; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+.team-surface .message-agent-name:hover,
+.team-surface .message-agent-name:focus-visible { color: var(--ink); cursor: pointer; }
+.team-surface .message-agent-name:hover .message-agent-label,
+.team-surface .message-agent-name:focus-visible .message-agent-label {
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.team-surface .message-actions { flex: 0 0 auto; margin-left: 0; }
+.team-surface :is(.message-ack-pill, .message-taste-pill, .message-broadcast-pill, .message-review-pill, .message-final-pill, .message-room-pill) {
+  --message-inline-pill-accent: var(--app-semantic-ink);
+  display: inline-flex;
+  min-height: 17px;
+  align-items: center;
+  vertical-align: baseline;
+  padding: 0 4px;
+  border-radius: var(--app-radius-pill);
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--message-inline-pill-accent) 80%, var(--app-semantic-ink)) 80%,
+    transparent
+  );
+  color: var(--app-semantic-panel);
+  font-size: .8125em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.team-surface .message-classification-group {
+  display: inline-flex;
+  align-items: stretch;
+  vertical-align: baseline;
+}
+.team-surface .message-classification-group > :is(
+  .message-ack-pill,
+  .message-final-pill,
+  .message-taste-pill,
+  .message-review-pill,
+  .message-broadcast-pill, .message-room-pill
+) {
+  border-radius: 0;
+}
+.team-surface .message-classification-group > :first-child {
+  border-start-start-radius: var(--app-radius-pill);
+  border-end-start-radius: var(--app-radius-pill);
+}
+.team-surface .message-classification-group > :last-child {
+  border-start-end-radius: var(--app-radius-pill);
+  border-end-end-radius: var(--app-radius-pill);
+}
+.team-surface .message-classification-group > :not(:first-child) {
+  border-inline-start: var(--app-control-edge-width) solid color-mix(in srgb, var(--app-semantic-panel) 24%, transparent);
+}
+.team-surface .message-final-pill {
+  --message-inline-pill-accent: var(--accent-1);
+  background: color-mix(in srgb, var(--message-inline-pill-accent) 6%, transparent);
+  color: var(--message-inline-pill-accent);
+}
+/* One badge, one metric. The label cell is exactly the width ACK occupies in
+   the pill's monospace face, and NAK is the same three characters, so every
+   state shares a box to the pixel and the operator's quoted words never shift
+   when a state settles. Pending spends no word of its own: it is a transient
+   the reader cannot act on, so it wears the ACK label in the muted tone until
+   the journal retires the key. */
+.team-surface .message-ack-pill {
+  --message-inline-pill-accent: var(--app-semantic-live);
+  justify-content: flex-start;
+}
+/* The speaker's classifications form one segmented pill, as does a quoted
+   directive's own kind beside its source. Each segment keeps its
+   authenticated color while sharing one outer silhouette and type scale. */
+.team-surface :is(.message-signoff, .message-attribution) .message-classification-group > :is(
+  .message-ack-pill,
+  .message-final-pill,
+  .message-taste-pill,
+  .message-review-pill,
+  .message-broadcast-pill, .message-room-pill
+) {
+  background: color-mix(in srgb, var(--message-inline-pill-accent) 6%, transparent);
+  color: var(--message-inline-pill-accent);
+}
+.team-surface .message-ack-label {
+  display: block;
+  width: 3ch;
+}
+.team-surface .message-ack-pill[data-message-packet] .message-ack-label { width: auto; } /* sized to kind and result */
+.team-surface .message-ack-pill[data-acknowledgement="pending"] {
+  --message-inline-pill-accent: var(--app-anchor-muted);
+}
+.team-surface .message-ack-pill[data-acknowledgement="declined"] {
+  --message-inline-pill-accent: var(--accent-3);
+}
+.team-surface .message-taste-pill {
+  --message-inline-pill-accent: var(--accent-2);
+}
+.team-surface .message-broadcast-pill {
+  --message-inline-pill-accent: var(--accent-5);
+}
+.team-surface .message-review-pill {
+  --message-inline-pill-accent: var(--accent-1);
+}
+:root[data-app-effective-theme="light"] .team-surface .message-taste-pill {
+  --message-inline-pill-accent: color-mix(in srgb, var(--accent-2) 90%, var(--app-semantic-ink));
+}
+:root[data-app-effective-theme="light"] .team-surface .message-review-pill {
+  --message-inline-pill-accent: color-mix(in srgb, var(--accent-1) 90%, var(--app-semantic-ink));
+}
+.team-surface .markdown-body blockquote .message-ack-pill,
+.team-surface .markdown-body blockquote .message-broadcast-pill {
+  background: color-mix(in srgb, var(--message-inline-pill-accent) 6%, transparent);
+  color: var(--message-inline-pill-accent);
+}
+/* Prose-card classifications mount once beside the producing speaker. Keep
+   authenticated source nodes in the Markdown DOM for notice-rail semantics,
+   but do not repeat them in the hunk's words. */
+.team-surface
+  .mosaic-message-card[data-agent-activity="prose"]
+  .markdown-body
+  .message-hunk-content
+  :is(.message-ack-pill, .message-broadcast-pill) {
+  display: none;
+}
+/* Card footer actions share one compact control treatment. */
+.team-surface .mosaic-message-card footer .app-card-action {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  margin-left: 0;
+  background: var(--control-surface-soft);
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--app-type-copy);
+  font-weight: 400;
+}
+.team-surface .mosaic-message-card footer .app-card-action:hover,
+.team-surface .mosaic-message-card footer .app-card-action:focus-visible {
+  background: color-mix(in srgb, var(--accent-slot, var(--accent)) 6%, var(--control-surface-soft));
+  color: var(--ink);
+}
+.team-surface .mosaic-message-card footer .app-card-action:active {
+  background: color-mix(
+    in srgb,
+    var(--accent-slot, var(--accent)) 12%,
+    var(--control-surface-soft)
+  );
+  color: var(--ink);
+}
+.team-surface .mosaic-message-empty {
+  padding: 16px 6px;
+  font-size: var(--app-type-sm);
+}

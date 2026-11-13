@@ -1,0 +1,7 @@
+disallowed-methods = [
+    { path = "std::env::var", reason = "acquire ambient configuration at the binary rim and pass typed values inward" },
+    { path = "std::env::var_os", reason = "acquire ambient configuration at the binary rim and pass typed values inward" },
+    { path = "std::env::vars", reason = "acquire ambient configuration at the binary rim and pass typed values inward" },
+    { path = "std::env::vars_os", reason = "acquire ambient configuration at the binary rim and pass typed values inward" },
+    { path = "std::process::exit", reason = "return typed outcomes to the binary rim instead of terminating from library code" },
+]

@@ -1,0 +1,163 @@
+version = 1
+
+[[arms]]
+disposition = "compiled"
+gate_id = "merge-integrity"
+family = "core"
+declaration = "gate::core::merge-integrity::merge-tree-comparison-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "planning-phase"
+family = "core"
+declaration = "gate::core::planning-phase::active-claim-phase-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "repo-shape"
+family = "core"
+declaration = "gate::core::repo-shape::repo-shape-findings-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "staging"
+family = "core"
+declaration = "gate::core::staging::staging-integrity-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "repo-docs"
+family = "core"
+declaration = "gate::core::repo-docs::repo-doc-character-bounds-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "config-key-validity"
+family = "core"
+declaration = "gate::core::config-key-validity::config-admission-findings-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "config-false-disable"
+family = "core"
+declaration = "gate::core::config-false-disable::config-declaration-consumer-inventory-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "config-tracked-trust"
+family = "core"
+declaration = "gate::core::config-tracked-trust::config-declaration-consumer-inventory-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "formatters"
+family = "toolchain"
+declaration = "gate::toolchain::formatters::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "local-paths"
+family = "toolchain"
+declaration = "gate::toolchain::local-paths::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "taste"
+family = "toolchain"
+declaration = "gate::toolchain::taste::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "rust-typecheck"
+family = "toolchain"
+declaration = "gate::toolchain::rust-typecheck::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "app-web-typecheck"
+family = "toolchain"
+declaration = "gate::toolchain::app-web-typecheck::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "javascript-unused"
+family = "toolchain"
+declaration = "gate::toolchain::javascript-unused::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "csharp-unused-candidates"
+family = "toolchain"
+declaration = "gate::toolchain::csharp-unused-candidates::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "python-typecheck"
+family = "toolchain"
+declaration = "gate::toolchain::python-typecheck::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "env-policy"
+family = "toolchain"
+declaration = "gate::toolchain::env-policy::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "env-name-ledger"
+family = "toolchain"
+declaration = "gate::toolchain::env-name-ledger::toolchain-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "file-shape"
+family = "metrics"
+declaration = "gate::metrics::file-shape::utf8-file-shape-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "complexity"
+family = "metrics"
+declaration = "gate::metrics::complexity::tree-sitter-complexity-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "magic-numbers"
+family = "metrics"
+declaration = "gate::metrics::magic-numbers::c-grammar-magic-delta-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "markdown-links"
+family = "metrics"
+declaration = "gate::metrics::markdown-links::markdown-tracked-targets-v1"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "reachability"
+family = "hygiene"
+declaration = "gate::hygiene::HygieneAnalyzer::PythonImportGraph"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "symbol-reachability"
+family = "hygiene"
+declaration = "gate::hygiene::HygieneAnalyzer::PythonSymbolGraph"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "python-unused"
+family = "hygiene"
+declaration = "gate::hygiene::HygieneAnalyzer::PythonUnusedSymbols"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "assertion-free-tests"
+family = "hygiene"
+declaration = "gate::hygiene::HygieneAnalyzer::PythonTestAssertions"
+
+[[arms]]
+disposition = "compiled"
+gate_id = "private-internals"
+family = "hygiene"
+declaration = "gate::hygiene::HygieneAnalyzer::PythonPrivateBoundaries"

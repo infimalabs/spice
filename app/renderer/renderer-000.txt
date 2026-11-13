@@ -1,0 +1,1582 @@
+{
+  "integrity": "sha512-/wQXC9iBxoGV8p3erbvaXs9h77VyLDBH6GdayVjj3hEcSQhFU4N1WUhUppotCEqlIxI2pRMwjwBSwTB1MfZBgQ==",
+  "licenses": [
+    {
+      "files": [
+        {
+          "file": "renderer-001.txt",
+          "sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "integrity": "sha512-/wQXC9iBxoGV8p3erbvaXs9h77VyLDBH6GdayVjj3hEcSQhFU4N1WUhUppotCEqlIxI2pRMwjwBSwTB1MfZBgQ==",
+      "license": "MIT",
+      "name": "mermaid",
+      "url": "https://registry.npmjs.org/mermaid/-/mermaid-12.0.0.tgz",
+      "version": "12.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-002.txt",
+          "sha256": "0984740e0c3d725c8044dec7edcefe1dbce180ef5a7bc710c251e19607000158",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "206cb8b942b10dad28dd3d31db3bf39e3fcdd7aa",
+      "integrity": "sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==",
+      "license": "MIT",
+      "name": "@braintree/sanitize-url",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/braintree/sanitize-url.git"
+      },
+      "url": "https://registry.npmjs.org/@braintree/sanitize-url/-/sanitize-url-7.1.2.tgz",
+      "version": "7.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-003.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstream": "package/LICENSE.txt"
+        }
+      ],
+      "gitHead": "3a0ee6abc9ef3b22448cc72ec54ec4987e44ab9b",
+      "integrity": "sha512-Z9zfXR5jNZb1Hlsd/p+4XWeUFugrHirq36bKzPWDSIacV+GPSVXdk+ahVWZTwjhNwofAWg/sZg58fyucKSQx5g==",
+      "license": "Apache-2.0",
+      "name": "@chevrotain/gast",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/Chevrotain/chevrotain.git"
+      },
+      "url": "https://registry.npmjs.org/@chevrotain/gast/-/gast-11.1.2.tgz",
+      "version": "11.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-003.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstream": "package/LICENSE.txt"
+        }
+      ],
+      "gitHead": "3a0ee6abc9ef3b22448cc72ec54ec4987e44ab9b",
+      "integrity": "sha512-nMU3Uj8naWer7xpZTYJdxbAs6RIv/dxYzkYU8GSwgUtcAAlzjcPfX1w+RKRcYG8POlzMeayOQ/znfwxEGo5ulw==",
+      "license": "Apache-2.0",
+      "name": "@chevrotain/regexp-to-ast",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/Chevrotain/chevrotain.git"
+      },
+      "url": "https://registry.npmjs.org/@chevrotain/regexp-to-ast/-/regexp-to-ast-11.1.2.tgz",
+      "version": "11.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-003.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstream": "package/LICENSE.txt"
+        }
+      ],
+      "gitHead": "3a0ee6abc9ef3b22448cc72ec54ec4987e44ab9b",
+      "integrity": "sha512-4mudFAQ6H+MqBTfqLmU7G1ZwRzCLfJEooL/fsF6rCX5eePMbGhoy5n4g+G4vlh2muDcsCTJtL+uKbOzWxs5LHA==",
+      "license": "Apache-2.0",
+      "name": "@chevrotain/utils",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/Chevrotain/chevrotain.git"
+      },
+      "url": "https://registry.npmjs.org/@chevrotain/utils/-/utils-11.1.2.tgz",
+      "version": "11.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-006.txt",
+          "sha256": "a86793ac023162ce98b91899601c15f6712f44943163c4f92a0a4bf89152b3bf",
+          "upstream": "package/license.txt"
+        }
+      ],
+      "gitHead": null,
+      "integrity": "sha512-EfJS0rLfVuRuJRn4psJHtK2A9TqVnkxPpHY6lYHiB9+8eSuudsxbwMiavocG45ujOo6FJ+CIRlRnlOGinzkaGQ==",
+      "license": "MIT",
+      "name": "@iconify/utils",
+      "repository": {
+        "directory": "packages/utils",
+        "type": "git",
+        "url": "git+https://github.com/iconify/iconify.git"
+      },
+      "url": "https://registry.npmjs.org/@iconify/utils/-/utils-3.0.2.tgz",
+      "version": "3.0.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-007.txt",
+          "sha256": "6a3508febf2cfccfee96597394543a6154a4bb0b1f91f28404be42c09e9fcb54",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "350c835aab4a92a7570963c28f725cf9f6e5f258",
+      "integrity": "sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==",
+      "license": "MIT",
+      "name": "@upsetjs/venn.js",
+      "repository": {
+        "type": "git",
+        "url": "https://github.com/upsetjs/venn.js.git"
+      },
+      "url": "https://registry.npmjs.org/@upsetjs/venn.js/-/venn.js-2.0.0.tgz",
+      "version": "2.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-003.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstream": "package/LICENSE.txt"
+        }
+      ],
+      "gitHead": "3a0ee6abc9ef3b22448cc72ec54ec4987e44ab9b",
+      "integrity": "sha512-opLQzEVriiH1uUQ4Kctsd49bRoFDXGGSC4GUqj7pGyxM3RehRhvTlZJc1FL/Flew2p5uwxa1tUDWKzI4wNM8pg==",
+      "license": "Apache-2.0",
+      "name": "chevrotain",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/Chevrotain/chevrotain.git"
+      },
+      "url": "https://registry.npmjs.org/chevrotain/-/chevrotain-11.1.2.tgz",
+      "version": "11.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-009.txt",
+          "sha256": "5fb3cf4a14c3c5af6e473a192df8bca10c77754e3a0c6492c79fb92a76a5478a",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "914bfe712991534af1d8b795d6f262687edc2563",
+      "integrity": "sha512-s9whTXInMSgAp/NVXVNuVxVKzGH2qck3aQlVHxDCdAEPgtMKwc4Wq6/QKhgdEdgbLSi9rBTAcPoRa6JpiG4ksg==",
+      "license": "MIT",
+      "name": "cose-base",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iVis-at-Bilkent/cose-base.git"
+      },
+      "url": "https://registry.npmjs.org/cose-base/-/cose-base-1.0.3.tgz",
+      "version": "1.0.3"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-009.txt",
+          "sha256": "5fb3cf4a14c3c5af6e473a192df8bca10c77754e3a0c6492c79fb92a76a5478a",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "37f07ed2b8803211ec6c74110574cc47c156a136",
+      "integrity": "sha512-AzlgcsCbUMymkADOJtQm3wO9S3ltPfYOFD5033keQn9NJzIbtnZj+UdBJe7DYml/8TdbtHJW3j58SOnKhWY/5g==",
+      "license": "MIT",
+      "name": "cose-base",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iVis-at-Bilkent/cose-base.git"
+      },
+      "url": "https://registry.npmjs.org/cose-base/-/cose-base-2.2.0.tgz",
+      "version": "2.2.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-011.txt",
+          "sha256": "eb319c6e6f233607f71e8e2f450391751883cfc0eeb3ca7ef574c13d1d9c2203",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "22716bfb75834b56fa6679648b0abb06f4ae691c",
+      "integrity": "sha512-62rNSrioXw93uliKFBwjukeQyeWwH2PqDrTac31r2P6464u3AUvTk0xS4LVvT251g7IgkFunrI48ZEZGjywSOg==",
+      "license": "MIT",
+      "name": "cytoscape",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/cytoscape/cytoscape.js.git"
+      },
+      "url": "https://registry.npmjs.org/cytoscape/-/cytoscape-3.34.0.tgz",
+      "version": "3.34.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-012.txt",
+          "sha256": "440fc58a56a12814e417d2b341da89b050da052dc75bdb235607d37ec5fe74ef",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "999090a8438b4f14788d636ef4fd7a5355e29e8c",
+      "integrity": "sha512-wgQlVIUJF13Quxiv5e1gstZ08rnZj2XaLHGoFMYXz7SkNfCDOOteKBE6SYRfA9WxxI/iBc3ajfDoc6hb/MRAHQ==",
+      "license": "MIT",
+      "name": "cytoscape-cose-bilkent",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/cytoscape/cytoscape.js-cose-bilkent.git"
+      },
+      "url": "https://registry.npmjs.org/cytoscape-cose-bilkent/-/cytoscape-cose-bilkent-4.1.0.tgz",
+      "version": "4.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-013.txt",
+          "sha256": "2837634f403949215760fcdd2fa1ed0c64875d02099ecc8318c704b852f1421d",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "78afcf96512a409abc903699277ad616c02dfad9",
+      "integrity": "sha512-ki1/VuRIHFCzxWNrsshHYPs6L7TvLu3DL+TyIGEsRcvVERmxokbf5Gdk7mFxZnTdiGtnA4cfSmjZJMviqSuZrQ==",
+      "license": "MIT",
+      "name": "cytoscape-fcose",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iVis-at-Bilkent/cytoscape.js-fcose.git"
+      },
+      "url": "https://registry.npmjs.org/cytoscape-fcose/-/cytoscape-fcose-2.2.0.tgz",
+      "version": "2.2.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-014.txt",
+          "sha256": "0747bebeb06b10954913149be9b9a8bdf6fad3e6fdcbd9f9524e7a94c13d2cea",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "6fda2773d31c2b3377d8b2dbd11a3e334a7cbc9e",
+      "integrity": "sha512-B0ErZK/66mHtEsR1TkPEEkwdy+WDesimkM5gpZr5Dsg54BiTA5RXtYW5qTLIAcekaS9xfZrzBLF/OAkB3Qn1YQ==",
+      "license": "BSD-3-Clause",
+      "name": "d3-array",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-array.git"
+      },
+      "url": "https://registry.npmjs.org/d3-array/-/d3-array-2.12.1.tgz",
+      "version": "2.12.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-015.txt",
+          "sha256": "3e6849627f74ff73c257a3ae1efb574015d94fc1035c05ec3c15805165efcbc4",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "94d4541626ae3ac6c847e3d4c6e31aca1a8879b4",
+      "integrity": "sha512-tdQAmyA18i4J7wprpYq8ClcxZy3SC31QMeByyCFyRt7BVHdREQZ5lpzoe5mFEYZUWe+oq8HBvk9JjpibyEV4Jg==",
+      "license": "ISC",
+      "name": "d3-array",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-array.git"
+      },
+      "url": "https://registry.npmjs.org/d3-array/-/d3-array-3.2.4.tgz",
+      "version": "3.2.4"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "64372b12c9ba5c8a816277b3ad04ff813db5af97",
+      "integrity": "sha512-IH5tgjV4jE/GhHkRV0HiVYPDtvfjHQlQfJHs0usq7M30XcSBvOotpmH1IgkcXsO/5gEQZD43B//fc7SRT5S+xw==",
+      "license": "ISC",
+      "name": "d3-axis",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-axis.git"
+      },
+      "url": "https://registry.npmjs.org/d3-axis/-/d3-axis-3.0.0.tgz",
+      "version": "3.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "ec2bce6f15074a9ead7f9a84c61335be51c123a3",
+      "integrity": "sha512-ALnjWlVYkXsVIGlOsuWH1+3udkYFI48Ljihfnh8FZPF2QS9o+PzGLBslO0PjzVoHLZ2KCVgAM8NVkXPJB2aNnQ==",
+      "license": "ISC",
+      "name": "d3-brush",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-brush.git"
+      },
+      "url": "https://registry.npmjs.org/d3-brush/-/d3-brush-3.0.0.tgz",
+      "version": "3.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-018.txt",
+          "sha256": "faa682e3e430941f958d26180458f5934a62f58dac4d70ccdd15608c15d0f884",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "7a1573ed260de4fd97d061975244841132adde92",
+      "integrity": "sha512-zg/chbXyeBtMQ1LbD/WSoW2DpC3I0mpmPdW+ynRTj/x2DAWYrIY7qeZIHidozwV24m4iavr15lNwIwLxRmOxhA==",
+      "license": "ISC",
+      "name": "d3-color",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-color.git"
+      },
+      "url": "https://registry.npmjs.org/d3-color/-/d3-color-3.1.0.tgz",
+      "version": "3.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "904ddf22634bb642460685992f4ce22898f8aeb4",
+      "integrity": "sha512-rzUyPU/S7rwUflMyLc1ETDeBj0NRuHKKAcvukozwhshr6g6c5d8zh4c2gQjY2bZ0dXeGLWc1PF174P2tVvKhfg==",
+      "license": "ISC",
+      "name": "d3-dispatch",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-dispatch.git"
+      },
+      "url": "https://registry.npmjs.org/d3-dispatch/-/d3-dispatch-3.0.1.tgz",
+      "version": "3.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-020.txt",
+          "sha256": "b989d9085148d21ff64a75e14462aefa06b2589a55553b07b1460c70081c7d08",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "a0919680efc6f8e667275ba1d6330bf6a4cc9301",
+      "integrity": "sha512-wR/XK3D3XcLIZwpbvQwQ5fK+8Ykds1ip7A2Txe0yxncXSdq1L9skcG7blcedkOX+ZcgxGAmLX1FrRGbADwzi0w==",
+      "license": "BSD-3-Clause",
+      "name": "d3-ease",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-ease.git"
+      },
+      "url": "https://registry.npmjs.org/d3-ease/-/d3-ease-3.0.1.tgz",
+      "version": "3.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "08806c62aa8f7b3fe64925f3989f1491c950a71c",
+      "integrity": "sha512-YyUI6AEuY/Wpt8KWLgZHsIU86atmikuoOmCfommt0LYHiQSPjvX2AcFc38PX0CBpr2RCyZhjex+NS/LPOv6YqA==",
+      "license": "ISC",
+      "name": "d3-format",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-format.git"
+      },
+      "url": "https://registry.npmjs.org/d3-format/-/d3-format-3.1.0.tgz",
+      "version": "3.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "7bea49efdc1093b28a8d60d2f8717d8a17803564",
+      "integrity": "sha512-FX/9frcub54beBdugHjDCdikxThEqjnR93Qt7PvQTOHxyiNCAlvMrHhclk3cD5VeAaq9fxmfRp+CnWw9rEMBuA==",
+      "license": "ISC",
+      "name": "d3-hierarchy",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-hierarchy.git"
+      },
+      "url": "https://registry.npmjs.org/d3-hierarchy/-/d3-hierarchy-3.1.2.tgz",
+      "version": "3.1.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "6562b85040f7a9b96efe49b54a77eb6fceafa1c1",
+      "integrity": "sha512-3bYs1rOD33uo8aqJfKP3JWPAibgw8Zm2+L9vBKEHJ2Rg+viTR7o5Mmv5mZcieN+FRYaAOWX5SJATX6k1PWz72g==",
+      "license": "ISC",
+      "name": "d3-interpolate",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-interpolate.git"
+      },
+      "url": "https://registry.npmjs.org/d3-interpolate/-/d3-interpolate-3.0.1.tgz",
+      "version": "3.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-024.txt",
+          "sha256": "b8265327ab678f554800e71188b1cc6b1ff57522e292d2b1c0be66f27cf328b6",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "151f962faa58f110993c6d71faefad57c174b66c",
+      "integrity": "sha512-VLaYcn81dtHVTjEHd8B+pbe9yHWpXKZUC87PzoFmsFrJqgFwDe/qxfp5MlfsfM1V5E/iVt0MmEbWQ7FVIXh/bg==",
+      "license": "BSD-3-Clause",
+      "name": "d3-path",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-path.git"
+      },
+      "url": "https://registry.npmjs.org/d3-path/-/d3-path-1.0.9.tgz",
+      "version": "1.0.9"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-025.txt",
+          "sha256": "a09b0d6d76e768fca2085fad05743ee81ddd11946bcda160a3cf5e1081a479aa",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "58bce7a53df2b03f70092a9b00b78055c4ffee04",
+      "integrity": "sha512-p3KP5HCf/bvjBSSKuXid6Zqijx7wIfNW+J/maPs+iwR35at5JCbLUT0LzF1cnjbCHWhqzQTIN2Jpe8pRebIEFQ==",
+      "license": "ISC",
+      "name": "d3-path",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-path.git"
+      },
+      "url": "https://registry.npmjs.org/d3-path/-/d3-path-3.1.0.tgz",
+      "version": "3.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-026.txt",
+          "sha256": "2bf785e778d67a4f5266cffcd4f2cc5bb98cde73791666e7efeb8002ba32dfa5",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "bb7233ea0004669878d922e55fe83084ef3cb555",
+      "integrity": "sha512-nQhsBRmM19Ax5xEIPLMY9ZmJ/cDvd1BG3UVvt5h3WRxKg5zGRbvnteTyWAbzeSvlh3tW7ZEmq4VwR5mB3tutmQ==",
+      "license": "BSD-3-Clause",
+      "name": "d3-sankey",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-sankey.git"
+      },
+      "url": "https://registry.npmjs.org/d3-sankey/-/d3-sankey-0.12.3.tgz",
+      "version": "0.12.3"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "83555bd759c7314420bd4240642beda5e258db9e",
+      "integrity": "sha512-GZW464g1SH7ag3Y7hXjf8RoUuAFIqklOAq3MRl4OaWabTFJY9PN/E1YklhXLh+OQ3fM9yS2nOkCoS+WLZ6kvxQ==",
+      "license": "ISC",
+      "name": "d3-scale",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-scale.git"
+      },
+      "url": "https://registry.npmjs.org/d3-scale/-/d3-scale-4.0.2.tgz",
+      "version": "4.0.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-028.txt",
+          "sha256": "0986d93944902cca9af86824b6a641b4b7c2d10602fc510c433a8bcd443919fe",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "2c52792197299346b7bdb94322bb4dff8f554fea",
+      "integrity": "sha512-A3s5PWiZ9YCXFye1o246KoscMWqf8BsD9eRiJ3He7C9OBaxKhAd5TFCdEx/7VbKtxxTsu//1mMJFrEt572cEyQ==",
+      "license": "ISC",
+      "name": "d3-scale-chromatic",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-scale-chromatic.git"
+      },
+      "url": "https://registry.npmjs.org/d3-scale-chromatic/-/d3-scale-chromatic-3.1.0.tgz",
+      "version": "3.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "91245ee124ec4dd491e498ecbdc9679d75332b49",
+      "integrity": "sha512-fmTRWbNMmsmWq6xJV8D19U/gw/bwrHfNXxrIN+HfZgnzqTHp9jOmKMhsTUjXOJnZOdZY9Q28y4yebKzqDKlxlQ==",
+      "license": "ISC",
+      "name": "d3-selection",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-selection.git"
+      },
+      "url": "https://registry.npmjs.org/d3-selection/-/d3-selection-3.0.0.tgz",
+      "version": "3.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-030.txt",
+          "sha256": "7eea8533ea92bd8c32a901e89ecb0305890905bb12711449565ddff96891146d",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "246e232651631a78c4803430e3bac326b4a4147b",
+      "integrity": "sha512-EUkvKjqPFUAZyOlhY5gzCxCeI0Aep04LwIRpsZ/mLFelJiUfnK56jo5JMDSE7yyP2kLSb6LtF+S5chMk7uqPqw==",
+      "license": "BSD-3-Clause",
+      "name": "d3-shape",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-shape.git"
+      },
+      "url": "https://registry.npmjs.org/d3-shape/-/d3-shape-1.3.7.tgz",
+      "version": "1.3.7"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-018.txt",
+          "sha256": "faa682e3e430941f958d26180458f5934a62f58dac4d70ccdd15608c15d0f884",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "8ec82658454750cfa29efb1e0ea514e3dd9b2297",
+      "integrity": "sha512-SaLBuwGm3MOViRq2ABk3eLoxwZELpH6zhl3FbAoJ7Vm1gofKx6El1Ib5z23NUEhF9AsGl7y+dzLe5Cw2AArGTA==",
+      "license": "ISC",
+      "name": "d3-shape",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-shape.git"
+      },
+      "url": "https://registry.npmjs.org/d3-shape/-/d3-shape-3.2.0.tgz",
+      "version": "3.2.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-018.txt",
+          "sha256": "faa682e3e430941f958d26180458f5934a62f58dac4d70ccdd15608c15d0f884",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "d66bba6f83801b2f3a3e6440dba8df3357669c73",
+      "integrity": "sha512-VqKjzBLejbSMT4IgbmVgDjpkYrNWUYJnbCGo874u7MMKIWsILRX+OpX/gTk8MqjpT1A/c6HY2dCA77ZN0lkQ2Q==",
+      "license": "ISC",
+      "name": "d3-time",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-time.git"
+      },
+      "url": "https://registry.npmjs.org/d3-time/-/d3-time-3.1.0.tgz",
+      "version": "3.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "76cfef1da81b70404c0226ec9db9b0d56fa09461",
+      "integrity": "sha512-dJxPBlzC7NugB2PDLwo9Q8JiTR3M3e4/XANkreKSUxF8vvXKqm1Yfq4Q5dl8budlunRVlUUaDUgFt7eA8D6NLg==",
+      "license": "ISC",
+      "name": "d3-time-format",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-time-format.git"
+      },
+      "url": "https://registry.npmjs.org/d3-time-format/-/d3-time-format-4.1.0.tgz",
+      "version": "4.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "441e45b3f582762cd20035d47b40e9759ed1b235",
+      "integrity": "sha512-ndfJ/JxxMd3nw31uyKoY2naivF+r29V+Lc0svZxe1JvvIRmi8hUsrMvdOwgS1o6uBHmiz91geQ0ylPP0aj1VUA==",
+      "license": "ISC",
+      "name": "d3-timer",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-timer.git"
+      },
+      "url": "https://registry.npmjs.org/d3-timer/-/d3-timer-3.0.1.tgz",
+      "version": "3.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "c4c94c421e2ef9e9ffc253fab33ccf99f1434901",
+      "integrity": "sha512-ApKvfjsSR6tg06xrL434C0WydLr7JewBB3V+/39RMHsaXTOG0zmt/OAXeng5M5LBm0ojmxJrpomQVZ1aPvBL4w==",
+      "license": "ISC",
+      "name": "d3-transition",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-transition.git"
+      },
+      "url": "https://registry.npmjs.org/d3-transition/-/d3-transition-3.0.1.tgz",
+      "version": "3.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-016.txt",
+          "sha256": "e008c5e25a6be382593089c29bfabbc553c6378eee02895aec46ce396cc404ee",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "debbe3d76d86ea96965ed4cc61beb6bdf7238156",
+      "integrity": "sha512-b8AmV3kfQaqWAuacbPuNbL6vahnOJflOhexLzMMNLga62+/nh0JzvJ0aO/5a5MVgUFGS7Hu1P9P03o3fJkDCyw==",
+      "license": "ISC",
+      "name": "d3-zoom",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/d3/d3-zoom.git"
+      },
+      "url": "https://registry.npmjs.org/d3-zoom/-/d3-zoom-3.0.0.tgz",
+      "version": "3.0.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-037.txt",
+          "sha256": "d01eb84ccce437dbf5fd40853bceea0f287930920acea066597a4a25ead63858",
+          "upstream": "package/LICENSE.md"
+        }
+      ],
+      "gitHead": "4b95ad0a0bca6ce4cfa4cb83dfa9be19ca740e8f",
+      "integrity": "sha512-P4rFMVq9ESWqmOgK+dlXvOtLwYg0i7u0HBGJER0LZDJT2VHIPAMZ/riPxqJceWMStH5+E61QxFra9kIS3AqdMg==",
+      "license": "MIT",
+      "name": "dagre-d3-es",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/tbo47/dagre-es.git"
+      },
+      "url": "https://registry.npmjs.org/dagre-d3-es/-/dagre-d3-es-7.0.14.tgz",
+      "version": "7.0.14"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-038.txt",
+          "sha256": "5faab7526d055651be3aab769d58897be6bd91f3d39d137f25f12dba1b31d5dc",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "a25f01e8154290b203ab480ffeedc60c80bd0710",
+      "integrity": "sha512-98IT+HOahAisibz/yjKbzuOBwYcjJ7BCLPzARyHiyEBmRz4fatF+KPJszEHXsGYjUG234aH/cOjW1wwTbKUZlA==",
+      "license": "MIT",
+      "name": "dayjs",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iamkun/dayjs.git"
+      },
+      "url": "https://registry.npmjs.org/dayjs/-/dayjs-1.11.21.tgz",
+      "version": "1.11.21"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-003.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "upstream": "package/LICENSE"
+        },
+        {
+          "file": "renderer-040.txt",
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85",
+          "upstream": "package/LICENSE-MPL"
+        }
+      ],
+      "gitHead": "a9ca1e537422319a557a9a2aa61f003b23b4a197",
+      "integrity": "sha512-zQvGet8Z2sWbQhCmfFz/T5QWH2oBmjnqK3qvOjaqaNLrLEF912WamU+ohnTp0TCep/MFVHpdJuCZEdFOdTnEFg==",
+      "license": "(MPL-2.0 OR Apache-2.0)",
+      "name": "dompurify",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/cure53/DOMPurify.git"
+      },
+      "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.12.tgz",
+      "version": "3.4.12"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-041.txt",
+          "sha256": "89591d4578fb1ebd91501312a3d25f021bd865a2e436641c1cf7b1bc7e3c1617",
+          "upstream": "package/LICENSE.md"
+        }
+      ],
+      "gitHead": "a8304cf79fde75bc2ab1a89d28320f53f8637436",
+      "integrity": "sha512-f/ZeWvW/BCXbhGEf1Ujp29EASo/lk1FDnETgNKwJrsVvGZhUWCZyg3xLJjAsxfOmt8KjswHmI5EwCQcPMpOYhQ==",
+      "license": "EPL-2.0",
+      "name": "elkjs",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/kieler/elkjs.git"
+      },
+      "url": "https://registry.npmjs.org/elkjs/-/elkjs-0.9.3.tgz",
+      "version": "0.9.3"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-042.txt",
+          "sha256": "ed68888a2a28f32a05e88f24d4d4ee75075a1bda2b6372a1f2e00fa0576a5524",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": null,
+      "integrity": "sha512-/jhoOj/Fx+A+IIyDNOvO3TItGmlMKhtX8ISAHKE90c4b/k1tqaqEZ+uUqfpU8DMnW5cgNJv606zS55jGvza0Xw==",
+      "license": "MIT",
+      "name": "es-toolkit",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/toss/es-toolkit.git"
+      },
+      "url": "https://registry.npmjs.org/es-toolkit/-/es-toolkit-1.45.1.tgz",
+      "version": "1.45.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-043.txt",
+          "sha256": "df2ae14f12f31864acef768195afe4584b08a257f25925f49884619279f02f37",
+          "upstream": "package/README.md#License"
+        }
+      ],
+      "gitHead": "a7b9044d58952b970c8b918dcf0e7c8824ba0ff5",
+      "integrity": "sha512-LB+xjSTEbjHE1cWsxu+tN2Xqr1kpi+V9aADI7sVM5ZMaXyYGPHULQMzpJMYqOTULK/73pUkWVzzObFRBkPr+hg==",
+      "license": "MIT",
+      "name": "fastdom",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/wilsonpage/fastdom.git"
+      },
+      "url": "https://registry.npmjs.org/fastdom/-/fastdom-1.0.12.tgz",
+      "version": "1.0.12"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-044.txt",
+          "sha256": "9ea8903938dab5f12c4572d60725069bec2d1b0dc3bcc210b09bae946a5ebb1f",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "78db0b387b951c036f7a8d6580d98afd8f416a5e",
+      "integrity": "sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==",
+      "license": "ISC",
+      "name": "internmap",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mbostock/internmap.git"
+      },
+      "url": "https://registry.npmjs.org/internmap/-/internmap-2.0.3.tgz",
+      "version": "2.0.3"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-045.txt",
+          "sha256": "a07bc24468b9654ce76a547d47a2db282d07733b715db4c73a98bd63961f9550",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "33d05b5d29a8c21360f620f7e1c1706e24522eda",
+      "integrity": "sha512-1td788aAnnZ5qs7V2QIRl1owjtYpbKt749Y3xauqQgwIIGF/xXWz1wMTEBx5O3LK3lXLVuqXPdPxj2BoFHaW9Q==",
+      "license": "MIT",
+      "name": "js-yaml",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/nodeca/js-yaml.git"
+      },
+      "url": "https://registry.npmjs.org/js-yaml/-/js-yaml-4.3.0.tgz",
+      "version": "4.3.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-046.txt",
+          "sha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "878a61be7743a8ec4ee725b0b5efa810b5167c79",
+      "integrity": "sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==",
+      "license": "MIT",
+      "name": "katex",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/KaTeX/KaTeX.git"
+      },
+      "url": "https://registry.npmjs.org/katex/-/katex-0.16.47.tgz",
+      "version": "0.16.47"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-047.txt",
+          "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
+          "upstream": "package/license"
+        }
+      ],
+      "gitHead": "4968165afb0d3d09be66497e7985a34f7bfe6d42",
+      "integrity": "sha512-Ls993zuzfayK269Svk9hzpeGUKob/sIgZzyHYdjQoAdQetRKpOLj+k/QQQ/6Qi0Yz65mlROrfd+Ev+1+7dz9Kw==",
+      "license": null,
+      "name": "khroma",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/fabiospampinato/khroma.git"
+      },
+      "url": "https://registry.npmjs.org/khroma/-/khroma-2.1.0.tgz",
+      "version": "2.1.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-048.txt",
+          "sha256": "eabb762d8a95109a39c9be3247325529a5239a7aca327d909c3ccdc41f3a06bf",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "836898aa4a88e2794774997d7128b383108a3d5a",
+      "integrity": "sha512-8h2oVEZNktL4BH2JCOI90iD1yXwL6iNW7KcCKT2QZgQJR2vbqDsldCTPRU9NifTCqHZci57XvQQ15YTu+sTYPg==",
+      "license": "MIT",
+      "name": "layout-base",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iVis-at-Bilkent/layout-base.git"
+      },
+      "url": "https://registry.npmjs.org/layout-base/-/layout-base-1.0.2.tgz",
+      "version": "1.0.2"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-048.txt",
+          "sha256": "eabb762d8a95109a39c9be3247325529a5239a7aca327d909c3ccdc41f3a06bf",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "3f7549940feef31416cc35ef8256282ebc4d1ecd",
+      "integrity": "sha512-dp3s92+uNI1hWIpPGH3jK2kxE2lMjdXdr+DH8ynZHpd6PUlH6x6cbuXnoMmiNumznqaNO31xu9e79F0uuZ0JFg==",
+      "license": "MIT",
+      "name": "layout-base",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/iVis-at-Bilkent/layout-base.git"
+      },
+      "url": "https://registry.npmjs.org/layout-base/-/layout-base-2.0.1.tgz",
+      "version": "2.0.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-050.txt",
+          "sha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "a89086873c551e413ed6159654e4da2a6af549d6",
+      "integrity": "sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg==",
+      "license": "MIT",
+      "name": "lodash-es",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/lodash/lodash.git"
+      },
+      "url": "https://registry.npmjs.org/lodash-es/-/lodash-es-4.17.23.tgz",
+      "version": "4.17.23"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-050.txt",
+          "sha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "d85490ebfb8f49ddc1eab84892aa33a3ef547894",
+      "integrity": "sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==",
+      "license": "MIT",
+      "name": "lodash-es",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/lodash/lodash.git"
+      },
+      "url": "https://registry.npmjs.org/lodash-es/-/lodash-es-4.18.1.tgz",
+      "version": "4.18.1"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-052.txt",
+          "sha256": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c",
+          "upstream": "package/LICENSE.md"
+        }
+      ],
+      "gitHead": "9a5306d4c4dbafa76051d70dff8e20f55f2c6ba8",
+      "integrity": "sha512-K3UxuKu6l6bmA5FUwYho8CfJBlsUWAooKtdGgMcERSpF7gcBUrCGsLH7wDaaNOzwq18JzSUDyoEb/YsrqMac3w==",
+      "license": "MIT",
+      "name": "marked",
+      "repository": {
+        "type": "git",
+        "url": "git://github.com/markedjs/marked.git"
+      },
+      "url": "https://registry.npmjs.org/marked/-/marked-16.3.0.tgz",
+      "version": "16.3.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-053.txt",
+          "sha256": "dca9a392272606ac748ac0976a2a1133f14eef841c27beaa51a844d53c56a09d",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "56a2762171b1294d643501e8d14f120db6b27bd7",
+      "integrity": "sha512-ZUz/69+SYpFN/g/lUlo2FXcIjRkSu3nDarreVdGGndHEBJ6cXPdKguS8JGxwj5HA5xIbVKSmLgr5b3AWxtRfvQ==",
+      "license": "MIT",
+      "name": "roughjs",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/pshihn/rough.git"
+      },
+      "url": "https://registry.npmjs.org/roughjs/-/roughjs-4.6.6.tgz",
+      "version": "4.6.6"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-054.txt",
+          "sha256": "88c579c6ee44b41137a21321190d177982e5b17d4fa1b83a4a2e3ea325a8fc9a",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "2e3828995507e1b68e01c21ee9f35501a48355f0",
+      "integrity": "sha512-yQ3rwFWRfwNUY7H5vpU0wfdkNSnvnJinhF9830Swlaxl03zsOjCfmX0ugac+3LtK0lYSgwL/KXc8oYL3mG4YFQ==",
+      "license": "MIT",
+      "name": "stylis",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/thysultan/stylis.js.git"
+      },
+      "url": "https://registry.npmjs.org/stylis/-/stylis-4.3.6.tgz",
+      "version": "4.3.6"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-055.txt",
+          "sha256": "eff13095d9d762c3bd9dda74370c81e2130c28f2691bc455603abf973bac25b9",
+          "upstream": "package/LICENSE"
+        }
+      ],
+      "gitHead": "70e153460de0141afd09ff402b50047103a4c409",
+      "integrity": "sha512-q5W7tVM71e2xjHZTlgfTDoPF/SmqKG5hddq9SzR49CH2hayqRKJtQ4mtRlSxKaJlR/+9rEM+mnBHf7I2/BQcpQ==",
+      "license": "MIT",
+      "name": "ts-dedent",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/tamino-martinius/node-ts-dedent.git"
+      },
+      "url": "https://registry.npmjs.org/ts-dedent/-/ts-dedent-2.2.0.tgz",
+      "version": "2.2.0"
+    },
+    {
+      "files": [
+        {
+          "file": "renderer-056.txt",
+          "sha256": "beaa6b04fb82e41dd2ad679e19e27953afb5999b1abbb455b6564e78ebfeb332",
+          "upstream": "package/LICENSE.md"
+        }
+      ],
+      "gitHead": "7c1ea087a8149b57380fc8bb7f68c3a215cb6e4b",
+      "integrity": "sha512-Qo+uWgilfSmAhXCMav1uYFynlQO7fMFiMVZsQqZRMIXp0O7rR7qjkj+cPvBHLgBqi960QCoo/PH2/6ZtVqKvrg==",
+      "license": "MIT",
+      "name": "uuid",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/uuidjs/uuid.git"
+      },
+      "url": "https://registry.npmjs.org/uuid/-/uuid-14.0.0.tgz",
+      "version": "14.0.0"
+    }
+  ],
+  "modules": [
+    {
+      "file": "renderer-001.mjs",
+      "sha256": "6bd10ac3b89c196062102fc8e89c849e440fd8587891b58c46155b956f61ab52",
+      "upstream": "package/dist/mermaid.esm.min.mjs"
+    },
+    {
+      "file": "renderer-002.mjs",
+      "sha256": "c4dcf6a7886b4dd79e287ecab5fa7c08912c8abb89c7e1ce57a834e61dfeb877",
+      "upstream": "package/dist/chunks/mermaid.esm.min/abnfDiagram-DGLNOSUI.mjs"
+    },
+    {
+      "file": "renderer-003.mjs",
+      "sha256": "2a7b54b74f5426b6e68b2b6c3e0828d0766ef9479917e990cf4f1ed64c737dc1",
+      "upstream": "package/dist/chunks/mermaid.esm.min/architecture-7GRP2DOG-HF4J73XS.mjs"
+    },
+    {
+      "file": "renderer-004.mjs",
+      "sha256": "9e6733c187d0776dff1e4fbfc284a5ca9dce4c8371202c2a561935653c1c48f5",
+      "upstream": "package/dist/chunks/mermaid.esm.min/architectureDiagram-IU6H5EVY.mjs"
+    },
+    {
+      "file": "renderer-005.mjs",
+      "sha256": "189c5f172e1e2ff0ebf371976b1e1d6df5e3f34fbb34b760833f187bda83c038",
+      "upstream": "package/dist/chunks/mermaid.esm.min/blockDiagram-FSX6DT2V.mjs"
+    },
+    {
+      "file": "renderer-006.mjs",
+      "sha256": "9e6eae7bbbaa15e9beb5d5e2d9088b8b3d9bb22188e859a059fdea14d0ba2326",
+      "upstream": "package/dist/chunks/mermaid.esm.min/c4Diagram-YNRVYILN.mjs"
+    },
+    {
+      "file": "renderer-007.mjs",
+      "sha256": "e4709f61a1d6aacf9826a43251e53d095200a314f434c90201dd6f270ce0a8b6",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-22SYA5HA.mjs"
+    },
+    {
+      "file": "renderer-008.mjs",
+      "sha256": "f61425a7952381720bbcfb17060b9b41b2b0f15ba243fb2f514bbb8b433ff392",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-2FTYKNOQ.mjs"
+    },
+    {
+      "file": "renderer-009.mjs",
+      "sha256": "e2da9c3bf884b11847291b57b26c1767a76ce0b623d76c1b692cd012e959b0ce",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-36VM3LGA.mjs"
+    },
+    {
+      "file": "renderer-010.mjs",
+      "sha256": "5564319d51d28bb47f0dee919e6272cd30198b6d685be379336262151bfe51c6",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-3SEI7E7V.mjs"
+    },
+    {
+      "file": "renderer-011.mjs",
+      "sha256": "63be472b53814fc6498d1104a9e87e3d1d3f18ad82223be62fa446657115e97d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-3T2MNPEU.mjs"
+    },
+    {
+      "file": "renderer-012.mjs",
+      "sha256": "a8ffe8bf73910e05a34286e4047a0031482bb529e8c5dda534ec205da24284eb",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-44AU3KAP.mjs"
+    },
+    {
+      "file": "renderer-013.mjs",
+      "sha256": "adf32db1dd13d0046930c24d3b327f2ad68ab1364bb4c22ca86603058ee6b943",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-4MZOTL6B.mjs"
+    },
+    {
+      "file": "renderer-014.mjs",
+      "sha256": "22ada21b00d36e309c1d7872e68350d6124f738138acf4d0b7fcfd7802a9de7d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-52IMQVNL.mjs"
+    },
+    {
+      "file": "renderer-015.mjs",
+      "sha256": "ef66816ff45f4fbdb3570833bb8ac377a7728790bf6c1784f956cf7b451ad2a4",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-5NYYYZGL.mjs"
+    },
+    {
+      "file": "renderer-016.mjs",
+      "sha256": "258c1f8a5e8fc1cc5edfd343779c9c50f0bf8932a6e7fa67aa2d174283b617fa",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-BOZ75642.mjs"
+    },
+    {
+      "file": "renderer-017.mjs",
+      "sha256": "68e9b842ca194d2a0fb7df57cc4bad78329d45ba658265b3c182e658b98ca0d0",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-CVBX6EWK.mjs"
+    },
+    {
+      "file": "renderer-018.mjs",
+      "sha256": "6fa5cda64a6227731eb422b312aaff0070f0986097e8d94354ac6101a25c398b",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-D36F7FYG.mjs"
+    },
+    {
+      "file": "renderer-019.mjs",
+      "sha256": "86439dd57c66e4da27cace4f8010b89175e911c7d4a8d4f5c053075e933339e0",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-DEGLBX6O.mjs"
+    },
+    {
+      "file": "renderer-020.mjs",
+      "sha256": "7a600c611d09d8a05cd2e6f96f13901d9ba27576fc21c77e63668af1005cd163",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-F6PIGZHG.mjs"
+    },
+    {
+      "file": "renderer-021.mjs",
+      "sha256": "afd4f43ee2561e0a5199bcb39803456612bd87152c2b9303531c137471bee646",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-FE53TMRB.mjs"
+    },
+    {
+      "file": "renderer-022.mjs",
+      "sha256": "8d7c420d9526ab350be333dbf743e91354691a6481275e64f1db7549db4dba05",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-FNR2RGIF.mjs"
+    },
+    {
+      "file": "renderer-023.mjs",
+      "sha256": "0613e167b74c7f000549b95541b971a1ec378792a71beed86196c60a1fce0700",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-GDOATIN3.mjs"
+    },
+    {
+      "file": "renderer-024.mjs",
+      "sha256": "91a17383810e0f5ef53c86e61027a84a900f3e5c8e48a9c079bd6ff5f10a08dc",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-H7BX327W.mjs"
+    },
+    {
+      "file": "renderer-025.mjs",
+      "sha256": "15b097a55baa8dffc83744237196bc8b4757fcaffed5b7e72ccd4a872b6d5b82",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-HI3EPXIC.mjs"
+    },
+    {
+      "file": "renderer-026.mjs",
+      "sha256": "f2dd1ca7f2d35b0fdf2986c967b3ce3d196a522ca065d96d93be6836eaf0e871",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-JCBDXJ5W.mjs"
+    },
+    {
+      "file": "renderer-027.mjs",
+      "sha256": "08eb3eab361912f0dbd69f04900f41cd9a5d2d70494622e34f9336c932a97b11",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-JGXDHUYS.mjs"
+    },
+    {
+      "file": "renderer-028.mjs",
+      "sha256": "57b417baaff19ed1a3383bf327d39247c0c4aa876dc433e09f708d2e5950b71a",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-L2B47AAZ.mjs"
+    },
+    {
+      "file": "renderer-029.mjs",
+      "sha256": "510f5c3317bab620bbf82e10649bd7bb55aa52c547f1278a6fb3e52e7e76b183",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-LIEGGFIX.mjs"
+    },
+    {
+      "file": "renderer-030.mjs",
+      "sha256": "50dca8ff9b938d96081f2623879d49afb217172d146a01317c635b7af16460b4",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-LLWYPJEZ.mjs"
+    },
+    {
+      "file": "renderer-031.mjs",
+      "sha256": "907abf3f3c54b58e7577c4bd6a3cfa18a9978110765843cd0d46748d6db4e748",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-MFYRHTYG.mjs"
+    },
+    {
+      "file": "renderer-032.mjs",
+      "sha256": "5d4f7c6773b99ffca185401cf164d111ab304d05709d933c10ce47a1e06d5188",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-MIE3LDYP.mjs"
+    },
+    {
+      "file": "renderer-033.mjs",
+      "sha256": "314dd31439a026a0cb626fd30f13076ee2793f32949a64c0760600db50f6a222",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-MLQVGYRW.mjs"
+    },
+    {
+      "file": "renderer-034.mjs",
+      "sha256": "f523b938f9e0dab285dcb5d6278c717c22f84cbb3baf4179cd4d43c185b78f0f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-MNT3HHAC.mjs"
+    },
+    {
+      "file": "renderer-035.mjs",
+      "sha256": "fe6c622006f36060f414b8aa93fa9e21bc37215cf057c73cab7f9d052eddf9dc",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-NRRTYJAG.mjs"
+    },
+    {
+      "file": "renderer-036.mjs",
+      "sha256": "5b4aecc3ff4d16d7925c35a0f0f04bba2249efbdf9272ad7e3962c7d73a4d636",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-OCMJQKYE.mjs"
+    },
+    {
+      "file": "renderer-037.mjs",
+      "sha256": "156839168b42cfcc80351b1b597b16a76e94de3af300c58243768f038dbc579a",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-PKJCTQEK.mjs"
+    },
+    {
+      "file": "renderer-038.mjs",
+      "sha256": "e9c775fa20ca2edf8995d76a13fd599918af25d8551d7900321325a44708eec6",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-QADHU5CF.mjs"
+    },
+    {
+      "file": "renderer-039.mjs",
+      "sha256": "5ad0557882607c7b100c33722714c62832a84feb26d79a7151fdbe4680f2165b",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-QVIEFLGF.mjs"
+    },
+    {
+      "file": "renderer-040.mjs",
+      "sha256": "2e45a2106e2b75a86f3abcd566b0437869c94c01d459a96662914a642f2bcbec",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-QX7LGXZU.mjs"
+    },
+    {
+      "file": "renderer-041.mjs",
+      "sha256": "d27207e011fa154c80e23a90dcc853cd84a04ba3771177531bc242e5250f25ba",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-R2KH53MI.mjs"
+    },
+    {
+      "file": "renderer-042.mjs",
+      "sha256": "e454f35207ba126bbb0cd9be40455b48a0b658c701248223d8bcd7cc191a723d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-RXM7Z7NK.mjs"
+    },
+    {
+      "file": "renderer-043.mjs",
+      "sha256": "591509da5cec6ff3207bd8b80b5f379471fe12a83dab0b52a8d338884fdafab9",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-S4TE5DX6.mjs"
+    },
+    {
+      "file": "renderer-044.mjs",
+      "sha256": "c927a4a7d111b376cddf6c30a73bc2366a6fa1be145ca69abdead4c55d24fb4f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-SDIBIOXT.mjs"
+    },
+    {
+      "file": "renderer-045.mjs",
+      "sha256": "b86aba6910d9a4cb8f6c994b446d514a4e7968398c163b983b8af53bfbdd3331",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-TDFULVG6.mjs"
+    },
+    {
+      "file": "renderer-046.mjs",
+      "sha256": "70a1d2ed6d7be0ca521b0cd3473e1850b6402bf32f81e6eb16d02cd23e3ab07d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-TECWHJ6D.mjs"
+    },
+    {
+      "file": "renderer-047.mjs",
+      "sha256": "8d8c03d5bfdaf959049b0bc8829482eaa2756b4fc8a02082cc6b908e1bcb462d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-TINYC7RT.mjs"
+    },
+    {
+      "file": "renderer-048.mjs",
+      "sha256": "e853c6e038172db019a380b207f31588d0c1ca9b78f6755e022bd6194df1a4a0",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-V3KJR4XU.mjs"
+    },
+    {
+      "file": "renderer-049.mjs",
+      "sha256": "d5cbcb93a647654a40be75e7e27f86607738e21e044285a7631c9f90d8cbe746",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-VTMXW4ES.mjs"
+    },
+    {
+      "file": "renderer-050.mjs",
+      "sha256": "f17d1d5a41d30f83ff93b1d485194c927ec40e642201ba1fe6b24d9488ebba9a",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-Y5NT6LW5.mjs"
+    },
+    {
+      "file": "renderer-051.mjs",
+      "sha256": "d48d46306b653feee026d67ab7c66305b0a6a8a77ec2253419748e848178ea4b",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-Y5O5OPKC.mjs"
+    },
+    {
+      "file": "renderer-052.mjs",
+      "sha256": "bbf61f84c9d86a49fc21f38eb8bc6dbab91d2ac3927f684c8f781692d5d00c69",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-YZG4BXY6.mjs"
+    },
+    {
+      "file": "renderer-053.mjs",
+      "sha256": "05866f9f6191141f83fd225d0ae8071873cdd24f94e8b99023cd3401ad4a12a8",
+      "upstream": "package/dist/chunks/mermaid.esm.min/chunk-ZZ52EIBP.mjs"
+    },
+    {
+      "file": "renderer-054.mjs",
+      "sha256": "6025aaed3a3d1c30542fde9fdb252b1baef696d402e0372eafc1d85be798a01c",
+      "upstream": "package/dist/chunks/mermaid.esm.min/classDiagram-v2-VV4INRHB.mjs"
+    },
+    {
+      "file": "renderer-055.mjs",
+      "sha256": "e61d5ee575a455979b9f889f0d570665375efb0d0864fb5bd0711dde05ead739",
+      "upstream": "package/dist/chunks/mermaid.esm.min/cose-bilkent-MSIMRU2B.mjs"
+    },
+    {
+      "file": "renderer-056.mjs",
+      "sha256": "8a73b005b5e9939ee1e9badc0135e6cb13b904f6d2abf29c288c70d7ec3be7f5",
+      "upstream": "package/dist/chunks/mermaid.esm.min/cynefin-OW5HDTMX-KMPDV6GS.mjs"
+    },
+    {
+      "file": "renderer-057.mjs",
+      "sha256": "a454a6569e844b51fb65904218d7b1ca70f90ed75d7c496204203b2c5e6ace53",
+      "upstream": "package/dist/chunks/mermaid.esm.min/cynefinDiagram-KTGLXFXK.mjs"
+    },
+    {
+      "file": "renderer-058.mjs",
+      "sha256": "e3d22686a35679e440a512bc06d5be0e356275ba70bc8db4bfc63b1f039564a8",
+      "upstream": "package/dist/chunks/mermaid.esm.min/dagre-QJJCSHY4.mjs"
+    },
+    {
+      "file": "renderer-059.mjs",
+      "sha256": "cb1d2e351a1f73a4a24d79cf38a513389eb11e3d7f62d32c16682b452a178348",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-2ZIM67RP.mjs"
+    },
+    {
+      "file": "renderer-060.mjs",
+      "sha256": "8b0ec6021168ef8f2c4596538ffd2212ace4472ca8ca96c540264dd1c30166df",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-FYHH5O6R.mjs"
+    },
+    {
+      "file": "renderer-061.mjs",
+      "sha256": "290b8d34ba2c2c959ba42c2853ce76284b73ee0a0c8892f2a5d28bc0991605cb",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-LYLDACMS.mjs"
+    },
+    {
+      "file": "renderer-062.mjs",
+      "sha256": "0a4884978c03693c15b096a4cb862d040d2745368f9589eddadad808bffac378",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-TYT3HRBC.mjs"
+    },
+    {
+      "file": "renderer-063.mjs",
+      "sha256": "2a9043b739c2875a1d136ed15a051d66f33e1ce9ed9e306bbd6b608e17c248a3",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-XVIN6YVD.mjs"
+    },
+    {
+      "file": "renderer-064.mjs",
+      "sha256": "f69b987edccaad346bd7918af8e7fff1c261a57dfadb495325055407c29799a9",
+      "upstream": "package/dist/chunks/mermaid.esm.min/diagram-ZO2NLLYC.mjs"
+    },
+    {
+      "file": "renderer-065.mjs",
+      "sha256": "54164be2a45b99249c8fc54733bd610ab308c26f5682091056fb7ce56e51b81e",
+      "upstream": "package/dist/chunks/mermaid.esm.min/ebnfDiagram-TU3FGH35.mjs"
+    },
+    {
+      "file": "renderer-066.mjs",
+      "sha256": "1276d59f3fde3eef097055ef026d4f0abf22113bb654ba1bd222f84cc33fce3f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/elk-GHAXNSLK.mjs"
+    },
+    {
+      "file": "renderer-067.mjs",
+      "sha256": "75ca44289644ea07e6a53c3b1aa0b37623a10695801f460e36f71c1579a772a7",
+      "upstream": "package/dist/chunks/mermaid.esm.min/erDiagram-XID3VV23.mjs"
+    },
+    {
+      "file": "renderer-068.mjs",
+      "sha256": "b3be236e25ba6b5b72b2a0d40cc3c1b46f7e0b5fffc48c8c652a3fd27dadc73a",
+      "upstream": "package/dist/chunks/mermaid.esm.min/eventmodeling-NTZA5JFV-P5QJSWSK.mjs"
+    },
+    {
+      "file": "renderer-069.mjs",
+      "sha256": "e22be1ef179d5eccc5424f91437d87461dd713de3192ee77de4936b8e3d87e1b",
+      "upstream": "package/dist/chunks/mermaid.esm.min/flowDiagram-WPHQAKTU.mjs"
+    },
+    {
+      "file": "renderer-070.mjs",
+      "sha256": "1f9599e4140e9079bccde2d38b5c79c72ff7960ba36b727017dc73257cdbfddf",
+      "upstream": "package/dist/chunks/mermaid.esm.min/ganttDiagram-QACGSKG6.mjs"
+    },
+    {
+      "file": "renderer-071.mjs",
+      "sha256": "7a108585e107d165bbae964cd5f80a8cc5d31a419c82eacafc585a952a62f83d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/gitGraph-4MIJSDKK-V5NEQQYP.mjs"
+    },
+    {
+      "file": "renderer-072.mjs",
+      "sha256": "f51927b2e6fab491544a51b77a0e66ce68d6fce45ce296e3f76b7b7c4f9dd9fa",
+      "upstream": "package/dist/chunks/mermaid.esm.min/gitGraphDiagram-EB76O4HC.mjs"
+    },
+    {
+      "file": "renderer-073.mjs",
+      "sha256": "83fd327ea22fda37778a65298925936d1e1011ad4d5d25c19ec1a3133f75a432",
+      "upstream": "package/dist/chunks/mermaid.esm.min/info-A6RAGUB7-IGBHH2L7.mjs"
+    },
+    {
+      "file": "renderer-074.mjs",
+      "sha256": "6ceebc155365159a0cb00915a208147599d4921a90ffbd078def439dc9f9706e",
+      "upstream": "package/dist/chunks/mermaid.esm.min/infoDiagram-343ZKIDN.mjs"
+    },
+    {
+      "file": "renderer-075.mjs",
+      "sha256": "82de333415baa00ba2ee9d83649dc7580d211cab64cdde6b30e9637fc82d25f8",
+      "upstream": "package/dist/chunks/mermaid.esm.min/ishikawaDiagram-UEEU5D75.mjs"
+    },
+    {
+      "file": "renderer-076.mjs",
+      "sha256": "02f37151c03a8a6727eeb51d6f31224ed2a3c1257c4d458163992b9074cc4b41",
+      "upstream": "package/dist/chunks/mermaid.esm.min/journeyDiagram-4QTZOVLF.mjs"
+    },
+    {
+      "file": "renderer-077.mjs",
+      "sha256": "5f6dd0d20354b397392e45b8c233472d0479fe174bae818aa874a2401362c133",
+      "upstream": "package/dist/chunks/mermaid.esm.min/kanban-definition-VEJL4RG2.mjs"
+    },
+    {
+      "file": "renderer-078.mjs",
+      "sha256": "5ba7308a6da6d094333437a03fe5f4c4edbadd7e70617a2fcba854d81d876977",
+      "upstream": "package/dist/chunks/mermaid.esm.min/katex-QVRI4OIV.mjs"
+    },
+    {
+      "file": "renderer-079.mjs",
+      "sha256": "d27a0a0595a48a0b5a35b408fc04ce523f809049fa604ee7a89ff9e4ddf8293f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/mindmap-definition-C5K5ZT7T.mjs"
+    },
+    {
+      "file": "renderer-080.mjs",
+      "sha256": "690309fc395556a60a2d93045789401d28303b76bd13c8575c656d277c6f6fb6",
+      "upstream": "package/dist/chunks/mermaid.esm.min/packet-AYTQ26CC-PJTKDECJ.mjs"
+    },
+    {
+      "file": "renderer-081.mjs",
+      "sha256": "f013113264e1bc9e880e86846569824ba4b1bcd112d2b45815f6db7a24ab569d",
+      "upstream": "package/dist/chunks/mermaid.esm.min/pegDiagram-FHIILVJB.mjs"
+    },
+    {
+      "file": "renderer-082.mjs",
+      "sha256": "e6c3704b6d0e4d3101c366fb4042cc2910faecb75b7ae3b541fa08e9c9a0ca99",
+      "upstream": "package/dist/chunks/mermaid.esm.min/pie-WAS4IAKB-U3JFQXZN.mjs"
+    },
+    {
+      "file": "renderer-083.mjs",
+      "sha256": "991232f17b1d2b43b9136d7d6b8d668966d0db46945979d9bb5a1a6762ca4866",
+      "upstream": "package/dist/chunks/mermaid.esm.min/pieDiagram-S76BU6V7.mjs"
+    },
+    {
+      "file": "renderer-084.mjs",
+      "sha256": "b34033c1aeba4373c7dd0e8c9b632c6e90db33f87d89dea811ba1e34927f9692",
+      "upstream": "package/dist/chunks/mermaid.esm.min/quadrantDiagram-HZBLWUZE.mjs"
+    },
+    {
+      "file": "renderer-085.mjs",
+      "sha256": "6fe09d626fcf29108cf5552bb547d29cc1b8abea73478c0a905abdf649140cad",
+      "upstream": "package/dist/chunks/mermaid.esm.min/radar-RG4KPBEZ-7T2UW32D.mjs"
+    },
+    {
+      "file": "renderer-086.mjs",
+      "sha256": "3f233d16d1ae5100a9b4adaa0792965ae87972f3a0601f99bb8537b5440cc8c3",
+      "upstream": "package/dist/chunks/mermaid.esm.min/railroad-74A4TZTK-DZY7ARDL.mjs"
+    },
+    {
+      "file": "renderer-087.mjs",
+      "sha256": "ac85ab39ede4a890e9e905dc447164ed1e9d1916e105edd29188fda488fc1368",
+      "upstream": "package/dist/chunks/mermaid.esm.min/railroad-abnf-HS5TGJTU-LWS535ZK.mjs"
+    },
+    {
+      "file": "renderer-088.mjs",
+      "sha256": "c75dbfb07296c286bd1845194b2eddcea8eb701b991d7f299a04bc824665b0de",
+      "upstream": "package/dist/chunks/mermaid.esm.min/railroad-ebnf-LZEXJU2U-EA3S4ZFM.mjs"
+    },
+    {
+      "file": "renderer-089.mjs",
+      "sha256": "6d45d95ac42c009560f270bfe2b24c2838d3eae25ee0eaf36e81502bb2c574b1",
+      "upstream": "package/dist/chunks/mermaid.esm.min/railroad-peg-WCYAUIDC-DUKZONPX.mjs"
+    },
+    {
+      "file": "renderer-090.mjs",
+      "sha256": "5a447ec90feebb085bf9237b38dcf07064b2fda606f60930ebbfc1a7f88e1369",
+      "upstream": "package/dist/chunks/mermaid.esm.min/railroadDiagram-R6RP3MQ2.mjs"
+    },
+    {
+      "file": "renderer-091.mjs",
+      "sha256": "9a302832ca2ea97c270c681fdb563e7c0bab77005c980c344aba629aeed10198",
+      "upstream": "package/dist/chunks/mermaid.esm.min/requirementDiagram-SGBABQV6.mjs"
+    },
+    {
+      "file": "renderer-092.mjs",
+      "sha256": "b19f4de1177305fa695ebb96e29209a28fa6f4c49332c6afae993e80b21e26db",
+      "upstream": "package/dist/chunks/mermaid.esm.min/sankeyDiagram-IM6M5BOW.mjs"
+    },
+    {
+      "file": "renderer-093.mjs",
+      "sha256": "ead87517b4943a2f9488af4ccc73fe1f2254651f95821fee9e08186cea9fe2af",
+      "upstream": "package/dist/chunks/mermaid.esm.min/sequenceDiagram-FGJOIFJ2.mjs"
+    },
+    {
+      "file": "renderer-094.mjs",
+      "sha256": "7a3bca8294b25c9335abb79609d5807120c6c37659f18f0014e3f017bfe233aa",
+      "upstream": "package/dist/chunks/mermaid.esm.min/sizeCapture-ERV5D3W5.mjs"
+    },
+    {
+      "file": "renderer-095.mjs",
+      "sha256": "2b77e0a097e0b7472c3da72b8840eefb860980763116e8041610d4a95b36b6bd",
+      "upstream": "package/dist/chunks/mermaid.esm.min/stateDiagram-v2-6KDGCZ5J.mjs"
+    },
+    {
+      "file": "renderer-096.mjs",
+      "sha256": "bc3b26c607b951eebc707c026aad13230d382c9c32b026d036729f59eae8ef65",
+      "upstream": "package/dist/chunks/mermaid.esm.min/swimlanes-OJBUSBEF.mjs"
+    },
+    {
+      "file": "renderer-097.mjs",
+      "sha256": "6f6fc3d544e8b057fb6a001fd6b78cb993cb5b98bb4a854162a38be70e1047ad",
+      "upstream": "package/dist/chunks/mermaid.esm.min/swimlanesDiagram-LNXYTHDW.mjs"
+    },
+    {
+      "file": "renderer-098.mjs",
+      "sha256": "a94f86d9586fbf5a27045667d26b7252046771b5daebb62b43614a4e764566fc",
+      "upstream": "package/dist/chunks/mermaid.esm.min/timeline-definition-7G6YQRTY.mjs"
+    },
+    {
+      "file": "renderer-099.mjs",
+      "sha256": "709d867c88493a1d781cafe3fd3dbde48114f5e3f3279bddaa8d87bf46ca6354",
+      "upstream": "package/dist/chunks/mermaid.esm.min/treeView-Q6P3EWNA-AABPVERA.mjs"
+    },
+    {
+      "file": "renderer-100.mjs",
+      "sha256": "e5257854b08c486229d8966057cab2049c3a1a73d4d6f7945071a46e17954900",
+      "upstream": "package/dist/chunks/mermaid.esm.min/treemap-WGGIJYW6-F2JSY3V3.mjs"
+    },
+    {
+      "file": "renderer-101.mjs",
+      "sha256": "e79775ddacfd5e59be96f960951d668eb1033db4f64971978f7121931fa0d244",
+      "upstream": "package/dist/chunks/mermaid.esm.min/usecaseDiagram-6Y6TMLBO.mjs"
+    },
+    {
+      "file": "renderer-102.mjs",
+      "sha256": "4c7405716e31bbc0c7277f5dcf50c3f35d046d9c3800b1c60deba8806431e71f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/vennDiagram-6RODYPCK.mjs"
+    },
+    {
+      "file": "renderer-103.mjs",
+      "sha256": "f8bc024046d3251514913866aec96dc114f9ce6f868e27ce97dd74803af3038f",
+      "upstream": "package/dist/chunks/mermaid.esm.min/wardley-WFR3VGLG-EIT5NWVN.mjs"
+    },
+    {
+      "file": "renderer-104.mjs",
+      "sha256": "040c2ec2463e2d0015ad1b8c64da34197b309b1f2f63e75a17c3207ef847e5a2",
+      "upstream": "package/dist/chunks/mermaid.esm.min/wardleyDiagram-RFZKLAPA.mjs"
+    },
+    {
+      "file": "renderer-105.mjs",
+      "sha256": "3a36377e738bd5d22d999414a84fc455e7ea85dd9f77d15c532364ad355e8117",
+      "upstream": "package/dist/chunks/mermaid.esm.min/xychartDiagram-TWWI2QJZ.mjs"
+    }
+  ],
+  "name": "mermaid",
+  "selection": "dist/mermaid.esm.min.mjs plus every dist/chunks/mermaid.esm.min/*.mjs; byte-for-byte upstream; maps omitted",
+  "url": "https://registry.npmjs.org/mermaid/-/mermaid-12.0.0.tgz",
+  "version": "12.0.0"
+}

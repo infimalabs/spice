@@ -1,0 +1,20 @@
+[package]
+name = "journal"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+atomic = { path = "../atomic" }
+wire = { path = "../wire" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.40.1", default-features = false, features = ["backup", "bundled"] }
+serde = "1.0.229"
+serde_json = "1.0.151"
+sill = { path = "../sill" }
+
+[lints]
+workspace = true

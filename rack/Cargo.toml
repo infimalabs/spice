@@ -1,0 +1,31 @@
+[package]
+name = "rack"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic STORE ZIP racks: write them, link them into executables, and read their members in place."
+# Published on its own; every other member inherits the workspace's false.
+publish = true
+
+[features]
+# Build an archive from entries.
+write = []
+# Emit the relocatable object that links an archive into an executable, and
+# extract the archive from a built executable image.
+link = []
+# Read the archive linked into the running executable. Enable it only in builds
+# that link the object `link` emits: its symbols resolve nowhere else.
+linked = []
+
+[dependencies]
+zip = { version = "9.3", default-features = false }
+
+[dev-dependencies]
+crc32fast = "1.5.0"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[lints]
+workspace = true

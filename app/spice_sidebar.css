@@ -1,0 +1,431 @@
+.app-spice-sidebar-content {
+  --app-team-pad: 9px;
+  --app-team-gap: 8px;
+  display: grid;
+  min-width: 0;
+}
+/* Sections keep their dividers full-bleed while content stands off the view's
+   edges by the header's own inset. */
+.app-spice-sidebar-content > .app-sheet-section {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding-inline: var(--app-spice-section-inset-inline);
+}
+/* The resident summary lends its status and version their type; the header
+   places each one. */
+.app-resident-summary {
+  color: var(--muted);
+  font: var(--app-type-caption)/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-resident-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The fixed-width weekly percentage stands centered under the Spice button,
+   outside the anchor's box, so the button never moves as quota state loads or
+   becomes unavailable; the header's foot leaves it room. */
+.app-spice-capacity {
+  position: absolute;
+  top: calc(100% + var(--app-spice-capacity-gap));
+  inset-inline-end: calc((var(--app-header-control) - 4ch) / 2);
+  width: 4ch;
+  color: var(--ink);
+  font: 700 var(--app-type-control)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.app-spice-capacity:is([data-state="loading"], [data-state="unavailable"], [data-quota-stale]) { color: var(--muted); }
+/* Each principal is one identity row with its controls stacked at the
+   trailing edge; an open form, the one-time capability handoff, and the
+   connected principal's inbox stand beneath across the full width. */
+.app-spice-principal-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-spice-principal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.app-spice-principal > :not(.app-spice-principal-identity, .app-control-rail) { grid-column: 1 / -1; }
+.app-spice-principal > .app-control-rail {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-self: center;
+}
+/* Each action stands as tall as two fact lines, so Edit profile sits beside
+   the name and code lines and the role action beside the email and roles;
+   the column is only as wide as its longest label. Admit a principal, at the
+   heading's trailing end, wears the same compact face. */
+.app-spice-principal > .app-control-rail > button,
+.app-spice-principals > .section-heading > .app-control-rail > button {
+  flex: 0 0 auto;
+  min-height: calc(2 * 1.25 * var(--app-type-meta) + 2px);
+  padding: 0 8px;
+  font-size: var(--app-type-control);
+  line-height: 1.2;
+}
+.app-spice-principal-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* The avatar stands as tall as a listed principal's four fact lines, so the
+   row keeps its height when the listing replaces the self row. */
+.app-spice-principal .operator-avatar {
+  --app-spice-principal-avatar: calc(4 * 1.25 * var(--app-type-meta) + 3 * 2px);
+  flex-basis: var(--app-spice-principal-avatar);
+  width: var(--app-spice-principal-avatar);
+  height: var(--app-spice-principal-avatar);
+}
+.app-spice-principal-facts {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font: var(--app-type-meta)/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-spice-principal-facts > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-spice-principal-facts > span,
+.app-spice-principal-own { color: var(--muted); }
+.app-spice-principal[data-state="loading"] .app-spice-principal-facts > strong { color: var(--muted); }
+/* The connected principal's inbox stands inside their own row, beneath the
+   identity and its controls, so it reads as theirs. */
+.app-spice-principal > .room-inbox { margin-top: 4px; }
+.app-spice-principal-form,
+.app-spice-principal-handoff {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: var(--app-edge-soft);
+  border-radius: var(--app-radius-compact);
+  background: var(--control-surface-soft);
+  font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-spice-principal-form p,
+.app-spice-principal-handoff p { margin: 0; }
+.app-spice-principal-form label { display: grid; gap: 2px; min-width: 0; }
+.app-spice-principal-form label > span { color: var(--muted); }
+.app-spice-principal-form .app-spice-principal-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.app-spice-principal-handoff code { overflow-wrap: anywhere; user-select: all; }
+.app-spice-principal-status { margin: 0; color: var(--muted); font-size: var(--app-type-sm); }
+.app-spice-principal-status[data-state="failed"],
+.app-spice-principal-form [data-state="danger"] { color: var(--danger); }
+.app-spice-topology-placeholder {
+  min-height: 12rem;
+  border: var(--app-edge-soft);
+  border-radius: var(--app-radius-compact);
+  background: var(--control-surface-soft);
+}
+.app-theme-selector {
+  --app-segment-count: 3;
+  inline-size: var(--app-theme-selector-inline-size);
+}
+.app-theme-selector:has(> [data-app-theme="system"][aria-pressed="true"]) { --app-segment-stop: 1; }
+.app-theme-selector:has(> [data-app-theme="dark"][aria-pressed="true"]) { --app-segment-stop: 2; }
+.app-theme-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-product-version {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* An available update reads as the version itself in the focus accent, with
+   its reload mark, rather than as a framed control. */
+.app-product-version--update {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 0;
+  align-items: baseline;
+  gap: .5ch;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--focus) 78%, var(--ink));
+  font: inherit;
+  font-weight: 700;
+}
+.app-product-version--update:hover { color: var(--focus); }
+.app-product-version-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-product-version-indicator {
+  flex: 0 0 auto;
+  line-height: 1;
+}
+.app-product-version:focus-visible {
+  border-radius: var(--app-radius-micro);
+  outline: var(--app-focus-ring-width) solid var(--focus);
+  outline-offset: 2px;
+}
+/* Real teams share one guarded roster. */
+.app-roster { display: grid; gap: 10px; }
+.app-roster-groups { display: grid; gap: 10px; }
+.app-roster-groups:empty { display: none; }
+.app-roster-group {
+  display: grid;
+  gap: var(--app-team-gap);
+  padding: var(--app-team-pad);
+  border: var(--app-control-edge);
+  border-radius: var(--app-radius-frame);
+  background: var(--control-surface-soft);
+}
+.app-roster-group[data-drop-enabled="true"]:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--control-line-soft));
+  background: color-mix(in srgb, var(--control-surface-soft) 94%, var(--accent) 6%);
+}
+.app-roster-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-block-size: 0;
+  gap: 10px;
+  color: var(--muted);
+  font: var(--app-type-caption)/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-roster-group > header > div {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 2px;
+}
+.app-roster-group > header strong { overflow: hidden; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; }
+.app-roster-group > header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-roster-members { display: grid; gap: 6px; }
+.app-roster-member { min-width: 0; }
+.app-roster-group[draggable="true"],
+.app-roster-member[draggable="true"] { cursor: grab; }
+.app-roster-group[draggable="true"]:active,
+.app-roster-member[draggable="true"]:active { cursor: grabbing; }
+/* A finger or pen lifts a card by its header and a tile by its name; the rest
+   still scrolls the sheet and activates the tile. */
+.app-roster-group[draggable="true"] > header,
+.app-roster-member[draggable="true"] [data-roster-handle] {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.app-roster-group[data-topology-drag-source],
+.app-roster-member[data-topology-drag-source] { opacity: .38; }
+.app-roster-ungrouped > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font: var(--app-type-caption)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-roster-ungrouped h3 {
+  margin: 0;
+  font: 700 var(--app-type-caption)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.app-roster-ungrouped {
+  padding: 10px;
+  border: var(--app-control-edge-width) dashed var(--control-line-soft);
+  border-radius: var(--app-radius-frame);
+  background: var(--control-surface-soft);
+}
+.app-roster-ungrouped[data-drop-enabled="true"]:hover {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--control-line-soft));
+  background: color-mix(in srgb, var(--control-surface-soft) 94%, var(--accent) 6%);
+}
+.app-empty-state { margin: 0; padding: 3px 1px; color: var(--muted); font-size: var(--app-type-sm); line-height: 1.4; }
+/* The job board packs one fixed-height row per kept command. Every cell has a
+   fixed width, so a standing change or an age tick rewrites text in place, and
+   oldest-first order keeps every row above a starting job where it was. */
+.app-spice-jobs {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  --app-spice-job-visible: 4;
+  --app-spice-job-row: 1.5rem;
+  --app-spice-job-gap: 1px;
+  --app-spice-job-slot: calc(var(--app-spice-job-visible) * var(--app-spice-job-row) + (var(--app-spice-job-visible) - 1) * var(--app-spice-job-gap));
+  grid-template-rows: auto var(--app-spice-job-slot);
+}
+.app-spice-job-census {
+  display: inline-flex;
+  gap: .9ch;
+  font-variant-numeric: tabular-nums;
+}
+.app-spice-job-census > [data-job-standing="unheard"] { color: var(--muted); }
+.app-spice-job-board {
+  display: grid;
+  align-content: start;
+  gap: var(--app-spice-job-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  block-size: 100%;
+  overflow: auto;
+  scrollbar-width: thin;
+  /* Keep the four-row viewport while wheel and touch boundary gestures
+     continue through the containing Spice menu. */
+  overscroll-behavior: auto;
+  font: var(--app-type-fact)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-spice-job {
+  min-inline-size: 0;
+  block-size: var(--app-spice-job-row);
+  padding-inline: 4px 6px;
+  border-left: var(--quote-rail) solid var(--accent-slot, var(--accent));
+  background: color-mix(in srgb, var(--panel) 76%, var(--page));
+}
+.app-job-open {
+  display: grid;
+  grid-template-columns: 1.4em 9ch 3ch minmax(0, 1fr);
+  column-gap: 1ch;
+  align-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  text-align: start;
+}
+.app-spice-job-glyph {
+  color: var(--accent-slot, var(--accent));
+  text-align: center;
+}
+.app-spice-job-agent,
+.app-spice-job-command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-spice-job-agent { color: var(--ink); font-weight: 650; }
+.app-spice-job-age { color: var(--muted); text-align: right; }
+.app-spice-job-command { color: var(--ink); font: inherit; }
+.app-spice-job[data-job-standing="unheard"] :is(.app-spice-job-glyph, .app-spice-job-command) { color: var(--muted); }
+.app-spice-jobs { container-type: inline-size; container-name: jobs; }
+.app-spice-jobs .section-heading { gap: .35rem; block-size: 1.125rem; min-inline-size: 0; }
+.app-spice-jobs button {
+  min-block-size: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.app-spice-jobs button:disabled { opacity: .45; cursor: default; }
+.app-spice-jobs button:focus-visible,
+.app-job-stage:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 1px; }
+.app-spice-jobs button:hover:not(:disabled) { background: var(--control); }
+.app-spice-jobs button[aria-pressed="true"] { color: var(--accent); background: var(--control); }
+.app-job-reset { white-space: nowrap; }
+.app-spice-jobs .app-job-search {
+  flex: 1 1 8ch;
+  inline-size: 8ch;
+  min-inline-size: 5ch;
+  max-inline-size: 14ch;
+  block-size: 100%;
+  min-block-size: 0;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--app-radius-control);
+  background: var(--panel);
+  color: var(--ink);
+  font: var(--app-type-fact)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-spice-job-census { gap: .3ch; flex-shrink: 0; font-size: var(--app-type-fact); line-height: 1; }
+.app-spice-job-census button { padding: 2px; }
+.app-job-stage { block-size: var(--app-spice-job-slot); min-block-size: 0; min-inline-size: 0; overflow: hidden; }
+.app-job-inspector {
+  display: grid;
+  grid-template-rows: var(--app-spice-job-row) minmax(0, 1fr);
+  gap: var(--app-spice-job-gap);
+  block-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+  animation: app-job-enter 140ms ease-out;
+}
+.app-job-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-inline-size: 0;
+  font: var(--app-type-fact)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-job-toolbar button { flex: 0 0 auto; block-size: 100%; padding-inline: 3px; min-inline-size: 1.5rem; }
+.app-job-position { min-inline-size: 3ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--muted); }
+.app-job-toolbar-spacer { flex: 1; }
+.app-job-toolbar .app-job-kill, .app-job-error { color: var(--danger); }
+.app-job-confirm { flex: 1; min-inline-size: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--danger); }
+.app-job-evidence {
+  min-block-size: 0;
+  min-inline-size: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  overscroll-behavior: auto;
+  padding: 2px 4px;
+  border-left: var(--quote-rail) solid var(--accent-slot, var(--accent));
+  background: color-mix(in srgb, var(--panel) 76%, var(--page));
+  font: var(--app-type-fact)/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-job-evidence-heading {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  position: sticky;
+  inset-block-start: -2px;
+  background: var(--panel);
+  white-space: nowrap;
+  color: var(--muted);
+}
+.app-job-evidence-heading strong { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.app-job-full-command, .app-job-output { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.app-job-status, .app-job-tail-note, .app-job-error { margin: 3px 0; overflow-wrap: anywhere; }
+.app-job-status, .app-job-tail-note { color: var(--muted); }
+.app-job-facts { display: grid; grid-template-columns: 6ch minmax(0, 1fr); gap: 1px 1ch; margin: 4px 0 0; }
+.app-job-facts dt { color: var(--muted); }
+.app-job-facts dd { margin: 0; overflow-wrap: anywhere; }
+.app-job-control-short { display: none; }
+@container jobs (max-width: 18rem) {
+  .app-job-control-full { display: none; }
+  .app-job-control-short { display: inline; }
+}
+@keyframes app-job-enter { from { opacity: .5; transform: translateX(1rem); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .app-job-inspector { animation: none; } }

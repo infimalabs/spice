@@ -1,0 +1,811 @@
+.mosaic-composer {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: var(--app-edge);
+  background: color-mix(in srgb, var(--accent) 3%, var(--panel));
+}
+
+/* One size for every composer input: typed text and its placeholder alike. */
+.mosaic-composer textarea {
+  width: 100%;
+  min-height: 92px;
+  padding: 10px 11px;
+  resize: vertical;
+  font-size: var(--app-type-prose);
+  line-height: 1.42;
+}
+
+.composer-quote-stack { display: contents; }
+
+.mosaic-message-card footer button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border-radius: var(--app-radius-circle);
+}
+
+/* Stream cards (--app-radius-card) and nested quotes round by their rail
+   width, ending each curve at the rail's inner edge; other markdown keeps the
+   surface radius. */
+.markdown-body { --mosaic-quote-radius: 12px; }
+.mosaic-message-card,
+.mosaic-message-card .markdown-body { --mosaic-quote-radius: 2px; }
+.markdown-body {
+  --message-image-gap: 7px;
+  --mosaic-quote-inline: 5px;
+  --mosaic-quote-pad-block: 4px;
+  --mosaic-quote-rail: var(--quote-rail);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+/* The hidden portal host is renderer plumbing, not visible content. It must not
+   steal the terminal margin reset from the element immediately before it. */
+.markdown-body > :has(+ .markdown-body-portals:last-child) { margin-bottom: 0; }
+.markdown-body p { margin: 0 0 .7em; line-height: 1.45; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin: .8em 0 .35em; color: var(--ink); line-height: 1.18;
+}
+.markdown-body h1 { font-size: 1.45em; }
+.markdown-body h2 { font-size: 1.28em; }
+.markdown-body h3 { font-size: 1.13em; }
+.markdown-body ul,
+.markdown-body ol { margin: .4em 0 .75em; padding-left: 1.45em; }
+.markdown-body li + li { margin-top: .25em; }
+.markdown-body blockquote {
+  margin: var(--mosaic-quote-pad-block) 0;
+  padding: var(--mosaic-quote-pad-block) var(--mosaic-quote-inline);
+  border-left: var(--mosaic-quote-rail) solid var(--accent-neutral); border-radius: var(--mosaic-quote-radius);
+  color: var(--muted);
+  /* Drop the quote tier once; nested rails inherit this size without compounding it. */
+  font-size: var(--app-type-prose);
+}
+.markdown-body blockquote blockquote { font-size: inherit; }
+.markdown-body blockquote p { margin: 0 0 6px; }
+.markdown-body blockquote p:last-child { margin-bottom: 0; }
+.markdown-body blockquote ul,
+.markdown-body blockquote ol { margin: 0 0 6px; padding-left: 18px; }
+/* Quotes carry no fill at any depth. A quote's rail wears its own speaker's
+   accent slot, as that speaker's top-level cards do; operator and system
+   quotes, notices included, keep the neutral accent and rely on their pills
+   and attribution. A quote's slot is its rail, so anything accented inside it,
+   such as its control rings, follows the quote rather than the outer card. */
+.markdown-body :is(blockquote, .message-quote-card)[data-accent] {
+  border-left-color: var(--accent-slot);
+}
+.markdown-body :is(blockquote, .message-quote-card):not([data-accent]) {
+  --accent-slot: var(--accent-neutral);
+}
+.markdown-body :is(sup, sub) { line-height: 0; }
+.markdown-body .math-inline { display: inline; white-space: normal; }
+/* A formula keeps its 1.25em height; negative block margins keep its line one pitch tall. */
+.markdown-body .math-inline > .math-render {
+  display: inline-flex; max-width: 100%; overflow-x: auto; margin-block: -.125em; vertical-align: -.2em;
+}
+.markdown-body .math-inline .math-render img { display: block; width: auto; height: 1.25em; }
+.markdown-body .math-display {
+  display: block; max-width: 100%; margin: .5em 0; overflow-x: auto; text-align: center;
+}
+.markdown-body .math-display > .math-render { display: inline-flex; min-width: max-content; }
+.markdown-body .math-display .math-render img { display: block; width: auto; height: auto; }
+.markdown-body .math-source-fallback {
+  color: var(--muted); font: var(--app-type-status)/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+}
+
+.markdown-body code {
+  padding: 0; background: transparent;
+  font: var(--app-type-status)/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.markdown-body :not(pre) > code { line-height: 0; }
+.markdown-body pre {
+  max-width: 100%; margin: .55em 0; padding: .65em .75em; overflow: auto;
+  border: var(--app-edge); border-radius: var(--app-radius-control); background: var(--page);
+}
+.markdown-body pre code { padding: 0; background: transparent; }
+.markdown-body table { width: 100%; border-collapse: collapse; }
+.markdown-body th,
+.markdown-body td { padding: .35em .45em; border: var(--app-edge); text-align: left; }
+.markdown-body :is(th, td)[data-align="center"] { text-align: center; }
+.markdown-body :is(th, td)[data-align="right"] { text-align: right; }
+.markdown-body a { color: var(--accent); }
+
+.mosaic-message-card {
+  --mosaic-image-size: 8.75rem;
+  display: inline-grid;
+  width: 100%;
+  gap: 12px;
+  break-inside: avoid;
+  margin: 0 0 14px;
+  padding: 15px;
+  border: var(--app-edge);
+  border-left: var(--message-rail) solid var(--accent);
+  border-radius: var(--app-radius-card);
+  background: var(--mosaic-card);
+  box-shadow: var(--shadow);
+}
+
+.mosaic-message-card footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--app-type-meta);
+}
+.mosaic-message-card footer button { margin-left: auto; }
+
+.mosaic-compaction-card {
+  grid-template-columns: minmax(2rem, 1fr) auto minmax(2rem, 1fr);
+  align-items: center;
+  text-align: center;
+}
+.mosaic-compaction-rule {
+  width: 100%;
+  height: 1px;
+  background: var(--accent-slot, var(--accent));
+}
+.mosaic-compaction-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: var(--app-type-chip);
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.mosaic-compaction-context {
+  display: inline-flex;
+  min-width: 0;
+  gap: .35em;
+  overflow: hidden;
+  color: var(--ink);
+}
+.mosaic-compaction-label .message-key, .mosaic-compaction-agent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mosaic-compaction-agent { flex: 1 1 auto; color: var(--accent-slot, var(--accent)); }
+.mosaic-compaction-label .message-key { flex: 0 1 auto; }
+.mosaic-compaction-method { color: var(--muted); font-weight: 400; }
+.mosaic-compaction-age { color: var(--muted); font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+
+.message-image {
+  --message-image-size: var(--mosaic-image-size);
+  display: inline-grid; flex: 0 0 var(--message-image-size);
+  width: var(--message-image-size); height: var(--message-image-size);
+  min-width: var(--message-image-size); aspect-ratio: 1 / 1;
+  place-items: center; text-decoration: none;
+  padding: 0; border: 0; background: transparent;
+}
+.message-image img {
+  grid-area: 1 / 1; display: block; width: 100%; height: 100%;
+  max-width: var(--message-image-size); max-height: var(--message-image-size);
+  aspect-ratio: 1 / 1;
+  border: var(--app-edge); border-radius: var(--app-radius-control);
+  background: var(--control-surface-soft); object-fit: cover; object-position: center;
+}
+.message-image img[data-mosaic-image-state="pending"],
+.message-image img[data-mosaic-image-state="error"] { visibility: hidden; }
+.message-image-status {
+  grid-area: 1 / 1; display: grid; width: 100%; height: 100%;
+  padding: 10px; place-items: center; border: var(--app-edge); border-radius: var(--app-radius-control);
+  background: var(--control-surface-soft); color: var(--muted);
+  font: 600 var(--app-type-sm)/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+}
+.message-image-status[data-mosaic-image-status="loaded"] { display: none; }
+.message-image-status[data-mosaic-image-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); color: var(--danger);
+}
+.message-image--openable { cursor: zoom-in; }
+.message-image--openable:hover img {
+  border-color: color-mix(in srgb, var(--accent-slot, var(--accent)) 42%, var(--line));
+}
+.message-image--openable:focus-visible { outline: none; }
+.message-image--openable:focus-visible img,
+.message-image--openable:focus-visible .message-image-status {
+  outline: var(--app-focus-ring-width) solid var(--accent-slot, var(--accent)); outline-offset: 2px;
+}
+.markdown-body .message-image-stack,
+.message-attachments {
+  display: flex; max-width: 100%; min-width: 0; gap: var(--message-image-gap, 7px);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.markdown-body .message-image-stack {
+  flex-flow: row nowrap; margin: .5em 0; white-space: normal;
+}
+.message-attachments { flex-flow: row nowrap; }
+.mosaic-message-card--image-only :is(.message-image-shell, .message-image),
+.mosaic-message-card--image-only .mermaid-slot {
+  --message-image-size: var(--mosaic-image-large-size);
+}
+.mosaic-message-card:not(.mosaic-message-card--image-only)
+  .message-flow > .message-body:has(> .message-image-stack + .message-image-stack) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 7px;
+}
+.mosaic-message-card:not(.mosaic-message-card--image-only)
+  .message-flow > .message-body:has(> .message-image-stack + .message-image-stack)
+  > :not(.message-image-stack) {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+.mosaic-message-card:not(.mosaic-message-card--image-only)
+  .message-flow > .message-body:has(> .message-image-stack + .message-image-stack)
+  > .message-image-stack {
+  display: contents;
+}
+
+/* The raw slot reserves the preview before the portal mounts. Controls stay inside it. */
+.mermaid-slot {
+  --message-image-size: var(--mosaic-image-size);
+  display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  min-width: 0; margin: .5em 0;
+  width: min(100%, var(--message-image-size));
+  aspect-ratio: 1 / 1;
+}
+.mermaid-render { position: relative; height: 100%; min-height: 0; }
+.mermaid-render > .message-image,
+.mermaid-slot:empty::before {
+  display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  width: 100%; min-width: 0; height: 100%;
+  aspect-ratio: auto; overflow: hidden; vertical-align: top; padding: 0; border: 0;
+}
+.mermaid-render > .message-image:disabled { opacity: 1; cursor: default; }
+.mermaid-render > .message-image--openable:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--accent-slot, var(--accent)); outline-offset: -2px;
+}
+.mermaid-slot:empty::before {
+  content: "Rendering diagram"; box-sizing: border-box; place-items: center;
+  border: var(--app-edge); border-radius: var(--app-radius-control);
+  background: var(--control-surface-soft); color: var(--muted);
+  font: 600 var(--app-type-sm)/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* A diagram is read, not cropped: it letterboxes inside the square floor. */
+.mermaid-render > .message-image img {
+  min-width: 0; min-height: 0; max-width: 100%; max-height: 100%;
+  aspect-ratio: auto; object-fit: contain;
+}
+.mermaid-render .message-image-status {
+  min-width: 0; min-height: 0; overflow: auto; overflow-wrap: anywhere;
+}
+.mermaid-render .message-image:has(img) > .message-image-status {
+  align-self: end; height: auto; max-height: 3rem; padding: 4px;
+}
+.message-image-status[data-mermaid-status="ready"] { display: none; }
+.message-image-status[data-mermaid-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--line)); color: var(--danger);
+}
+.mermaid-render > .mermaid-retry { position: absolute; inset-block-end: 10px; inset-inline-end: 10px; z-index: 1; }
+/* Horizontal touch travel is the lightbox's own swipe; vertical pan and
+   pinch zoom stay native. Pinch-zoomed, every pan is the browser's. */
+.image-lightbox {
+  padding: 16px; touch-action: pan-y pinch-zoom;
+}
+.image-lightbox[data-zoomed] { touch-action: manipulation; }
+.image-lightbox[open] {
+  display: grid; grid-template: "actions" auto "image" minmax(0, 1fr) / minmax(0, 1fr);
+  gap: 8px;
+}
+/* Sized to its content so every frosted pixel around it is the dialog, which closes on click. */
+.image-lightbox-image {
+  grid-area: image; place-self: center; display: block; width: auto; height: auto; min-height: 0;
+  max-width: 100%; max-height: 100%; object-fit: contain;
+}
+/* The lightbox's packed actions use the app-wide joined frame while retaining
+   the frosted surface treatment. Annotation tools form two spatially separate
+   joined sets: editing tools and commit actions. */
+.image-lightbox-actions { grid-area: actions; justify-self: end; display: flex; flex-wrap: wrap; justify-content: flex-end; }
+.image-lightbox-actions.app-control-rail > button,
+.image-annotation-tools.app-control-rail > button { background: transparent; }
+.image-lightbox-actions.app-control-rail > button:not([aria-disabled="true"], :disabled):hover,
+.image-annotation-tools.app-control-rail > button:not([aria-disabled="true"], :disabled):hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.image-annotation-editor { display: contents; }
+.image-annotation-controls { justify-self: stretch; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+.image-annotation-editing { grid-column: 1; min-width: 0; }
+.image-annotation-commit { grid-column: 2; justify-self: end; flex-wrap: nowrap; }
+.image-annotation-tools > button[aria-pressed="true"],
+.image-annotation-tools.app-control-rail > .image-annotation-apply { background: var(--accent); color: var(--on-accent, var(--panel)); }
+.image-annotation-tools > button:disabled { opacity: .45; cursor: default; }
+/* Wide enough for its longest route word, so cycling never reflows the rail. */
+.image-annotation-tools > .image-annotation-route { min-inline-size: 9ch; }
+/* The palette is one rail cell of compact swatches; the chosen one is ringed. */
+.image-annotation-palette { display: flex; align-items: stretch; flex: 0 0 auto; }
+.image-annotation-palette > .image-annotation-swatch {
+  display: grid; place-items: center; min-width: 0; margin: 0; padding: 0 6px;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none; cursor: pointer;
+}
+.image-annotation-swatch > svg { display: block; inline-size: 1.15em; block-size: 1.15em; border-radius: 50%; }
+.image-annotation-swatch:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.image-annotation-swatch[aria-pressed="true"] > svg { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+.image-annotation-swatch:disabled { opacity: .45; cursor: default; }
+.image-annotation-stage { grid-area: image; min-width: 0; min-height: 0; outline: none; }
+.image-annotation-stage:focus-visible { outline: var(--app-focus-ring-width) solid var(--accent); outline-offset: 2px; }
+.image-annotation-svg { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; }
+.image-annotation-svg--draw { cursor: crosshair; }
+.image-annotation-hit { fill: transparent; stroke: transparent; stroke-width: 20px; vector-effect: non-scaling-stroke; cursor: move; }
+/* A routed mark is hit along its stroke only, never across the area a curve
+   or elbow encloses. */
+path.image-annotation-hit { fill: none; }
+.image-annotation-mark { pointer-events: none; stroke-linejoin: round; }
+.image-annotation-handle { fill: var(--app-highlight-source); stroke: var(--app-annotation-danger); stroke-width: 2px; vector-effect: non-scaling-stroke; cursor: crosshair; }
+.image-annotation-outline { fill: none; stroke: var(--app-annotation-danger); stroke-width: 1.5px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* Sized in image pixels through the SVG viewBox; the size arrives by CSSOM. */
+.image-annotation-label-field {
+  box-sizing: border-box; display: block; width: 100%; height: 100%; margin: 0; padding: 0 calc(var(--annotation-label-size) / 4);
+  border: 1.5px dashed var(--app-annotation-danger); border-radius: 0; outline: none;
+  background: color-mix(in srgb, var(--annotation-label-halo) 55%, transparent); color: var(--annotation-label-ink);
+  font: 700 var(--annotation-label-size)/1 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.image-annotation-loading { text-align: center; color: var(--muted); }
+/* Out of flow; independently owned notices stack in one lower area without moving or overlapping content. */
+.toast-area { position: fixed; inset: auto 16px 24px; z-index: 10; display: grid; gap: 8px; justify-items: center; width: auto; height: auto; max-width: none; margin: 0; padding: 0; border: 0; background: transparent; color: inherit; overflow: visible; pointer-events: none; }
+.toast {
+  position: fixed; inset: auto 16px 24px; z-index: 10; width: fit-content; height: auto; max-width: 36rem; margin: 0 auto; padding: 7px 14px;
+  color: inherit; overflow: visible;
+  border-radius: var(--app-radius-overlay); font-size: var(--app-type-toast); overflow-wrap: anywhere;
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard), translate var(--app-motion-settle) var(--app-ease-standard), visibility var(--app-motion-settle) allow-discrete;
+}
+.toast-area .toast { position: static; inset: auto; max-width: min(36rem, 100%); margin: 0; }
+.toast:empty { display: none; }
+.toast[data-shown="false"] { opacity: 0; translate: 0 8px; visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+.composer-shard-image-open {
+  display: block; width: 100%; height: 100%; min-width: 0; min-height: 0;
+  padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: zoom-in;
+}
+
+.mosaic-message-empty {
+  padding: 28px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Chat runs to the viewport's edges: only a real device safe-area inset keeps
+   a team clear of them. */
+.mosaic-workspace .content {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.mosaic-workspace { display: flex; min-height: 0; }
+
+/* Teams follow the composer model: the first team in arrangement order holds
+   the control-adjacent right edge, later teams stack to its left, and RTL
+   overflow keeps that edge visible. Surfaces stay LTR. */
+.team-fleet {
+  display: flex; flex-flow: row nowrap; align-items: stretch; flex: 1 1 auto;
+  width: 100%; min-height: 0; min-width: 0;
+  overflow: auto hidden; overscroll-behavior-inline: contain;
+  direction: rtl;
+}
+/* The fleet meets the viewport edges, so its focus ring paints inside it. */
+.team-fleet:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+/* No watchband scrollbar covers activity traces; important outranks message strips' thin bars. */
+.team-fleet, .team-fleet * { scrollbar-width: none !important; }
+.team-fleet::-webkit-scrollbar, .team-fleet ::-webkit-scrollbar { display: none; }
+
+.team-surface {
+  --inactive-lane-opacity: .72;
+  --mosaic-card: color-mix(in srgb, var(--panel) 95%, var(--accent));
+  --message-stream-surface: color-mix(in srgb, var(--page) 50%, var(--control));
+  --team-pip-gap: calc(var(--app-presence-pip-size) / 2);
+  --team-toolbar-inline-inset: 8px;
+  --team-control-inline-size: var(--app-team-control-inline-size);
+  --team-control-submit-block-size: calc(2 * var(--app-status-line-band));
+  /* The composer controls keep a fixed right-edge column below the full-width
+     task rail and inline status band. */
+  --team-status-band: var(--app-status-line-band);
+  --team-task-band: calc(var(--team-control-submit-block-size) - var(--team-status-band));
+  --team-header-size: var(--team-control-submit-block-size);
+  --team-chamber-inset: 8px;
+  /* Match the predecessor's weighted swimlanes: each team receives one
+     share per member, up to the six-member visual contract, while the fleet
+     can carry any number of sibling team surfaces. */
+  position: relative;
+  direction: ltr;
+  display: flex;
+  flex: var(--team-weight, 4) 1 0;
+  flex-direction: column;
+  width: auto;
+  min-height: 100%;
+  min-width: var(--team-surface-min-inline);
+  max-width: 100%;
+  container-type: inline-size;
+  overflow: visible;
+}
+/* In dark mode, lift the stream and status band from control toward panel. */
+:root[data-app-effective-theme="dark"] .team-surface { --message-stream-surface: color-mix(in srgb, var(--control) 50%, var(--panel)); }
+.team-surface[data-team-weight="1"] { --team-weight: 1; }
+.team-surface[data-team-weight="2"] { --team-weight: 2; }
+.team-surface[data-team-weight="3"] { --team-weight: 3; }
+.team-surface[data-team-weight="4"] { --team-weight: 4; }
+.team-surface[data-team-weight="5"] { --team-weight: 5; }
+.team-surface[data-team-weight="6"] { --team-weight: 6; }
+
+/* Work owns the first row. The ticker leads the status row; the pip matrix
+   ends it, directly above the composer's fixed control column. */
+.team-toolbar {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template:
+    "tasks" var(--team-task-band)
+    "status" var(--team-status-band)
+    / minmax(0, 1fr);
+  block-size: var(--team-header-size);
+  padding: 0;
+}
+/* The ticker runs over TURBO; the pips sit over the team menu, no wider than a round control. The band's top rule, where the open tab row meets the console, is the soft edge tone; the inter-console seam instead wears the page colour that tab row shows. */
+.team-toolbar > .team-status-row { grid-area: status; display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--team-control-inline-size) / 2); box-sizing: border-box; min-width: 0; padding-inline: 0; border-block-start: var(--app-edge-soft); }
+.team-toolbar > .team-status-row:not(:has(> .team-lights)) { grid-template-columns: minmax(0, 1fr); padding-inline-end: var(--team-toolbar-inline-inset); }
+.team-status-row > .team-lights {
+  --team-pip-columns: 3; position: relative; display: grid; grid-auto-flow: column dense; direction: rtl; place-content: center; gap: var(--team-pip-gap);
+  grid-template: repeat(2, var(--app-presence-pip-size)) / repeat(var(--team-pip-columns), var(--app-presence-pip-size));
+  grid-column: 2; justify-self: center; inline-size: var(--app-round-control-size); min-width: 0; margin: 0; padding: 0;
+}
+/* Members fill bottom-up from the right; three and five nest their shorter top row half a pitch in, like stacked shot. */
+.team-lights > :nth-child(odd of .app-presence-pip) { grid-row: 2; }
+.team-lights > :nth-child(even of .app-presence-pip) { grid-row: 1; }
+.team-lights:is([data-team-size="1"], [data-team-size="2"]) { --team-pip-columns: 1; }
+.team-lights[data-team-size="1"] > .app-presence-pip { grid-row: 1 / -1; align-self: center; }
+.team-lights:is([data-team-size="3"], [data-team-size="4"]) { --team-pip-columns: 2; }
+.team-lights:is([data-team-size="3"], [data-team-size="5"]) > :nth-child(even of .app-presence-pip) { transform: translateX(calc(-1 * (var(--app-presence-pip-size) + var(--team-pip-gap)) / 2)); }
+/* The trailing total spans the pip cell flush right, centring its badge over the pips and team menu;
+   tasks flow leftward from it, fading in at the rail's left edge and sliding under the total. */
+.team-toolbar > .team-task-rail {
+  --app-total-tab-inline-size: calc(var(--team-control-inline-size) / 2);
+  --team-task-fade: var(--mosaic-gap);
+  position: relative;
+  display: grid;
+  grid-area: tasks;
+  align-self: end;
+  grid-template-columns: minmax(0, 1fr) var(--app-total-tab-inline-size);
+  min-width: 0;
+  margin-inline: var(--team-toolbar-inline-inset) 0;
+  overflow: hidden;
+}
+.team-task-rail > :is(.team-tasks, [data-work-scope="team"], [data-work-scope="group"]) { align-self: end; }
+.team-task-rail > :is([data-work-scope="team"], [data-work-scope="group"]) { grid-column: 2; grid-row: 1; z-index: 2; }
+.team-task-rail > .team-tasks {
+  flex-direction: row-reverse; gap: 0;
+  grid-area: 1 / 1;
+  z-index: 1;
+  width: calc(100% + var(--team-task-fade));
+  max-width: none;
+  padding-inline: var(--team-task-fade);
+  scroll-padding-inline: var(--team-task-fade);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--team-task-fade),
+    #000 calc(100% - var(--team-task-fade)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--team-task-fade),
+    #000 calc(100% - var(--team-task-fade)),
+    transparent
+  );
+}
+
+.team-lights[data-lane-drag-handle] {
+  cursor: grab;
+  user-select: none;
+}
+.team-lights[data-lane-drag-handle]:active { cursor: grabbing; }
+/* Edge controls meet the fleet's clipping edges, so their rings paint inside. */
+.team-lights[data-lane-drag-handle]:focus-visible {
+  outline: var(--app-focus-ring-width) solid var(--accent);
+  outline-offset: -2px;
+}
+.team-composer .team-send:focus-visible { outline-offset: -2px; }
+
+/* One top rule; the composer heading's 8px start puts the ticker age over composer ages. */
+.team-status-row > .ticker {
+  grid-column: 1; align-self: stretch; border-block-start: 0; background: transparent;
+  min-width: 0;
+  padding: 0 var(--team-chamber-inset) 0 var(--team-toolbar-inline-inset);
+  line-height: calc(var(--team-status-band) - var(--app-control-edge-width));
+}
+.team-status-row > .ticker:is([data-lane-status="bound"], [data-lane-status="unbound"])
+  > :is(.ticker-age, .ticker-prefix, .ticker-detail) {
+  opacity: var(--inactive-lane-opacity);
+}
+.team-surface .ticker-age { display: inline-block; width: 3ch; color: var(--app-semantic-live); text-align: right; }
+.team-surface .ticker-age.queued { color: var(--warning); } .team-surface .ticker-age.bound, .team-surface .ticker-age.unbound { color: var(--app-anchor-muted); opacity: .7; }
+.team-surface .ticker-prefix { color: color-mix(in srgb, var(--accent-slot, var(--muted)) 70%, var(--ink)); font-weight: 700; }
+.team-pane {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--page);
+}
+.team-pane > .empty { flex: 1 1 auto; }
+
+.team-compose {
+  --team-composer-block: 0px;
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Member lanes and the control frame share boundaries as one field that runs
+   to the team's edges. The control column still sizes itself from the stack's
+   fixed inline size, so the draft takes every remaining pixel at every
+   viewport width. */
+.team-composer {
+  --team-composer-block-size: 208px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0;
+}
+/* Canonical member zero is the main agent. Paint canonical order from the
+   control-adjacent right edge, matching the predecessor, and let RTL overflow
+   keep that edge visible on initial layout. Agent contents remain LTR. */
+.team-surface .team-agents {
+  display: grid;
+  grid-template-columns: repeat(var(--team-weight, 4), minmax(var(--team-composer-block-size), 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(var(--team-composer-block-size), 1fr);
+  gap: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+  direction: rtl;
+}
+
+.team-surface .team-agent {
+  --composer-underline-color: color-mix(
+    in srgb,
+    var(--accent-slot, var(--accent)) 64%,
+    var(--line-soft)
+  );
+  position: relative;
+  display: flex;
+  min-width: 0;
+  height: var(--team-composer-block-size);
+  max-height: var(--team-composer-block-size);
+  flex-direction: column;
+  direction: ltr;
+  align-self: stretch;
+  overflow: hidden;
+  border-color: var(--control-line-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* The team owns the field's outer left edge and the form owns its bottom edge;
+   member shards add neither of those structural rules. */
+.team-composer .composer-shard { border-block-end: 0; }
+.team-agent .composer-shard { background: var(--composer-fill, transparent); }
+.team-surface .team-agent::after {
+  position: absolute;
+  z-index: 6;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--composer-underline, transparent);
+  content: "";
+  pointer-events: none;
+}
+/* A lit member, focused or a held keyboard broadcast's target, shows its accent
+   as the bottom underline. The lit draft itself takes a 10% fill: whichever
+   shard holds focus, primary or quote, or a broadcast target's primary. */
+.team-surface .team-agent:has(textarea:focus),
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"]
+  .team-composer:has(
+    .composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus
+  )
+  .team-agent:has(
+    .composer-shard--primary[data-broadcast-target-eligible="true"]
+  ) {
+  --composer-underline: var(--composer-underline-color);
+}
+.team-surface .composer-shard:has(> textarea:focus),
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"]
+  .team-composer:has(
+    .composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus
+  )
+  .composer-shard--primary[data-broadcast-target-eligible="true"] {
+  --composer-fill: color-mix(in srgb, var(--accent-slot, var(--accent)) 10%, transparent);
+}
+/* Opacity makes a stacking context, which would trap the open agent menu
+   below the dimmed textarea; a heading whose menu is open stays undimmed. */
+.team-surface .team-agent--vacant :is(.composer-shard-heading:not(:has(> .agent-menu[open])), textarea) {
+  opacity: var(--inactive-lane-opacity);
+}
+
+.agent-composer-stack {
+  --composer-shard-block-size: var(--team-composer-block-size);
+  display: grid;
+  gap: 5px;
+  max-height: var(--team-composer-block-size);
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-block: contain;
+  overscroll-behavior-inline: auto;
+  scroll-behavior: smooth;
+}
+.composer-shard {
+  position: relative;
+  width: 100%;
+  height: var(--composer-shard-block-size);
+  min-height: var(--composer-shard-block-size);
+  max-height: var(--composer-shard-block-size);
+  min-width: 0;
+  overflow: hidden;
+  border: var(--app-control-edge);
+  border-radius: 0;
+  background: var(--control);
+  box-shadow: none;
+}
+/* Member lanes and the control frame are one uninterrupted field: shards paint
+   no inline edge between siblings or beside the controls. */
+.team-agent .composer-shard { border-inline: 0; border-block-start: 0; }
+/* Quote shards are the context leading into the primary draft, so the visible
+   stack and the submitted Markdown share quote-then-primary order. */
+.composer-shard--primary {
+  order: 1;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.composer-shard--quote {
+  order: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+/* The heading stays unpositioned so the open agent menu anchors to its shard.
+   Its derived 62% control tint is the double-thick paint over the shared
+   glass. The permanent accent spans the full border box as a bottom-aligned
+   2px background stroke; active block-end accents remain full-width. */
+.composer-shard-heading {
+  --composer-heading-inline-start: 8px;
+  --composer-heading-inline-end: 5px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) fit-content(50%) 22px;
+  align-items: center;
+  gap: 6px;
+  height: var(--app-status-line-band);
+  min-height: var(--app-status-line-band);
+  padding: 0 var(--composer-heading-inline-end) 0 var(--composer-heading-inline-start);
+  border-bottom: var(--quote-rail) solid transparent;
+  background: linear-gradient(var(--composer-underline-color), var(--composer-underline-color))
+    left bottom / 100% 2px no-repeat border-box;
+  background-color: var(--app-control-glass-paint);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--app-type-status);
+}
+.composer-shard-heading strong {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent-slot, var(--muted)) 70%, var(--ink));
+  font-size: var(--app-type-status);
+  font-weight: 400;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-shard-heading strong:has(+ .composer-shard-image-indicators .composer-shard-image-indicator) {
+  -webkit-mask-image: linear-gradient(90deg, var(--app-mask-opaque) calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, var(--app-mask-opaque) calc(100% - 18px), transparent);
+}
+/* The trailing menu owns the last column, so a heading without an image
+   strip, such as a Design composer's, still pins it to the right edge. */
+.composer-shard-heading > .agent-menu { grid-column: -2; }
+.composer-shard-link {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+}
+/* Firefox does not paint an ancestor's decoration through this inline-block clock slot. */
+.composer-shard-link > .composer-shard-age-label {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.composer-shard-age { color: var(--app-semantic-live); }
+.composer-shard-age.queued { color: var(--warning); }
+.composer-shard-age.bound,
+.composer-shard-age.unbound {
+  color: var(--app-anchor-muted);
+  opacity: .7;
+}
+/* Edge-to-edge cover crops fill the heading band from the trailing control
+   toward the age. The bounded strip scrolls, so attachments never push the
+   prose out of the row. An empty strip stays laid out at zero width in the
+   third heading column. */
+.composer-shard-image-indicators {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 1px;
+  height: 28px;
+  justify-content: flex-start;
+  min-width: 0;
+  max-width: 222px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+}
+.composer-shard-image-indicator {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--app-radius-hairline);
+  background: color-mix(in srgb, var(--control) 84%, var(--page));
+  box-shadow: none;
+}
+.composer-shard-image-indicator img {
+  display: block;
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  object-fit: cover;
+}
+.composer-shard-image-indicator:hover,
+.composer-shard-image-indicator:has(.composer-shard-image-open:focus-visible) {
+  outline: var(--app-control-edge-width) solid var(--accent);
+  outline-offset: -1px;
+}
+.composer-shard-image-remove {
+  display: inline-flex;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+  min-height: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-hairline);
+  background: color-mix(in srgb, var(--control) 80%, transparent);
+  color: var(--ink);
+  font-size: var(--app-type-compact);
+  line-height: 1;
+  opacity: 0;
+}
+.composer-shard-image-indicator:hover .composer-shard-image-remove,
+.composer-shard-image-remove:focus-visible { opacity: 1; }
+.composer-shard-image-remove:hover,
+.composer-shard-image-remove:focus-visible {
+  background: color-mix(in srgb, var(--danger) 70%, var(--control));
+  color: var(--page);
+}

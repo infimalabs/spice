@@ -1,0 +1,266 @@
+/* Team composer controls: SEND, TURBO, sliders, and their held-key previews. */
+/* The observation composer's submit controls are a column of equal pills. */
+.team-composer-controls {
+  --team-control-gap: 6px;
+  --team-control-item-height: 36px;
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--team-control-gap);
+  min-width: 0;
+}
+/* Flush button material is shared by the primary panel and the separately
+   admitted global fast-mode control. */
+.team-composer .team-composer-controls,
+.app-spice-sidebar-anchor .app-spice-turbo, .app-compose-dialog .app-compose-submit, .agent-menu > .agent-menu-button {
+  --team-control-face: linear-gradient(145deg, color-mix(in srgb, var(--app-highlight-source) 8.5%, transparent), color-mix(in srgb, var(--app-highlight-source) 2%, transparent));
+  --team-control-edge: var(--app-control-edge-width) solid color-mix(in srgb, var(--ink) 24%, transparent);
+  --team-control-rest: inset 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--app-highlight-source) 8%, transparent);
+  --team-control-contact: inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent), inset 0 -1px 1px color-mix(in srgb, var(--app-highlight-source) 60%, transparent);
+  --team-send-rim-width: 3px; --team-send-command-ring-width: 2px;
+  /* SEND's backlight: an even diffuse field with no drawn ring or hotspot. */
+  --team-send-emitter: radial-gradient(closest-side, color-mix(in srgb, var(--app-highlight-source) 26%, transparent) 0 72%, color-mix(in srgb, var(--app-highlight-source) 18%, transparent) 86%, transparent 100%);
+}
+/* The panel holds utility buttons, speech, SEND, and a policy pill; gaps
+   separate every row and the final inset clears the panel rule. */
+.team-composer .team-composer-controls {
+  --team-control-inset: 4px;
+  --team-control-send-size: 72px;
+  --team-control-button-size: var(--app-round-control-size);
+  --team-slider-inset: var(--team-control-inset);
+  --team-slider-groove-block: 28px;
+  --team-slider-thumb-inline: 48px;
+  --team-slider-thumb-block: 24px;
+  --team-slider-thumb-inset: calc((var(--team-slider-groove-block) - var(--team-slider-thumb-block)) / 2);
+  --team-control-upper-gap: 12px;
+  --team-control-send-gap: 12px;
+  --team-control-policy-gap: 12px;
+  --team-control-bottom-inset: 8px;
+  position: relative; display: grid; row-gap: 0; column-gap: 0; inline-size: var(--team-control-inline-size);
+  margin-block-start: 0; padding-block-start: var(--team-control-inset); block-size: var(--team-composer-block-size);
+  grid-template: var(--team-control-button-size) var(--team-control-upper-gap) var(--team-slider-groove-block) var(--team-control-send-gap) var(--team-control-send-size) var(--team-control-policy-gap) var(--team-slider-groove-block) var(--team-control-bottom-inset) / repeat(2, minmax(0, 1fr));
+  border: 0; border-radius: 0;
+  isolation: isolate;
+  box-shadow:
+    -8px 0 14px -6px color-mix(in srgb, var(--app-shadow-source) 42%, transparent),
+    8px 0 14px -6px color-mix(in srgb, var(--app-shadow-source) 42%, transparent);
+}
+/* Global and agent TURBO controls keep their own admission and layout while
+   reusing the production Flush face, edge, contact, and selected-state
+   treatment below. */
+.app-spice-sidebar-anchor .app-spice-turbo, .member-fast .member-turbo {
+  --team-control-button-size: var(--app-round-control-size);
+  --team-send-command-ring: 0 0 0 0 transparent;
+  --inactive-lane-opacity: .72;
+}
+.app-turbo-button .fit-word, .team-policy-switch .fit-word { inline-size: 26px; block-size: 10px; }
+/* Flush controls are transmitted glass, with no opaque accent face or dome. */
+.team-composer :is(.team-send, .team-turbo, .team-menu, .team-policy-switch), .app-spice-sidebar-anchor .app-spice-turbo, .member-fast .member-turbo, .agent-menu > .agent-menu-button {
+  --team-send-command-accent: var(--focus); --team-send-command-ring: 0 0 0 0 transparent;
+  position: relative; display: grid; place-items: center; overflow: hidden; place-self: center;
+  width: var(--team-control-button-size); min-width: var(--team-control-button-size); max-width: var(--team-control-button-size); height: var(--team-control-button-size); min-height: var(--team-control-button-size); margin: 0; padding: 0;
+  border: var(--team-control-edge); border-radius: var(--app-radius-circle);
+  background: var(--team-control-face); box-shadow: var(--team-send-command-ring), var(--team-control-rest);
+  backdrop-filter: blur(1.5px) saturate(1.15); color: var(--ink); cursor: pointer;
+  font: 700 var(--app-type-primary-action)/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -.025em; text-transform: uppercase;
+}
+.team-composer .team-turbo { grid-row: 1; grid-column: 1; }
+.team-composer .team-menu { grid-row: 1; grid-column: 2; }
+/* SEND's glass, shared by the team SEND and the main composer's lit action:
+   uneven perimeter catches ride over a face that transmits a backlit emitter
+   (CONSOLE.md). */
+.team-composer .team-send, .app-compose-submit {
+  --team-send-glass-catch: inset 2px -2px 1px -1px color-mix(in srgb, var(--app-highlight-source) 34%, transparent), inset 5px -5px 5px -4px color-mix(in srgb, var(--app-highlight-source) 16%, transparent), inset -2px 1.5px 1px -1px color-mix(in srgb, var(--app-highlight-source) 20%, transparent), inset -4px 4px 6px -5px color-mix(in srgb, var(--app-highlight-source) 12%, transparent), inset 0 0 2px color-mix(in srgb, var(--app-shadow-source) 28%, transparent);
+  --team-send-glass-face: radial-gradient(ellipse 64% 30% at 40% -6%, color-mix(in srgb, var(--app-highlight-source) 18%, transparent), transparent 74%), radial-gradient(ellipse 72% 34% at 60% 106%, color-mix(in srgb, var(--app-highlight-source) 9%, transparent), transparent 72%), linear-gradient(color-mix(in srgb, var(--app-highlight-source) 2.5%, transparent), color-mix(in srgb, var(--app-highlight-source) 2.5%, transparent));
+}
+.team-composer .team-send {
+  grid-row: 5; grid-column: 1 / -1;
+  width: var(--team-control-send-size); min-width: var(--team-control-send-size); max-width: var(--team-control-send-size); height: var(--team-control-send-size); min-height: var(--team-control-send-size);
+  background: var(--team-send-glass-face);
+  box-shadow: var(--team-send-command-ring), var(--team-control-rest), var(--team-send-glass-catch);
+}
+.team-composer :is(.team-send, .team-turbo, .team-menu, .team-policy-switch):not(:disabled):hover, .app-spice-sidebar-anchor .app-spice-turbo:not(:disabled):hover, .member-fast .member-turbo:not(:disabled):hover, .agent-menu > .agent-menu-button:hover { background-color: color-mix(in srgb, var(--app-highlight-source) 7.5%, transparent); }
+.team-composer :is(.team-send, .team-turbo, .team-menu, .team-policy-switch):not(:disabled):is(:active, [data-touch-contact]), .app-spice-sidebar-anchor .app-spice-turbo:not(:disabled):active, .member-fast .member-turbo:not(:disabled):active, .agent-menu > .agent-menu-button:active {
+  transform: translateY(1.5px); box-shadow: var(--team-send-command-ring), var(--team-control-contact), var(--team-send-glass-catch, 0 0 0 0 transparent);
+}
+/* TURBO keeps its selected material on its own face. A descendant inheriting
+   TURBO from its parent remains visibly selected while its redundant control
+   is disabled. Policy switches layer their checked material through the
+   coordinated face below so pending admission cannot replay the wash and
+   halo. */
+.app-turbo-button[data-lit="true"]:not(:disabled),
+:is(.team-turbo--inherited, .member-turbo--inherited)[data-lit="true"] {
+  --app-turbo-accent: #efc36b; --app-turbo-halo: 0 0 6px color-mix(in srgb, var(--app-turbo-accent) 18%, transparent); color: var(--ink);
+  background: radial-gradient(ellipse 84% 46% at 50% 108%, color-mix(in srgb, var(--app-turbo-accent) 36%, transparent), transparent 74%), linear-gradient(color-mix(in srgb, var(--app-turbo-accent) 22%, transparent), color-mix(in srgb, var(--app-turbo-accent) 22%, transparent)), var(--team-control-face);
+  box-shadow: var(--team-send-command-ring), var(--team-control-rest), inset 0 -4px 6px -4px color-mix(in srgb, var(--app-turbo-accent) 38%, transparent), var(--app-turbo-halo);
+}
+.app-turbo-button[data-lit="true"]:not(:disabled):hover { background-color: color-mix(in srgb, var(--app-turbo-accent) 10%, transparent); }
+.app-turbo-button[data-lit="true"]:not(:disabled):is(:active, [data-touch-contact]) { box-shadow: var(--team-send-command-ring), var(--team-control-contact), var(--app-turbo-halo); }
+.app-turbo-button[data-lit="false"], .team-policy-switch[aria-checked="false"] { color: var(--muted); }
+.team-composer .team-menu[aria-expanded="true"]:not(:disabled), .agent-menu[open] > .agent-menu-button { background-color: color-mix(in srgb, var(--app-highlight-source) 12%, transparent); }
+.team-composer .fit-word, .app-spice-turbo .fit-word, .member-turbo .fit-word { filter: drop-shadow(0 .5px .15px color-mix(in srgb, var(--app-highlight-source) 40%, transparent)); }
+.team-composer .team-send::before {
+  position: absolute; inset: 0; border-radius: inherit; opacity: 0; content: ""; pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--app-shadow-source) 18%, transparent), transparent 55%, color-mix(in srgb, var(--app-highlight-source) 10%, transparent));
+}
+.team-composer .team-send:not(:disabled):is(:active, [data-touch-contact])::before { opacity: 1; }
+.team-composer .team-send::after {
+  position: absolute; inset: 0; border-radius: inherit; content: ""; pointer-events: none; background: var(--team-send-recipient-rim, transparent);
+  mask: radial-gradient(closest-side, transparent calc(100% - var(--team-send-rim-width)), var(--app-mask-opaque) calc(100% - var(--team-send-rim-width) + .5px));
+}
+.team-composer .team-send:not(:disabled):is(:active, [data-touch-contact])::after { opacity: .4; }
+:is(.team-composer .team-send, .app-compose-submit) .team-send-label { --team-send-full-opacity: 0; --team-send-full-scale: 0; --team-send-word-offset: 0ch; --team-send-word-scale: 1; position: relative; z-index: 1; display: block; inline-size: 4ch; block-size: 1em; text-shadow: 0 .5px .15px color-mix(in srgb, var(--app-highlight-source) 40%, transparent); transform: none; }
+.team-composer .team-send-label { font-size: 1.5em; color: var(--ink); }
+.team-composer .team-send:not(:disabled):is(:active, [data-touch-contact]) .team-send-label { translate: 0 .5px; }
+/* Complete coverage divides the original SEND footprint into two compressed words. */
+:is(.team-composer .team-send, .app-compose-submit) .team-send-full { position: absolute; inset: 0; inline-size: 4ch; pointer-events: none; color: var(--focus); font-weight: 800; opacity: var(--team-send-full-opacity); transform: scaleX(var(--team-send-full-scale)); transform-origin: left center; transition: transform var(--app-motion-fast) var(--app-ease-standard), opacity var(--app-motion-fast) var(--app-ease-standard); }
+/* The Ask sheet rebuilds its roles achromatic; FULL keeps the page's focus tint there. */
+.app-compose-dialog .app-compose-submit .team-send-full { color: var(--app-semantic-focus); }
+:is(.team-composer .team-send, .app-compose-submit) .team-send-word { position: absolute; inset: 0; inline-size: 4ch; transform: translateX(var(--team-send-word-offset)) scaleX(var(--team-send-word-scale)); transform-origin: left center; transition: transform var(--app-motion-fast) var(--app-ease-standard); }
+:is(.team-composer .team-send, .app-compose-submit)[data-full-send="true"] .team-send-label { --team-send-full-opacity: 1; --team-send-full-scale: .5; --team-send-word-offset: 2ch; --team-send-word-scale: .5; }
+.team-composer .team-turbo:disabled,
+.team-composer .team-menu:disabled,
+.app-spice-sidebar-anchor .app-spice-turbo:disabled,
+.member-fast .member-turbo:disabled { opacity: var(--inactive-lane-opacity); cursor: not-allowed; }
+/* A fitted word is a stretched glyph lockup: RTL would anchor x=0 outside its box. */
+.fit-word {
+  display: block; overflow: hidden; pointer-events: none; direction: ltr;
+  fill: currentColor; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 800; text-transform: uppercase;
+}
+.team-slider {
+  --team-slider-position: 0; --team-slider-accent: transparent; --team-slider-groove-edge: var(--app-control-edge-width) solid color-mix(in srgb, var(--ink) 16%, transparent); --team-slider-groove-face: color-mix(in srgb, var(--control) 5%, transparent); --team-slider-groove-wash: linear-gradient(color-mix(in srgb, var(--team-slider-accent) 28%, transparent), color-mix(in srgb, var(--team-slider-accent) 28%, transparent));
+  --team-slider-groove-shadow: inset 0 1px 2px color-mix(in srgb, var(--app-shadow-source) 20%, transparent), 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent); --team-slider-light-shadow: 0 0 6px color-mix(in srgb, var(--team-slider-accent) 12%, transparent); --team-slider-thumb-face: var(--team-control-face); --team-slider-thumb-shadow: var(--team-control-rest);
+  position: relative; display: grid; align-items: center; min-width: 0; min-height: 0; padding: 0 var(--team-slider-inset); cursor: ew-resize;
+}
+.team-slider::before { position: absolute; inset-block: 0; margin-block: auto; inset-inline: var(--team-slider-inset); block-size: var(--team-slider-groove-block); content: ""; pointer-events: none; border: var(--team-slider-groove-edge); border-radius: var(--app-radius-pill); background: var(--team-slider-groove-wash), var(--team-slider-groove-face); box-shadow: var(--team-slider-groove-shadow), var(--team-slider-light-shadow); }
+.team-slider::after {
+  position: absolute; inset-block: 0; margin-block: auto; inset-inline-start: calc(var(--team-slider-inset) + var(--team-slider-thumb-inset) + var(--team-slider-position) * (100% - 2 * var(--team-slider-inset) - 2 * var(--team-slider-thumb-inset) - var(--team-slider-thumb-inline))); inline-size: var(--team-slider-thumb-inline); block-size: var(--team-slider-thumb-block); box-sizing: border-box; border: var(--team-control-edge); border-radius: var(--app-radius-pill);
+  background: var(--team-slider-thumb-face); box-shadow: var(--team-slider-thumb-shadow); content: ""; pointer-events: none; transition: inset-inline-start var(--app-motion-settle) var(--app-ease-standard), background var(--app-motion-fast) var(--app-ease-standard), box-shadow var(--app-motion-fast) var(--app-ease-standard);
+}
+.team-slider:is([data-stop="1"], [data-stop="2"]) { --app-slider-thumb-accent: var(--team-slider-accent); --team-slider-thumb-face: var(--app-slider-thumb-face); --team-slider-thumb-shadow: var(--app-slider-thumb-shadow); }
+.team-slider:is([data-stop="1"], [data-stop="2"])::after { backdrop-filter: blur(2px) saturate(1.45) brightness(1.08) contrast(1.22); -webkit-backdrop-filter: blur(2px) saturate(1.45) brightness(1.08) contrast(1.22); }
+.team-slider:has(input:focus-visible)::after { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 1px; }
+.team-slider[data-stop="1"] { --team-slider-position: .5; --team-slider-accent: #7de0b4; }
+.team-slider[data-stop="2"] { --team-slider-position: 1; --team-slider-accent: #efc36b; }
+/* Pill flyers use the same flush face and fine optical edge as the buttons. */
+.team-composer .team-slider { grid-column: 1 / -1; }
+.team-composer .team-speech { grid-row: 3; }
+.team-composer .team-policy-switches {
+  --app-turbo-accent: #efc36b; grid-row: 7; grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  place-self: center; box-sizing: border-box; inline-size: calc(100% - 2 * var(--team-slider-inset)); block-size: var(--team-slider-groove-block);
+  overflow: hidden; border: var(--app-control-edge-width) solid color-mix(in srgb, var(--ink) 16%, transparent); border-radius: var(--app-radius-pill); background: color-mix(in srgb, var(--control) 5%, transparent);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--app-shadow-source) 20%, transparent), 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent), 0 0 6px transparent; transition: box-shadow var(--app-motion-settle) var(--app-ease-standard);
+}
+.team-composer .team-policy-switches:has(.team-policy-switch[aria-checked="true"]) { box-shadow: inset 0 1px 2px color-mix(in srgb, var(--app-shadow-source) 20%, transparent), 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent), 0 0 6px color-mix(in srgb, var(--app-turbo-accent) 12%, transparent); }
+.team-composer .team-policy-switches:has(.team-policy-switch[data-team-policy="drive"][aria-checked="true"]):not(:has(.team-policy-switch[data-team-policy="drain"][aria-checked="true"])) { --app-turbo-accent: #7de0b4; }
+.team-composer .team-policy-switches .team-policy-switch {
+  place-self: stretch; inline-size: auto; min-inline-size: 0; max-inline-size: none; block-size: auto; min-block-size: 0;
+  isolation: isolate; border: 0; border-radius: 0; background: var(--team-control-face); box-shadow: var(--team-control-rest); backdrop-filter: blur(1.5px) saturate(1.15); transform: none; transition: color var(--app-motion-settle) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard), box-shadow var(--app-motion-fast) var(--app-ease-standard);
+}
+.team-composer .team-policy-switches .team-policy-switch[data-team-policy="drive"] { --app-turbo-accent: #7de0b4; }
+.team-composer .team-policy-switches .team-policy-switch[data-team-policy="drain"] { --app-turbo-accent: #efc36b; }
+.team-composer .team-policy-switches .team-policy-switch::before {
+  position: absolute; z-index: 0; inset: 0; content: ""; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse 84% 46% at 50% 108%, color-mix(in srgb, var(--app-turbo-accent) 36%, transparent), transparent 74%), linear-gradient(color-mix(in srgb, var(--app-turbo-accent) 22%, transparent), color-mix(in srgb, var(--app-turbo-accent) 22%, transparent));
+  box-shadow: inset 0 -4px 6px -4px color-mix(in srgb, var(--app-turbo-accent) 38%, transparent); transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+}
+.team-composer .team-policy-switches .team-policy-switch + .team-policy-switch { border-inline-start: var(--app-control-edge-width) solid color-mix(in srgb, var(--ink) 16%, transparent); }
+.team-composer .team-policy-switches .team-policy-switch[aria-checked="true"] { color: var(--ink); }
+.team-composer .team-policy-switches .team-policy-switch[aria-checked="true"]::before { opacity: 1; }
+.team-composer .team-policy-switches .team-policy-switch:not(:disabled):hover { background-color: color-mix(in srgb, var(--app-highlight-source) 7.5%, transparent); }
+.team-composer .team-policy-switches .team-policy-switch:not(:disabled):is(:active, [data-touch-contact]) { transform: none; box-shadow: inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent); }
+.team-policy-switch .fit-word { position: relative; z-index: 1; transition: opacity var(--app-motion-settle) var(--app-ease-standard); }
+.team-policy-switch:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+.team-policy-switch:disabled { cursor: not-allowed; }
+.team-composer-controls:not([data-policy-pending="true"]) .team-policy-switch:disabled .fit-word,
+.team-policy-switch[data-policy-locked="true"] .fit-word { opacity: .48; }
+.team-slider input {
+  -webkit-appearance: none; appearance: none;
+  position: relative; inline-size: calc(100% - 2 * var(--team-slider-thumb-inset)); block-size: var(--team-slider-groove-block);
+  margin: 0 var(--team-slider-thumb-inset); padding: 0; border: 0; background: transparent; cursor: inherit;
+}
+.team-slider input:focus-visible { outline: none; }
+/* Engines refuse a whole selector list that names another engine's range
+   pseudo-element, so each pseudo-element keeps its own rule. */
+.team-slider input::-webkit-slider-runnable-track { box-sizing: border-box; block-size: var(--team-slider-groove-block); border: 0; background: transparent; }
+.team-slider input::-moz-range-track { box-sizing: border-box; block-size: var(--team-slider-groove-block); border: 0; background: transparent; }
+.team-slider input::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; box-sizing: border-box;
+  inline-size: var(--team-slider-thumb-inline); block-size: var(--team-slider-thumb-block);
+  margin-block-start: calc((var(--team-slider-groove-block) - var(--team-slider-thumb-block)) / 2);
+  border: 0; border-radius: var(--app-radius-pill); background: transparent;
+}
+.team-slider input::-moz-range-thumb {
+  box-sizing: border-box;
+  inline-size: var(--team-slider-thumb-inline); block-size: var(--team-slider-thumb-block);
+  border: 0; border-radius: var(--app-radius-pill); background: transparent;
+}
+.team-slider:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.team-slider input:disabled { cursor: not-allowed; }
+/* The word rides the thumb inside nine pixels at each rounded end; its 30 × 11 box and TURBO's 26 × 10 box sit within a pixel of one cap height. */
+.team-slider .team-slider-words {
+  position: absolute; inset-block: 0; margin-block: auto;
+  inset-inline-start: calc(var(--team-slider-inset) + var(--team-slider-thumb-inset) + var(--team-slider-position) * (100% - 2 * var(--team-slider-inset) - 2 * var(--team-slider-thumb-inset) - var(--team-slider-thumb-inline)) + 9px);
+  inline-size: calc(var(--team-slider-thumb-inline) - 18px); block-size: calc(var(--team-slider-thumb-block) - 13px);
+  z-index: 1; color: var(--ink); pointer-events: none; transition: inset-inline-start var(--app-motion-settle) var(--app-ease-standard);
+}
+.team-slider-words > span { position: absolute; inset: 0; }
+.team-slider-words .fit-word { inline-size: 100%; block-size: 100%; }
+.team-send {
+  min-width: 6ch;
+  flex: 0 0 var(--team-control-item-height);
+  height: var(--team-control-item-height);
+  min-height: var(--team-control-item-height);
+  padding: 5px 16px;
+  border-radius: var(--app-radius-pill);
+  border-color: color-mix(in srgb, var(--control-state-accent, var(--accent)) 72%, var(--line));
+  background: var(--control-state-accent, var(--accent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--page) 22%, transparent);
+  color: var(--page);
+  font: var(--app-type-copy)/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+/* With no agent running and nothing drafted, the team's knobs step back like
+   an inactive lane without compositing their shared field surface. */
+.team-composer .team-composer-controls > :is(.team-send, .team-turbo, .team-menu, .team-slider),
+.app-spice-sidebar-anchor .app-spice-turbo, .agent-menu > .agent-menu-button {
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard), color var(--app-motion-settle) var(--app-ease-standard), background-color var(--app-motion-settle) var(--app-ease-standard), transform var(--app-motion-fast) var(--app-ease-standard), box-shadow var(--app-motion-fast) var(--app-ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-composer .team-composer-controls > :is(.team-send, .team-turbo, .team-menu, .team-slider),
+  .app-spice-sidebar-anchor .app-spice-turbo, .agent-menu > .agent-menu-button, .team-slider::after, .team-slider .team-slider-words, .team-slider-words > span { transition: none; }
+  :is(.team-composer .team-send, .app-compose-submit) :is(.team-send-full, .team-send-word) { transition: none; }
+  .team-composer :is(.team-policy-switches, .team-policy-switch, .team-policy-switch .fit-word), .team-composer .team-policy-switches .team-policy-switch::before { transition: none; }
+}
+.team-composer .team-composer-controls[data-idle="true"] > :not(.team-send) { opacity: var(--inactive-lane-opacity); }
+.team-composer .team-composer-controls[data-idle="true"] > :is(.team-turbo, .team-menu, .team-slider) { filter: saturate(.55); }
+/* Command previews ring outside SEND, thinner than the recipient bands they frame;
+   broadcast selects its recipient rim without replacing the neutral transmitted-glass face. */
+.team-composer:has(.team-agent[data-accent="0"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-0); }
+.team-composer:has(.team-agent[data-accent="1"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-1); }
+.team-composer:has(.team-agent[data-accent="2"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-2); }
+.team-composer:has(.team-agent[data-accent="3"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-3); }
+.team-composer:has(.team-agent[data-accent="4"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-4); }
+.team-composer:has(.team-agent[data-accent="5"] textarea:focus) .team-send { --team-send-command-accent: var(--accent-5); }
+/* A broadcast reaches every occupied recipient at once, so its command ring is
+   their accent light combined: the theme's ink signal, near white on dark glass
+   and near black on light glass, rather than any one accent. */
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .team-composer:has(.composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus) .team-send { --team-send-command-accent: var(--ink); --team-send-command-ring: 0 0 0 var(--team-send-command-ring-width) var(--team-send-command-accent); }
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .team-composer:has(.composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus) .team-send::after { background: var(--team-send-broadcast-rim, transparent); }
+html[data-command-modifier-held="true"] .team-composer:has(.composer-shard--primary[data-command-submit-eligible="true"] textarea:focus) .team-send:not(:disabled) { --team-send-command-ring: 0 0 0 var(--team-send-command-ring-width) var(--team-send-command-accent); }
+/* The global composer rings Send/Create alike; with Shift only an Ask broadcasts. */
+html[data-command-modifier-held="true"]:not([data-shift-modifier-held="true"]) .app-compose-dialog:focus-within .app-compose-submit[data-lit="true"]:not(:disabled) { --app-compose-command-ring: 0 0 0 var(--team-send-command-ring-width) var(--focus); }
+/* Ask is intentionally achromatic, but its ordinary command cue keeps the
+   same semantic blue as FULL; work modes retain their kind-owned focus. */
+html[data-command-modifier-held="true"]:not([data-shift-modifier-held="true"]) .app-compose-entry[data-base-flavor="neutral"] .app-compose-dialog:focus-within .app-compose-submit[data-lit="true"]:not(:disabled) { --app-compose-command-ring: 0 0 0 var(--team-send-command-ring-width) var(--app-semantic-focus); }
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .app-compose-dialog:focus-within .app-compose-submit[data-lit="true"]:not(:disabled):has(> .team-send-label) { --app-compose-command-ring: 0 0 0 var(--team-send-command-ring-width) var(--ink); }
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .team-composer:has(.composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus) .team-send-label,
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .app-compose-dialog:focus-within .app-compose-submit .team-send-label { --team-send-full-opacity: 0; --team-send-full-scale: 0; --team-send-word-offset: 0ch; --team-send-word-scale: 1; }
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .team-composer:has(.composer-shard--primary[data-broadcast-source-eligible="true"] textarea:focus) .team-send[data-full-broadcast="true"] .team-send-label,
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .app-compose-dialog:focus-within .app-compose-submit[data-full-broadcast="true"] .team-send-label { --team-send-full-opacity: 1; --team-send-full-scale: .5; --team-send-word-offset: 2ch; --team-send-word-scale: .5; }
+html[data-command-modifier-held="true"]:not([data-shift-modifier-held="true"]) .work-note-composer:has(textarea:focus) .team-send:not([value="close"]):not(:disabled),
+html[data-command-modifier-held="true"][data-shift-modifier-held="true"] .work-note-composer:has(textarea:focus) .team-send[value="close"]:not(:disabled) { box-shadow: inset 0 0 0 3px var(--focus); }
+/* A narrow viewport trims button inline padding rather than letting controls
+   crowd the agent cards; the draft keeps its standard near-square block. */
+@media (max-width: 720px) {
+  .team-send { padding: 5px 8px; }
+}

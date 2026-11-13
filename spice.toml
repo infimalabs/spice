@@ -1,0 +1,143 @@
+# Tracked repository policy. Every active entry is admitted through Spice's
+# typed configuration registry and compiled Gate.
+
+[wrappers]
+# Agent-authored `spice` commands stay on the repository-local appliance.
+# The runtime resolves this declarative reference beneath the Git-common
+# directory and refuses redirected, escaping, or non-executable installed
+# commands.
+spice = "appliance"
+
+[vendor.omp]
+# OMP lanes merge `.omp/lsp.json` into its built-in workspace server
+# definitions; each lane keeps the selected server in its supervised process.
+lsp = true
+
+[judge]
+# Adjudicate maxim trigger candidates before they become lane direction.
+enabled = true
+
+
+[policy]
+# The installed hook reaches this source tree's current gate through the
+# exact Git-common appliance and its private dev-Cargo lifecycle rather than
+# ambient Cargo. The configured-command trust boundary keeps this exact argv
+# inert until an operator grants the digest of these tracked bytes.
+pre_commit_builtins = false
+pre_commit = [
+    { label = "Spice source gate", run = ["spice", "dev", "cargo", "--", "run", "--quiet", "--locked", "--package", "spice", "--bin", "spice", "--", "gate", "selection"] },
+]
+
+# The native Git publisher runs this cheap repository load over every
+# synthesized integration before it can reach the shared baseline.
+admission = [
+    "cargo", "metadata", "--no-deps", "--offline", "--format-version", "1",
+]
+
+# Installed packaged gates run no test process unless the repository names a
+# compiled engine. This source enables the canonical Cargo workspace selector;
+# repository data cannot replace its executable or argument contract.
+test_engines = ["cargo-workspace"]
+
+# Upstream-generated Mermaid 12.0.0 ESM and its generated provenance index.
+# The handwritten renderer-000.mjs bridge and every license remain measured.
+# Exact upstream members and checksums: app/renderer/renderer-000.txt.
+generated_paths = [
+    "app/renderer/renderer-00[1-9].mjs",
+    "app/renderer/renderer-0[1-9][0-9].mjs",
+    "app/renderer/renderer-10[0-5].mjs",
+    "app/renderer/renderer-000.txt",
+]
+
+# Environment names referenced by the current product, build, and gate
+# surfaces. Foreign names remain listed because Gate accounts every reference,
+# but Doctor reports only the typed Spice-owned subset. Selected-tree tests
+# receive private writable and shared-output roots; Git and RTK selectors retain
+# their upstream spellings.
+# Keep the environment ledger ordered by serialized name for reviewable diffs.
+env_names = [
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_EDITOR",
+    "RTK_DB_PATH",
+    "SPICE_AGENT_VENDOR",
+    "SPICE_APP_SOURCE_IDENTITY",
+    "SPICE_BOOTSTRAP_CARGO_HOME",
+    "SPICE_DAEMON_HANDOFF",
+    "SPICE_HOSTED_STAGE",
+    "SPICE_HOSTED_VENDOR",
+    "SPICE_INSTALL_TEST_EXECUTABLE",
+    "SPICE_LANE",
+    "SPICE_NATIVE_CARGO",
+    "SPICE_NATIVE_PINS",
+    "SPICE_NATIVE_RUSTC",
+    "SPICE_NATIVE_RUSTDOC",
+    "SPICE_PRE_COMMIT_PATHS",
+    "SPICE_PRE_COMMIT_SOURCE",
+    "SPICE_RTK_EXECUTABLE",
+    "SPICE_SESSION",
+    "SPICE_SOURCE_ARCHIVE",
+    "SPICE_WORKSPACE_TEST_WRITABLE_ROOT",
+    "SPICE_WRAPPER_SPICE",
+]
+
+# Which files the shape arm measures lines and bytes over.
+#
+# Nothing packages a fallback for this. An arm offered no paths reports a clean
+# family over nothing, which reads exactly like a repository that passed, so the
+# selection is declared here or the document refuses to load. The inventory is
+# the complete set Gate measures in this repository; a shorter list would not
+# tighten the gate, it would silently stop measuring
+# whatever it dropped.
+[policy.file_shape]
+source_suffixes = [
+    ".astro", ".bash", ".c", ".cc", ".cjs", ".cpp", ".cs", ".css", ".cts",
+    ".go", ".h", ".hpp", ".html", ".java", ".js", ".json", ".jsx", ".kt",
+    ".less", ".lua", ".m", ".md", ".mjs", ".mm", ".mts", ".php", ".ps1",
+    ".py", ".pyi", ".rb", ".rs", ".rst", ".sass", ".scala", ".scss", ".sh",
+    ".sql", ".svelte", ".swift", ".toml", ".ts", ".tsx", ".txt", ".vue",
+    ".xml", ".yaml", ".yml", ".zsh",
+]
+
+# Which files each language arm reads.
+#
+# These are two selections rather than one because they are genuinely different
+# sets. `complexity` preserves the repository's routine-language selection; the
+# compiled arm measures suffixes with a vendored grammar and names every other
+# selected suffix as unsupported. `magic` compares literals against a baseline
+# through a C-family grammar, and a language that grammar cannot parse exactly
+# would have every literal in it read as a regression.
+[policy.languages]
+complexity = [
+    ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt",
+    ".lua", ".m", ".mm", ".php", ".py", ".rb", ".rs", ".scala", ".swift",
+    ".ts",
+]
+magic = [
+    ".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".kt",
+    ".m", ".mm", ".py", ".rs", ".scala", ".swift", ".ts",
+]
+
+[taste.polling]
+words = ["delay", "delays", "delayed", "delaying", "poll", "polls", "polled", "polling", "sleep", "sleeps", "sleeping", "slept"]
+message = "Respond to the real event, signal, or completion notification through a blocking call, watcher, or callback, or restructure the flow so nothing remains to await."
+
+[taste.fallbacks]
+words = ["fall back", "fall backs", "fallback", "fallbacks", "falls back"]
+message = "Keep one deterministic path and let violated assumptions refuse immediately. Add a default or resolver order only when the contract names it."
+
+[taste.compatibility]
+words = ["compatible", "compatibility", "compatibilities", "compatibly"]
+message = "Keep one tested, visible current path. Migrate retained data forward once or refuse naming its owning release; never accumulate release-specific execution arms."
+
+[taste.shims]
+words = ["shim", "shimmed", "shimming", "shims"]
+message = "Replace the old shape outright, delete it, and route every caller to the current interface."
+
+[taste.aliases]
+words = ["alias", "aliases", "aliased", "aliasing"]
+message = "Rename in place, update every reference in one change, and leave exactly one name."
+
+[taste.legacy]
+words = ["legacy", "legacies"]
+message = "Treat old implementations as evidence, never as executable arms. Migrate retained data forward once or refuse naming its owning release."

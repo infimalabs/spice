@@ -1,0 +1,434 @@
+/* The live team is one dense surface. Its dimensions deliberately follow the
+   supplied 1000 × 568 reference: compact global chrome, one fixed team header,
+   four simultaneous standings and their always-mounted Chat columns. */
+.commandbar--mosaic {
+  min-height: var(--app-commandbar-block-size);
+  gap: 7px;
+  padding-block: var(--app-commandbar-block-pad);
+  padding-inline: var(--app-commandbar-inset-start) var(--app-commandbar-inset-end);
+  background: var(--page);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.shell {
+  /* SPICE and the composer's TURBO button share one round-control diameter. */
+  --app-round-control-size: 32px;
+  --app-header-control: var(--app-round-control-size);
+  --app-team-control-inline-size: 80px;
+  --app-shell-edge-inline: 10px;
+  --app-shell-edge-start: calc(var(--app-shell-edge-inline) + env(safe-area-inset-left, 0px));
+  --app-shell-edge-end: calc(var(--app-shell-edge-inline) + env(safe-area-inset-right, 0px));
+  --app-commandbar-inline-pad: 18px;
+  /* The native window's own controls stand in the header: macOS's traffic
+     lights at its leading edge, the Windows shell's caption buttons at its
+     trailing edge. Only that shell publishes their width, so the browser
+     reserves nothing. */
+  --app-commandbar-inset-start: calc(var(--app-shell-edge-start) + var(--app-titlebar-inset-start, 0px));
+  --app-commandbar-inset-end: calc(var(--app-shell-edge-end) + var(--app-titlebar-inset-end, 0px));
+  /* The trigger clears the window's top edge and the rising team tabs by two
+     message-rail widths each; no tab row hangs above it any longer. */
+  --app-spice-tab-clearance: calc(2 * var(--message-rail));
+  --app-commandbar-block-pad: var(--app-spice-tab-clearance);
+  --app-commandbar-block-size: calc(var(--app-header-control) + 2 * var(--app-commandbar-block-pad));
+  --app-commandbar-gap: var(--app-spice-side-gap);
+  /* The trigger centers over the composer-control column, level with the
+     command bar's one content row. */
+  --app-spice-anchor-inset-block: var(--app-commandbar-block-pad);
+  /* The weekly percentage hangs this far under the open view's Spice button,
+     within the header's foot: the band beneath the round controls that also
+     holds the status line, which fixes the header's height. */
+  --app-spice-capacity-gap: 6px;
+  --app-spice-header-foot: calc(var(--app-type-control) + 8px);
+  /* The launcher stands this far from the window edge, and as far from the
+     Design total before it. */
+  --app-spice-side-gap: calc((var(--app-team-control-inline-size) - var(--app-header-control)) / 2);
+  --app-spice-anchor-inset-inline: calc(var(--app-spice-side-gap) + env(safe-area-inset-right, 0px) + var(--app-titlebar-inset-end, 0px));
+  /* The open Spice view's sections stand off the view's edges by this inset. */
+  --app-spice-section-inset-inline: 22px;
+  --team-surface-min-inline: 20em;
+  /* The open view's anchor holds the theme selector, then TURBO, then the
+     Spice button, each this far from the next. Beside the Windows caption
+     buttons the whole anchor moves with the Spice button. */
+  --app-theme-selector-inline-size: 88px;
+  --app-spice-anchor-gap: 12px;
+  --app-spice-anchor-inline-size: calc(var(--app-theme-selector-inline-size) + var(--app-round-control-size) + var(--app-header-control) + 2 * var(--app-spice-anchor-gap));
+  /* The open view's header keeps its text this far from its end, clear of the
+     anchor. */
+  --app-spice-header-reserve: calc(var(--app-spice-anchor-inset-inline) + var(--app-spice-anchor-inline-size) + 20px);
+  /* The open view's status line runs this far past the header's text room,
+     under the theme selector and TURBO, ending short of the Spice button. */
+  --app-spice-status-overhang: calc(var(--app-spice-header-reserve) - var(--app-spice-anchor-inset-inline) - var(--app-header-control) - 8px);
+  /* Between stream lanes, and between task tabs, global or team-local. */
+  --mosaic-gap: 9px;
+}
+
+html:has(.shell),
+body:has(.shell),
+#app:has(> .shell) {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell {
+  position: fixed;
+  inset: 0;
+  height: 100vh;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.app-commandbar-content {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) auto var(--app-header-control);
+  align-items: center;
+  gap: var(--app-commandbar-gap);
+  min-width: 0;
+  height: var(--app-header-control);
+  min-height: var(--app-header-control);
+  max-height: var(--app-header-control);
+  padding: 0;
+  border-radius: var(--app-radius-element);
+}
+
+/* The global totals fuse into one strip hanging from the command bar's top
+   edge immediately before the Spice launcher. They use the same horn-tab
+   material as team and group totals, with one continuous bottom rail and only
+   the strip's outside corners rounded. The Design total stands off the
+   launcher by the launcher's own side gap, so the launcher reads centered
+   between the tabs and the window edge. The launcher is absolutely positioned
+   past the grid's nominal launcher column, so the totals end that side gap
+   short of the launcher's inset rather than at the column's end. */
+.app-work-totals {
+  /* Each total keeps the team and group total footprint: half the team
+     control column. */
+  --app-total-tab-inline-size: calc(var(--app-team-control-inline-size) / 2);
+  display: flex;
+  grid-area: 1 / 2;
+  align-self: start;
+  gap: 0;
+  margin-block-start: calc(-1 * var(--app-commandbar-block-pad));
+  margin-inline-end: calc(var(--app-spice-anchor-inset-inline) + var(--app-spice-side-gap) - var(--app-commandbar-inset-end) - var(--app-commandbar-gap));
+}
+.app-work-totals > .app-horn-tab { border-radius: 0; }
+.app-work-totals > .app-horn-tab:first-child { border-end-start-radius: var(--app-radius-card); }
+.app-work-totals > .app-horn-tab:last-child { border-end-end-radius: var(--app-radius-card); }
+.app-work-totals:empty { display: none; }
+.app-spice-button,
+.app-compose-dialog {
+  --app-spice-edge: var(--accent-slot, var(--line));
+  --app-spice-rest-border: color-mix(in srgb, var(--app-spice-edge) 68%, var(--line));
+  --app-spice-border: var(--app-spice-rest-border);
+  --app-spice-flush-face: linear-gradient(145deg, color-mix(in srgb, var(--app-highlight-source) 8.5%, transparent), color-mix(in srgb, var(--app-highlight-source) 2%, transparent));
+  --app-spice-surface: var(--app-spice-flush-face);
+  --app-spice-rest: inset 0 1px 0 color-mix(in srgb, var(--app-highlight-source) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--app-highlight-source) 8%, transparent);
+  --app-spice-contact: inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent), inset 0 -1px 1px color-mix(in srgb, var(--app-highlight-source) 60%, transparent);
+}
+.app-spice-button {
+  position: relative;
+  display: grid;
+  flex: 0 0 var(--app-header-control);
+  grid-row: 1;
+  grid-column: -2;
+  width: var(--app-header-control);
+  min-width: var(--app-header-control);
+  max-width: var(--app-header-control);
+  height: var(--app-header-control);
+  min-height: var(--app-header-control);
+  max-height: var(--app-header-control);
+  padding: 0;
+  /* One cell exactly the content box: the doubled pepper is wider than it
+     wherever the emoji font advances past 1em (Noto Color Emoji on Android),
+     and an auto track would widen with it and carry the well past the rim. */
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  border: var(--app-focus-ring-width) solid var(--app-spice-border);
+  border-radius: var(--app-radius-circle);
+  background: var(--app-spice-surface);
+  color: var(--ink);
+  box-shadow: var(--app-spice-rest);
+  transition: transform var(--app-motion-fast) var(--app-ease-standard), background var(--app-motion-fast) var(--app-ease-standard), box-shadow var(--app-motion-fast) var(--app-ease-standard), border-color var(--app-motion-fast) var(--app-ease-standard);
+  cursor: pointer;
+}
+.commandbar--mosaic .app-commandbar-content > .app-spice-button {
+  position: absolute;
+  top: var(--app-spice-anchor-inset-block);
+  inset-inline-end: var(--app-spice-anchor-inset-inline);
+}
+.app-spice-button:hover,
+.app-spice-button:focus-visible {
+  --app-spice-border: var(--app-spice-rest-border);
+  --app-spice-surface: var(--app-spice-flush-face);
+  border-color: var(--app-spice-border);
+  background: var(--app-spice-surface);
+  box-shadow: var(--app-spice-rest);
+}
+.app-spice-button[aria-expanded="true"] {
+  --app-spice-surface: linear-gradient(145deg, color-mix(in srgb, var(--app-highlight-source) 12%, transparent), color-mix(in srgb, var(--app-highlight-source) 4%, transparent));
+  --app-spice-border: var(--app-spice-edge);
+  border-color: var(--app-spice-border);
+  background: var(--app-spice-surface);
+  box-shadow: var(--app-spice-rest);
+}
+.app-spice-button:active {
+  transform: translateY(1.5px);
+  border-color: var(--app-spice-border);
+  background: var(--app-spice-surface);
+  box-shadow: var(--app-spice-contact);
+}
+.app-spice-well {
+  grid-area: 1 / 1;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--app-radius-pill);
+  background: var(--page);
+}
+/* Spent quota is the well above the account layers. A faint neutral hatch
+   distinguishes it in either theme without reading as an account layer. */
+.app-spice-well:has(> .app-spice-quota-well) {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ink) 14%, var(--page)) 0 1px,
+    color-mix(in srgb, var(--ink) 6%, var(--page)) 1px 3px
+  );
+}
+/* Color emoji fonts optically enlarge glyphs below about 24px, and engines
+   apply that at CSS size (WebKit) or device size (Blink), so a 15px pepper
+   drew 19px off-center in the native app. Drawing at twice the size, where
+   ink matches the em, then halving it renders one centered glyph everywhere. */
+.app-spice-pepper {
+  --app-pepper-halo: drop-shadow(0 0 2px var(--page)) drop-shadow(0 0 2px var(--page));
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji;
+  font-size: calc(2 * var(--app-type-menu-icon));
+  line-height: 1;
+  scale: .5;
+  filter: var(--app-pepper-halo);
+}
+.app-spice-quota-well { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.app-spice-quota-account { fill: var(--accent-slot); stroke: none; }
+.app-spice-button[data-quota-stale] .app-spice-quota-account { filter: saturate(.35); }
+/* Messages waiting in the operator's inbox wear a small neutral status dot.
+   Its center sits just outside the round button's rim at 45 degrees: absolute
+   positioning uses the button's inner padding edge, so the negative inset
+   accounts for the two-pixel border and favors separation from the pepper. */
+.app-spice-button[data-inbox-waiting]::after {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  z-index: 2;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--app-radius-circle);
+  background: var(--muted);
+  box-shadow: 0 0 0 2px var(--panel);
+  content: "";
+}
+.app-spice-button:not([data-accent]):is([data-connection="starting"], [data-connection="connecting"]) {
+  --app-spice-edge: var(--focus);
+}
+.app-spice-button:not([data-accent])[data-connection="reconnecting"] {
+  --app-spice-edge: var(--warning);
+}
+.app-spice-button:not([data-connection="online"]) .app-spice-pepper { filter: grayscale(1) var(--app-pepper-halo); }
+.app-spice-button:is([data-connection="starting"], [data-connection="connecting"], [data-connection="reconnecting"]) .app-spice-pepper {
+  animation: app-fast-mode-pulse var(--app-motion-pulse) ease-in-out infinite;
+}
+@keyframes app-fast-mode-pulse { 0%, 100% { opacity: 0; } 45% { opacity: .92; } }
+@media (prefers-reduced-motion: reduce) {
+  .app-spice-button:is([data-connection="starting"], [data-connection="connecting"], [data-connection="reconnecting"]) .app-spice-pepper {
+    animation: none;
+  }
+}
+/* Lane menu controls: each packed set is one joined rail whose controls grow
+   to share their row, so no row ends in dead space. */
+.member-controls {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.member-controls[aria-busy="true"] { cursor: progress; }
+.member-confirm > summary { display: flex; border: 0; border-radius: 0; list-style: none; }
+.member-confirm > summary::-webkit-details-marker { display: none; }
+.member-confirm[open] { flex-basis: 100%; }
+/* An open prompt seats its question over its action, divided like the
+   composer's sliders over its send button. */
+.member-confirm-body { display: grid; border-top: var(--app-control-edge); }
+.member-confirm-body p { margin: 0; padding: 5px 7px; overflow-wrap: anywhere; }
+.member-confirm-body > .agent-menu-action { border: 0; border-top: var(--app-control-edge); border-radius: 0; }
+.member-refusal {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+.member-model,
+.member-effort,
+.member-fast {
+  display: grid;
+  gap: 4px;
+}
+.member-model label,
+.member-effort label {
+  color: var(--muted);
+  font-size: var(--app-type-compact);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+/* The model field keeps a usable width; its buttons wrap beneath it first. */
+.member-model input { flex-basis: 8em; }
+/* A held leave lists the unsent work that held it, over the workspace and
+   beneath the command bar, until the operator dismisses it. */
+.unsent-work {
+  position: fixed;
+  inset-block-start: calc(var(--app-commandbar-block-size) + var(--mosaic-gap));
+  inset-inline: var(--app-shell-edge-start) var(--app-shell-edge-end);
+  z-index: 11;
+  display: grid;
+  gap: 8px;
+  width: fit-content;
+  max-width: min(36rem, 100% - var(--app-shell-edge-start) - var(--app-shell-edge-end));
+  margin-inline: auto;
+  padding: 10px 14px;
+  font-size: var(--app-type-toast);
+}
+.unsent-work-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.unsent-work-header h2 { margin: 0; font-size: var(--app-type-section); }
+.unsent-work-items { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.unsent-work-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: center;
+}
+.unsent-work-excerpt {
+  grid-column: 1;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.unsent-work-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
+
+/* The help sheet: one centered overlay panel on the shared frosted veil.
+   Sheet and veil fade together like the sidebar; the fade's end closes it. */
+.app-help[open] {
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  overflow: hidden;
+}
+.app-help-sheet,
+.app-help::backdrop { transition: var(--app-side-view-fade); }
+@media (prefers-reduced-motion: no-preference) {
+  .app-help[data-presented="false"] .app-help-sheet,
+  .app-help[data-presented="false"]::backdrop { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-help-sheet,
+  .app-help::backdrop { transition: none; }
+}
+.app-help-sheet {
+  box-sizing: border-box;
+  width: min(52rem, 100%);
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 22px 22px;
+  border: var(--app-edge);
+  border-radius: var(--app-radius-overlay);
+  box-shadow: var(--shadow);
+}
+.app-help-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.app-help-header h2 { margin: 0; font-size: var(--app-type-section); }
+.app-help-places {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+  gap: 8px;
+  margin-block: 14px 18px;
+}
+.app-help-place {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: var(--app-edge);
+  border-radius: var(--app-radius-compact);
+  color: var(--ink);
+  text-decoration: none;
+}
+.app-help-place > span { color: var(--muted); font-size: var(--app-type-caption); }
+.app-help-place:hover { border-color: var(--accent); }
+.app-help-place:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: 2px; }
+.app-help-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: 18px 28px;
+  align-items: start;
+}
+.app-help-section { min-width: 0; }
+.app-help-section h3 {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: var(--app-type-kicker);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+/* Rows share one key column per section, as wide as its longest keys. */
+.app-help-section dl {
+  display: grid;
+  grid-template-columns: fit-content(50%) minmax(0, 1fr);
+  gap: 6px 14px;
+  align-items: baseline;
+  margin: 0;
+}
+.app-help-row { display: contents; }
+.app-help-row dt { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; min-width: 0; }
+.app-help-row dd { margin: 0; min-width: 0; color: var(--ink); font-size: var(--app-type-body); line-height: 1.4; overflow-wrap: anywhere; }
+.app-help-combination { display: inline-flex; gap: 2px; align-items: baseline; white-space: nowrap; }
+.app-help-join,
+.app-help-or { color: var(--muted); font-size: var(--app-type-caption); }
+.app-help kbd {
+  padding: 1px 6px;
+  border: var(--app-control-edge-width) solid var(--line-soft);
+  border-radius: var(--app-radius-micro);
+  background: var(--control);
+  color: var(--ink);
+  font: var(--app-type-caption)/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (max-width: 520px) {
+  .app-help-sheet { padding: 14px 14px 18px; }
+  .app-help-section dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .app-help-row dd { margin-block-end: 6px; }
+}
+.app-help-modes { --app-segment-count: 2; margin-block: 14px; width: fit-content; }
+.app-documents[hidden] { display: none; }
+.app-documents[aria-busy="true"] { cursor: progress; }
+.app-documents-navigation { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-block-end: 14px; }
+.app-documents-history { display: flex; gap: 4px; }
+.app-documents-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0; margin: 0; list-style: none; }
+.app-documents-breadcrumbs li + li::before { content: "/"; color: var(--muted); margin-inline-end: 4px; }
+.app-documents-breadcrumbs button { overflow-wrap: anywhere; }
+.app-documents-entries { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr)); gap: 8px; padding: 0; list-style: none; }
+.app-documents-entries .app-help-place { width: 100%; text-align: start; overflow-wrap: anywhere; }
+.app-documents-entries small { color: var(--muted); }
+.app-documents-content { min-width: 0; overflow-wrap: anywhere; }
+.app-documents-content pre { overflow: auto; }
+.app-documents-content table { display: block; overflow: auto; }
+.app-documents-image { max-width: 100%; height: auto; }
+.app-documents-text { white-space: pre-wrap; }
+.app-documents-issue { display: flex; align-items: baseline; gap: 12px; color: var(--danger); overflow-wrap: anywhere; }
+.app-documents-issue button { flex: none; white-space: nowrap; }

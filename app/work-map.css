@@ -1,0 +1,263 @@
+/* Dynamic Work graph: controls, viewport, overlays, and relationship evidence. */
+/* The relationship graph is the Work list's map, not a second task surface.
+   It retains the historical lenses, bounded enrichment, native pan/zoom, and
+   lifecycle vocabulary while the accordion below owns all task detail. */
+.work-surface {
+  min-width: 0;
+  --work-in-flight: var(--app-semantic-live);
+  --work-waiting: var(--accent);
+  --work-ready: var(--focus);
+  --work-blocked: var(--danger);
+  --work-selection: var(--warning);
+  --work-deferred: var(--warning);
+  --work-terminal: var(--muted);
+  --work-completed: var(--app-semantic-live);
+  --work-deleted: var(--danger);
+}
+.work-map-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px 16px 20px;
+  border-bottom: var(--app-edge);
+}
+.work-map-primary-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.work-map-lenses { width: fit-content; max-width: 100%; }
+.work-map-lenses button,
+.work-map-control-group button {
+  min-height: 36px;
+  background: transparent;
+}
+.work-map-lenses button { padding: 6px 11px; font-size: var(--app-type-label); }
+.work-map-lenses button[aria-pressed="true"],
+.work-map-control-group button.active {
+  border-color: transparent;
+  background: var(--control);
+  color: var(--ink);
+  box-shadow: var(--app-selection-shadow);
+}
+.work-map-context { margin: 0; color: var(--muted); font-size: var(--app-type-detail); }
+.work-map-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.work-map-control-group { display: inline-flex; }
+.work-map-control-group button {
+  min-height: 36px;
+  padding: 5px 9px;
+  background: transparent;
+  font-size: var(--app-type-meta);
+}
+.work-map-depth span {
+  display: grid;
+  place-items: center;
+  padding-inline: 5px;
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+  white-space: nowrap;
+}
+.work-map-direction { margin-left: auto; }
+.work-map-bounds {
+  margin: 0 0 0 auto;
+  color: var(--muted);
+  font-size: var(--app-type-meta);
+}
+.work-map-empty {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-inset);
+  background: var(--control-surface-soft);
+  color: var(--muted);
+  font-size: var(--app-type-control);
+}
+.work-map-empty strong { color: var(--ink); }
+.work-map-list {
+  min-width: 0;
+  padding: 18px 0 0;
+  border-top: var(--app-edge-soft);
+}
+.work-map-list-scroll {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  block-size: clamp(14rem, 36vh, 24rem);
+  overflow-y: auto;
+}
+.work-map-list-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.work-map-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 11px;
+}
+.work-map-heading h3 { margin: 0; font-size: var(--app-type-section); }
+.work-map-heading > span { color: var(--muted); font-size: var(--app-type-sm); text-align: right; }
+.work-map-canvas { position: relative; min-width: 0; }
+.work-map-viewport {
+  --work-map-cap: clamp(18rem, 42vh, 28rem);
+  position: relative;
+  height: min(var(--work-map-cap), var(--work-map-content-block, var(--work-map-cap)));
+  overflow: auto;
+  scrollbar-width: none;
+  touch-action: pan-x pan-y;
+  user-select: none;
+  border-radius: var(--app-radius-inset);
+}
+.work-map-viewport::-webkit-scrollbar { display: none; }
+.work-map-viewport:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.work-map-viewport[data-work-map-zoomed="true"] { cursor: grab; }
+.work-map-viewport[data-work-map-dragging="true"] { cursor: grabbing; }
+.work-map-viewport .mermaid-render {
+  width: var(--work-map-stage-inline, 100%);
+  height: var(--work-map-stage-block, 100%);
+  min-height: 0;
+}
+.work-map-viewport .mermaid-render > .message-image {
+  --message-image-size: 100%;
+  position: absolute;
+  left: var(--work-map-offset-inline, 0px);
+  top: var(--work-map-offset-block, 0px);
+  width: var(--work-map-drawn-inline, 100%);
+  min-width: 0;
+  height: var(--work-map-drawn-block, 100%);
+}
+.work-map-viewport .mermaid-render > .message-image img {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.work-map-node-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.work-map-node-button {
+  --work-card-tone: var(--work-terminal);
+  position: absolute;
+  pointer-events: auto;
+  min-height: 0;
+  padding: 0;
+  left: calc(var(--work-map-offset-inline, 0px) + var(--map-node-x) * var(--work-map-scale) * 1px);
+  top: calc(var(--work-map-offset-block, 0px) + var(--map-node-y) * var(--work-map-scale) * 1px);
+  width: calc(var(--map-node-width) * var(--work-map-scale) * 1px);
+  height: calc(var(--map-node-height) * var(--work-map-scale) * 1px);
+  border: var(--app-focus-ring-width) solid color-mix(in srgb, var(--work-card-tone) 65%, transparent);
+  border-radius: var(--app-radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+.work-map-node-button[data-work-availability="in-flight"] { --work-card-tone: var(--work-in-flight); }
+.work-map-node-button[data-work-availability="ready"],
+.work-map-node-button[data-work-availability="review"],
+.work-map-node-button[data-work-availability="stale"] { --work-card-tone: var(--work-ready); }
+.work-map-node-button[data-work-availability="blocked"],
+.work-map-node-button[data-work-availability="held"] { --work-card-tone: var(--work-blocked); }
+.work-map-node-button[data-work-availability="waiting"],
+.work-map-node-button[data-work-availability="passive"] { --work-card-tone: var(--work-waiting); }
+.work-map-node-button[data-work-availability="waiting"] { border-style: dotted; }
+.work-map-node-button[data-work-availability="selection"] { --work-card-tone: var(--work-selection); }
+.work-map-node-button[data-work-availability="deferred"] { --work-card-tone: var(--work-deferred); }
+.work-map-node-button[data-work-disposition="completed"] { --work-card-tone: var(--work-completed); }
+.work-map-node-button[data-work-disposition="deleted"] {
+  --work-card-tone: var(--work-deleted);
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--work-card-tone) 35%, var(--line));
+  background: color-mix(in srgb, var(--panel) 50%, transparent);
+}
+/* A Design ready for a pass wears the live tone its tab mark carries. */
+.work-map-node-button[data-work-mark="pass"] { --work-card-tone: var(--app-semantic-live); }
+.work-map-node-button[data-work-state]::after {
+  content: attr(data-work-state);
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 2px 6px;
+  white-space: nowrap;
+  border: var(--app-control-edge-width) solid color-mix(in srgb, var(--work-card-tone) 45%, var(--line));
+  border-radius: var(--app-radius-pill);
+  background: var(--panel);
+  color: var(--work-card-tone);
+  font: 750 var(--app-type-micro)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.work-map-node-button[data-work-availability="waiting"]::after {
+  border-width: var(--app-focus-ring-width);
+  border-style: dotted;
+}
+.work-map-node-button[data-work-availability="terminal"]:not([data-work-disposition])::after {
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 600;
+}
+.work-map-node-button[data-work-disposition="deleted"]::after {
+  border-style: dashed;
+  border-color: var(--line);
+  color: color-mix(in srgb, var(--work-card-tone) 50%, var(--muted));
+  font-weight: 600;
+}
+.work-map-node-button:hover,
+.work-map-node-button:focus-visible {
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--work-card-tone) 9%, transparent);
+}
+.work-map-node-button:focus-visible {
+  outline: var(--app-focus-ring-strong-width) solid var(--focus);
+  outline-offset: -3px;
+}
+.work-map-node-button[data-task-selected="true"] { border-width: var(--app-focus-ring-strong-width); }
+.work-map-fact-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.work-map-fact {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 10px;
+  border-radius: var(--app-radius-element);
+  background: var(--control-surface-soft);
+  text-align: left;
+}
+.work-map-fact span { color: var(--accent); font-size: var(--app-type-xs); text-transform: uppercase; }
+.work-map-fact strong,
+.work-map-fact small { max-width: 100%; overflow-wrap: anywhere; }
+.work-map-fact small { color: var(--muted); }
+.work-map-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.work-map-budget .work-map-bounds { margin: 0; }
+.work-map-problem {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px 22px;
+  text-align: center;
+}
+.work-map-problem :is(h4, p) { margin: 0; }
+.work-map-problem p { color: var(--danger); }
+.work-map-retry {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+}

@@ -1,0 +1,23 @@
+# A machine-level Cargo configuration may move `build.build-dir` into a
+# shared cache hierarchy. Cargo 1.97.1 identifies a build that is using one of
+# those roots by holding `<build-dir>/<profile>/.cargo-build-lock`; an external
+# cleaner must enumerate those files and skip the whole root when any lock is
+# held. An operator can observe the holder with `lsof <lock>`, and a collector
+# can attempt a nonblocking exclusive file lock. `CACHEDIR.TAG` is permanent
+# and means "cache", not "idle". Cargo's own stable automatic collection
+# manages caches under `CARGO_HOME` and visits no build-dir, so it does not
+# supply that external-cleaner check. (`cargo clean gc` is still nightly-only.)
+[build]
+# Workspace validation runs the compiler directly. A machine-level sccache
+# daemon outlives the process groups that bound each gate; when an outer gate
+# deadline interrupted one compile, its cache client survived as a zero-CPU
+# orphan and later focused Cargo commands stopped behind that shared path.
+# Cargo's per-worktree build directory retains warm artifacts without putting
+# a daemon outside the command's completion boundary.
+rustc-wrapper = ""
+
+[alias]
+# Keep the change-local app compiler check on the app's Wasm unit graph.
+# Routing this through the native xtask graph before the package-scoped command
+# would add unrelated host compilation to the app check.
+app-wasm-typecheck = "clippy --locked --package app --target wasm32-unknown-unknown -- -D warnings"

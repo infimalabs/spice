@@ -1,0 +1,41 @@
+[package]
+name = "app"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+serde = "1.0.229"
+thiserror = "2.0.19"
+wire = { path = "../wire" }
+
+# Browser crates are Wasm dependencies. `rust_analyzer` also admits them when
+# the editor's Cargo metadata runs with `--cfg rust_analyzer` in RUSTFLAGS
+# (.omp/lsp.json), so `html!` expands for host analysis of the browser gates.
+# Plain host builds never set that cfg and resolve exactly as before.
+[target.'cfg(any(target_arch = "wasm32", rust_analyzer))'.dependencies]
+base64 = "0.22.1"
+futures-util = "0.3.33"
+futures-channel = "0.3.33"
+gloo-net = "0.6.0"
+gloo-timers = { version = "0.3.0", features = ["futures"] }
+js-sys = "0.3.83"
+serde_json = "1.0.151"
+wasm-bindgen = "0.2.106"
+wasm-bindgen-futures = "0.4.56"
+web-sys = { version = "0.3.83", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "ClipboardEvent", "Crypto", "CssStyleDeclaration", "DataTransfer", "Document", "DocumentFragment", "DomRect", "DragEvent", "Element", "Event", "EventInit", "File", "FileList", "FileReader", "FocusOptions", "History", "HtmlAnchorElement", "HtmlCanvasElement", "HtmlDialogElement", "HtmlElement", "HtmlFormElement", "HtmlIFrameElement", "HtmlImageElement", "HtmlInputElement", "HtmlSelectElement", "HtmlTextAreaElement", "Location", "MediaQueryList", "MessageEvent", "MutationObserver", "MutationObserverInit", "Navigator", "NodeList", "Performance", "PointerEvent", "ProgressEvent", "Range", "ResizeObserver", "Response", "SpeechSynthesis", "SpeechSynthesisUtterance", "SpeechSynthesisVoice", "Storage", "TextMetrics", "Touch", "TouchEvent", "TouchList", "TransitionEvent", "Url", "UrlSearchParams", "VisualViewport", "WheelEvent", "Window"] }
+yew = { version = "0.21.0", features = ["csr"] }
+
+[dev-dependencies]
+futures-channel = "0.3.33"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[lints]
+workspace = true

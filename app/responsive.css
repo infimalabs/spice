@@ -1,0 +1,108 @@
+/* Below the plane's minimum useful block size, the fixed controls and a
+   readable history viewport cannot share one screen. Return that dimension to
+   document flow instead of clipping either surface or inventing a second
+   inner scroller. */
+@media (max-height: 440px) {
+  html:has(.shell),
+  body:has(.shell),
+  #app:has(> .shell) {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+  .shell {
+    position: static;
+    height: auto;
+    min-height: 100vh;
+    width: auto;
+    overflow: visible;
+  }
+  /* Grow into any spare screen, never below content, so the flowed fleet
+     still reaches the viewport's end. */
+  .mosaic-workspace,
+  .mosaic-workspace .content,
+  .team-fleet,
+  .team-pane,
+  .team-compose,
+  .team-activity-grid { flex: 1 0 auto; min-height: auto; }
+  .team-pane > .empty { flex: 1 0 auto; }
+  .lane-mosaic-plane { flex: 1 0 max(12rem, calc(100vh - 20rem)); }
+}
+
+@media (max-width: 900px) {
+  .commandbar { gap: 10px; padding: 8px 12px; }
+  .commandbar--mosaic {
+    gap: 7px;
+    padding-inline: var(--app-commandbar-inset-start) var(--app-commandbar-inset-end);
+  }
+}
+
+@media (max-width: 720px) {
+  .shell { --app-shell-edge-inline: 8px; }
+}
+
+@media (max-width: 560px) {
+  .content { padding: 18px 14px 28px; }
+  .team-toolbar { --team-chamber-inset: 4px; }
+  th, td { padding: 10px; }
+}
+
+@media (max-width: 1180px) {
+  .app-sidebar-layer { --app-side-view-large: 42rem; --app-side-view-gutter: 2rem; }
+}
+
+@media (max-width: 920px) {
+  .app-fact-grid { grid-template-columns: 1fr; }
+  .work-map-fact-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .app-sidebar { width: 100vw; }
+  .shell { --app-spice-section-inset-inline: 14px; }
+  .app-sidebar-header { padding-inline: 14px; }
+  .work-map-content { padding-inline: 14px; }
+  .work-map-lenses { width: 100%; }
+  .work-map-controls { align-items: center; }
+  .work-map-primary-controls .work-map-control-group { width: 100%; }
+  .work-map-controls .work-map-control-group button { min-height: 44px; }
+  .work-map-depth {
+    display: grid;
+    flex: 1 1 auto;
+    grid-template-columns: auto minmax(4.5rem, 1fr) auto;
+  }
+  .work-map-toggle { flex: 0 0 auto; }
+  .work-map-bounds { width: 100%; margin-left: 0; text-align: center; }
+  .work-map-budget { width: 100%; margin-left: 0; justify-content: space-between; }
+  .work-map-budget .work-map-bounds { width: auto; text-align: left; }
+  .work-map-heading { align-items: flex-start; flex-direction: column; }
+  .work-map-heading > span { text-align: left; }
+  .work-map-viewport { --work-map-cap: 18rem; }
+  .work-blocker-card { grid-template-columns: 1fr; }
+  .work-blocker-card > button { width: 100%; }
+  /* A phone row reads in two lines: where it stands, then its title. Every
+     control the list owns keeps a 44px target. */
+  .work-scope-chip,
+  .work-context-chip,
+  .work-filter { min-height: 44px; }
+  .work-context-chip button { min-width: 44px; min-height: 44px; }
+  .work-task-link,
+  .work-view-back { min-height: 44px; }
+  .work-row-head {
+    grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "glyph id phase holder age"
+      ". title title title title";
+    gap: 2px 8px;
+    min-height: 56px;
+    padding: 6px 14px;
+  }
+  .work-row-glyph { grid-area: glyph; }
+  .work-row-id { grid-area: id; }
+  .work-row-title { grid-area: title; }
+  .work-row-phase { grid-area: phase; }
+  .work-row-holder { grid-area: holder; max-width: 8rem; }
+  .work-row-age { grid-area: age; }
+  .app-sidebar-close { min-height: 44px; }
+  .work-columns { display: none; }
+  .work-row-body { padding: 4px 14px 20px; }
+  .work-group-heading { padding-inline: 14px; }
+}
