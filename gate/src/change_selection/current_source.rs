@@ -280,6 +280,7 @@ fn known_workspace_package_root(root: &str) -> bool {
             | "taste"
             | "vendor"
             | "wire"
+            | "windows"
             | "xtask"
     )
 }
