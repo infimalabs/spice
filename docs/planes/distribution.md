@@ -700,12 +700,14 @@ Git first-parent ancestry only selects the exact integrated commit window. The
 window runs from the highest-versioned prior tag reachable from the release
 commit, addressed through its fully qualified tag ref so a same-named branch
 cannot redefine it. With no reachable tag, a bounded window of recent commits
-names that basis.
+names that basis. The repository's true parentless root is the initial release
+boundary rather than a selected landing; commit-object parentage proves that
+identity, so a shallow boundary cannot impersonate it.
 
-**Invariant —** Every selected commit belongs to exactly one contributing task
-landing projected from a durable task Git boundary. Task identity, current title,
-current topic, review standing, and typed correction relationships come from
-journal authority, never from commit subjects, trailers, or revert prose.
+**Invariant —** Every other selected commit belongs to exactly one contributing
+task landing projected from a durable task Git boundary. Task identity, current
+title, current topic, review standing, and typed correction relationships come
+from journal authority, never from commit subjects, trailers, or revert prose.
 Missing or ambiguous typed authority refuses before draft or release mutation.
 
 **Invariant —** Landings sharing a task collapse into one entry at the task's

@@ -56,7 +56,10 @@ fn draft_with_release(
     let previous_tag = reachable_tags(root, &history_commit)?
         .into_iter()
         .find(|tag| tag != &current_tag);
-    let window = first_parent_commits(root, previous_tag.as_deref(), &history_commit, true)?;
+    let mut window = first_parent_commits(root, previous_tag.as_deref(), &history_commit, true)?;
+    if previous_tag.is_none() {
+        exclude_parentless_root(root, &mut window)?;
+    }
     let ancestry = first_parent_commits(root, None, &history_commit, false)?
         .into_iter()
         .collect::<BTreeSet<_>>();
@@ -171,6 +174,28 @@ fn bound_recent(mut commits: Vec<String>) -> Vec<String> {
     commits
 }
 
+fn exclude_parentless_root(root: &Path, commits: &mut Vec<String>) -> Result<(), Error> {
+    let Some(first) = commits.first() else {
+        return Ok(());
+    };
+    let object = read(
+        root,
+        &["cat-file".to_owned(), "-p".to_owned(), first.to_owned()],
+        "read the first release boundary",
+    )?;
+    if !commit_object_has_parent(&object) {
+        commits.remove(0);
+    }
+    Ok(())
+}
+
+fn commit_object_has_parent(object: &str) -> bool {
+    object
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .any(|line| line.starts_with("parent "))
+}
+
 fn read(root: &Path, arguments: &[String], action: &str) -> Result<String, Error> {
     let output = run(root, arguments)?;
     if output.status == 0 {
@@ -254,7 +279,7 @@ impl StdError for Error {
 
 #[cfg(test)]
 mod tests {
-    use super::bound_recent;
+    use super::{bound_recent, commit_object_has_parent};
 
     #[test]
     fn an_untagged_window_keeps_the_latest_bound_in_first_parent_order() {
@@ -264,5 +289,15 @@ mod tests {
             bound_recent(commits),
             ["commit-3", "commit-4", "commit-5", "commit-6", "commit-7"]
         );
+    }
+
+    #[test]
+    fn only_a_parent_in_the_commit_header_prevents_the_initial_boundary() {
+        assert!(!commit_object_has_parent(
+            "tree abc\nauthor A\ncommitter A\n\nparent text in the message\n"
+        ));
+        assert!(commit_object_has_parent(
+            "tree abc\nparent def\nauthor A\ncommitter A\n\nmessage\n"
+        ));
     }
 }
