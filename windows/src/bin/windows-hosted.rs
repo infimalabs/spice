@@ -490,7 +490,7 @@ mod windows {
             }
             0o500
         } else if metadata.is_file() {
-            0o400
+            0o500
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
