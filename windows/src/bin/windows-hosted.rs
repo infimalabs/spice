@@ -19,6 +19,7 @@ mod windows {
     use std::thread;
 
     use sha2::{Digest as _, Sha256};
+    use sill::authority;
     use windows_execution::hosted::{
         Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument, WORKFLOW,
         X86_64_ARCHITECTURE,
@@ -36,7 +37,6 @@ mod windows {
     use wire::{Digest, Domain};
 
     const REFUSAL_EXIT: u8 = 70;
-    const ICACLS: &str = r"C:\Windows\System32\icacls.exe";
     const NETSH: &str = r"C:\Windows\System32\netsh.exe";
     const NON_LOOPBACK_REMOTE: &str = "remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::-::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
 
@@ -461,23 +461,7 @@ mod windows {
     }
 
     fn make_read_only(kind: &str, path: &Path, challenge: &str) -> Result<(), String> {
-        let domain = required_env("USERDOMAIN")?;
-        let user = required_env("USERNAME")?;
-        let principal = format!(r"{domain}\{user}");
-        let grant = format!("{principal}:(OI)(CI)RX");
-        for arguments in [
-            vec!["/grant:r", grant.as_str(), "/T", "/Q"],
-            vec!["/inheritance:r", "/T", "/Q"],
-        ] {
-            let status = ProcessCommand::new(ICACLS)
-                .arg(path)
-                .args(arguments)
-                .status()
-                .map_err(|error| format!("cannot establish {kind} ACL: {error}"))?;
-            if !status.success() {
-                return Err(format!("{kind} ACL refused with {status}"));
-            }
-        }
+        seal_tree(path).map_err(|error| format!("cannot seal {kind}: {error}"))?;
         let probe = path.join(format!(".spice-read-only-{challenge}"));
         match fs::OpenOptions::new()
             .write(true)
@@ -493,6 +477,27 @@ mod windows {
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
             Err(error) => Err(format!("cannot verify {kind} write refusal: {error}")),
         }
+    }
+
+    fn seal_tree(path: &Path) -> io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        if authority::is_link_like(&metadata) {
+            return Ok(());
+        }
+        let mode = if metadata.is_dir() {
+            for entry in fs::read_dir(path)? {
+                seal_tree(&entry?.path())?;
+            }
+            0o500
+        } else if metadata.is_file() {
+            0o400
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} is not a regular file or directory", path.display()),
+            ));
+        };
+        authority::set_owner_mode(path, mode)
     }
 
     fn resolve_program(
