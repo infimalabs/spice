@@ -96,8 +96,10 @@ mod windows {
         fs::create_dir(&target).map_err(|error| format!("cannot create fresh target: {error}"))?;
         create_empty(&stage)?;
         configure_cargo_home(&cargo_home, &vendor)?;
-        make_read_only("source", &workspace)?;
-        make_read_only("vendored dependencies", &vendor)?;
+        make_read_only("source", &workspace, &request.challenge)?;
+        fs::read(workspace.join("Cargo.toml"))
+            .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
+        make_read_only("vendored dependencies", &vendor, &request.challenge)?;
 
         let firewall = Firewall::establish(&request.challenge)?;
         let executions = request
@@ -458,20 +460,39 @@ mod windows {
             .map_err(|error| format!("cannot configure fresh Cargo home: {error}"))
     }
 
-    fn make_read_only(kind: &str, path: &Path) -> Result<(), String> {
+    fn make_read_only(kind: &str, path: &Path, challenge: &str) -> Result<(), String> {
+        let domain = required_env("USERDOMAIN")?;
         let user = required_env("USERNAME")?;
-        let grant = format!("{user}:(OI)(CI)RX");
-        let status = ProcessCommand::new(ICACLS)
-            .arg(path)
-            .args(["/inheritance:r", "/grant:r"])
-            .arg(grant)
-            .args(["/T", "/C", "/Q"])
-            .status()
-            .map_err(|error| format!("cannot establish {kind} ACL: {error}"))?;
-        if !status.success() {
-            return Err(format!("{kind} ACL refused with {status}"));
+        let principal = format!(r"{domain}\{user}");
+        let grant = format!("{principal}:(OI)(CI)RX");
+        for arguments in [
+            vec!["/grant:r", grant.as_str(), "/T", "/Q"],
+            vec!["/inheritance:r", "/T", "/Q"],
+        ] {
+            let status = ProcessCommand::new(ICACLS)
+                .arg(path)
+                .args(arguments)
+                .status()
+                .map_err(|error| format!("cannot establish {kind} ACL: {error}"))?;
+            if !status.success() {
+                return Err(format!("{kind} ACL refused with {status}"));
+            }
         }
-        Ok(())
+        let probe = path.join(format!(".spice-read-only-{challenge}"));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+        {
+            Ok(file) => {
+                drop(file);
+                fs::remove_file(&probe)
+                    .map_err(|error| format!("cannot remove writable {kind} probe: {error}"))?;
+                Err(format!("{kind} remained writable after ACL sealing"))
+            }
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+            Err(error) => Err(format!("cannot verify {kind} write refusal: {error}")),
+        }
     }
 
     fn resolve_program(
