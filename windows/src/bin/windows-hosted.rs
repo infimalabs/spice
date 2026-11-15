@@ -56,6 +56,7 @@ mod windows {
         temp: PathBuf,
         vendor: PathBuf,
         system_root: PathBuf,
+        provider_identity: String,
         run_id: u64,
         run_attempt: u32,
     }
@@ -72,6 +73,9 @@ mod windows {
                 temp: required_path("RUNNER_TEMP")?,
                 vendor: required_path("SPICE_HOSTED_VENDOR")?, // env-policy: allow
                 system_root: required_path("SystemRoot")?,
+                provider_identity: authority::process_owners()
+                    .map_err(|error| format!("cannot inspect provider process identity: {error}"))?
+                    .user,
                 run_id: required_u64("GITHUB_RUN_ID")?,
                 run_attempt: required_u32("GITHUB_RUN_ATTEMPT")?,
             };
@@ -108,6 +112,15 @@ mod windows {
                 if !path.is_absolute() {
                     return Err(format!("guest {name} path is not absolute"));
                 }
+            }
+            let mut components = self.provider_identity.split('-');
+            if components.next() != Some("S")
+                || components.next() != Some("1")
+                || components.next() != Some("5")
+                || components.clone().next().is_none()
+                || !components.all(|component| component.parse::<u32>().is_ok())
+            {
+                return Err("guest provider identity is not a canonical user SID".to_owned());
             }
             if !self.system_root.is_dir() {
                 return Err("guest system root is not a directory".to_owned());
@@ -222,13 +235,13 @@ mod windows {
             .and_then(Path::parent)
             .ok_or_else(|| "pinned Cargo path has no toolchain root".to_owned())?;
         grant_ancestor_traversal(toolchain_root, account.sid())?;
-        grant_tree_access(toolchain_root, account.sid(), 0o500)?;
+        grant_tree_access(toolchain_root, account.sid(), 0o500, 0o500)?;
         let trunk_root = Path::new(&request.toolchain.trunk_path)
             .parent()
             .and_then(Path::parent)
             .ok_or_else(|| "pinned Trunk path has no installation root".to_owned())?;
         grant_ancestor_traversal(trunk_root, account.sid())?;
-        grant_tree_access(trunk_root, account.sid(), 0o500)?;
+        grant_tree_access(trunk_root, account.sid(), 0o500, 0o500)?;
 
         eprintln!("[windows-hosted] establishing principal firewall");
         verify_non_loopback_available()?;
@@ -247,6 +260,12 @@ mod windows {
 
         let encoded = fs::read(&guest_result)
             .map_err(|error| format!("cannot read guest result: {error}"))?;
+        let result = serde_json::from_slice::<ResultDocument>(&encoded)
+            .map_err(|error| format!("guest result does not decode: {error}"))?;
+        let provider_artifacts = artifact_inventory(&stage)?;
+        if provider_artifacts != result.artifacts {
+            return Err("provider-visible staged artifacts differ from guest inventory".to_owned());
+        }
         write_result(result_path, &encoded)?;
         fs::remove_dir_all(&scratch)
             .map_err(|error| format!("cannot tear down scratch: {error}"))?;
@@ -279,6 +298,7 @@ mod windows {
             temp,
             vendor,
             system_root,
+            provider_identity,
             run_id,
             run_attempt,
         } = GuestEnvironment::decode(encoded_environment)?;
@@ -336,6 +356,7 @@ mod windows {
             })
             .collect::<Result<Vec<_>, String>>()?;
         let artifacts = artifact_inventory(&stage)?;
+        grant_tree_contents_access(&stage, &provider_identity, 0o400, 0o500)?;
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
@@ -732,32 +753,61 @@ mod windows {
         authority::set_owner_and_identity_mode(path, identity, mode, mode)
     }
 
-    fn grant_tree_access(path: &Path, identity: &str, mode: u32) -> Result<(), String> {
+    fn grant_tree_contents_access(
+        path: &Path,
+        identity: &str,
+        file_mode: u32,
+        directory_mode: u32,
+    ) -> Result<(), String> {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("cannot enumerate access tree {}: {error}", path.display()))?
+        {
+            let entry = entry.map_err(|error| {
+                format!("cannot enumerate access tree {}: {error}", path.display())
+            })?;
+            grant_tree_access(&entry.path(), identity, file_mode, directory_mode)?;
+        }
+        Ok(())
+    }
+
+    fn grant_tree_access(
+        path: &Path,
+        identity: &str,
+        file_mode: u32,
+        directory_mode: u32,
+    ) -> Result<(), String> {
         let metadata = fs::symlink_metadata(path)
-            .map_err(|error| format!("cannot inspect guest tool {}: {error}", path.display()))?;
+            .map_err(|error| format!("cannot inspect access tree {}: {error}", path.display()))?;
         if authority::is_link_like(&metadata) {
             return Err(format!(
-                "guest tool access refuses link-like path {}",
+                "access tree refuses link-like path {}",
                 path.display()
             ));
         }
-        if metadata.is_dir() {
+        let mode = if metadata.is_dir() {
             for entry in fs::read_dir(path).map_err(|error| {
-                format!("cannot enumerate guest tool {}: {error}", path.display())
+                format!("cannot enumerate access tree {}: {error}", path.display())
             })? {
                 let entry = entry.map_err(|error| {
-                    format!("cannot enumerate guest tool {}: {error}", path.display())
+                    format!("cannot enumerate access tree {}: {error}", path.display())
                 })?;
-                grant_tree_access(&entry.path(), identity, mode)?;
+                grant_tree_access(&entry.path(), identity, file_mode, directory_mode)?;
             }
-        } else if !metadata.is_file() {
+            directory_mode
+        } else if metadata.is_file() {
+            file_mode
+        } else {
             return Err(format!(
-                "guest tool path is not regular: {}",
+                "access tree path is not regular: {}",
                 path.display()
             ));
-        }
-        authority::grant_identity_mode(path, identity, mode)
-            .map_err(|error| format!("cannot grant guest access to {}: {error}", path.display()))
+        };
+        authority::grant_identity_mode(path, identity, mode).map_err(|error| {
+            format!(
+                "cannot grant identity access to {}: {error}",
+                path.display()
+            )
+        })
     }
 
     fn grant_file_access(path: &Path, identity: &str, mode: u32) -> Result<(), String> {
