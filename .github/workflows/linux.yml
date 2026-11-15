@@ -68,6 +68,10 @@ jobs:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
         run: |
           set -uo pipefail
+          # The proof image runs as UID 0 with every capability dropped. Give
+          # that exact principal the sole writable workspace mount without
+          # making the checkout or Git common directory writable.
+          sudo install -d -o 0 -g 0 -m 0755 dist/stage
           common="$(git rev-parse --git-common-dir)"
           mkdir -p "$common/.spice"
           printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
