@@ -304,8 +304,10 @@ identity; and uploads the stage log, the staged files without the archive,
 and `result.json`. That result records the challenge, archive identity, run
 id, runner image, proof-image identity, stage exit, log digest, and the
 size and SHA-256 of every staged file. A separate `attest` job, which runs no
-repository code, alone holds OIDC identity-token and Attestations write and
-signs `result.json`; a third job retires the tag. The client verifies that
+repository code, alone holds OIDC identity-token and Attestations write. It
+signs `result.json` and every staged file as subjects of one attestation, so a
+released executable verifies directly with `gh attestation verify`; a third job
+retires the tag. The client verifies that
 attestation against `linux.yml` at the one-use commit and tag on a
 GitHub-hosted runner. Before it accepts anything else, it requires the result
 to answer its own challenge, archive, and dispatched run on `ubuntu24` `X64`.
@@ -499,9 +501,10 @@ read-only through Trunk compilation.
 
 The sealing step builds the guest from the selected source and executes the
 sealed request in the disposable VM, then signs that exact
-`windows-hosted.exe` and its result separately with GitHub's workload identity.
+`windows-hosted.exe`, and separately its result together with every staged
+file, with GitHub's workload identity.
 Nothing publishes unless both attestations succeed. Verification rejects
-self-hosted attestations and binds both subjects to the one-use source ref and
+self-hosted attestations and binds both attestations to the one-use source ref and
 commit. The guest hashes itself under
 `spice.proof.native-runner.v1`; the client verifies both attestations, hashes
 the downloaded runner, and refuses unless that independent identity equals the
