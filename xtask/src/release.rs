@@ -123,6 +123,7 @@ pub struct ReleaseEnvironment {
     pub rustup_home: Option<OsString>,
     pub rustup_toolchain: Option<OsString>,
     pub temporary: Option<OsString>,
+    pub system_root: Option<OsString>,
     pub sdk_root: Option<OsString>,
     pub developer_dir: Option<OsString>,
     pub cargo_target_dir: Option<OsString>,
@@ -935,6 +936,7 @@ impl SystemExecutor {
             // way, so dropping the name is what makes an offline build fail.
             ("RUSTUP_TOOLCHAIN", release.rustup_toolchain.as_ref()),
             ("TMPDIR", release.temporary.as_ref()),
+            ("SystemRoot", release.system_root.as_ref()),
             ("SDKROOT", release.sdk_root.as_ref()),
             ("DEVELOPER_DIR", release.developer_dir.as_ref()),
         ] {

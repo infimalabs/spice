@@ -742,6 +742,7 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         rustup_home: read("RUSTUP_HOME"),
         rustup_toolchain: read("RUSTUP_TOOLCHAIN"),
         temporary: read("TMPDIR"),
+        system_root: read("SystemRoot"),
         sdk_root: read("SDKROOT"),
         developer_dir: read("DEVELOPER_DIR"),
         cargo_target_dir: read("CARGO_TARGET_DIR"),

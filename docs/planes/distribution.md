@@ -410,6 +410,10 @@ runner smoke before landing.
 Inside the sealed guest, installed-target admission reads the exact selected
 compiler's sysroot and requires its standard-library archive for both the
 native and Wasm targets; it executes no mutable runner Rustup proxy.
+Nested release commands receive only the sealed executor environment; on
+Windows that environment carries the exact admitted `SystemRoot` so build tools
+can resolve operating-system components without inheriting unrelated runner
+state.
 
 The sealing step builds the guest from the selected source and executes the
 sealed request in the disposable VM, then signs that exact
