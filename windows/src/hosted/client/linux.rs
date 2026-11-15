@@ -252,3 +252,64 @@ fn differs(path: &str) -> WindowsHostedError {
         "hosted Linux artifact {path} differs from its signed inventory"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use super::{LinuxArtifact, admit_inventory, sha256};
+
+    struct Stage(PathBuf);
+
+    impl Stage {
+        fn new(name: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "spice-linux-inventory-{name}-{}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(root.join("targets/x86_64-unknown-linux-musl")).unwrap();
+            fs::write(
+                root.join("targets/x86_64-unknown-linux-musl/payload.json"),
+                b"{}",
+            )
+            .unwrap();
+            Self(root)
+        }
+    }
+
+    impl Drop for Stage {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn listed(path: &str, bytes: &[u8]) -> LinuxArtifact {
+        LinuxArtifact {
+            path: path.to_owned(),
+            bytes: bytes.len() as u64,
+            sha256: sha256(bytes),
+        }
+    }
+
+    #[test]
+    fn publishes_only_the_exact_signed_inventory() {
+        let payload = "targets/x86_64-unknown-linux-musl/payload.json";
+        let stage = Stage::new("exact");
+        let admitted = admit_inventory(&stage.0, &[listed(payload, b"{}")]).unwrap();
+        assert_eq!(admitted.len(), 1);
+        assert_eq!(admitted[0].path, payload);
+
+        let tampered = Stage::new("tampered");
+        assert!(admit_inventory(&tampered.0, &[listed(payload, b"[]")]).is_err());
+
+        let extra = Stage::new("extra");
+        fs::write(extra.0.join("unlisted"), b"x").unwrap();
+        assert!(admit_inventory(&extra.0, &[listed(payload, b"{}")]).is_err());
+
+        let missing = Stage::new("missing");
+        let inventory = [listed(payload, b"{}"), listed("objects/absent", b"x")];
+        assert!(admit_inventory(&missing.0, &inventory).is_err());
+    }
+}
