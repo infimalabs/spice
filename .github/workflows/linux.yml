@@ -1,4 +1,4 @@
-name: Spice hosted Linux staging
+name: Linux staging
 
 on:
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
           set -euo pipefail
           [[ "$CHALLENGE" =~ ^[0-9a-f]{64}$ ]] || { echo "challenge is not 32 hex bytes" >&2; exit 1; }
           [[ "$SOURCE" =~ ^[0-9A-Za-z:._-]+$ ]] || { echo "source identity is malformed" >&2; exit 1; }
-          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == "spice-hosted-${CHALLENGE:0:24}" ]] \
+          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == "hosted-${CHALLENGE:0:24}" ]] \
             || { echo "refusing source ref $GITHUB_REF for this challenge" >&2; exit 1; }
           [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$ImageOS" == ubuntu24 && "$RUNNER_ARCH" == X64 ]] \
             || { echo "runner is not a GitHub-hosted ubuntu24 X64 machine" >&2; exit 1; }
@@ -86,7 +86,7 @@ jobs:
           PROOF_IMAGE: ${{ steps.image.outputs.identity }}
         run: |
           set -euo pipefail
-          out="$RUNNER_TEMP/spice-linux-$CHALLENGE"
+          out="$RUNNER_TEMP/linux-$CHALLENGE"
           mkdir -p "$out/stage"
           cp "$RUNNER_TEMP/stage.log" "$out/stage.log"
           if [[ -d dist/stage ]]; then
@@ -118,8 +118,8 @@ jobs:
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spice-linux-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/spice-linux-${{ inputs.challenge }}
+          name: linux-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/linux-${{ inputs.challenge }}
           if-no-files-found: error
           retention-days: 1
 
@@ -136,7 +136,7 @@ jobs:
       - name: Download result
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: spice-linux-${{ inputs.challenge }}
+          name: linux-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
 
       - name: Sign result and staged files
@@ -160,7 +160,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == spice-hosted-* ]] \
+          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == hosted-* ]] \
             || { echo "refusing to retire non-hosted source ref $GITHUB_REF" >&2; exit 1; }
           if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null; then
             if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null 2>&1; then

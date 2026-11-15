@@ -1,4 +1,4 @@
-name: Hosted macOS release
+name: macOS staging
 
 on:
   workflow_dispatch:

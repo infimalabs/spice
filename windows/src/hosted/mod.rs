@@ -70,10 +70,7 @@ impl Request {
         {
             return Err(AdmissionError::Repository(self.repository.clone()));
         }
-        let expected_ref = format!(
-            "spice-hosted-{}",
-            &self.challenge[..SOURCE_REF_CHALLENGE_LENGTH]
-        );
+        let expected_ref = format!("hosted-{}", &self.challenge[..SOURCE_REF_CHALLENGE_LENGTH]);
         if self.source_ref != expected_ref {
             return Err(AdmissionError::SourceRef(self.source_ref.clone()));
         }
@@ -373,7 +370,7 @@ mod tests {
             challenge: "1".repeat(64),
             provider: GITHUB_PROVIDER.to_owned(),
             repository: "infimalabs/spice".to_owned(),
-            source_ref: format!("spice-hosted-{}", "1".repeat(24)),
+            source_ref: format!("hosted-{}", "1".repeat(24)),
             source: "2".repeat(64),
             tree: "3".repeat(64),
             image: ImagePin {

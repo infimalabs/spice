@@ -160,7 +160,7 @@ pub fn windows_hosted_commands_into(
     });
     let scratch = Scratch::new()?;
     let challenge = challenge()?;
-    let source_ref = format!("spice-hosted-{}", &challenge[..24]);
+    let source_ref = format!("hosted-{}", &challenge[..24]);
     let source = source::prepare(&root, scratch.path(), &challenge, source)?;
     let request = Request {
         version: super::PROTOCOL_VERSION,
@@ -342,7 +342,7 @@ fn complete_dispatched_run(
             .all(|output| matches!(output.completion, Completion::Exited { code: 0 }))
         {
             publish_artifacts(
-                &artifact_dir.join(format!("spice-hosted-stage-{}", request.challenge)),
+                &artifact_dir.join(format!("windows-stage-{}", request.challenge)),
                 &result.artifacts,
                 destination,
                 &request.source,
@@ -391,7 +391,7 @@ fn download_attested_artifact(
     challenge: &str,
     run_id: u64,
 ) -> Result<(PathBuf, PathBuf, PathBuf), WindowsHostedError> {
-    let artifact_dir = download_artifact(run, run_id, &format!("spice-hosted-{challenge}"))?;
+    let artifact_dir = download_artifact(run, run_id, &format!("windows-{challenge}"))?;
     let result_path = artifact_dir.join("result.json");
     let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
     for path in [&runner_path, &result_path] {
@@ -1010,10 +1010,8 @@ impl Scratch {
             .duration_since(UNIX_EPOCH)
             .map_err(|error| WindowsHostedError::Clock(error.to_string()))?
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "spice-windows-hosted-{}-{nonce}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("windows-hosted-{}-{nonce}", std::process::id()));
         fs::create_dir(&path).map_err(|source| WindowsHostedError::Io {
             path: path.clone(),
             source,

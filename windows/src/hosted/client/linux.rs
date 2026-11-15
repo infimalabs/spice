@@ -77,7 +77,7 @@ pub fn linux_hosted_stage(
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
     let challenge = challenge()?;
-    let source_ref = format!("spice-hosted-{}", &challenge[..24]);
+    let source_ref = format!("hosted-{}", &challenge[..24]);
     let source = source::prepare(
         &root,
         scratch.path(),
@@ -97,7 +97,7 @@ pub fn linux_hosted_stage(
     with_pushed_source(&run, &cancellation, || {
         dispatch(&run, WORKFLOW_PATH, &inputs, |run_id| {
             watch_run(run.root, run.repository, run_id, &cancellation)?;
-            let artifact = download_artifact(&run, run_id, &format!("spice-linux-{challenge}"))?;
+            let artifact = download_artifact(&run, run_id, &format!("linux-{challenge}"))?;
             let result_path = artifact.join("result.json");
             verify_attestation(&run, WORKFLOW_PATH, &result_path)?;
             let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
@@ -264,10 +264,8 @@ mod tests {
 
     impl Stage {
         fn new(name: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "spice-linux-inventory-{name}-{}",
-                std::process::id()
-            ));
+            let root =
+                std::env::temp_dir().join(format!("linux-inventory-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&root);
             fs::create_dir_all(root.join("targets/x86_64-unknown-linux-musl")).unwrap();
             fs::write(
