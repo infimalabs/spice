@@ -383,6 +383,9 @@ dispatches the exact Git commit and canonical source-archive digest; the sealed
 native proof runner builds an unsigned `aarch64-apple-darwin` stage with
 networking denied. The workflow refuses image, source, archive, SDK, tool, or
 stage drift before credentials enter any job.
+The hosted bootstrap selects the exact Cargo executable and admits only its
+sibling Rustc; the proof build does not rediscover that toolchain through
+ambient `rustup`.
 Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
 dynamic libraries; extracting the executable alone is not an executable tool.
 
