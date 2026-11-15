@@ -111,9 +111,12 @@ published. The hosted Windows route commits the archive's exact tree,
 `dist/build.json` included, as a parentless one-use commit; the signed request
 and result bind the archive identity, which the guest hands to its own
 `stage-target`, and the client refuses a returned payload recording any other
-archive. The release plan names the archive identity once; manifest
-publication refuses targets staged from two archives, and `spice release`
-refuses a sealed manifest whose archive is not the one at the stage root.
+archive. The tracked attributes keep both canonical `dist/version` inputs
+LF-only when the one-use source commit is checked out on Windows; their
+compile-time parsers refuse any platform newline rewrite. The release plan
+names the archive identity once; manifest publication refuses targets staged
+from two archives, and `spice release` refuses a sealed manifest whose archive
+is not the one at the stage root.
 
 **Invariant —** Every appliance executable produced by a current build path
 links one spice rack: a ZIP whose `app/` members are the staged generation's
