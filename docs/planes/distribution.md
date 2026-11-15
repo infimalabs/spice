@@ -402,10 +402,14 @@ the pinned `RUSTC` path under the same pinned `RUSTUP_TOOLCHAIN`; workflow-step
 scope never lets it fall back to the runner image's mutable stable proxy. The
 workflow admits the pinned Trunk, wasm-bindgen, and Binaryen release archives by
 SHA-256 and each extracted executable by its reported version before the runner
-can use it. The workflow
-pins every third-party action by full commit. Updating the image means
-reviewing the matching `actions/runner-images` release manifest, changing every
-affected tool/path pin together, and proving the runner smoke before landing.
+can use it. The workflow pins every third-party action by full commit. Updating
+the image means reviewing the matching `actions/runner-images` release
+manifest, changing every affected tool/path pin together, and proving the
+runner smoke before landing.
+
+Inside the sealed guest, installed-target admission reads the exact selected
+compiler's sysroot and requires its standard-library archive for both the
+native and Wasm targets; it executes no mutable runner Rustup proxy.
 
 The sealing step builds the guest from the selected source and executes the
 sealed request in the disposable VM, then signs that exact

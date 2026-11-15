@@ -605,16 +605,20 @@ fn observe_pins<E: Executor>(
         ["--version"],
     ))?)?;
     let rust = first_words(&rust.stdout, 2, "rust version")?;
-    let targets = successful(executor.execute(CommandSpec::new(
-        "installed-targets",
-        &programs.rustup,
-        ["target", "list", "--installed"],
+    let sysroot = successful(executor.execute(CommandSpec::new(
+        "rust-sysroot",
+        &programs.rustc,
+        ["--print", "sysroot"],
     ))?)?;
-    let targets = text(&targets.stdout, "installed Rust targets")?;
+    let sysroot = PathBuf::from(one_line(&sysroot.stdout, "Rust sysroot")?);
+    if !sysroot.is_absolute() {
+        return Err(TargetBuildError::Observation {
+            label: "Rust sysroot",
+            observed: sysroot.display().to_string(),
+        });
+    }
     for required in [WASM_TARGET, target.as_str()] {
-        if !targets.lines().any(|line| line == required) {
-            return Err(TargetBuildError::TargetNotInstalled(required.to_owned()));
-        }
+        admit_installed_target(&sysroot, required)?;
     }
     let trunk = successful(executor.execute(CommandSpec::new(
         "trunk-version",
@@ -627,6 +631,42 @@ fn observe_pins<E: Executor>(
         trunk: one_line(&trunk.stdout, "Trunk version")?,
         proof_container: proof_container.to_owned(),
     })
+}
+
+fn admit_installed_target(sysroot: &Path, target: &str) -> Result<(), TargetBuildError> {
+    let directory = sysroot.join("lib").join("rustlib").join(target).join("lib");
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {
+            return Err(TargetBuildError::TargetNotInstalled(target.to_owned()));
+        }
+        Err(source) => {
+            return Err(TargetBuildError::Io {
+                path: directory,
+                source,
+            });
+        }
+    };
+    for entry in entries {
+        let entry = entry.map_err(|source| TargetBuildError::Io {
+            path: directory.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| TargetBuildError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let name = entry.file_name();
+        if file_type.is_file()
+            && name
+                .to_str()
+                .is_some_and(|name| name.starts_with("libstd-") && name.ends_with(".rlib"))
+        {
+            return Ok(());
+        }
+    }
+    Err(TargetBuildError::TargetNotInstalled(target.to_owned()))
 }
 
 fn first_words(
@@ -670,7 +710,6 @@ fn text<'a>(bytes: &'a [u8], label: &'static str) -> Result<&'a str, TargetBuild
 struct Programs {
     cargo: PathBuf,
     rustc: PathBuf,
-    rustup: PathBuf,
     trunk: PathBuf,
     xtask: PathBuf,
     #[cfg(unix)]
@@ -719,7 +758,6 @@ impl Programs {
         Ok(Self {
             cargo: find_program(path, "cargo")?,
             rustc,
-            rustup: find_program(path, "rustup")?,
             trunk: find_program(path, "trunk")?,
             xtask: env::current_exe().map_err(|source| TargetBuildError::Io {
                 path: PathBuf::from("current xtask executable"),
