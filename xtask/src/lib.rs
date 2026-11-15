@@ -23,7 +23,7 @@ mod source_archive;
 mod verify_error;
 mod verify_execution;
 mod verify_timing;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "macos")]
 mod windows_guest;
 mod windows_hosted;
 mod windows_msvc;
@@ -56,7 +56,7 @@ pub use seal_darwin::{PlacedExecutable, SealDarwinError, place_executable, seal_
 pub use share_darwin::{ShareDarwinError, ShareDarwinRequest, share_darwin};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source_archive::source_archive;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
     HostedExecution, WindowsHostedError, windows_hosted, windows_hosted_stage,

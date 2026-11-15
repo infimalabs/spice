@@ -108,7 +108,7 @@ fn main() -> ExitCode {
             drop(output);
             return run_windows_hosted(arguments.collect());
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "macos")]
         Some(value) if value == OsStr::new("windows-guest") => {
             drop(output);
             return run_windows_guest(arguments.collect(), &ambient);
@@ -648,7 +648,7 @@ fn run_windows_hosted(mut arguments: Vec<OsString>) -> ExitCode {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(target_os = "macos")]
 fn run_windows_guest(arguments: Vec<OsString>, ambient: &Ambient) -> ExitCode {
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();

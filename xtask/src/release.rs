@@ -31,7 +31,7 @@ pub use report::TargetBuildError;
 pub(crate) use report::render_canvas;
 use report::{render_command_records, render_records};
 mod source;
-use source::{ExtractedSource, GuardedPublisher, SourceArchive, verify_checkout};
+use source::{GuardedPublisher, SourceArchive, verify_checkout};
 
 mod windows_appliance;
 pub use windows_appliance::build_windows_appliance;
@@ -486,7 +486,10 @@ fn stage_with_roots<E: Executor>(
         proof_container,
         canvas,
     } = request;
-    let ExtractedSource { commit, identity } = archive.source(root)?;
+    let source = archive.source(root)?;
+    #[cfg(unix)]
+    let commit = source.commit;
+    let identity = source.identity;
     let required = required_pins(proof_container);
     let observed = observe_pins(executor, programs, target, proof_container)?;
     let required = RequiredPins::new(required)?;
@@ -783,9 +786,11 @@ fn named_rustc(document: &str, path: &Path) -> Result<Option<PathBuf>, TargetBui
 
 fn find_program(path: &OsStr, name: &'static str) -> Result<PathBuf, TargetBuildError> {
     #[cfg(windows)]
-    let file_name = format!("{name}.exe");
+    let file_name_storage = format!("{name}.exe");
+    #[cfg(windows)]
+    let file_name = OsStr::new(&file_name_storage);
     #[cfg(not(windows))]
-    let file_name = name;
+    let file_name = OsStr::new(name);
     for directory in env::split_paths(path) {
         let candidate = directory.join(file_name);
         if executable(&candidate) {
