@@ -55,6 +55,7 @@ mod windows {
         workspace: PathBuf,
         temp: PathBuf,
         vendor: PathBuf,
+        system_root: PathBuf,
         run_id: u64,
         run_attempt: u32,
     }
@@ -70,6 +71,7 @@ mod windows {
                 workspace: required_path("GITHUB_WORKSPACE")?,
                 temp: required_path("RUNNER_TEMP")?,
                 vendor: required_path("SPICE_HOSTED_VENDOR")?, // env-policy: allow
+                system_root: required_path("SystemRoot")?,
                 run_id: required_u64("GITHUB_RUN_ID")?,
                 run_attempt: required_u32("GITHUB_RUN_ATTEMPT")?,
             };
@@ -101,10 +103,14 @@ mod windows {
                 ("workspace", &self.workspace),
                 ("temporary directory", &self.temp),
                 ("vendored dependencies", &self.vendor),
+                ("system root", &self.system_root),
             ] {
                 if !path.is_absolute() {
                     return Err(format!("guest {name} path is not absolute"));
                 }
+            }
+            if !self.system_root.is_dir() {
+                return Err("guest system root is not a directory".to_owned());
             }
             if self.run_id == 0 || self.run_attempt == 0 {
                 return Err("guest run coordinates are zero".to_owned());
@@ -272,6 +278,7 @@ mod windows {
             workspace,
             temp,
             vendor,
+            system_root,
             run_id,
             run_attempt,
         } = GuestEnvironment::decode(encoded_environment)?;
@@ -317,6 +324,7 @@ mod windows {
                     &workspace,
                     &cargo_home,
                     &target,
+                    &system_root,
                     &stage,
                     &request,
                 )
@@ -817,6 +825,7 @@ mod windows {
         workspace: &Path,
         cargo_home: &Path,
         target: &Path,
+        system_root: &Path,
         stage: &Path,
         request: &Request,
     ) -> Result<(Completion, Capture, Capture), String> {
@@ -828,7 +837,7 @@ mod windows {
             .args(arguments)
             .current_dir(workspace)
             .env_clear()
-            .env("SystemRoot", r"C:\Windows")
+            .env("SystemRoot", system_root)
             .env("CARGO_HOME", cargo_home)
             .env("CARGO_TARGET_DIR", target)
             .env("CARGO_NET_OFFLINE", "true")
