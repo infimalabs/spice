@@ -129,6 +129,12 @@ pub struct ReleaseEnvironment {
     pub temp: Option<OsString>,
     pub tmp: Option<OsString>,
     pub system_root: Option<OsString>,
+    /// Windows `which`-style lookups such as Trunk's tool discovery resolve
+    /// `NAME.exe` from a bare name only through `PATHEXT`.
+    pub path_ext: Option<OsString>,
+    /// Trunk's own offline switch, so an unresolved tool refuses at once
+    /// rather than reaching for the network.
+    pub trunk_offline: Option<OsString>,
     pub cc: Option<OsString>,
     pub cxx: Option<OsString>,
     pub include: Option<OsString>,
@@ -1000,6 +1006,8 @@ impl SystemExecutor {
             ("TEMP", release.temp.as_ref()),
             ("TMP", release.tmp.as_ref()),
             ("SystemRoot", release.system_root.as_ref()),
+            ("PATHEXT", release.path_ext.as_ref()),
+            ("TRUNK_OFFLINE", release.trunk_offline.as_ref()),
             ("CC", release.cc.as_ref()),
             ("CXX", release.cxx.as_ref()),
             ("INCLUDE", release.include.as_ref()),

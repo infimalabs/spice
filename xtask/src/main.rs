@@ -797,6 +797,8 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         temp: read("TEMP"),
         tmp: read("TMP"),
         system_root: read("SystemRoot"),
+        path_ext: read("PATHEXT"),
+        trunk_offline: read("TRUNK_OFFLINE"),
         cc: read("CC"),
         cxx: read("CXX"),
         include: read("INCLUDE"),

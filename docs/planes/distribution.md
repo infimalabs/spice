@@ -419,10 +419,11 @@ Inside the sealed guest, installed-target admission reads the exact selected
 compiler's sysroot and requires its standard-library archive for both the
 native and Wasm targets; it executes no mutable runner Rustup proxy.
 Nested release commands receive only the sealed executor environment; on
-Windows that environment carries the exact admitted `SystemRoot`, `TEMP`,
-`TMP`, compiler paths, SDK include roots, and SDK library roots so Cargo, its
-host build scripts, and the MSVC linker can resolve operating-system components
-and write scratch files without inheriting unrelated runner state. The release
+Windows that environment carries the exact admitted `SystemRoot`, `PATHEXT`,
+`TEMP`, `TMP`, `TRUNK_OFFLINE`, compiler paths, SDK include roots, and SDK
+library roots so Cargo, its host build scripts, the MSVC linker, and Trunk's
+tool discovery can resolve operating-system components and pinned tools and
+write scratch files without inheriting unrelated runner state. The release
 app publishes its generation under the admitted build root,
 not the sealed source tree; source and vendored dependency ACLs remain
 read-only through Trunk compilation.

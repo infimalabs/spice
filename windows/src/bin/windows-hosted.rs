@@ -848,6 +848,9 @@ mod windows {
             .current_dir(workspace)
             .env_clear()
             .env("SystemRoot", system_root)
+            // Admitted tools are executables; `which`-style lookups such as
+            // Trunk's resolve a bare tool name to `NAME.exe` only through it.
+            .env("PATHEXT", ".EXE")
             .env("CARGO_HOME", cargo_home)
             .env("CARGO_TARGET_DIR", target)
             .env("CARGO_NET_OFFLINE", "true")
