@@ -25,7 +25,9 @@ use crate::protocol::{
 use serde::Deserialize;
 use wire::{Digest, Domain};
 
+mod linux;
 mod source;
+pub use linux::{LinuxHostedStage, linux_hosted_stage};
 use source::{delete_source, push_source};
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -177,27 +179,60 @@ pub fn windows_hosted_commands_into(
     request.admit().map_err(WindowsHostedError::Admission)?;
 
     let cancellation = Cancellation::install()?;
-    let operation = push_source(&root, &source.commit, &source_ref).and_then(|()| {
+    let run = HostedRun {
+        root: &root,
+        scratch: scratch.path(),
+        repository: &policy.repository,
+        source_ref: &source_ref,
+        source_commit: &source.commit,
+    };
+    let request_json = serde_json::to_string(&request).map_err(WindowsHostedError::Encode)?;
+    with_pushed_source(&run, &cancellation, || {
+        dispatch(
+            &run,
+            WORKFLOW_PATH,
+            &serde_json::json!({ "request": request_json }),
+            |run_id| {
+                complete_dispatched_run(
+                    &run,
+                    &request,
+                    run_id,
+                    destination.as_deref(),
+                    &cancellation,
+                )
+            },
+        )
+    })
+}
+
+/// One hosted run: the workspace it is driven from and the pushed source
+/// revision the provider builds.
+#[derive(Clone, Copy)]
+struct HostedRun<'a> {
+    root: &'a Path,
+    scratch: &'a Path,
+    repository: &'a str,
+    source_ref: &'a str,
+    source_commit: &'a str,
+}
+
+/// Push the run's one-use source ref, run `operation` unless cancellation
+/// already arrived, and delete the ref whatever happened.
+fn with_pushed_source<T>(
+    run: &HostedRun<'_>,
+    cancellation: &Cancellation,
+    operation: impl FnOnce() -> Result<T, WindowsHostedError>,
+) -> Result<T, WindowsHostedError> {
+    let operation = push_source(run.root, run.source_commit, run.source_ref).and_then(|()| {
         if cancellation.requested() {
             Err(WindowsHostedError::Cancelled { run_id: None })
         } else {
-            dispatch(
-                &HostedRun {
-                    root: &root,
-                    scratch: scratch.path(),
-                    repository: &policy.repository,
-                    source_ref: &source_ref,
-                    source_commit: &source.commit,
-                    request: &request,
-                },
-                destination.as_deref(),
-                &cancellation,
-            )
+            operation()
         }
     });
-    let cleanup = delete_source(&root, &source_ref);
+    let cleanup = delete_source(run.root, run.source_ref);
     match (operation, cleanup) {
-        (Ok(execution), Ok(())) => Ok(execution),
+        (Ok(value), Ok(())) => Ok(value),
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(cleanup)) => Err(cleanup),
         (Err(error), Err(cleanup)) => Err(WindowsHostedError::OperationAndCleanup {
@@ -207,46 +242,35 @@ pub fn windows_hosted_commands_into(
     }
 }
 
-/// One hosted run: the workspace it is driven from, the pushed source
-/// revision the provider builds, and the admitted request it executes.
-#[derive(Clone, Copy)]
-struct HostedRun<'a> {
-    root: &'a Path,
-    scratch: &'a Path,
-    repository: &'a str,
-    source_ref: &'a str,
-    source_commit: &'a str,
-    request: &'a Request,
-}
-
-fn dispatch(
+/// Dispatch `workflow` at the run's source ref with `inputs`, complete the
+/// provider run through `complete`, cancel it on any other failure, and
+/// delete its artifact.
+fn dispatch<T>(
     run: &HostedRun<'_>,
-    destination: Option<&Path>,
-    cancellation: &Cancellation,
-) -> Result<HostedExecution, WindowsHostedError> {
+    workflow: &str,
+    inputs: &serde_json::Value,
+    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+) -> Result<T, WindowsHostedError> {
     let HostedRun {
         root,
         repository,
         source_ref,
-        request,
         ..
     } = *run;
-    let request_json = serde_json::to_string(request).map_err(WindowsHostedError::Encode)?;
-    let dispatch_input = serde_json::json!({ "request": request_json });
     let dispatched = command_with_input(
         root,
         "gh",
         [
             OsString::from("workflow"),
             OsString::from("run"),
-            OsString::from(WORKFLOW_PATH),
+            OsString::from(workflow),
             OsString::from("--repo"),
             OsString::from(repository),
             OsString::from("--ref"),
             OsString::from(source_ref),
             OsString::from("--json"),
         ],
-        serde_json::to_vec(&dispatch_input).map_err(WindowsHostedError::Encode)?,
+        serde_json::to_vec(inputs).map_err(WindowsHostedError::Encode)?,
     )?;
     let url = successful_text("workflow dispatch", dispatched)?;
     let run_id = url
@@ -258,7 +282,7 @@ fn dispatch(
             WindowsHostedError::ProviderResponse(format!("dispatch returned no run URL: {url:?}"))
         })?;
 
-    let operation = complete_dispatched_run(run, run_id, destination, cancellation);
+    let operation = complete(run_id);
     let operation = match operation {
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
         Err(error) => finish_run_cleanup(Err(error), cancel_run(root, repository, run_id)),
@@ -270,13 +294,14 @@ fn dispatch(
 
 fn complete_dispatched_run(
     run: &HostedRun<'_>,
+    request: &Request,
     run_id: u64,
     destination: Option<&Path>,
     cancellation: &Cancellation,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    let request = run.request;
     watch_run(run.root, run.repository, run_id, cancellation)?;
-    let (artifact_dir, runner_path, result_path) = download_attested_artifact(run, run_id)?;
+    let (artifact_dir, runner_path, result_path) =
+        download_attested_artifact(run, &request.challenge, run_id)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
     let result_bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
         path: result_path.clone(),
@@ -318,7 +343,7 @@ fn complete_dispatched_run(
                 &artifact_dir.join(format!("spice-hosted-stage-{}", request.challenge)),
                 &result.artifacts,
                 destination,
-                request,
+                &request.source,
             )?;
         }
     } else if !result.artifacts.is_empty() {
@@ -361,17 +386,25 @@ fn finish_run_cleanup<T>(
 
 fn download_attested_artifact(
     run: &HostedRun<'_>,
+    challenge: &str,
     run_id: u64,
 ) -> Result<(PathBuf, PathBuf, PathBuf), WindowsHostedError> {
-    let HostedRun {
-        root,
-        scratch,
-        repository,
-        source_ref,
-        source_commit,
-        request,
-    } = *run;
-    let artifact_dir = scratch.join("artifact");
+    let artifact_dir = download_artifact(run, run_id, &format!("spice-hosted-{challenge}"))?;
+    let result_path = artifact_dir.join("result.json");
+    let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
+    for path in [&runner_path, &result_path] {
+        verify_attestation(run, WORKFLOW, path)?;
+    }
+    Ok((artifact_dir, runner_path, result_path))
+}
+
+/// Download the run's one artifact `name` into a fresh scratch directory.
+fn download_artifact(
+    run: &HostedRun<'_>,
+    run_id: u64,
+    name: &str,
+) -> Result<PathBuf, WindowsHostedError> {
+    let artifact_dir = run.scratch.join("artifact");
     fs::create_dir(&artifact_dir).map_err(|source| WindowsHostedError::Io {
         path: artifact_dir.clone(),
         source,
@@ -379,55 +412,68 @@ fn download_attested_artifact(
     successful(
         "artifact download",
         command(
-            root,
+            run.root,
             "gh",
             [
                 OsString::from("run"),
                 OsString::from("download"),
                 OsString::from(run_id.to_string()),
                 OsString::from("--repo"),
-                OsString::from(repository),
+                OsString::from(run.repository),
                 OsString::from("--name"),
-                OsString::from(format!("spice-hosted-{}", request.challenge)),
+                OsString::from(name),
                 OsString::from("--dir"),
                 artifact_dir.as_os_str().to_owned(),
             ],
         )?,
     )?;
-    let result_path = artifact_dir.join("result.json");
-    let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
-    for path in [&runner_path, &result_path] {
-        let verification = command(
-            root,
-            "gh",
-            [
-                OsString::from("attestation"),
-                OsString::from("verify"),
-                path.as_os_str().to_owned(),
-                OsString::from("--repo"),
-                OsString::from(repository),
-                OsString::from("--signer-workflow"),
-                OsString::from(format!("{repository}/{WORKFLOW}")),
-                OsString::from("--signer-digest"),
-                OsString::from(source_commit),
-                OsString::from("--source-ref"),
-                OsString::from(format!("refs/tags/{source_ref}")),
-                OsString::from("--source-digest"),
-                OsString::from(source_commit),
-                OsString::from("--deny-self-hosted-runners"),
-                OsString::from("--format=json"),
-            ],
-        )?;
-        successful("artifact attestation", verification)?;
-    }
-    Ok((artifact_dir, runner_path, result_path))
+    Ok(artifact_dir)
+}
+
+/// Require a GitHub Sigstore attestation over the file at `path` signed by
+/// `workflow` running at the run's one-use source commit and tag on a
+/// provider-hosted runner.
+fn verify_attestation(
+    run: &HostedRun<'_>,
+    workflow: &str,
+    path: &Path,
+) -> Result<(), WindowsHostedError> {
+    let HostedRun {
+        root,
+        repository,
+        source_ref,
+        source_commit,
+        ..
+    } = *run;
+    let verification = command(
+        root,
+        "gh",
+        [
+            OsString::from("attestation"),
+            OsString::from("verify"),
+            path.as_os_str().to_owned(),
+            OsString::from("--repo"),
+            OsString::from(repository),
+            OsString::from("--signer-workflow"),
+            OsString::from(format!("{repository}/{workflow}")),
+            OsString::from("--signer-digest"),
+            OsString::from(source_commit),
+            OsString::from("--source-ref"),
+            OsString::from(format!("refs/tags/{source_ref}")),
+            OsString::from("--source-digest"),
+            OsString::from(source_commit),
+            OsString::from("--deny-self-hosted-runners"),
+            OsString::from("--format=json"),
+        ],
+    )?;
+    successful("artifact attestation", verification).map(|_| ())
 }
 
 fn publish_artifacts(
     source: &Path,
     artifacts: &[super::Artifact],
     destination: &Path,
-    request: &Request,
+    source_archive: &str,
 ) -> Result<(), WindowsHostedError> {
     for artifact in artifacts {
         let path = source.join(&artifact.path);
@@ -445,7 +491,7 @@ fn publish_artifacts(
             )));
         }
         if artifact.path.ends_with("/payload.json") {
-            admit_payload_source(&path, &request.source)?;
+            admit_payload_source(&path, source_archive)?;
         }
     }
     let mut published = artifacts.iter().collect::<Vec<_>>();

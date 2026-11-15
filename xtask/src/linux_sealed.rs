@@ -15,7 +15,8 @@ use crate::{AppBuildError, ReleaseEnvironment};
 /// Measured at six to eight minutes on an arm64 Docker host, and a little
 /// over two of those are the `xtask` compile on a cold VM; the bound is
 /// generous against that so a deadlocked run is reported within one release
-/// cut rather than hours later.
+/// cut rather than hours later. A delivered archive adds the app build, which
+/// the same bound covers.
 const STAGE_RUNTIME: Duration = Duration::from_secs(30 * 60);
 const OUTPUT_DRAIN: Duration = Duration::from_secs(10);
 const REAP: Duration = Duration::from_secs(10);
@@ -34,6 +35,7 @@ pub enum LinuxSealedError {
     },
     Image(proof::ContainerError),
     App(AppBuildError),
+    SourceArchive,
     Run(proof::ContainerError),
     Output(io::Error),
     Staging(Option<i32>),
@@ -59,6 +61,9 @@ impl fmt::Display for LinuxSealedError {
                 path.display()
             ),
             Self::Image(error) => write!(formatter, "sealed Linux image unavailable: {error}"),
+            Self::SourceArchive => {
+                formatter.write_str("the delivered source archive identity is not Unicode")
+            }
             Self::App(error) => write!(formatter, "app stage for Linux staging: {error}"),
             Self::Run(error) => write!(formatter, "sealed Linux staging did not run: {error}"),
             Self::Output(error) => write!(formatter, "cannot write staging output: {error}"),
@@ -79,7 +84,7 @@ impl Error for LinuxSealedError {
             Self::Runtime { error, .. } | Self::Image(error) | Self::Run(error) => Some(error),
             Self::App(error) => Some(error),
             Self::Output(error) => Some(error),
-            Self::RuntimeUnset | Self::Staging(_) => None,
+            Self::RuntimeUnset | Self::SourceArchive | Self::Staging(_) => None,
         }
     }
 }
@@ -127,9 +132,17 @@ pub fn linux_sealed_stage(
         })?;
     let container = proof::Container::new(admitted, repository.worktree_root(), limits)
         .map_err(LinuxSealedError::Image)?;
-    crate::app(environment, output).map_err(LinuxSealedError::App)?;
+    // A delivered archive identity names the exact tree this workspace is, so
+    // the image builds the app itself; otherwise it links this host's stage.
+    let delivered = match &environment.source_archive {
+        Some(identity) => Some(identity.to_str().ok_or(LinuxSealedError::SourceArchive)?),
+        None => {
+            crate::app(environment, output).map_err(LinuxSealedError::App)?;
+            None
+        }
+    };
     let stage = container
-        .stage_release(repository.common_dir())
+        .stage_release(repository.common_dir(), delivered)
         .map_err(LinuxSealedError::Run)?;
     output
         .write_all(&stage.stdout)
