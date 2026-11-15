@@ -8,6 +8,7 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(windows)]
 mod windows {
+    use base64::Engine as _;
     use sha2::{Digest as _, Sha256};
     use sill::authority;
     use std::env;
@@ -1134,21 +1135,25 @@ mod windows {
              exit 1\n\
              }\n",
         );
-        let mut child = ProcessCommand::new(POWERSHELL)
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"])
-            .stdin(Stdio::piped())
+        let encoded = guarded
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(encoded);
+        let child = ProcessCommand::new(POWERSHELL)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+            ])
+            .arg(encoded)
+            .env_remove("PSModulePath")
+            .stdin(Stdio::null())
             .stdout(stdout)
             .stderr(stderr)
             .spawn()
             .map_err(|error| format!("cannot start PowerShell to {action}: {error}"))?;
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| format!("PowerShell stdin unavailable while trying to {action}"))?;
-        stdin
-            .write_all(guarded.as_bytes())
-            .map_err(|error| format!("cannot send PowerShell script to {action}: {error}"))?;
-        drop(stdin);
         Ok(child)
     }
 
