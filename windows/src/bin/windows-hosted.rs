@@ -356,7 +356,7 @@ mod windows {
             })
             .collect::<Result<Vec<_>, String>>()?;
         let artifacts = artifact_inventory(&stage)?;
-        grant_tree_access(&stage, &provider_identity, 0o400, 0o500)?;
+        grant_tree_contents_access(&stage, &provider_identity, 0o400, 0o500)?;
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
@@ -751,6 +751,23 @@ mod windows {
             ));
         };
         authority::set_owner_and_identity_mode(path, identity, mode, mode)
+    }
+
+    fn grant_tree_contents_access(
+        path: &Path,
+        identity: &str,
+        file_mode: u32,
+        directory_mode: u32,
+    ) -> Result<(), String> {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("cannot enumerate access tree {}: {error}", path.display()))?
+        {
+            let entry = entry.map_err(|error| {
+                format!("cannot enumerate access tree {}: {error}", path.display())
+            })?;
+            grant_tree_access(&entry.path(), identity, file_mode, directory_mode)?;
+        }
+        Ok(())
     }
 
     fn grant_tree_access(
