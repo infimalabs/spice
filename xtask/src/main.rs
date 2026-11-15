@@ -22,7 +22,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target <aarch64-apple-darwin|x86_64-unknown-linux-musl> [--unsigned] --hosted|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -461,7 +461,7 @@ fn run_stage_target(
         return match target {
             LINUX_TARGET => xtask::linux_hosted_stage(&archive, output).map_err(Into::into),
             DARWIN_TARGET => {
-                let proof_container = resolve_proof_container(None)?;
+                let proof_container = resolve_proof_container(proof_container)?;
                 xtask::macos_hosted_stage(&archive, &proof_container, output).map_err(Into::into)
             }
             _ => unreachable!("hosted route parser admits only hosted targets"),
@@ -546,15 +546,8 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         _ => return None,
     };
     let target = target.to_str()?;
-    if route != StageRoute::Default && (proof_container.is_some() || scope != StageScope::Target) {
+    if !stage_route_admitted(target, unsigned, proof_container, scope, route) {
         return None;
-    }
-    match route {
-        StageRoute::Default => {}
-        StageRoute::Sealed if target == LINUX_TARGET => {}
-        StageRoute::Hosted if target == LINUX_TARGET => {}
-        StageRoute::Hosted if target == DARWIN_TARGET && !unsigned => {}
-        StageRoute::Sealed | StageRoute::Hosted => return None,
     }
     Some(StageRequest {
         target,
@@ -565,8 +558,28 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     })
 }
 
+fn stage_route_admitted(
+    target: &str,
+    unsigned: bool,
+    proof_container: Option<&str>,
+    scope: StageScope,
+    route: StageRoute,
+) -> bool {
+    if scope != StageScope::Target {
+        return false;
+    }
+    match route {
+        StageRoute::Default => true,
+        StageRoute::Sealed => target == LINUX_TARGET && proof_container.is_none(),
+        StageRoute::Hosted if target == LINUX_TARGET => proof_container.is_none(),
+        StageRoute::Hosted if target == DARWIN_TARGET => !unsigned && proof_container.is_some(),
+        StageRoute::Hosted if target == WINDOWS_TARGET => unsigned && proof_container.is_some(),
+        StageRoute::Hosted => false,
+    }
+}
+
 /// Where a release target build executes.
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StageRoute {
     /// Natively on its host, or in the sealed image for Linux on another host.
     Default,
@@ -589,13 +602,16 @@ enum StageScope {
 
 /// Release targets with no signing route yet. Their unsigned executables are
 /// the releases for now, built only when the caller names that result.
-const UNSIGNED_TARGETS: [&str; 2] = [LINUX_TARGET, "x86_64-pc-windows-msvc"];
+const UNSIGNED_TARGETS: [&str; 2] = [LINUX_TARGET, WINDOWS_TARGET];
 
 /// The signed Darwin release target with a hosted route.
 const DARWIN_TARGET: &str = "aarch64-apple-darwin";
 
 /// The Linux release target with sealed and hosted routes.
 const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
+
+/// The unsigned Windows release target with a hosted route.
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
 
 fn require_unsigned(target: &str, unsigned: bool) -> CommandResult {
     if unsigned {
@@ -944,7 +960,10 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
 
 #[cfg(test)]
 mod tests {
-    use super::install_request;
+    use super::{
+        DARWIN_TARGET, LINUX_TARGET, StageRoute, WINDOWS_TARGET, install_request,
+        parse_stage_target,
+    };
     use std::ffi::OsString;
 
     #[test]
@@ -966,5 +985,45 @@ mod tests {
             request.up_arguments,
             ["--host", "0.0.0.0", "--allow-insecure-bind", "--open"].map(OsString::from)
         );
+    }
+
+    #[test]
+    fn hosted_targets_admit_only_their_supported_proof_image_inputs() {
+        let image = "sha256:0123456789abcdef";
+        let darwin = [DARWIN_TARGET, "--proof-container", image, "--hosted"].map(OsString::from);
+        let darwin = parse_stage_target(&darwin).expect("hosted Darwin proof image");
+        assert_eq!(darwin.target, DARWIN_TARGET);
+        assert_eq!(darwin.proof_container, Some(image));
+        assert_eq!(darwin.route, StageRoute::Hosted);
+        assert!(!darwin.unsigned);
+
+        let windows = [
+            WINDOWS_TARGET,
+            "--unsigned",
+            "--proof-container",
+            image,
+            "--hosted",
+        ]
+        .map(OsString::from);
+        let windows = parse_stage_target(&windows).expect("hosted Windows proof image");
+        assert_eq!(windows.target, WINDOWS_TARGET);
+        assert_eq!(windows.proof_container, Some(image));
+        assert_eq!(windows.route, StageRoute::Hosted);
+        assert!(windows.unsigned);
+
+        let linux = [
+            LINUX_TARGET,
+            "--unsigned",
+            "--proof-container",
+            image,
+            "--hosted",
+        ]
+        .map(OsString::from);
+        assert!(parse_stage_target(&linux).is_none());
+
+        let unpinned_darwin = [DARWIN_TARGET, "--hosted"].map(OsString::from);
+        assert!(parse_stage_target(&unpinned_darwin).is_none());
+        let unpinned_windows = [WINDOWS_TARGET, "--unsigned", "--hosted"].map(OsString::from);
+        assert!(parse_stage_target(&unpinned_windows).is_none());
     }
 }
