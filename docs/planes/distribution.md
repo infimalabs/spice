@@ -383,6 +383,8 @@ dispatches the exact Git commit and canonical source-archive digest; the sealed
 native proof runner builds an unsigned `aarch64-apple-darwin` stage with
 networking denied. The workflow refuses image, source, archive, SDK, tool, or
 stage drift before credentials enter any job.
+Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
+dynamic libraries; extracting the executable alone is not an executable tool.
 
 The repository variable `MACOS_DEVELOPER_IDENTITY` names the dedicated CI
 Developer ID Application identity. Actions secrets

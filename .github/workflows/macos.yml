@@ -137,9 +137,11 @@ jobs:
 
           binaryen=$(checked_archive "$(policy_value wasm_opt archive)" "$(policy_value wasm_opt url)" "$(policy_value wasm_opt sha256)")
           binaryen_root="$RUNNER_TEMP/binaryen"
-          mkdir -p "$binaryen_root"
+          binaryen_home="$RUNNER_TEMP/hosted-tools"
+          mkdir -p "$binaryen_root" "$binaryen_home/lib"
           tar -xzf "$binaryen" -C "$binaryen_root"
           cp "$binaryen_root/binaryen-version_131/bin/wasm-opt" "$tools/wasm-opt"
+          cp -R "$binaryen_root/binaryen-version_131/lib/." "$binaryen_home/lib/"
           rm -rf "$binaryen" "$binaryen_root"
           chmod 0555 "$tools/trunk" "$tools/wasm-bindgen" "$tools/wasm-opt"
           test "$("$tools/trunk" --version)" = "$EXPECTED_TRUNK"
