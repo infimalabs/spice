@@ -400,7 +400,10 @@ key through GitHub and the local keychain.
 executable, `PATH`, include, and library location. The bootstrap Cargo invokes
 the pinned `RUSTC` path under the same pinned `RUSTUP_TOOLCHAIN`; workflow-step
 scope never lets it fall back to the runner image's mutable stable proxy. The
-workflow pins every third-party action by full commit. Updating the image means
+workflow admits the pinned Trunk, wasm-bindgen, and Binaryen release archives by
+SHA-256 and each extracted executable by its reported version before the runner
+can use it. The workflow
+pins every third-party action by full commit. Updating the image means
 reviewing the matching `actions/runner-images` release manifest, changing every
 affected tool/path pin together, and proving the runner smoke before landing.
 

@@ -105,7 +105,9 @@ mod windows {
         create_empty(&scratch)?;
         create_empty(&stage)?;
 
+        eprintln!("[windows-hosted] creating isolated account");
         let account = GuestAccount::create(&request.challenge)?;
+        eprintln!("[windows-hosted] sealing source and vendor");
         grant_ancestor_traversal(&workspace, account.sid())?;
         grant_ancestor_traversal(&vendor, account.sid())?;
         grant_ancestor_traversal(&scratch, account.sid())?;
@@ -128,6 +130,7 @@ mod windows {
             &request.challenge,
             account.sid(),
         )?;
+        eprintln!("[windows-hosted] granting isolated tool access");
         grant_file_access(Path::new(request_path), account.sid(), 0o400)?;
         grant_file_access(&executable, account.sid(), 0o500)?;
         let toolchain_root = Path::new(&request.toolchain.cargo_path)
@@ -143,12 +146,15 @@ mod windows {
         grant_ancestor_traversal(trunk_root, account.sid())?;
         grant_tree_access(trunk_root, account.sid(), 0o500)?;
 
+        eprintln!("[windows-hosted] establishing principal firewall");
         verify_non_loopback_available()?;
         let firewall = Firewall::establish(&request.challenge, account.sid())?;
+        eprintln!("[windows-hosted] starting isolated guest");
         let execution = account.execute(&executable, request_path, &guest_result);
         let firewall_cleanup = firewall.close();
         let account_cleanup = account.close();
         combine_cleanup(execution, firewall_cleanup, account_cleanup)?;
+        eprintln!("[windows-hosted] isolated guest completed");
 
         let encoded = fs::read(&guest_result)
             .map_err(|error| format!("cannot read guest result: {error}"))?;
@@ -174,6 +180,7 @@ mod windows {
                 "guest process identity drifted: expected {expected_identity}, observed {observed_identity}"
             ));
         }
+        eprintln!("[windows-hosted] guest identity admitted");
         let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
         admit_host(&request)?;
@@ -195,6 +202,7 @@ mod windows {
         }
         admit_toolchain(&request)?;
         verify_non_loopback_denied()?;
+        eprintln!("[windows-hosted] guest network isolation admitted");
 
         let scratch = temp.join(format!("spice-hosted-{}", request.challenge));
         let cargo_home = scratch.join("cargo-home");
@@ -207,6 +215,10 @@ mod windows {
         verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
         verify_writable("fresh target", &target, &request.challenge)?;
         verify_writable("staged output", &stage, &request.challenge)?;
+        eprintln!(
+            "[windows-hosted] guest filesystem admitted; executing {} command(s)",
+            request.commands.len()
+        );
 
         let outputs = request
             .commands
@@ -739,6 +751,7 @@ mod windows {
             .env("CARGO_HOME", cargo_home)
             .env("CARGO_TARGET_DIR", target)
             .env("CARGO_NET_OFFLINE", "true")
+            .env("TRUNK_OFFLINE", "true")
             .env("RUST_TEST_THREADS", "1")
             .env("TEMP", target)
             .env("TMP", target)
@@ -901,10 +914,16 @@ mod windows {
             let script = format!(
                 "$ErrorActionPreference = 'Stop'\n\
                  $password = ConvertTo-SecureString {} -AsPlainText -Force\n\
-                 $user = New-LocalUser -Name {} -Password $password \
-                     -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword\n\
-                 [Console]::Out.WriteLine($user.SID.Value)\n",
+                 New-LocalUser -Name {} -Password $password \
+                     -AccountNeverExpires -PasswordNeverExpires \
+                     -UserMayNotChangePassword | Out-Null\n\
+                 $sid = (Get-LocalUser -Name {}).SID.Value\n\
+                 if ([string]::IsNullOrWhiteSpace($sid)) {{ \
+                     throw 'new local user has no SID' \
+                 }}\n\
+                 Write-Output $sid\n",
                 ps_literal(&password),
+                ps_literal(&name),
                 ps_literal(&name),
             );
             let sid = powershell_output(&script, "create guest account")?;
@@ -914,7 +933,13 @@ mod windows {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || byte == b'S' || byte == b'-')
             {
-                return Err(format!("guest account returned invalid SID {sid:?}"));
+                let cleanup = delete_guest(&name).err();
+                return Err(format!(
+                    "guest account returned invalid SID {sid:?}{}",
+                    cleanup
+                        .map(|error| format!("; account cleanup also failed: {error}"))
+                        .unwrap_or_default()
+                ));
             }
             Ok(Self {
                 name,
