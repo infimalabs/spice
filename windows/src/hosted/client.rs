@@ -26,8 +26,10 @@ use serde::Deserialize;
 use wire::{Digest, Domain};
 
 mod linux;
+mod macos;
 mod source;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
+pub use macos::{MacosHostedStage, macos_hosted_stage};
 use source::{delete_source, push_source};
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -535,18 +537,23 @@ fn admit_payload_source(path: &Path, source: &str) -> Result<(), WindowsHostedEr
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ArtifactCleanupAction {
     Complete,
-    Delete(u64),
-    Refuse(usize),
+    Delete(Vec<u64>),
 }
 
 fn artifact_cleanup_action(inventory: &ArtifactInventory) -> ArtifactCleanupAction {
-    match inventory.artifacts.as_slice() {
-        [] => ArtifactCleanupAction::Complete,
-        [artifact] => ArtifactCleanupAction::Delete(artifact.id),
-        artifacts => ArtifactCleanupAction::Refuse(artifacts.len()),
+    if inventory.artifacts.is_empty() {
+        ArtifactCleanupAction::Complete
+    } else {
+        ArtifactCleanupAction::Delete(
+            inventory
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.id)
+                .collect(),
+        )
     }
 }
 
@@ -564,30 +571,27 @@ fn delete_artifact(root: &Path, repository: &str, run_id: u64) -> Result<(), Win
     let listed = successful_text("artifact inventory", listed)?;
     let inventory: ArtifactInventory =
         serde_json::from_str(&listed).map_err(WindowsHostedError::Decode)?;
-    let artifact_id = match artifact_cleanup_action(&inventory) {
+    let artifact_ids = match artifact_cleanup_action(&inventory) {
         ArtifactCleanupAction::Complete => return Ok(()),
-        ArtifactCleanupAction::Delete(artifact_id) => artifact_id,
-        ArtifactCleanupAction::Refuse(count) => {
-            return Err(WindowsHostedError::ProviderResponse(format!(
-                "run {run_id} published {count} artifacts instead of one"
-            )));
-        }
+        ArtifactCleanupAction::Delete(artifact_ids) => artifact_ids,
     };
-    successful(
-        "artifact deletion",
-        command(
-            root,
-            "gh",
-            [
-                OsString::from("api"),
-                OsString::from("--method"),
-                OsString::from("DELETE"),
-                OsString::from(format!(
-                    "repos/{repository}/actions/artifacts/{artifact_id}"
-                )),
-            ],
-        )?,
-    )?;
+    for artifact_id in artifact_ids {
+        successful(
+            "artifact deletion",
+            command(
+                root,
+                "gh",
+                [
+                    OsString::from("api"),
+                    OsString::from("--method"),
+                    OsString::from("DELETE"),
+                    OsString::from(format!(
+                        "repos/{repository}/actions/artifacts/{artifact_id}"
+                    )),
+                ],
+            )?,
+        )?;
+    }
     Ok(())
 }
 
@@ -1276,7 +1280,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_inventory_selects_only_one_exact_artifact() {
+    fn artifact_inventory_deletes_every_run_artifact() {
         let inventory = |ids: &[u64]| ArtifactInventory {
             artifacts: ids.iter().map(|id| Artifact { id: *id }).collect(),
         };
@@ -1287,11 +1291,11 @@ mod tests {
         );
         assert_eq!(
             artifact_cleanup_action(&inventory(&[42])),
-            ArtifactCleanupAction::Delete(42)
+            ArtifactCleanupAction::Delete(vec![42])
         );
         assert_eq!(
             artifact_cleanup_action(&inventory(&[42, 43])),
-            ArtifactCleanupAction::Refuse(2)
+            ArtifactCleanupAction::Delete(vec![42, 43])
         );
     }
 

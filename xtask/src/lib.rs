@@ -57,13 +57,16 @@ pub use seal_darwin::{PlacedExecutable, SealDarwinError, place_executable, seal_
 #[cfg(not(target_arch = "wasm32"))]
 pub use share_darwin::{ShareDarwinError, ShareDarwinRequest, share_darwin};
 #[cfg(not(target_arch = "wasm32"))]
-pub use share_darwin_stage::{StagedDarwinError, sign_staged_darwin, verify_staged_darwin};
+pub use share_darwin_stage::{
+    StagedDarwinError, finalize_staged_darwin, sign_staged_darwin, verify_staged_darwin,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source_archive::source_archive;
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
-    HostedExecution, WindowsHostedError, linux_hosted_stage, windows_hosted, windows_hosted_stage,
+    HostedExecution, WindowsHostedError, linux_hosted_stage, macos_hosted_stage, windows_hosted,
+    windows_hosted_stage,
 };
 pub use windows_msvc::{WindowsMsvcError, windows_msvc};
 

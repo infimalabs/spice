@@ -1,4 +1,4 @@
-name: Spice hosted macOS release
+name: Hosted macOS release
 
 on:
   workflow_dispatch:
@@ -12,41 +12,18 @@ on:
         required: true
         type: string
       archive:
-        description: Canonical Spice source-archive digest
+        description: Canonical source-archive digest
+        required: true
+        type: string
+      proof_container:
+        description: Exact admitted vendor-set proof image
         required: true
         type: string
 
 jobs:
-  credentials:
-    name: Admit configured Apple credentials
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Require the complete credential set
-        shell: bash
-        env:
-          DEVELOPER_IDENTITY: ${{ vars.MACOS_DEVELOPER_IDENTITY }}
-          DEVELOPER_ID_P12_B64: ${{ secrets.MACOS_DEVELOPER_ID_P12_B64 }}
-          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
-          NOTARY_KEY_B64: ${{ secrets.MACOS_NOTARY_KEY_B64 }}
-          NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          test -n "$DEVELOPER_ID_P12_B64"
-          test -n "$DEVELOPER_ID_P12_PASSWORD"
-          test -n "$NOTARY_KEY_B64"
-          test -n "$NOTARY_KEY_ID"
-          test -n "$NOTARY_ISSUER_ID"
-          case "$DEVELOPER_IDENTITY" in
-            "Developer ID Application: "*) ;;
-            *) printf 'MACOS_DEVELOPER_IDENTITY is not configured as a Developer ID Application identity\n' >&2; exit 65 ;;
-          esac
 
   build:
     name: Build sealed unsigned arm64 payload
-    needs: credentials
     runs-on: macos-15
     timeout-minutes: 90
     permissions:
@@ -63,6 +40,7 @@ jobs:
         env:
           EXPECTED_SOURCE: ${{ inputs.source }}
           EXPECTED_ARCHIVE: ${{ inputs.archive }}
+          PROOF_CONTAINER: ${{ inputs.proof_container }}
           CHALLENGE: ${{ inputs.challenge }}
         run: |
           set -euo pipefail
@@ -72,6 +50,10 @@ jobs:
           test "${#EXPECTED_SOURCE}" -eq 40 -o "${#EXPECTED_SOURCE}" -eq 64
           case "$EXPECTED_ARCHIVE" in *[!0-9a-f]*|'') exit 65 ;; esac
           test "${#EXPECTED_ARCHIVE}" -eq 64
+          case "$PROOF_CONTAINER" in sha256:*) ;; *) exit 65 ;; esac
+          proof_digest=${PROOF_CONTAINER#sha256:}
+          case "$proof_digest" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#proof_digest}" -eq 64
           test "$(git rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_SOURCE"
           test "$(uname -m)" = arm64
           python3 - <<'PY' >> "$GITHUB_ENV"
@@ -121,7 +103,7 @@ jobs:
           test "$("$rust_bin/rustc" --version)" = "$EXPECTED_RUST"
           test "$("$rust_bin/cargo" --version)" = "$EXPECTED_CARGO"
 
-          tools="$RUNNER_TEMP/spice-hosted-tools/bin"
+          tools="$RUNNER_TEMP/hosted-tools/bin"
           mkdir -p "$tools"
           checked_archive() {
             name=$1
@@ -173,13 +155,17 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
           EXPECTED_ARCHIVE: ${{ inputs.archive }}
+          PROOF_CONTAINER: ${{ inputs.proof_container }}
         run: |
           set -euo pipefail
           export PATH="$RUNNER_TEMP/bootstrap-target/release:$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
           "$cargo" build --locked --release --package xtask
           "$cargo" build --locked --release --package spice --bin spice
-          SPICE_PROOF_CARGO="$cargo" "$RUNNER_TEMP/bootstrap-target/release/xtask" seal-darwin --unsigned
+          SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh
+          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
+            "$RUNNER_TEMP/bootstrap-target/release/xtask" \
+            stage-target aarch64-apple-darwin --unsigned --proof-container "$PROOF_CONTAINER"
 
           payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
           python3 - "$payload" "$EXPECTED_ARCHIVE" "$RUNNER_TEMP/unsigned-stage" <<'PY'
@@ -202,32 +188,40 @@ jobs:
           PY
           "$RUNNER_TEMP/bootstrap-target/release/xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
           tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
-          cp dist/darwin/hosted.toml "$RUNNER_TEMP/bootstrap-target/release/hosted.toml"
-          tar -czf "$RUNNER_TEMP/darwin-tools.tar.gz" -C "$RUNNER_TEMP/bootstrap-target/release" xtask hosted.toml
+          cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
+          tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$RUNNER_TEMP/bootstrap-target/release" xtask
 
       - name: Upload unsigned stage transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spice-darwin-unsigned-${{ inputs.challenge }}
+          name: darwin-unsigned-${{ inputs.challenge }}
           path: ${{ runner.temp }}/unsigned-stage.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload admitted host policy
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: darwin-policy-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/hosted.toml
           if-no-files-found: error
           retention-days: 1
 
       - name: Upload credential-free finalizer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spice-darwin-tools-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/darwin-tools.tar.gz
+          name: darwin-finalizer-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/finalizer.tar.gz
           if-no-files-found: error
           retention-days: 1
 
       - name: Tear down build roots
         if: always()
         shell: bash
-        run: rm -rf "$RUNNER_TEMP/bootstrap-cargo" "$RUNNER_TEMP/bootstrap-target" "$RUNNER_TEMP/spice-hosted-tools" "$RUNNER_TEMP/unsigned-stage"
+        run: rm -rf "$RUNNER_TEMP/bootstrap-cargo" "$RUNNER_TEMP/bootstrap-target" "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
 
   sign:
-    name: Developer ID sign and notarize final bytes
+    name: Sign and notarize exact native bytes
     needs: build
     runs-on: macos-15
     timeout-minutes: 45
@@ -238,26 +232,27 @@ jobs:
       - name: Download unsigned stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: spice-darwin-unsigned-${{ inputs.challenge }}
+          name: darwin-unsigned-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
-      - name: Download credential-free finalizer
+      - name: Download admitted host policy
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: spice-darwin-tools-${{ inputs.challenge }}
+          name: darwin-policy-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
-      - name: Admit signing host and unsigned input
+      - name: Admit signing host and prepare exact input
         shell: bash
+        env:
+          EXPECTED_ARCHIVE: ${{ inputs.archive }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/sign"
           mkdir -p "$work"
           tar -xzf "$RUNNER_TEMP/transport/unsigned-stage.tar.gz" -C "$work"
-          tar -xzf "$RUNNER_TEMP/transport/darwin-tools.tar.gz" -C "$work"
-          chmod 0555 "$work/xtask"
+          policy="$RUNNER_TEMP/transport/hosted.toml"
           policy_value() {
-            python3 - "$work/hosted.toml" "$1" "$2" <<'PY'
+            python3 - "$policy" "$1" "$2" <<'PY'
           import sys, tomllib
           with open(sys.argv[1], "rb") as source:
               policy = tomllib.load(source)
@@ -272,10 +267,25 @@ jobs:
           sudo xcode-select --switch "$(policy_value xcode developer_dir)"
           test "$(xcodebuild -version | sed -n '2s/^Build version //p')" = "$(policy_value xcode build)"
           test "macosx$(xcrun --sdk macosx --show-sdk-version)" = "$(policy_value xcode sdk)"
-          "$work/xtask" verify-staged-darwin "$work/unsigned-stage"
+          python3 - "$work/unsigned-stage" "$work/native" "$EXPECTED_ARCHIVE" <<'PY'
+          import json, os, shutil, sys
+          root, output, expected_archive = sys.argv[1:]
+          payload_path = os.path.join(root, "targets/aarch64-apple-darwin/payload.json")
+          with open(payload_path, "rb") as source:
+              payload = json.load(source)
+          if payload["target"] != "aarch64-apple-darwin" or payload["archive"] != expected_archive:
+              raise SystemExit("unsigned stage answers another request")
+          if len(payload["inventory"]) != 2:
+              raise SystemExit("unsigned stage inventory is not exact")
+          entry = next(item for item in payload["inventory"] if item["path"] == "bin/spice")
+          source = os.path.join(root, "objects", f"{entry['digest']}-{entry['mode']:04o}")
+          if entry["mode"] != 0o755 or os.path.getsize(source) != entry["bytes"]:
+              raise SystemExit("unsigned native object differs from its inventory")
+          shutil.copyfile(source, output)
+          os.chmod(output, 0o755)
+          PY
 
-
-      - name: Sign, notarize, verify, and finalize
+      - name: Apply Apple credentials to exact native bytes
         shell: bash
         env:
           DEVELOPER_IDENTITY: ${{ vars.MACOS_DEVELOPER_IDENTITY }}
@@ -284,21 +294,19 @@ jobs:
           NOTARY_KEY_B64: ${{ secrets.MACOS_NOTARY_KEY_B64 }}
           NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          CHALLENGE: ${{ inputs.challenge }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/sign"
-
-          keychain="$RUNNER_TEMP/spice-signing.keychain-db"
+          native="$work/native"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
           p12="$RUNNER_TEMP/developer-id.p12"
           api_key="$RUNNER_TEMP/notary.p8"
+          archive="$RUNNER_TEMP/native.zip"
+          reply="$RUNNER_TEMP/notary.json"
           keychain_password=$(openssl rand -hex 32)
-          profile="spice-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          old_default=$(security default-keychain -d user | tr -d '"')
           cleanup() {
-            security default-keychain -d user -s "$old_default" >/dev/null 2>&1 || true
             security delete-keychain "$keychain" >/dev/null 2>&1 || true
-            rm -rf "$p12" "$api_key" "$keychain" "$work/unsigned-stage" "$work/signed-stage"
+            rm -f "$p12" "$api_key" "$archive" "$reply" "$keychain"
             keychain_password=
           }
           trap cleanup EXIT HUP INT TERM
@@ -311,27 +319,30 @@ jobs:
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$p12" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
-          security default-keychain -d user -s "$keychain"
-          xcrun notarytool store-credentials "$profile" --key "$api_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --keychain "$keychain" --validate
+          security find-identity -v -p codesigning "$keychain" | grep -F "\"$DEVELOPER_IDENTITY\""
 
-          "$work/xtask" sign-staged-darwin "$work/unsigned-stage" "$work/signed-stage" --identity "$DEVELOPER_IDENTITY" --notary-profile "$profile"
-          "$work/xtask" verify-staged-darwin "$work/signed-stage"
-          native=$(python3 - "$work/signed-stage" <<'PY'
-          import json, os, sys
-          root = sys.argv[1]
-          payload = json.load(open(os.path.join(root, "targets/aarch64-apple-darwin/payload.json"), "rb"))
-          entry = next(item for item in payload["inventory"] if item["path"] == "bin/spice")
-          print(os.path.join(root, "objects", f"{entry['digest']}-{entry['mode']:04o}"))
-          PY
-          )
+          codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$DEVELOPER_IDENTITY" "$native"
           codesign --verify --deep --strict --verbose=2 "$native"
-          tar -czf "$RUNNER_TEMP/signed-stage.tar.gz" -C "$work" signed-stage
+          ditto -c -k --keepParent "$native" "$archive"
+          xcrun notarytool submit "$archive" \
+            --key "$api_key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --output-format json > "$reply"
+          python3 - "$reply" <<'PY'
+          import json, sys
+          with open(sys.argv[1], "rb") as source:
+              reply = json.load(source)
+          if reply.get("status") != "Accepted" or not reply.get("id"):
+              raise SystemExit(f"notary submission refused: {reply}")
+          print(f"notary submission {reply['id']} accepted")
+          PY
+          codesign --verify --deep --strict --verbose=2 "$native"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
 
-      - name: Upload signed stage transport
+      - name: Upload signed native bytes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spice-darwin-signed-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/signed-stage.tar.gz
+          name: darwin-native-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/sign/native
           if-no-files-found: error
           retention-days: 1
 
@@ -339,12 +350,63 @@ jobs:
         if: always()
         shell: bash
         run: |
-          security delete-keychain "$RUNNER_TEMP/spice-signing.keychain-db" >/dev/null 2>&1 || true
-          rm -rf "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/spice-signing.keychain-db" "$RUNNER_TEMP/sign"
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" >/dev/null 2>&1 || true
+          rm -rf "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/native.zip" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/sign"
+
+  finalize:
+    name: Rebind and verify signed stage
+    needs: sign
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: none
+    steps:
+      - name: Download unsigned stage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: darwin-unsigned-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/transport
+
+      - name: Download signed native bytes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: darwin-native-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/transport/native
+
+      - name: Download credential-free finalizer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: darwin-finalizer-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/transport
+
+      - name: Rebind and verify exact signed stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/finalize"
+          mkdir -p "$work"
+          tar -xzf "$RUNNER_TEMP/transport/unsigned-stage.tar.gz" -C "$work"
+          tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$work"
+          chmod 0555 "$work/xtask"
+          native="$RUNNER_TEMP/transport/native/native"
+          "$work/xtask" verify-staged-darwin "$work/unsigned-stage"
+          "$work/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$work/stage"
+          "$work/xtask" verify-staged-darwin "$work/stage"
+          codesign --verify --deep --strict --verbose=2 "$native"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
+
+      - name: Upload exact signed stage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: darwin-stage-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/finalize/stage
+          if-no-files-found: error
+          retention-days: 1
 
   attest:
-    name: Attest exact signed payload
-    needs: sign
+    name: Attest exact signed stage
+    needs: finalize
     runs-on: macos-15
     timeout-minutes: 15
     permissions:
@@ -352,84 +414,23 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      - name: Download signed stage
+      - name: Download exact signed stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: spice-darwin-signed-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/transport
-
-      - name: Download credential-free verifier
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: spice-darwin-tools-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/transport
-
-      - name: Admit exact final stage
-        shell: bash
-        env:
-          EXPECTED_ARCHIVE: ${{ inputs.archive }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/attest"
-          tar -xzf "$RUNNER_TEMP/transport/signed-stage.tar.gz" -C "$RUNNER_TEMP/attest"
-          tar -xzf "$RUNNER_TEMP/transport/darwin-tools.tar.gz" -C "$RUNNER_TEMP/attest"
-          chmod 0555 "$RUNNER_TEMP/attest/xtask"
-          policy_value() {
-            python3 - "$RUNNER_TEMP/attest/hosted.toml" "$1" "$2" <<'PY'
-          import sys, tomllib
-          with open(sys.argv[1], "rb") as source:
-              policy = tomllib.load(source)
-          print(policy[sys.argv[2]][sys.argv[3]])
-          PY
-          }
-          test "$(uname -m)" = arm64
-          test "$ImageOS" = "$(policy_value image provider_os)"
-          test "$ImageVersion" = "$(policy_value image version)"
-          test "$(sw_vers -productVersion)" = "$(policy_value image os_version)"
-          test "$(sw_vers -buildVersion)" = "$(policy_value image os_build)"
-          sudo xcode-select --switch "$(policy_value xcode developer_dir)"
-          test "$(xcodebuild -version | sed -n '2s/^Build version //p')" = "$(policy_value xcode build)"
-          test "macosx$(xcrun --sdk macosx --show-sdk-version)" = "$(policy_value xcode sdk)"
-          stage="$RUNNER_TEMP/attest/signed-stage"
-          "$RUNNER_TEMP/attest/xtask" verify-staged-darwin "$stage"
-          python3 - "$stage" "$EXPECTED_ARCHIVE" <<'PY'
-          import json, os, sys
-          root, expected = sys.argv[1:]
-          payload = json.load(open(os.path.join(root, "targets/aarch64-apple-darwin/payload.json"), "rb"))
-          if payload["archive"] != expected:
-              raise SystemExit("signed payload archive drifted")
-          entry = next(item for item in payload["inventory"] if item["path"] == "bin/spice")
-          print(os.path.join(root, "objects", f"{entry['digest']}-{entry['mode']:04o}"))
-          PY
-          native=$(python3 - "$stage" <<'PY'
-          import json, os, sys
-          root = sys.argv[1]
-          payload = json.load(open(os.path.join(root, "targets/aarch64-apple-darwin/payload.json"), "rb"))
-          entry = next(item for item in payload["inventory"] if item["path"] == "bin/spice")
-          print(os.path.join(root, "objects", f"{entry['digest']}-{entry['mode']:04o}"))
-          PY
-          )
-          codesign --verify --deep --strict --verbose=2 "$native"
+          name: darwin-stage-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/stage
 
       - name: Attest payload and exact inventoried objects
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
           subject-path: |
-            ${{ runner.temp }}/attest/signed-stage/targets/aarch64-apple-darwin/payload.json
-            ${{ runner.temp }}/attest/signed-stage/objects/*
-
-      - name: Publish exact signed target stage
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: spice-darwin-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/attest/signed-stage
-          if-no-files-found: error
-          retention-days: 1
+            ${{ runner.temp }}/stage/targets/aarch64-apple-darwin/payload.json
+            ${{ runner.temp }}/stage/objects/*
 
   retire:
     name: Retire disposable source ref
     if: always()
-    needs: [build, sign, attest]
+    needs: [build, sign, finalize, attest]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -441,7 +442,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" != tag ] || [[ "$GITHUB_REF_NAME" != spice-hosted-* ]]; then
+          if [ "$GITHUB_REF_TYPE" != tag ] || [[ "$GITHUB_REF_NAME" != hosted-* ]]; then
             exit 0
           fi
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" || {

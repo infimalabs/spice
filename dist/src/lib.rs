@@ -38,7 +38,7 @@ pub use source::{
 };
 pub use stage::{
     BuildError, BuildStep, Builder, FinalizedArtifact, FinalizedDarwinStage, Pipeline, StageError,
-    StagedTarget, TargetSource, restage_signed_darwin,
+    StagedTarget, TargetSource, admit_finalized_darwin, restage_signed_darwin,
 };
 pub use version::{
     BUILD_RECORD_FILE, Build, CounterError, SOURCE_ARCHIVE_FILE, TrackedVersion,

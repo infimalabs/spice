@@ -21,8 +21,8 @@ const USAGE: &str = concat!(
     "seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
-    "verify-staged-darwin STAGE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned <--sealed|--hosted>|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
+    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target <aarch64-apple-darwin|x86_64-unknown-linux-musl> [--unsigned] --hosted|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -93,6 +93,10 @@ fn main() -> ExitCode {
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("sign-staged-darwin") => {
             run_sign_staged_darwin(arguments.collect(), &mut output)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(value) if value == OsStr::new("finalize-staged-darwin") => {
+            run_finalize_staged_darwin(arguments.collect(), &mut output)
         }
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("verify-staged-darwin") => {
@@ -379,6 +383,23 @@ fn run_sign_staged_darwin(arguments: Vec<OsString>, output: &mut impl io::Write)
     xtask::sign_staged_darwin(Path::new(input), Path::new(destination), signing, output)
         .map_err(Into::into)
 }
+#[cfg(not(target_arch = "wasm32"))]
+fn run_finalize_staged_darwin(
+    arguments: Vec<OsString>,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    let [input, signed_native, destination] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    xtask::finalize_staged_darwin(
+        Path::new(input),
+        Path::new(signed_native),
+        Path::new(destination),
+        output,
+    )
+    .map_err(Into::into)
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_verify_staged_darwin(arguments: Vec<OsString>) -> CommandResult {
@@ -437,12 +458,19 @@ fn run_stage_target(
     }
     if route == StageRoute::Hosted {
         let archive = Path::new("dist/stage").join(dist::SOURCE_ARCHIVE_FILE);
-        return xtask::linux_hosted_stage(&archive, output).map_err(Into::into);
+        return match target {
+            LINUX_TARGET => xtask::linux_hosted_stage(&archive, output).map_err(Into::into),
+            DARWIN_TARGET => {
+                let proof_container = resolve_proof_container(None)?;
+                xtask::macos_hosted_stage(&archive, &proof_container, output).map_err(Into::into)
+            }
+            _ => unreachable!("hosted route parser admits only hosted targets"),
+        };
     }
     if target == LINUX_TARGET && (route == StageRoute::Sealed || !cfg!(target_os = "linux")) {
         return xtask::linux_sealed_stage(&environment, output, error_output).map_err(Into::into);
     }
-    let signing = if target == "aarch64-apple-darwin" {
+    let signing = if target == DARWIN_TARGET {
         darwin_signing(unsigned)?
     } else {
         None
@@ -518,10 +546,15 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         _ => return None,
     };
     let target = target.to_str()?;
-    if route != StageRoute::Default
-        && (target != LINUX_TARGET || proof_container.is_some() || scope != StageScope::Target)
-    {
+    if route != StageRoute::Default && (proof_container.is_some() || scope != StageScope::Target) {
         return None;
+    }
+    match route {
+        StageRoute::Default => {}
+        StageRoute::Sealed if target == LINUX_TARGET => {}
+        StageRoute::Hosted if target == LINUX_TARGET => {}
+        StageRoute::Hosted if target == DARWIN_TARGET && !unsigned => {}
+        StageRoute::Sealed | StageRoute::Hosted => return None,
     }
     Some(StageRequest {
         target,
@@ -532,14 +565,14 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     })
 }
 
-/// Where `stage-target` runs the Linux release build.
+/// Where a release target build executes.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum StageRoute {
-    /// Natively on a Linux host, or in the sealed image from any other host.
+    /// Natively on its host, or in the sealed image for Linux on another host.
     Default,
     /// In the sealed image even on a Linux host.
     Sealed,
-    /// On one fresh provider-hosted Linux machine.
+    /// On one fresh provider-hosted machine.
     Hosted,
 }
 
@@ -558,7 +591,10 @@ enum StageScope {
 /// the releases for now, built only when the caller names that result.
 const UNSIGNED_TARGETS: [&str; 2] = [LINUX_TARGET, "x86_64-pc-windows-msvc"];
 
-/// The one Linux release target, the only one with sealed and hosted routes.
+/// The signed Darwin release target with a hosted route.
+const DARWIN_TARGET: &str = "aarch64-apple-darwin";
+
+/// The Linux release target with sealed and hosted routes.
 const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
 
 fn require_unsigned(target: &str, unsigned: bool) -> CommandResult {

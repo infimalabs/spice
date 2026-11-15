@@ -35,8 +35,35 @@ pub fn sign_staged_darwin(
     let temporary = TemporaryExecutable::create(input, &unsigned.native)?;
     share_darwin(&ShareDarwinRequest::new(temporary.path(), signing), log)?;
     let signed = read_regular(temporary.path())?;
-    require_canvas(&unsigned.payload, &signed)?;
+    finalize_stage(unsigned, signed, output, log)
+}
 
+/// Rebind an admitted unsigned Darwin stage to an independently signed native
+/// executable without loading signing credentials.
+///
+/// # Errors
+///
+/// Refuses a malformed input stage, nonregular signed input, moved canvas,
+/// occupied output root, or any finalized stage that differs from its payload.
+pub fn finalize_staged_darwin(
+    input: &Path,
+    signed_native: &Path,
+    output: &Path,
+    log: &mut impl Write,
+) -> Result<(), StagedDarwinError> {
+    require_fresh_output(output)?;
+    let unsigned = read_stage(input)?;
+    let signed = read_regular(signed_native)?;
+    finalize_stage(unsigned, signed, output, log)
+}
+
+fn finalize_stage(
+    unsigned: ReadStage,
+    signed: Vec<u8>,
+    output: &Path,
+    log: &mut impl Write,
+) -> Result<(), StagedDarwinError> {
+    require_canvas(&unsigned.payload, &signed)?;
     let finalized = dist::restage_signed_darwin(
         &unsigned.payload_bytes,
         &unsigned.native,
