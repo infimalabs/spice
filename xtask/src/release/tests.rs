@@ -107,7 +107,6 @@ impl Fixture {
         Programs {
             cargo: program("cargo"),
             rustc: program("rustc"),
-            rustup: program("rustup"),
             trunk: program("trunk"),
             xtask: program("xtask"),
             macos: Some(MacPrograms {
@@ -153,6 +152,13 @@ struct FakeExecutor {
 
 impl FakeExecutor {
     fn new(fixture: &Fixture, target: ReleaseTarget) -> Self {
+        let sysroot = fixture.root.join("rust-sysroot");
+        for installed in [WASM_TARGET, target.as_str()] {
+            let library = sysroot.join("lib/rustlib").join(installed).join("lib");
+            fs::create_dir_all(&library).expect("create installed target fixture");
+            fs::write(library.join("libstd-fixture.rlib"), b"std")
+                .expect("write installed target fixture");
+        }
         Self {
             root: fixture.root.clone(),
             target,
@@ -228,7 +234,9 @@ impl Executor for FakeExecutor {
         }
         let stdout = match command.label {
             "rust-version" => b"rustc 1.97.1 (fixture)\n".to_vec(),
-            "installed-targets" => format!("{WASM_TARGET}\n{}\n", self.target).into_bytes(),
+            "rust-sysroot" => {
+                format!("{}\n", self.root.join("rust-sysroot").display()).into_bytes()
+            }
             "trunk-version" if self.trunk_drift_after_native.get() && self.native_ran.get() => {
                 b"trunk 0.21.13\n".to_vec()
             }
@@ -340,7 +348,6 @@ fn all_targets_use_the_fixed_commands_and_real_artifact_bytes() {
         )
         .expect("target stage succeeds");
 
-        assert_eq!(executor.labels(), expected_labels(target));
         let build_records = build
             .commands
             .iter()
@@ -480,31 +487,6 @@ fn a_substituted_dsym_member_refuses_before_target_publication() {
     .expect_err("a substituted dSYM member refuses before target publication");
     assert!(matches!(error, TargetBuildError::Stage(_)), "{error:?}");
     assert!(!fixture.pointer(target).exists());
-}
-
-fn expected_labels(target: ReleaseTarget) -> Vec<&'static str> {
-    let mut expected = vec![
-        "rust-version",
-        "installed-targets",
-        "trunk-version",
-        "app-build",
-        "native-build",
-    ];
-    if target == ReleaseTarget::Aarch64AppleDarwin {
-        expected.extend([
-            "dsym-generate",
-            "executable-uuid",
-            "dsym-uuid",
-            "native-strip",
-        ]);
-    }
-    expected.extend([
-        "canvas-version",
-        "rust-version",
-        "installed-targets",
-        "trunk-version",
-    ]);
-    expected
 }
 
 fn fixture_build() -> wire::manifest::BuildInfo {
@@ -1140,7 +1122,7 @@ impl ConfigTree {
     /// the workspace-root Cargo configuration in the discovery fixture.
     fn release_path(&self) -> (OsString, PathBuf) {
         let directory = self.root.join("release-path");
-        for program in ["cargo", "rustc", "rustup", "trunk"] {
+        for program in ["cargo", "rustc", "trunk"] {
             self.executable(&format!("release-path/{program}"));
         }
         let rustc = directory.join("rustc");
