@@ -19,6 +19,8 @@ mod seal_darwin;
 #[cfg(not(target_arch = "wasm32"))]
 mod share_darwin;
 #[cfg(not(target_arch = "wasm32"))]
+mod share_darwin_stage;
+#[cfg(not(target_arch = "wasm32"))]
 mod source_archive;
 mod verify_error;
 mod verify_execution;
@@ -54,6 +56,8 @@ pub use release::{
 pub use seal_darwin::{PlacedExecutable, SealDarwinError, place_executable, seal_runner};
 #[cfg(not(target_arch = "wasm32"))]
 pub use share_darwin::{ShareDarwinError, ShareDarwinRequest, share_darwin};
+#[cfg(not(target_arch = "wasm32"))]
+pub use share_darwin_stage::{StagedDarwinError, sign_staged_darwin, verify_staged_darwin};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source_archive::source_archive;
 #[cfg(target_os = "macos")]

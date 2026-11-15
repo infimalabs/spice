@@ -36,7 +36,10 @@ pub use source::{
     SourceIdentity, build_info, build_record_bytes, head_build_info, source_archive_identity,
     source_counter_sum, source_identity, source_version,
 };
-pub use stage::{BuildError, BuildStep, Builder, Pipeline, StageError, StagedTarget, TargetSource};
+pub use stage::{
+    BuildError, BuildStep, Builder, FinalizedArtifact, FinalizedDarwinStage, Pipeline, StageError,
+    StagedTarget, TargetSource, restage_signed_darwin,
+};
 pub use version::{
     BUILD_RECORD_FILE, Build, CounterError, SOURCE_ARCHIVE_FILE, TrackedVersion,
     TrackedVersionError, VERSION_FILE, current_counter_sum, current_tracked_version,
