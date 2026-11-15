@@ -141,6 +141,12 @@ impl FakeEffects {
                 reference: format!("refs/tags/v{}", plan.requested_version),
                 object: Some(plan.release_commit.clone()),
             },
+            Operation::PublishGithubReleaseAssets => OperationState::GithubRelease {
+                tag: format!("v{}", plan.requested_version),
+                title: Some(format!("v{}", plan.requested_version)),
+                notes: Some(plan.notes.clone()),
+                assets: Some(github_release_assets(plan)),
+            },
             Operation::Announce => OperationState::Announcement {
                 object: Some(plan.release_commit.clone()),
             },
@@ -168,6 +174,12 @@ impl EffectPort for FakeEffects {
                     object: None,
                 },
                 Operation::AwaitRegistryVisibility => OperationState::Registry { evidence: None },
+                Operation::PublishGithubReleaseAssets => OperationState::GithubRelease {
+                    tag: format!("v{}", plan.requested_version),
+                    title: None,
+                    notes: None,
+                    assets: None,
+                },
                 Operation::Announce => OperationState::Announcement { object: None },
                 _ => OperationState::Artifact { identity: None },
             }))
@@ -183,13 +195,16 @@ impl EffectPort for FakeEffects {
             self.interrupt_before = None;
             return Err(EffectError::Interrupted);
         }
+        let expected = Self::result(plan, operation);
         let existed = self.converged.contains_key(&operation);
-        let result = self
-            .converged
-            .get(&operation)
-            .cloned()
-            .unwrap_or_else(|| Self::result(plan, operation));
-        if !existed {
+        let partial_provider = operation == Operation::PublishGithubReleaseAssets
+            && self.converged.get(&operation) != Some(&expected);
+        let result = if partial_provider {
+            expected
+        } else {
+            self.converged.get(&operation).cloned().unwrap_or(expected)
+        };
+        if !existed || partial_provider {
             self.calls.push(operation);
             self.converged.insert(operation, result.clone());
         }
@@ -199,7 +214,7 @@ impl EffectPort for FakeEffects {
         }
         Ok((
             result,
-            if existed {
+            if existed && !partial_provider {
                 Convergence::AlreadyConverged
             } else {
                 Convergence::Applied
@@ -235,6 +250,7 @@ fn preview_is_pure_and_spells_the_complete_order() {
             "upload-package",
             "await-registry-visibility",
             "create-immutable-tag",
+            "publish-github-release-assets",
             "announce",
         ]
     );
@@ -558,6 +574,7 @@ fn a_visible_package_supersedes_the_publication_prefix() {
         [
             Operation::ResolvePreconditionsAndCredentials,
             Operation::CreateImmutableTag,
+            Operation::PublishGithubReleaseAssets,
             Operation::Announce,
         ],
         "visibility must not rerun the gate or republish"
@@ -589,6 +606,7 @@ fn an_observed_tag_and_announcement_are_never_repeated() {
         &[
             Operation::AwaitRegistryVisibility,
             Operation::CreateImmutableTag,
+            Operation::PublishGithubReleaseAssets,
             Operation::Announce,
         ],
     );
@@ -597,6 +615,69 @@ fn an_observed_tag_and_announcement_are_never_repeated() {
     assert_eq!(
         effects.calls,
         [Operation::ResolvePreconditionsAndCredentials]
+    );
+}
+
+#[test]
+fn a_partial_provider_release_resumes_missing_assets_before_announcement() {
+    let plan = plan_release(input()).expect("plan");
+    let mut effects = observed(
+        &plan,
+        &[
+            Operation::AwaitRegistryVisibility,
+            Operation::CreateImmutableTag,
+        ],
+    );
+    effects.converged.insert(
+        Operation::PublishGithubReleaseAssets,
+        OperationState::GithubRelease {
+            tag: format!("v{}", plan.requested_version),
+            title: Some(format!("v{}", plan.requested_version)),
+            notes: Some(plan.notes.clone()),
+            assets: Some(vec![github_release_assets(&plan)[0].clone()]),
+        },
+    );
+    ReleaseExecutor::execute(
+        &plan,
+        &plan.key,
+        &mut MemoryJournal::default(),
+        &mut effects,
+    )
+    .expect("partial provider release resumes");
+    assert_eq!(
+        effects.calls,
+        [
+            Operation::ResolvePreconditionsAndCredentials,
+            Operation::PublishGithubReleaseAssets,
+            Operation::Announce,
+        ]
+    );
+}
+
+#[test]
+fn provider_asset_names_and_identities_derive_from_the_sealed_targets() {
+    let plan = plan_release(input()).expect("plan");
+    let assets = github_release_assets(&plan);
+    assert_eq!(
+        assets
+            .iter()
+            .map(|asset| asset.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "spice-aarch64-apple-darwin",
+            "spice-x86_64-unknown-linux-musl",
+            "spice-x86_64-pc-windows-msvc.exe",
+        ]
+    );
+    assert_eq!(
+        assets
+            .iter()
+            .map(|asset| &asset.identity)
+            .collect::<Vec<_>>(),
+        plan.targets
+            .iter()
+            .map(|target| &target.artifact)
+            .collect::<Vec<_>>()
     );
 }
 

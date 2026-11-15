@@ -44,13 +44,15 @@ fresh execution, and every resumption. There is one release action and one
 ordered operation graph. Before the first effect, admission proves the
 converged prefix: each operation is met by its durable receipt or by
 authoritative external state. An exact visible package meets every operation
-through registry visibility, a tag at the release commit meets tagging, and an
-announcement at the release commit meets announcing. A receipt whose own
-registry, tag, or announcement state is absent, external state naming another
-release, or a met operation after an unmet one refuses before any effect. A met
-operation is receipted as already converged without crossing its effect, so
-no resumption reruns the gate, republishes a visible package, retags, or
-repeats an announcement. Every other operation records its exact prior state
+through registry visibility, a tag at the release commit meets tagging, an
+exact GitHub Release with its three canonical executable assets meets provider
+publication, and an announcement at the release commit meets announcing. A
+receipt whose own registry, tag, provider-release, or announcement state is
+absent, external state naming another release, or a met operation after an
+unmet one refuses before any effect. A met operation is receipted as already
+converged without crossing its effect, so no resumption reruns the gate,
+republishes a visible package, retags, reuploads assets, or repeats an
+announcement. Every other operation records its exact prior state
 before crossing its effect boundary and a typed receipt after convergence. A
 journal written under another journal schema refuses before any effect,
 naming the release that last wrote it, and is never decoded for execution.
@@ -863,22 +865,26 @@ headings.
 
 ### The publication sequence
 
-**Invariant —** The only external release provider is the tracked Git authority:
-remote `origin`, source `refs/heads/main`, package
-`refs/spice/packages/vVERSION`, tag `refs/tags/vVERSION`, and announcement
-`refs/spice/releases/vVERSION`. Runtime configuration cannot redirect a step.
+**Invariant —** External release authority is fixed to the tracked `origin`
+repository: source `refs/heads/main`, package
+`refs/spice/packages/vVERSION`, tag `refs/tags/vVERSION`, GitHub Release
+`vVERSION`, and announcement `refs/spice/releases/vVERSION`. Runtime
+configuration cannot redirect a step.
 
 **Invariant —** Publication never moves the source branch. The package ref
-converges first through a guarded no-effect rehearsal; tag and announcement
-converge to the release commit only after bounded observation sees the exact
-package object. Exhausting that observation is a terminal refusal, not
-permission to advertise unobservable content.
+converges first through a guarded no-effect rehearsal; the immutable tag,
+GitHub Release and its exact Darwin, Linux, and Windows executable assets, and
+announcement converge in that order only after bounded observation sees the
+exact package object. Asset names and content identities derive from the sealed
+three-target plan. Exhausting observation is a terminal refusal, not permission
+to advertise unobservable content.
 
-**Invariant —** A version names exactly one package object and one release
-commit. A package, tag, or announcement ref pointing elsewhere refuses rather
-than moving; a matching ref is already converged and left untouched. An
-interrupted release is completed by re-running it from the first incomplete
-boundary, never unwound.
+**Invariant —** A version names exactly one package object, release commit,
+GitHub Release title and notes, and canonical asset set. A package, tag, release
+asset, or announcement pointing elsewhere refuses rather than moving; matching
+external state is already converged and left untouched. An interrupted release
+is completed by re-running it from the first incomplete boundary, never
+unwound.
 
 **Invariant —** An operator interruption terminates with a status distinct from a
 gate failure.

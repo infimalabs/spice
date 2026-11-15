@@ -30,6 +30,8 @@ pub enum Operation {
     AwaitRegistryVisibility,
     /// Create the immutable release tag.
     CreateImmutableTag,
+    /// Create the GitHub Release and publish its exact canonical package asset.
+    PublishGithubReleaseAssets,
     /// Publish the release announcement.
     Announce,
 }
@@ -46,6 +48,7 @@ impl Operation {
             Self::UploadPackage => "upload-package",
             Self::AwaitRegistryVisibility => "await-registry-visibility",
             Self::CreateImmutableTag => "create-immutable-tag",
+            Self::PublishGithubReleaseAssets => "publish-github-release-assets",
             Self::Announce => "announce",
         }
     }

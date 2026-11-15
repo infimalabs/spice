@@ -1,16 +1,17 @@
 //! Native effect adapter and durable operation journal for external releases.
 
 use std::fs;
-use std::io::Write as _;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as ShaDigest, Sha256};
 use spice::ambient::Ambient;
 use wire::release::{Operation, RegistryEvidence, ReleaseObservations, ReleasePlan};
 use wire::{Digest, Outcome, Refusal};
 
-const JOURNAL_SCHEMA: u16 = 1;
+const JOURNAL_SCHEMA: u16 = 2;
 const VISIBILITY_ATTEMPTS: usize = 8;
 
 enum CorrectnessGateStanding {
@@ -275,6 +276,122 @@ pub(super) struct SystemEffects<'a> {
     ambient: &'a Ambient,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubReleaseView {
+    tag_name: String,
+    name: String,
+    body: String,
+    is_draft: bool,
+    is_prerelease: bool,
+    assets: Vec<GithubAssetView>,
+}
+
+#[derive(Deserialize)]
+struct GithubAssetView {
+    name: String,
+    digest: Option<String>,
+    state: String,
+}
+
+struct HashWriter(Sha256);
+
+impl Default for HashWriter {
+    fn default() -> Self {
+        Self(Sha256::new())
+    }
+}
+
+impl io::Write for HashWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl HashWriter {
+    fn finish(self) -> String {
+        format!("sha256:{:x}", self.0.finalize())
+    }
+}
+
+fn release_target(name: &str) -> Result<wire::manifest::ReleaseTarget, dist::EffectError> {
+    use wire::manifest::ReleaseTarget;
+    match name {
+        "aarch64-apple-darwin" => Ok(ReleaseTarget::Aarch64AppleDarwin),
+        "x86_64-unknown-linux-musl" => Ok(ReleaseTarget::X86_64UnknownLinuxMusl),
+        "x86_64-pc-windows-msvc" => Ok(ReleaseTarget::X86_64PcWindowsMsvc),
+        _ => Err(dist::EffectError::Moved(format!(
+            "release plan contains unknown target {name}"
+        ))),
+    }
+}
+
+fn parse_github_release_view(
+    tag: String,
+    bytes: &[u8],
+    expected: Vec<(dist::GithubReleaseAsset, String)>,
+) -> Result<dist::OperationState, dist::EffectError> {
+    let view: GithubReleaseView = serde_json::from_slice(bytes).map_err(|error| {
+        dist::EffectError::RemoteRefused(format!(
+            "GitHub Release observation was not canonical JSON: {error}"
+        ))
+    })?;
+    if view.is_draft || view.is_prerelease {
+        return Err(dist::EffectError::Moved(
+            "GitHub Release is draft or prerelease rather than final".to_owned(),
+        ));
+    }
+    if view.tag_name != tag {
+        return Err(dist::EffectError::Moved(format!(
+            "GitHub Release names tag {}, not {tag}",
+            view.tag_name
+        )));
+    }
+    let remote_count = view.assets.len();
+    let mut remote = view
+        .assets
+        .into_iter()
+        .map(|asset| (asset.name.clone(), asset))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if remote.len() != remote_count {
+        return Err(dist::EffectError::Moved(
+            "GitHub Release repeats an asset name".to_owned(),
+        ));
+    }
+    let mut admitted = Vec::with_capacity(remote.len());
+    for (asset, checksum) in expected {
+        let Some(observed) = remote.remove(&asset.name) else {
+            continue;
+        };
+        if observed.state != "uploaded" || observed.digest.as_deref() != Some(&checksum) {
+            return Err(dist::EffectError::Moved(format!(
+                "GitHub Release asset {} moved from its sealed bytes",
+                asset.name
+            )));
+        }
+        admitted.push(asset);
+    }
+    if let Some(name) = remote.keys().next() {
+        return Err(dist::EffectError::Moved(format!(
+            "GitHub Release has unexpected asset {name}"
+        )));
+    }
+    Ok(dist::OperationState::GithubRelease {
+        tag,
+        title: Some(view.name),
+        notes: Some(Digest::compute(
+            wire::Domain::DistReleaseNotes,
+            view.body.as_bytes(),
+        )),
+        assets: Some(admitted),
+    })
+}
+
 impl<'a> SystemEffects<'a> {
     fn new(
         root: &Path,
@@ -316,6 +433,197 @@ impl<'a> SystemEffects<'a> {
             self.package = Some((plan.key.clone(), index));
         }
         Ok(&self.package.as_ref().expect("package index admitted").1)
+    }
+
+    fn github_asset_checksums(
+        &mut self,
+        plan: &ReleasePlan,
+    ) -> Result<Vec<(dist::GithubReleaseAsset, String)>, dist::EffectError> {
+        let expected = dist::github_release_assets(plan);
+        let mut checksums = Vec::with_capacity(expected.len());
+        for (target, asset) in plan.targets.iter().zip(expected) {
+            let target = release_target(&target.target)?;
+            let member = self
+                .package_index(plan)?
+                .target_executable(target)
+                .map_err(package_failure)?;
+            if member.digest() != &asset.identity {
+                return Err(dist::EffectError::Moved(format!(
+                    "release asset {} moved from its sealed target identity",
+                    asset.name
+                )));
+            }
+            let mut hash = HashWriter::default();
+            member.copy_to(&mut hash).map_err(package_failure)?;
+            checksums.push((asset, hash.finish()));
+        }
+        Ok(checksums)
+    }
+
+    fn github_release_state(
+        &mut self,
+        plan: &ReleasePlan,
+    ) -> Result<dist::OperationState, dist::EffectError> {
+        let tag = format!("v{}", plan.requested_version);
+        let output = Command::new("gh")
+            .args([
+                "release",
+                "view",
+                &tag,
+                "--json",
+                "tagName,name,body,isDraft,isPrerelease,assets",
+            ])
+            .current_dir(&self.root)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .map_err(|error| {
+                dist::EffectError::Environment(format!("cannot launch gh: {error}"))
+            })?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            if detail.to_ascii_lowercase().contains("release not found") {
+                return Ok(dist::OperationState::GithubRelease {
+                    tag,
+                    title: None,
+                    notes: None,
+                    assets: None,
+                });
+            }
+            return Err(dist::EffectError::RemoteRefused(format!(
+                "gh release view exited {:?}: {}",
+                output.status.code(),
+                detail.trim()
+            )));
+        }
+        let expected = self.github_asset_checksums(plan)?;
+        parse_github_release_view(tag, &output.stdout, expected)
+    }
+
+    fn materialize_github_assets(
+        &mut self,
+        plan: &ReleasePlan,
+    ) -> Result<Vec<PathBuf>, dist::EffectError> {
+        let root = self
+            .probe_root
+            .join(plan.key.as_str())
+            .join("github-release");
+        fs::create_dir_all(&root)
+            .map_err(|error| dist::EffectError::Environment(error.to_string()))?;
+        let assets = dist::github_release_assets(plan);
+        let mut paths = Vec::with_capacity(assets.len());
+        for (target, asset) in plan.targets.iter().zip(assets) {
+            let target = release_target(&target.target)?;
+            let member = self
+                .package_index(plan)?
+                .target_executable(target)
+                .map_err(package_failure)?;
+            if member.digest() != &asset.identity {
+                return Err(dist::EffectError::Moved(format!(
+                    "release asset {} moved from its sealed target identity",
+                    asset.name
+                )));
+            }
+            let path = root.join(&asset.name);
+            let mut staged = atomic::Destination::new(&path)
+                .map_err(|error| dist::EffectError::Environment(error.to_string()))?
+                .stage()
+                .map_err(|error| dist::EffectError::Environment(error.to_string()))?;
+            member.copy_to(&mut staged).map_err(package_failure)?;
+            staged
+                .commit()
+                .map_err(|error| dist::EffectError::Environment(error.to_string()))?;
+            paths.push(path);
+        }
+        Ok(paths)
+    }
+
+    fn converge_github_release(
+        &mut self,
+        plan: &ReleasePlan,
+    ) -> Result<(dist::OperationState, dist::Convergence), dist::EffectError> {
+        let expected_assets = dist::github_release_assets(plan);
+        let tag = format!("v{}", plan.requested_version);
+        let expected = dist::OperationState::GithubRelease {
+            tag: tag.clone(),
+            title: Some(tag.clone()),
+            notes: Some(plan.notes.clone()),
+            assets: Some(expected_assets.clone()),
+        };
+        let current = self.github_release_state(plan)?;
+        if current == expected {
+            return Ok((current, dist::Convergence::AlreadyConverged));
+        }
+        let present_assets = match &current {
+            dist::OperationState::GithubRelease {
+                title: None,
+                notes: None,
+                assets: None,
+                ..
+            } => Vec::new(),
+            dist::OperationState::GithubRelease {
+                title: Some(title),
+                notes: Some(notes),
+                assets: Some(assets),
+                ..
+            } if title == &tag
+                && notes == &plan.notes
+                && assets.iter().all(|asset| expected_assets.contains(asset)) =>
+            {
+                assets.clone()
+            }
+            _ => {
+                return Err(dist::EffectError::Moved(
+                    "GitHub Release moved from the previewed title, notes, or assets".to_owned(),
+                ));
+            }
+        };
+        let paths = self.materialize_github_assets(plan)?;
+        let notes_path = self
+            .probe_root
+            .join(plan.key.as_str())
+            .join("github-release")
+            .join("notes.md");
+        fs::write(&notes_path, plan.notes_document.as_bytes())
+            .map_err(|error| dist::EffectError::Environment(error.to_string()))?;
+        if matches!(
+            current,
+            dist::OperationState::GithubRelease { title: None, .. }
+        ) {
+            run(
+                &self.root,
+                "gh",
+                &[
+                    "release",
+                    "create",
+                    &tag,
+                    "--verify-tag",
+                    "--title",
+                    &tag,
+                    "--notes-file",
+                    notes_path.to_string_lossy().as_ref(),
+                    "--latest=false",
+                ],
+            )
+            .map_err(dist::EffectError::RemoteRefused)?;
+        }
+        for (asset, path) in expected_assets.iter().zip(paths) {
+            if present_assets.contains(asset) {
+                continue;
+            }
+            run(
+                &self.root,
+                "gh",
+                &["release", "upload", &tag, path.to_string_lossy().as_ref()],
+            )
+            .map_err(dist::EffectError::RemoteRefused)?;
+        }
+        let result = self.github_release_state(plan)?;
+        if result != expected {
+            return Err(dist::EffectError::Moved(
+                "GitHub Release did not converge to the sealed title, notes, and assets".to_owned(),
+            ));
+        }
+        Ok((result, dist::Convergence::Applied))
     }
 
     fn remote_ref(&self, reference: &str) -> Result<Option<String>, dist::EffectError> {
@@ -551,6 +859,7 @@ impl dist::EffectPort for SystemEffects<'_> {
             }
             Op::InstallAndProbeArtifacts => self.installed_state(plan),
             Op::AwaitRegistryVisibility => self.registry_state(plan),
+            Op::PublishGithubReleaseAssets => self.github_release_state(plan),
             Op::UploadPackage | Op::CreateImmutableTag => {
                 let reference = self
                     .reference_for(plan, operation)
@@ -583,6 +892,7 @@ impl dist::EffectPort for SystemEffects<'_> {
             Op::RunCorrectnessGate => self.converge_gate(plan, prior),
             Op::InstallAndProbeArtifacts => self.install_and_probe(plan),
             Op::RehearseUpload => self.converge_rehearsal(plan),
+            Op::PublishGithubReleaseAssets => self.converge_github_release(plan),
             Op::UploadPackage | Op::CreateImmutableTag | Op::Announce => {
                 self.converge_immutable(plan, operation, prior)
             }
@@ -868,6 +1178,98 @@ mod tests {
         assert!(matches!(
             unavailable,
             dist::EffectError::Environment(detail) if detail == "gate unavailable"
+        ));
+    }
+    #[test]
+    fn github_release_observation_binds_every_canonical_asset_digest() {
+        let digest = |domain, bytes: &[u8]| Digest::compute(domain, bytes);
+        let version: wire::manifest::ProductVersion = "1.2.3".parse().expect("version");
+        let notes_document = "## Release\n".to_owned();
+        let notes = digest(wire::Domain::DistReleaseNotes, notes_document.as_bytes());
+        let targets = [
+            ("aarch64-apple-darwin", b"darwin".as_slice()),
+            ("x86_64-unknown-linux-musl", b"linux".as_slice()),
+            ("x86_64-pc-windows-msvc", b"windows".as_slice()),
+        ]
+        .into_iter()
+        .map(|(target, bytes)| wire::body::PublishedTarget {
+            target: target.to_owned(),
+            artifact: digest(wire::Domain::DistArtifact, bytes),
+            receipt: digest(wire::Domain::ProofReceipt, bytes),
+        })
+        .collect::<Vec<_>>();
+        let plan = ReleasePlan {
+            key: digest(wire::Domain::DistReleasePlan, b"plan"),
+            repository: digest(wire::Domain::DistSourceCommit, b"repository"),
+            requested_version: version.clone(),
+            source_commit: "1".repeat(40),
+            source_archive: digest(wire::Domain::DistSourceArchive, b"archive"),
+            release_commit: "1".repeat(40),
+            manifest: digest(wire::Domain::DistReleaseManifest, b"manifest"),
+            notes: notes.clone(),
+            notes_document: notes_document.clone(),
+            package: digest(wire::Domain::DistReleasePackage, b"package"),
+            package_object: "2".repeat(40),
+            installed_artifact: targets[0].artifact.clone(),
+            targets,
+            operations: Vec::new(),
+            observations: ReleaseObservations {
+                head: "1".repeat(40),
+                clean: true,
+                unrecorded_local_commits: 0,
+                source_version: version.clone(),
+                release_version: version,
+                credentials_valid: true,
+                package_ref: None,
+                tag_ref: None,
+                announcement_ref: None,
+            },
+        };
+        let assets = dist::github_release_assets(&plan);
+        let checksums = assets
+            .iter()
+            .cloned()
+            .zip(["sha256:11", "sha256:22", "sha256:33"].map(str::to_owned))
+            .collect::<Vec<_>>();
+        let body = serde_json::json!({
+            "tagName": "v1.2.3",
+            "name": "v1.2.3",
+            "body": notes_document,
+            "isDraft": false,
+            "isPrerelease": false,
+            "assets": assets.iter().zip(&checksums).map(|(asset, (_, checksum))| {
+                serde_json::json!({
+                    "name": asset.name,
+                    "digest": checksum,
+                    "state": "uploaded"
+                })
+            }).collect::<Vec<_>>()
+        });
+        let observed = parse_github_release_view(
+            "v1.2.3".to_owned(),
+            &serde_json::to_vec(&body).expect("JSON"),
+            checksums.clone(),
+        )
+        .expect("exact provider evidence");
+        assert_eq!(
+            observed,
+            dist::OperationState::GithubRelease {
+                tag: "v1.2.3".to_owned(),
+                title: Some("v1.2.3".to_owned()),
+                notes: Some(notes),
+                assets: Some(assets),
+            }
+        );
+
+        let mut moved = body;
+        moved["assets"][1]["digest"] = serde_json::json!("sha256:bad");
+        assert!(matches!(
+            parse_github_release_view(
+                "v1.2.3".to_owned(),
+                &serde_json::to_vec(&moved).expect("JSON"),
+                checksums,
+            ),
+            Err(dist::EffectError::Moved(_))
         ));
     }
 }

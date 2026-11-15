@@ -24,6 +24,7 @@ const OPERATIONS: &[Operation] = &[
     Operation::UploadPackage,
     Operation::AwaitRegistryVisibility,
     Operation::CreateImmutableTag,
+    Operation::PublishGithubReleaseAssets,
     Operation::Announce,
 ];
 
@@ -325,6 +326,14 @@ pub enum PlanError {
     KeyMoved { expected: Digest, observed: Digest },
 }
 
+/// One exact GitHub Release asset admitted by name and content identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GithubReleaseAsset {
+    pub name: String,
+    pub identity: Digest,
+}
+
 /// Complete state observed immediately before one operation.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
@@ -348,6 +357,12 @@ pub enum OperationState {
     },
     Registry {
         evidence: Option<RegistryEvidence>,
+    },
+    GithubRelease {
+        tag: String,
+        title: Option<String>,
+        notes: Option<Digest>,
+        assets: Option<Vec<GithubReleaseAsset>>,
     },
     Announcement {
         object: Option<String>,
@@ -564,6 +579,7 @@ fn journal_error(error: impl fmt::Display) -> ExecuteError {
 struct Witnesses {
     registry: Option<OperationState>,
     tag: Option<OperationState>,
+    github_release: Option<OperationState>,
     announcement: Option<OperationState>,
 }
 
@@ -582,6 +598,7 @@ impl Witnesses {
         Ok(Self {
             registry,
             tag: Self::release_object(plan, effects, Operation::CreateImmutableTag)?,
+            github_release: Self::github_release(plan, effects)?,
             announcement: Self::release_object(plan, effects, Operation::Announce)?,
         })
     }
@@ -607,9 +624,47 @@ impl Witnesses {
         }
     }
 
+    fn github_release<E: EffectPort>(
+        plan: &ReleasePlan,
+        effects: &mut E,
+    ) -> Result<Option<OperationState>, ExecuteError> {
+        let state = effects
+            .prior(plan, Operation::PublishGithubReleaseAssets)
+            .map_err(ExecuteError::Effect)?;
+        let expected = github_release_assets(plan);
+        match &state {
+            OperationState::GithubRelease {
+                title: None,
+                notes: None,
+                assets: None,
+                ..
+            } => Ok(None),
+            OperationState::GithubRelease {
+                tag,
+                title: Some(title),
+                notes: Some(notes),
+                assets: Some(assets),
+            } if tag == &release_tag(plan)
+                && title == tag
+                && notes == &plan.notes
+                && assets.iter().all(|asset| expected.contains(asset)) =>
+            {
+                if assets == &expected {
+                    Ok(Some(state))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Err(ExecuteError::ExternalMoved(
+                Operation::PublishGithubReleaseAssets,
+            )),
+        }
+    }
+
     fn proof(&self, operation: Operation) -> Option<&OperationState> {
         match operation {
             Operation::CreateImmutableTag => self.tag.as_ref(),
+            Operation::PublishGithubReleaseAssets => self.github_release.as_ref(),
             Operation::Announce => self.announcement.as_ref(),
             operation if PUBLICATION_PREFIX.contains(&operation) => self.registry.as_ref(),
             _ => None,
@@ -624,6 +679,7 @@ impl Witnesses {
             operation,
             Operation::AwaitRegistryVisibility
                 | Operation::CreateImmutableTag
+                | Operation::PublishGithubReleaseAssets
                 | Operation::Announce
         )
     }
@@ -678,6 +734,26 @@ fn registry_evidence(plan: &ReleasePlan) -> RegistryEvidence {
         release_commit: plan.release_commit.clone(),
         package: plan.package.clone(),
     }
+}
+
+fn release_tag(plan: &ReleasePlan) -> String {
+    format!("v{}", plan.requested_version)
+}
+
+/// Canonical user-facing executable assets derived entirely from a sealed plan.
+#[must_use]
+pub fn github_release_assets(plan: &ReleasePlan) -> Vec<GithubReleaseAsset> {
+    plan.targets
+        .iter()
+        .map(|target| GithubReleaseAsset {
+            name: if target.target == ReleaseTarget::X86_64PcWindowsMsvc.as_str() {
+                format!("spice-{}.exe", target.target)
+            } else {
+                format!("spice-{}", target.target)
+            },
+            identity: target.artifact.clone(),
+        })
+        .collect()
 }
 
 fn validate_receipt(plan: &ReleasePlan, receipt: &OperationReceipt) -> Result<(), ExecuteError> {
@@ -736,6 +812,20 @@ fn validate_receipt(plan: &ReleasePlan, receipt: &OperationReceipt) -> Result<()
         ) if PUBLICATION_PREFIX.contains(operation) => {
             receipt.convergence == Convergence::AlreadyConverged
                 && *evidence == registry_evidence(plan)
+        }
+        (
+            Op::PublishGithubReleaseAssets,
+            OperationState::GithubRelease {
+                tag,
+                title: Some(title),
+                notes: Some(notes),
+                assets: Some(assets),
+            },
+        ) => {
+            tag == &release_tag(plan)
+                && title == tag
+                && notes == &plan.notes
+                && assets == &github_release_assets(plan)
         }
         (
             Op::Announce,

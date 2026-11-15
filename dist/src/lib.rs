@@ -29,8 +29,8 @@ pub use notes::{
 pub use pins::{PinError, PinName, RequiredPins};
 pub use release::{
     AcceptedOperation, Convergence, EffectError, EffectPort, ExecuteError, Execution,
-    OperationReceipt, OperationState, PlanError, PlanInput, ReleaseExecutor, ReleaseJournal,
-    gate_receipt, plan_release, verify_plan,
+    GithubReleaseAsset, OperationReceipt, OperationState, PlanError, PlanInput, ReleaseExecutor,
+    ReleaseJournal, gate_receipt, github_release_assets, plan_release, verify_plan,
 };
 pub use source::{
     SourceIdentity, build_info, build_record_bytes, head_build_info, source_archive_identity,
