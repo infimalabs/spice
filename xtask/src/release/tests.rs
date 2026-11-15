@@ -650,6 +650,10 @@ fn release_environment(cargo_target_dir: Option<&str>) -> ReleaseEnvironment {
         home: Some(OsString::from("/home/release")),
         cargo_home: Some(OsString::from("/cargo/home")),
         system_root: Some(OsString::from("/windows")),
+        cc: Some(OsString::from("/tool/bin/cl")),
+        cxx: Some(OsString::from("/tool/bin/cl")),
+        include: Some(OsString::from("/windows/include")),
+        lib: Some(OsString::from("/windows/lib")),
         cargo_target_dir: cargo_target_dir.map(OsString::from),
         ..ReleaseEnvironment::default()
     }
@@ -687,6 +691,10 @@ fn system_executor_overrides_machine_local_cargo_build_state() {
     assert_eq!(value("CARGO_INCREMENTAL"), "0");
     assert_eq!(value("RUSTC"), programs.rustc.as_os_str());
     assert_eq!(value("SystemRoot"), "/windows");
+    assert_eq!(value("CC"), "/tool/bin/cl");
+    assert_eq!(value("CXX"), "/tool/bin/cl");
+    assert_eq!(value("INCLUDE"), "/windows/include");
+    assert_eq!(value("LIB"), "/windows/lib");
     assert!(
         entries.iter().all(|(key, _)| key != "CARGO_BUILD_RUSTC"),
         "the resolved RUSTC already outranks CARGO_BUILD_RUSTC"
