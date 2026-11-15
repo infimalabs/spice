@@ -927,7 +927,18 @@ mod windows {
                 ps_literal(&name),
                 ps_literal(&name),
             );
-            let sid = powershell_output(&script, "create guest account")?;
+            let sid = match powershell_output(&script, "create guest account") {
+                Ok(sid) => sid,
+                Err(error) => {
+                    let cleanup = delete_guest(&name).err();
+                    return Err(format!(
+                        "{error}{}",
+                        cleanup
+                            .map(|cleanup| { format!("; account cleanup also failed: {cleanup}") })
+                            .unwrap_or_default()
+                    ));
+                }
+            };
             let sid = sid.trim().to_owned();
             if !sid.starts_with("S-1-5-")
                 || !sid
@@ -1126,7 +1137,11 @@ mod windows {
         action: &str,
     ) -> Result<std::process::Child, String> {
         let mut guarded = String::with_capacity(script.len() + 160);
-        guarded.push_str("try {\n$ErrorActionPreference = 'Stop'\n");
+        guarded.push_str(
+            "try {\n\
+             $ProgressPreference = 'SilentlyContinue'\n\
+             $ErrorActionPreference = 'Stop'\n",
+        );
         guarded.push_str(script);
         guarded.push_str(
             "\nexit 0\n\
