@@ -7,6 +7,35 @@ pub use windows_execution::hosted::client::{
     HostedExecution, HostedSource, WindowsHostedError, windows_hosted,
 };
 
+/// Stage the Linux release target on one fresh provider-hosted machine from
+/// the release source archive at `archive`, writing the retained stage log to
+/// `output` and publishing the staged files into `dist/stage` when it exits
+/// zero.
+pub fn linux_hosted_stage(
+    archive: &Path,
+    output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let stage =
+        windows_execution::hosted::client::linux_hosted_stage(archive, Path::new("dist/stage"))?;
+    output
+        .write_all(&stage.log)
+        .map_err(WindowsHostedError::Output)?;
+    writeln!(
+        output,
+        "hosted Linux run {} on {} with proof image {} exited {}",
+        stage.run_id, stage.runner_image, stage.proof_image, stage.exit_code
+    )
+    .map_err(WindowsHostedError::Output)?;
+    if stage.exit_code == 0 {
+        Ok(())
+    } else {
+        Err(WindowsHostedError::ProviderResponse(format!(
+            "hosted Linux staging exited {}",
+            stage.exit_code
+        )))
+    }
+}
+
 /// Stage the Windows release target on one fresh provider-hosted machine from
 /// the release source archive at `archive`.
 ///

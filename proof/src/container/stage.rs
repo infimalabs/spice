@@ -16,6 +16,10 @@ const STAGE: &str = "dist/stage";
 /// The one Linux release target the sealed image links and executes.
 const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
 
+/// The environment name that hands `stage-target` the identity of the source
+/// archive whose exact tree is the workspace.
+const SOURCE_ARCHIVE: &str = "SPICE_SOURCE_ARCHIVE"; // env-policy: allow
+
 /// One completed staging run: the in-image command's exit and both streams.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReleaseStage {
@@ -35,15 +39,24 @@ impl Container {
     /// read-only at the paths Git records for them, with `dist/stage` the one
     /// writable workspace path. The Cargo home and target are fresh scratch
     /// owned by this run, and the network is disabled, so neither the host's
-    /// Cargo configuration nor its tools reach the build. The app generation
-    /// is read from the workspace as already staged, never compiled here.
+    /// Cargo configuration nor its tools reach the build.
+    ///
+    /// Without `delivered`, the app generation is read from the workspace as
+    /// already staged, never compiled here. With `delivered`, the workspace is
+    /// the exact tree of that source archive identity: the image builds the
+    /// app itself, offline, into its own scratch, so no host toolchain
+    /// touches any part of the release.
     ///
     /// # Errors
     ///
     /// Refuses a Git common directory or stage directory the OCI mount grammar
     /// cannot represent, and returns runtime launch, wait, and capture failures
     /// or a run the deadline or a cancellation ended.
-    pub fn stage_release(&self, git_common: &Path) -> Result<ReleaseStage, ContainerError> {
+    pub fn stage_release(
+        &self,
+        git_common: &Path,
+        delivered: Option<&str>,
+    ) -> Result<ReleaseStage, ContainerError> {
         let stage = self.workspace.join(STAGE);
         fs::create_dir_all(&stage).map_err(|source| ContainerError::InspectWorkspace {
             path: stage.clone(),
@@ -102,6 +115,11 @@ impl Container {
             format!("CARGO_TARGET_DIR={CARGO_TARGET}"),
             "--env".to_owned(),
             "CARGO_NET_OFFLINE=true".to_owned(),
+        ]);
+        if let Some(delivered) = delivered {
+            runtime_arguments.extend(["--env".to_owned(), format!("{SOURCE_ARCHIVE}={delivered}")]);
+        }
+        runtime_arguments.extend([
             self.image.to_string(),
             "cargo".to_owned(),
             "run".to_owned(),
@@ -114,8 +132,10 @@ impl Container {
             "--unsigned".to_owned(),
             "--proof-container".to_owned(),
             self.image.to_string(),
-            "--staged-app".to_owned(),
         ]);
+        if delivered.is_none() {
+            runtime_arguments.push("--staged-app".to_owned());
+        }
         let execution =
             self.run(self.runtime_spec(runtime_arguments, "sealed Linux release staging")?)?;
         let ExecutionCompletion::Exited { success, code } = execution.completion else {

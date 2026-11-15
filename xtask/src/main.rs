@@ -20,7 +20,7 @@ const USAGE: &str = concat!(
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
     "seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned <--sealed|--hosted>|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -346,45 +346,14 @@ fn run_stage_target(
     output: &mut impl io::Write,
     error_output: &mut impl io::Write,
 ) -> CommandResult {
-    let (target, unsigned, proof_container, scope) = match arguments.as_slice() {
-        [target] => (target.to_str(), false, None, StageScope::Target),
-        [target, flag] if flag == OsStr::new("--unsigned") => {
-            (target.to_str(), true, None, StageScope::Target)
-        }
-        [target, flag, image] if flag == OsStr::new("--proof-container") => {
-            (target.to_str(), false, image.to_str(), StageScope::Target)
-        }
-        [target, unsigned_flag, image_flag, image]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && image_flag == OsStr::new("--proof-container") =>
-        {
-            (target.to_str(), true, image.to_str(), StageScope::Target)
-        }
-        [target, unsigned_flag, scope_flag]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && scope_flag == OsStr::new("--app-only") =>
-        {
-            (target.to_str(), true, None, StageScope::AppOnly)
-        }
-        [target, unsigned_flag, image_flag, image, scope_flag]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && image_flag == OsStr::new("--proof-container") =>
-        {
-            let scope = if scope_flag == OsStr::new("--staged-app") {
-                Some(StageScope::StagedApp)
-            } else if scope_flag == OsStr::new("--app-only") {
-                Some(StageScope::AppOnly)
-            } else {
-                None
-            };
-            match scope {
-                Some(scope) => (target.to_str(), true, image.to_str(), scope),
-                None => (None, false, None, StageScope::Target),
-            }
-        }
-        _ => (None, false, None, StageScope::Target),
-    };
-    let Some(target) = target else {
+    let Some(StageRequest {
+        target,
+        unsigned,
+        proof_container,
+        scope,
+        route,
+    }) = parse_stage_target(&arguments)
+    else {
         eprintln!("{}", help());
         return Err(usage_error().into());
     };
@@ -394,17 +363,10 @@ fn run_stage_target(
     let environment = release_environment(ambient);
     if target == "x86_64-pc-windows-msvc" && !environment.is_hosted_guest() {
         let archive = Path::new("dist/stage").join(dist::SOURCE_ARCHIVE_FILE);
-        let resolved_proof_container;
-        let proof_container = match proof_container {
-            Some(image) => image,
-            None => {
-                resolved_proof_container = xtask::release_proof_image()?;
-                &resolved_proof_container
-            }
-        };
+        let proof_container = resolve_proof_container(proof_container)?;
         return xtask::windows_hosted_stage(
             &archive,
-            proof_container,
+            &proof_container,
             scope == StageScope::AppOnly,
             output,
             error_output,
@@ -420,18 +382,15 @@ fn run_stage_target(
         .map_err(Into::into);
     }
     if scope == StageScope::AppOnly {
-        let resolved_proof_container;
-        let proof_container = match proof_container {
-            Some(image) => image,
-            None => {
-                resolved_proof_container = xtask::release_proof_image()?;
-                &resolved_proof_container
-            }
-        };
-        return xtask::stage_target_app(target, environment, proof_container, output)
+        let proof_container = resolve_proof_container(proof_container)?;
+        return xtask::stage_target_app(target, environment, &proof_container, output)
             .map_err(Into::into);
     }
-    if target == "x86_64-unknown-linux-musl" && !cfg!(target_os = "linux") {
+    if route == StageRoute::Hosted {
+        let archive = Path::new("dist/stage").join(dist::SOURCE_ARCHIVE_FILE);
+        return xtask::linux_hosted_stage(&archive, output).map_err(Into::into);
+    }
+    if target == LINUX_TARGET && (route == StageRoute::Sealed || !cfg!(target_os = "linux")) {
         return xtask::linux_sealed_stage(&environment, output, error_output).map_err(Into::into);
     }
     let signing = if target == "aarch64-apple-darwin" {
@@ -453,6 +412,88 @@ fn run_stage_target(
     })
 }
 
+/// The named proof image, or the current vendor-set image this worktree
+/// resolves.
+fn resolve_proof_container(named: Option<&str>) -> Result<String, xtask::TargetBuildError> {
+    named.map_or_else(xtask::release_proof_image, |image| Ok(image.to_owned()))
+}
+
+/// One admitted `stage-target` argument vector.
+struct StageRequest<'a> {
+    target: &'a str,
+    unsigned: bool,
+    proof_container: Option<&'a str>,
+    scope: StageScope,
+    route: StageRoute,
+}
+
+fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
+    let (route, arguments) = match arguments.split_last() {
+        Some((flag, rest)) if flag == OsStr::new("--sealed") => (StageRoute::Sealed, rest),
+        Some((flag, rest)) if flag == OsStr::new("--hosted") => (StageRoute::Hosted, rest),
+        _ => (StageRoute::Default, arguments),
+    };
+    let (target, unsigned, proof_container, scope) = match arguments {
+        [target] => (target, false, None, StageScope::Target),
+        [target, flag] if flag == OsStr::new("--unsigned") => {
+            (target, true, None, StageScope::Target)
+        }
+        [target, flag, image] if flag == OsStr::new("--proof-container") => {
+            (target, false, Some(image.to_str()?), StageScope::Target)
+        }
+        [target, unsigned_flag, image_flag, image]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && image_flag == OsStr::new("--proof-container") =>
+        {
+            (target, true, Some(image.to_str()?), StageScope::Target)
+        }
+        [target, unsigned_flag, scope_flag]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && scope_flag == OsStr::new("--app-only") =>
+        {
+            (target, true, None, StageScope::AppOnly)
+        }
+        [target, unsigned_flag, image_flag, image, scope_flag]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && image_flag == OsStr::new("--proof-container") =>
+        {
+            let scope = if scope_flag == OsStr::new("--staged-app") {
+                StageScope::StagedApp
+            } else if scope_flag == OsStr::new("--app-only") {
+                StageScope::AppOnly
+            } else {
+                return None;
+            };
+            (target, true, Some(image.to_str()?), scope)
+        }
+        _ => return None,
+    };
+    let target = target.to_str()?;
+    if route != StageRoute::Default
+        && (target != LINUX_TARGET || proof_container.is_some() || scope != StageScope::Target)
+    {
+        return None;
+    }
+    Some(StageRequest {
+        target,
+        unsigned,
+        proof_container,
+        scope,
+        route,
+    })
+}
+
+/// Where `stage-target` runs the Linux release build.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum StageRoute {
+    /// Natively on a Linux host, or in the sealed image from any other host.
+    Default,
+    /// In the sealed image even on a Linux host.
+    Sealed,
+    /// On one fresh provider-hosted Linux machine.
+    Hosted,
+}
+
 /// How much of one release target `stage-target` builds.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum StageScope {
@@ -466,7 +507,10 @@ enum StageScope {
 
 /// Release targets with no signing route yet. Their unsigned executables are
 /// the releases for now, built only when the caller names that result.
-const UNSIGNED_TARGETS: [&str; 2] = ["x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"];
+const UNSIGNED_TARGETS: [&str; 2] = [LINUX_TARGET, "x86_64-pc-windows-msvc"];
+
+/// The one Linux release target, the only one with sealed and hosted routes.
+const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
 
 fn require_unsigned(target: &str, unsigned: bool) -> CommandResult {
     if unsigned {

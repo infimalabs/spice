@@ -251,7 +251,8 @@ runs remotely), and `windows-appliance` refuse before any build unless given
 Darwin executable outside staging; its result is not a sealed artifact.
 
 **Invariant —** Linux staging links and executes the Linux release on Linux.
-A Linux host stages `x86_64-unknown-linux-musl` natively. Any other host runs
+A Linux host stages `x86_64-unknown-linux-musl` natively unless given
+`--sealed`. Any other host, and `--sealed`, runs
 that same `stage-target` inside the `linux/amd64` proof image selected by the
 current `Cargo.lock` vendor set through the Docker or Podman executable
 `proof.container` names. One image-inspection admission resolves the
@@ -275,6 +276,35 @@ home and target and no network. No Cargo config above the worktree
 and no host tool reaches that build. With `proof.container` unset or not an
 admitted runtime, or with the current vendor-set image not loaded, staging
 refuses before any build and names the missing piece.
+
+With `SPICE_SOURCE_ARCHIVE` naming the source archive whose exact tree the
+worktree is, the sealed route hands that identity to the in-image
+`stage-target` instead of linking a host-staged generation: the image builds
+the app itself, offline, so no host toolchain touches any part of the release.
+
+**Invariant —** `stage-target x86_64-unknown-linux-musl --unsigned --hosted`
+stages Linux on one fresh GitHub-hosted `ubuntu-24.04` X64 machine from
+`dist/stage/source.tar`, never from the developer host. Like the hosted Windows
+route, the client commits the archive's exact tree as a parentless one-use
+commit under a temporary `refs/tags/spice-hosted-*` tag and dispatches
+`.github/workflows/linux.yml` there with its challenge and the archive
+identity. The workflow's `stage` job has only Contents read: it admits the
+GitHub-hosted runner, the tag, and the request; builds `xtask` and the
+current vendor-set proof image; runs `stage-target … --sealed` with that
+identity; and uploads the stage log, the staged files without the archive,
+and `result.json`. That result records the challenge, archive identity, run
+id, runner image, proof-image identity, stage exit, log digest, and the
+size and SHA-256 of every staged file. A separate `attest` job, which runs no
+repository code, alone holds OIDC identity-token and Attestations write and
+signs `result.json`; a third job retires the tag. The client verifies that
+attestation against `linux.yml` at the one-use commit and tag on a
+GitHub-hosted runner. Before it accepts anything else, it requires the result
+to answer its own challenge, archive, and dispatched run on `ubuntu24` `X64`.
+It then requires the downloaded log and staged tree to match the signed
+digests and inventory exactly, and writes the log. Only after a zero exit, and
+with every target payload recording the requested archive, does it publish the
+stage into `dist/stage`, payload pointer last. It cancels the run on
+interrupt and deletes the tag and the run's artifact afterward.
 
 **Invariant —** A native Darwin proof runner is sealed for exactly one
 worktree: `dist/proof-runner/build.sh` bakes that worktree's HEAD commit and
