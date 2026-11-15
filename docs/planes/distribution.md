@@ -328,6 +328,13 @@ with every target payload recording the requested archive, does it publish the
 stage into `dist/stage`, payload pointer last. It cancels the run on
 interrupt and deletes the tag and the run's artifact afterward.
 
+**Invariant —** One retained hosted publication stages Linux first so its
+provider-built proof image supplies the exact `sha256:...` identity. Darwin and
+Windows then receive that identity through `--proof-container`; all three
+payloads must record it byte-identically. Hosted Linux refuses an explicit
+image because the sealed provider job owns that build, while hosted Darwin and
+Windows refuse publication without the selected identity.
+
 **Invariant —** A native Darwin proof runner is sealed for exactly one
 worktree: `dist/proof-runner/build.sh` bakes that worktree's HEAD commit and
 vendor tree into the runner and binds it through `proof.runner`, which admits

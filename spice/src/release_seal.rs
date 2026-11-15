@@ -100,10 +100,11 @@ fn prepare() -> Result<Prepared, Box<Outcome<SealedManifest>>> {
         .map_err(|error| Box::new(crate::state_failure(&error).outcome()))?;
     let bindings = current_bindings(repository.worktree_root())
         .map_err(|error| refused("release::seal-source-refused", &error))?;
-    let mut stored = Vec::with_capacity(2);
+    let mut stored = Vec::with_capacity(3);
     for target in [
         ReleaseTarget::Aarch64AppleDarwin,
         ReleaseTarget::X86_64UnknownLinuxMusl,
+        ReleaseTarget::X86_64PcWindowsMsvc,
     ] {
         let layout = proof::Layout::new(repository.worktree_root(), state.proof(), target);
         let payload = layout
