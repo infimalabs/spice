@@ -49,6 +49,70 @@ mod windows {
     ];
     const NETWORK_PROBE: &str = "1.1.1.1:443";
 
+    #[derive(serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct GuestEnvironment {
+        workspace: PathBuf,
+        temp: PathBuf,
+        vendor: PathBuf,
+        run_id: u64,
+        run_attempt: u32,
+    }
+
+    impl GuestEnvironment {
+        fn capture(request: &Request) -> Result<Self, String> {
+            exact_env("GITHUB_REPOSITORY", &request.repository)?;
+            exact_env("GITHUB_REF", &format!("refs/tags/{}", request.source_ref))?;
+            exact_env("ImageOS", &request.image.provider_os)?;
+            exact_env("ImageVersion", &request.image.version)?;
+            exact_env("RUNNER_ARCH", X86_64_ARCHITECTURE)?;
+            let environment = Self {
+                workspace: required_path("GITHUB_WORKSPACE")?,
+                temp: required_path("RUNNER_TEMP")?,
+                vendor: required_path("SPICE_HOSTED_VENDOR")?, // env-policy: allow
+                run_id: required_u64("GITHUB_RUN_ID")?,
+                run_attempt: required_u32("GITHUB_RUN_ATTEMPT")?,
+            };
+            environment.admit()?;
+            Ok(environment)
+        }
+
+        fn decode(encoded: &std::ffi::OsStr) -> Result<Self, String> {
+            let encoded = encoded
+                .to_str()
+                .ok_or_else(|| "guest environment is not Unicode".to_owned())?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| "guest environment is not base64".to_owned())?;
+            let environment = serde_json::from_slice::<Self>(&bytes)
+                .map_err(|error| format!("guest environment does not decode: {error}"))?;
+            environment.admit()?;
+            Ok(environment)
+        }
+
+        fn encode(&self) -> Result<String, String> {
+            let bytes = serde_json::to_vec(self)
+                .map_err(|error| format!("cannot encode guest environment: {error}"))?;
+            Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+
+        fn admit(&self) -> Result<(), String> {
+            for (name, path) in [
+                ("workspace", &self.workspace),
+                ("temporary directory", &self.temp),
+                ("vendored dependencies", &self.vendor),
+            ] {
+                if !path.is_absolute() {
+                    return Err(format!("guest {name} path is not absolute"));
+                }
+            }
+            if self.run_id == 0 || self.run_attempt == 0 {
+                return Err("guest run coordinates are zero".to_owned());
+            }
+            Ok(())
+        }
+    }
+
     pub fn main() -> ExitCode {
         match run() {
             Ok(()) => ExitCode::SUCCESS,
@@ -65,10 +129,21 @@ mod windows {
             return smoke_argv(&arguments[2..]);
         }
         if arguments.get(1).and_then(|value| value.to_str()) == Some(GUEST_ARGUMENT) {
-            let [_, _, request_path, result_path, guest_identity] = arguments.as_slice() else {
-                return Err("usage: windows-hosted --guest REQUEST.json RESULT.json SID".to_owned());
+            let [
+                _,
+                _,
+                request_path,
+                result_path,
+                guest_identity,
+                guest_environment,
+            ] = arguments.as_slice()
+            else {
+                return Err(
+                    "usage: windows-hosted --guest REQUEST.json RESULT.json SID ENVIRONMENT"
+                        .to_owned(),
+                );
             };
-            return run_guest(request_path, result_path, guest_identity);
+            return run_guest(request_path, result_path, guest_identity, guest_environment);
         }
         let [_, request_path, result_path] = arguments.as_slice() else {
             return Err("usage: windows-hosted REQUEST.json RESULT.json".to_owned());
@@ -82,11 +157,13 @@ mod windows {
     ) -> Result<(), String> {
         let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
-        admit_host(&request)?;
+        admit_machine(&request)?;
+        let guest_environment = GuestEnvironment::capture(&request)?;
+        let encoded_guest_environment = guest_environment.encode()?;
 
-        let workspace = required_path("GITHUB_WORKSPACE")?;
-        let temp = required_path("RUNNER_TEMP")?;
-        let vendor = required_path("SPICE_HOSTED_VENDOR")?; // env-policy: allow
+        let workspace = guest_environment.workspace.clone();
+        let temp = guest_environment.temp.clone();
+        let vendor = guest_environment.vendor.clone();
         let executable =
             env::current_exe().map_err(|error| format!("runner path is unavailable: {error}"))?;
         let tree = tree_digest(&request.toolchain.git_path, &workspace)?;
@@ -151,7 +228,12 @@ mod windows {
         verify_non_loopback_available()?;
         let firewall = Firewall::establish(&request.challenge, account.sid())?;
         eprintln!("[windows-hosted] starting isolated guest");
-        let execution = account.execute(&executable, request_path, &guest_result);
+        let execution = account.execute(
+            &executable,
+            request_path,
+            &guest_result,
+            &encoded_guest_environment,
+        );
         let firewall_cleanup = firewall.close();
         let account_cleanup = account.close();
         combine_cleanup(execution, firewall_cleanup, account_cleanup)?;
@@ -169,6 +251,7 @@ mod windows {
         request_path: &std::ffi::OsStr,
         result_path: &std::ffi::OsStr,
         expected_identity: &std::ffi::OsStr,
+        encoded_environment: &std::ffi::OsStr,
     ) -> Result<(), String> {
         let expected_identity = expected_identity
             .to_str()
@@ -184,13 +267,15 @@ mod windows {
         eprintln!("[windows-hosted] guest identity admitted");
         let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
-        admit_host(&request)?;
-
-        let workspace = required_path("GITHUB_WORKSPACE")?;
-        let temp = required_path("RUNNER_TEMP")?;
-        let vendor = required_path("SPICE_HOSTED_VENDOR")?; // env-policy: allow
-        let run_id = required_u64("GITHUB_RUN_ID")?;
-        let run_attempt = required_u32("GITHUB_RUN_ATTEMPT")?;
+        admit_machine(&request)?;
+        let GuestEnvironment {
+            workspace,
+            temp,
+            vendor,
+            run_id,
+            run_attempt,
+        } = GuestEnvironment::decode(encoded_environment)?;
+        eprintln!("[windows-hosted] guest environment admitted");
         let executable =
             env::current_exe().map_err(|error| format!("runner path is unavailable: {error}"))?;
         let runner = digest_file(Domain::ProofNativeRunner, &executable)?;
@@ -309,7 +394,7 @@ mod windows {
         std::process::exit(exit);
     }
 
-    fn admit_host(request: &Request) -> Result<(), String> {
+    fn admit_machine(request: &Request) -> Result<(), String> {
         if env::consts::ARCH != "x86_64" || env::consts::OS != "windows" {
             return Err(format!(
                 "unsupported guest {}-{}",
@@ -317,11 +402,6 @@ mod windows {
                 env::consts::OS
             ));
         }
-        exact_env("GITHUB_REPOSITORY", &request.repository)?;
-        exact_env("GITHUB_REF", &format!("refs/tags/{}", request.source_ref))?;
-        exact_env("ImageOS", &request.image.provider_os)?;
-        exact_env("ImageVersion", &request.image.version)?;
-        exact_env("RUNNER_ARCH", X86_64_ARCHITECTURE)?;
         let observed_os = windows_version()?;
         if observed_os != request.image.os_version {
             return Err(format!(
@@ -970,12 +1050,14 @@ mod windows {
             executable: &Path,
             request: &std::ffi::OsStr,
             result: &Path,
+            guest_environment: &str,
         ) -> Result<(), String> {
             let guest_arguments = [
                 GUEST_ARGUMENT.to_owned(),
                 quoted_argument(Path::new(request)),
                 quoted_argument(result),
                 self.sid.clone(),
+                guest_environment.to_owned(),
             ]
             .into_iter()
             .map(|argument| ps_literal(&argument))
