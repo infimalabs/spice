@@ -25,24 +25,13 @@ impl<E: Executor> Builder for CommandBuilder<'_, E> {
         if let Some(staged) = &self.canvas {
             return Ok(staged.canvas().clone());
         }
-        self.run(CommandSpec::new(
-            "app-build",
-            &self.programs.xtask,
-            [
-                OsString::from("app"),
-                OsString::from("--stage-root"),
-                self.app_root.as_os_str().to_owned(),
-            ],
-        ))?;
-        let build = dist::build_info(self.root, dist::Build::Staged).map_err(BuildError::new)?;
-        if &build.product != self.version {
-            return Err(BuildError::new(format!(
-                "release build expected product {} but source derives {}",
-                self.version, build.product
-            )));
-        }
-        let staged = crate::app::StagedCanvas::read_from(self.root, self.app_root, &build)
-            .map_err(build_error)?;
+        let staged = build_release_app(
+            self.executor,
+            self.programs,
+            self.root,
+            self.app_root,
+            self.version,
+        )?;
         let canvas = staged.canvas().clone();
         self.canvas = Some(staged);
         Ok(canvas)
@@ -153,6 +142,40 @@ impl<E: Executor> Builder for CommandBuilder<'_, E> {
     fn take_windows_debug_artifact(&mut self) -> Option<Vec<u8>> {
         self.windows_debug_artifact.take()
     }
+}
+
+/// Build the release app into `app_root` through the release executor and
+/// admit its staged canvas as the generation `version` derives.
+///
+/// The full stage and the app-only checkpoint both run exactly this command,
+/// so the checkpoint proves the environment the full stage's app build gets.
+pub(super) fn build_release_app<E: Executor>(
+    executor: &E,
+    programs: &Programs,
+    root: &Path,
+    app_root: &Path,
+    version: &ProductVersion,
+) -> Result<crate::app::StagedCanvas, BuildError> {
+    let record = executor
+        .execute(CommandSpec::new(
+            "app-build",
+            &programs.xtask,
+            [
+                OsString::from("app"),
+                OsString::from("--stage-root"),
+                app_root.as_os_str().to_owned(),
+            ],
+        ))
+        .map_err(build_error)?;
+    successful(record).map_err(build_error)?;
+    let build = dist::build_info(root, dist::Build::Staged).map_err(BuildError::new)?;
+    if &build.product != version {
+        return Err(BuildError::new(format!(
+            "release build expected product {version} but source derives {}",
+            build.product
+        )));
+    }
+    crate::app::StagedCanvas::read_from(root, app_root, &build).map_err(build_error)
 }
 
 impl<E: Executor> CommandBuilder<'_, E> {

@@ -353,6 +353,14 @@ Stage the Windows release target through the same boundary:
 spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned
 ```
 
+The shorter app-only checkpoint runs the same hosted route and the same release
+executor's app build, then stops before the native build and retrieves no
+stage output:
+
+```sh
+spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned --app-only
+```
+
 `PROGRAM` is either a path beneath the selected worktree or one admitted tool
 token: `@runner`, `@cargo`, `@rustc`, `@git`, `@cl`, or `@rc`. Proof replay
 sends its five commands as one bounded batch, so one signed provider run
@@ -411,10 +419,11 @@ Inside the sealed guest, installed-target admission reads the exact selected
 compiler's sysroot and requires its standard-library archive for both the
 native and Wasm targets; it executes no mutable runner Rustup proxy.
 Nested release commands receive only the sealed executor environment; on
-Windows that environment carries the exact admitted `SystemRoot`, compiler
-paths, SDK include roots, and SDK library roots so Cargo and its host build
-scripts can resolve operating-system components without inheriting unrelated
-runner state. The release app publishes its generation under the admitted build root,
+Windows that environment carries the exact admitted `SystemRoot`, `TEMP`,
+`TMP`, compiler paths, SDK include roots, and SDK library roots so Cargo, its
+host build scripts, and the MSVC linker can resolve operating-system components
+and write scratch files without inheriting unrelated runner state. The release
+app publishes its generation under the admitted build root,
 not the sealed source tree; source and vendored dependency ACLs remain
 read-only through Trunk compilation.
 

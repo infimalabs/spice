@@ -123,6 +123,11 @@ pub struct ReleaseEnvironment {
     pub rustup_home: Option<OsString>,
     pub rustup_toolchain: Option<OsString>,
     pub temporary: Option<OsString>,
+    /// Windows tools such as MSVC `link.exe` resolve scratch files from
+    /// `TMP` then `TEMP`, never `TMPDIR`; without them they fall back to the
+    /// Windows directory.
+    pub temp: Option<OsString>,
+    pub tmp: Option<OsString>,
     pub system_root: Option<OsString>,
     pub cc: Option<OsString>,
     pub cxx: Option<OsString>,
@@ -389,6 +394,56 @@ pub fn stage_target(
     }
 }
 
+/// Build only the release app for one supported target, through the same
+/// release executor and app-build command [`stage_target`] runs, then stop
+/// before the native build.
+///
+/// This is the short checkpoint for an isolated host's nested toolchain
+/// environment: it admits the same pins, builds the app from the same source
+/// tree into the same app root, and publishes no target payload.
+pub fn stage_target_app(
+    spelling: &str,
+    environment: ReleaseEnvironment,
+    proof_container: &str,
+    output: &mut impl Write,
+) -> Result<(), TargetBuildError> {
+    let target = parse_target(spelling)?;
+    let workspace = workspace_root()?;
+    let build_root = environment.build_root(&workspace);
+    let root = match &environment.source_archive {
+        Some(delivered) => {
+            SourceArchive::delivered(delivered)?;
+            workspace.clone()
+        }
+        None => local_source_tree(&workspace, &environment)?.1,
+    };
+    let version = spice::version::source_version(&root, dist::Build::Staged)
+        .map_err(TargetBuildError::SourceVersion)?;
+    let programs = Programs::discover(&root, &environment, target)?;
+    let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
+    let result = (|| {
+        let observed = observe_pins(&executor, &programs, target, proof_container)?;
+        RequiredPins::new(required_pins(proof_container))?.verify(&observed)?;
+        builder::build_release_app(
+            &executor,
+            &programs,
+            &root,
+            &release_app_root(&build_root),
+            &version,
+        )
+        .map_err(TargetBuildError::Build)
+    })();
+    render_command_records(output, &executor.records())?;
+    let staged = result?;
+    render_canvas(output, staged.canvas(), staged.tree()).map_err(TargetBuildError::Output)
+}
+
+/// The app root every release app build publishes into, beside the release
+/// target directory under the build root.
+fn release_app_root(build_root: &Path) -> PathBuf {
+    build_root.join("release-app")
+}
+
 /// Read and extract the one local release source archive.
 ///
 /// Darwin, Linux, and the clean local Windows appliance route share this
@@ -505,7 +560,7 @@ fn stage_with_roots<E: Executor>(
 
     let pipeline = Pipeline::new(required.clone(), version.clone());
     let target_dir = build_root.join("release-appliance");
-    let app_root = build_root.join("release-app");
+    let app_root = release_app_root(build_root);
     let mut builder = CommandBuilder {
         root,
         app_root: &app_root,
@@ -942,6 +997,8 @@ impl SystemExecutor {
             // way, so dropping the name is what makes an offline build fail.
             ("RUSTUP_TOOLCHAIN", release.rustup_toolchain.as_ref()),
             ("TMPDIR", release.temporary.as_ref()),
+            ("TEMP", release.temp.as_ref()),
+            ("TMP", release.tmp.as_ref()),
             ("SystemRoot", release.system_root.as_ref()),
             ("CC", release.cc.as_ref()),
             ("CXX", release.cxx.as_ref()),

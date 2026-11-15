@@ -48,7 +48,7 @@ pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
     CommandRecord, MacSymbols, ReleaseEnvironment, TargetBuild, TargetBuildError,
-    build_windows_appliance, release_proof_image, stage_target,
+    build_windows_appliance, release_proof_image, stage_target, stage_target_app,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use seal_darwin::{PlacedExecutable, SealDarwinError, place_executable, seal_runner};
