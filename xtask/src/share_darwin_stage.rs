@@ -335,10 +335,7 @@ impl TemporaryExecutable {
         let base = stage.parent().unwrap_or(stage);
         for _ in 0..100 {
             let sequence = TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-            let path = base.join(format!(
-                ".spice-darwin-sign-{}-{sequence}",
-                std::process::id()
-            ));
+            let path = base.join(format!(".darwin-sign-{}-{sequence}", std::process::id()));
             match fs::create_dir(&path) {
                 Ok(()) => {
                     let executable = path.join("spice");
