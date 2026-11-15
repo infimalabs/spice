@@ -181,7 +181,7 @@ mod windows {
         }
         admit_toolchain(&request)?;
 
-        let scratch = temp.join(format!("spice-hosted-{}", request.challenge));
+        let scratch = scratch_root(&temp, &request.challenge);
         let cargo_home = scratch.join("cargo-home");
         let target = scratch.join("target");
         let guest_result = scratch.join("result.json");
@@ -297,7 +297,7 @@ mod windows {
         verify_non_loopback_denied()?;
         eprintln!("[windows-hosted] guest network isolation admitted");
 
-        let scratch = temp.join(format!("spice-hosted-{}", request.challenge));
+        let scratch = scratch_root(&temp, &request.challenge);
         let cargo_home = scratch.join("cargo-home");
         let target = scratch.join("target");
         let stage = temp.join(format!("spice-hosted-stage-{}", request.challenge));
@@ -634,6 +634,16 @@ mod windows {
         let mut files = Vec::new();
         walk(root, root, &mut files)?;
         Ok(files)
+    }
+
+    /// The scratch root parent and guest share for one request.
+    ///
+    /// MSVC `link.exe` is not long-path aware, and nested Cargo build
+    /// directories beneath this root already spend most of `MAX_PATH`, so the
+    /// name carries only the challenge prefix the guest account and firewall
+    /// rule already use; the runner is disposable, so the prefix is unique.
+    fn scratch_root(temp: &Path, challenge: &str) -> PathBuf {
+        temp.join(format!("spice-hosted-{}", &challenge[..16]))
     }
 
     fn create_empty(path: &Path) -> Result<(), String> {
