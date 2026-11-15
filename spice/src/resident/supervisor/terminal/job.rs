@@ -899,8 +899,8 @@ impl Job {
     ///
     /// A job's directory need not change when its log grows, so a running job
     /// is also looked at after each `cadence` without a change. The armed
-    /// watch persists across those looks: a watch that never fires holds its
-    /// thread until this process ends.
+    /// watch persists across those looks and is disarmed when the
+    /// observation returns.
     ///
     /// # Errors
     ///
@@ -927,8 +927,9 @@ impl Job {
     ///
     /// `look` runs once the watches are armed, after every write to the log,
     /// and once more on seeing the ending, when the log is complete. No look
-    /// runs on a timer: a watch on the log itself wakes each one, and a watch
-    /// that never fires holds its thread until this process ends.
+    /// runs on a timer: a watch on the log itself wakes each one. Every watch
+    /// this observation arms is disarmed when it returns, so a job that never
+    /// changes again holds no descriptor or thread of a finished follow.
     ///
     /// # Errors
     ///
@@ -952,18 +953,20 @@ impl Job {
         let mut keeper = self.keeper;
         let deadline = Monotonic::now() + bound;
         let mut observed_exit = false;
-        let mut armed = false;
+        // Dropped on return, each disarm ends a watch this follow no longer
+        // needs.
+        let mut _exit = None;
+        let mut directory_watch = None;
+        let mut log_watch = None;
         // Only an output observation watches the log; a timed one looks on
         // its cadence instead.
-        let mut log_armed = matches!(looks, Looks::Every(_));
+        let watches_log = matches!(looks, Looks::OnOutput);
         loop {
-            if !armed {
-                watch(&self.directory, &control.sender, Signal::woke)?;
-                armed = true;
+            if directory_watch.is_none() {
+                directory_watch = Some(watch(&self.directory, &control.sender, Signal::woke)?);
             }
-            if !log_armed && self.log_path().try_exists()? {
-                watch(&self.log_path(), &control.sender, Signal::wrote)?;
-                log_armed = true;
+            if watches_log && log_watch.is_none() && self.log_path().try_exists()? {
+                log_watch = Some(watch(&self.log_path(), &control.sender, Signal::wrote)?);
             }
             if let Some(state) = self.state()? {
                 if let Some(ended) = state.ended() {
@@ -979,7 +982,7 @@ impl Job {
             if let (Some(pid), false) = (keeper, observed_exit) {
                 observed_exit = true;
                 if pid != std::process::id() {
-                    observer::wait_for_exit(pid, control.sender.clone());
+                    _exit = observer::wait_for_exit(pid, control.sender.clone());
                 }
             }
             let remaining = deadline.saturating_duration_since(Monotonic::now());
@@ -989,11 +992,11 @@ impl Job {
             };
             let observed = match control.receiver.recv_timeout(wait) {
                 Ok(Signal::Changed) => {
-                    armed = false;
+                    directory_watch = None;
                     continue;
                 }
                 Ok(Signal::Wrote) => {
-                    log_armed = false;
+                    log_watch = None;
                     continue;
                 }
                 Ok(Signal::KeeperExited) => {
