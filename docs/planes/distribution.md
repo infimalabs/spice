@@ -442,11 +442,15 @@ landing.
 Every dispatch has a fresh 256-bit challenge. The signed result must name that
 challenge, this repository and workflow, the provider run and attempt, the
 exact source archive, image, toolchain, runner digest, and every returned
-staging artifact's path, length, and digest. The client verifies GitHub's
-Sigstore/OIDC attestations before it reads the result as evidence. Changed
-source, image, tools, runner, repository, workflow, run identity, challenge, or
-artifact bytes refuse. A successful Windows stage copies content-addressed
-objects first and the mutable target payload pointer last.
+staging artifact's path, length, and digest. After inventory, the guest grants
+the admitted provider identity read-only file access and directory traversal;
+the provider re-inventories the same bytes after removing the guest account and
+before writing the result that the workflow signs and uploads. The client
+verifies GitHub's Sigstore/OIDC attestations before it reads the result as
+evidence. Changed source, image, tools, runner, repository, workflow, run
+identity, challenge, or artifact bytes refuse. A successful Windows stage
+copies content-addressed objects first and the mutable target payload pointer
+last.
 
 The guest gives the command batch a read-only source tree, one fresh Cargo home
 and target directory, bounded output per member, bounded member runtimes, and a
