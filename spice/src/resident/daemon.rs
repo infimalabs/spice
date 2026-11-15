@@ -623,8 +623,15 @@ fn wait_for_ready(
     let warn_at = started + horizon.min(ARRIVAL_WARN_HORIZON);
     let mut warned = false;
     let (sender, receiver) = mpsc::channel();
-    wait_for_change(observer, sender.clone(), Signal::woke);
-    wait_for_exit(child.id(), sender.clone());
+    let observer_unavailable = |error: io::Error| {
+        Some(environment_fault(
+            "resident::daemon-observer-unavailable",
+            &error.to_string(),
+        ))
+    };
+    let mut _change =
+        wait_for_change(observer, sender.clone(), Signal::woke).map_err(observer_unavailable)?;
+    let _exit = wait_for_exit(child.id(), sender.clone());
 
     if let Some(discovery) = arrival.candidate()? {
         return Ok(discovery);
@@ -649,16 +656,12 @@ fn wait_for_ready(
         };
         match receiver.recv_timeout(wait_bound) {
             Ok(Signal::Changed) => {
-                let next = DirectObserver::arm(watched).map_err(|error| {
-                    Some(environment_fault(
-                        "resident::daemon-observer-unavailable",
-                        &error.to_string(),
-                    ))
-                })?;
+                let next = DirectObserver::arm(watched).map_err(observer_unavailable)?;
                 if let Some(discovery) = arrival.candidate()? {
                     return Ok(discovery);
                 }
-                wait_for_change(next, sender.clone(), Signal::woke);
+                _change = wait_for_change(next, sender.clone(), Signal::woke)
+                    .map_err(observer_unavailable)?;
             }
             Ok(Signal::Exited) => {
                 if let Some(discovery) = arrival.candidate()? {
@@ -828,7 +831,7 @@ fn terminate_group(child: &mut Child) {
     };
     let _ = rustix::process::kill_process_group(group, rustix::process::Signal::TERM);
     let (sender, receiver) = mpsc::sync_channel(1);
-    wait_for_exit(child.id(), sender);
+    let _exit = wait_for_exit(child.id(), sender);
     if receiver.recv_timeout(TERMINATION_HORIZON).is_err() {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }

@@ -141,22 +141,23 @@ fn search(
         });
         found
     };
-    let (mut watchable, mut armed) = (true, false);
+    let mut watchable = true;
+    let mut armed = None;
     loop {
-        if watchable && !armed {
+        if watchable && armed.is_none() {
             armed = watch(&log, sender, |wrote| match wrote {
                 Ok(()) => Look::Wrote,
                 Err(_) => Look::Unwatched,
             })
-            .is_ok();
-            watchable = armed;
+            .ok();
+            watchable = armed.is_some();
         }
         if let Some(line) = look(&mut lines) {
             return Some(line);
         }
         match receiver.recv() {
-            Ok(Look::Wrote) => armed = false,
-            Ok(Look::Unwatched) => (watchable, armed) = (false, false),
+            Ok(Look::Wrote) => armed = None,
+            Ok(Look::Unwatched) => (watchable, armed) = (false, None),
             Ok(Look::Complete) | Err(_) => break,
         }
     }

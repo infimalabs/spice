@@ -71,11 +71,15 @@ pub(in crate::resident::supervisor) fn keep(request_path: &Path) -> io::Result<(
     let ending = match spawn(directory, &request, sender.clone()) {
         Ok((group, watcher, log)) => {
             let stop = directory.join(STOP);
+            let mut _armed = None;
             let ending = tend(
                 &receiver,
                 request.timeout_millis.map(Duration::from_millis),
                 TERMINATE_GRACE,
-                || watch(directory, &sender, Keep::woke).map(|()| stop.exists()),
+                || {
+                    _armed = Some(watch(directory, &sender, Keep::woke)?);
+                    Ok(stop.exists())
+                },
                 |signal| signal_group(group, signal),
                 |deadline| await_group_exit(group, deadline),
                 |signal, trigger| {
@@ -118,8 +122,10 @@ pub(in crate::resident::supervisor) fn keep(request_path: &Path) -> io::Result<(
 fn unheard(directory: &Path, grace: Duration, heard: impl Fn(&Path) -> bool) -> bool {
     let deadline = Monotonic::now() + grace;
     let (sender, receiver) = mpsc::channel();
+    let mut armed;
     loop {
-        if watch(directory, &sender, Keep::woke).is_err() || heard(directory) {
+        armed = watch(directory, &sender, Keep::woke).ok();
+        if armed.is_none() || heard(directory) {
             return !heard(directory);
         }
         let remaining = deadline.saturating_duration_since(Monotonic::now());
@@ -265,7 +271,7 @@ fn tend(
     receiver: &mpsc::Receiver<Keep>,
     timeout: Option<Duration>,
     grace: Duration,
-    stop_asked: impl Fn() -> io::Result<bool>,
+    mut stop_asked: impl FnMut() -> io::Result<bool>,
     signal: impl Fn(GroupSignal) -> io::Result<()>,
     emptied: impl Fn(Monotonic) -> io::Result<bool>,
     mut intervened: impl FnMut(Sent, Trigger),
@@ -406,15 +412,15 @@ fn spawn_group(command: &mut ProcessCommand) -> io::Result<sill::OwnedChild> {
 }
 
 /// Send what `signal` makes of the next change to `path`, a directory or a
-/// file; the watch is armed before the reader looks.
+/// file; the watch is armed before the reader looks, and ends unsent once
+/// the returned disarm is dropped.
 pub(super) fn watch<T: Send + 'static>(
     path: &Path,
     sender: &mpsc::Sender<T>,
     signal: impl FnOnce(io::Result<()>) -> T + Send + 'static,
-) -> io::Result<()> {
+) -> io::Result<observer::Disarm> {
     let observer = observer::DirectObserver::arm(path)?;
-    observer::wait_for_change(observer, sender.clone(), signal);
-    Ok(())
+    observer::wait_for_change(observer, sender.clone(), signal)
 }
 
 /// What reaches a job's observer: the job's own progress, and the lane's

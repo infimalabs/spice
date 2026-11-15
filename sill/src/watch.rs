@@ -1,5 +1,10 @@
 //! Direct filesystem and process-exit observers: one kernel wake per armed
 //! directory change or process exit, with no timer behind it.
+//!
+//! A wait blocks its thread until the kernel wakes it. A waiter whose owner may
+//! stop caring first waits disarmably: dropping the owner's [`Disarm`] ends the
+//! wait at once, so an observer nobody follows any longer holds no descriptor
+//! and no thread.
 
 #[cfg(unix)]
 use std::io;
@@ -12,6 +17,40 @@ mod windows;
 pub use windows::DirectObserver;
 #[cfg(windows)]
 pub use windows::ProcessExitObserver;
+#[cfg(windows)]
+pub use windows::{Disarm, Disarmed, disarm};
+
+/// How a disarmable wait ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Woke {
+    /// The observed change or exit arrived.
+    Fired,
+    /// The paired [`Disarm`] was dropped first; nobody awaits the change.
+    Disarmed,
+}
+
+/// The owner's end of one disarmable wait. Dropping it ends the paired wait,
+/// which answers [`Woke::Disarmed`] and releases its observer.
+#[cfg(unix)]
+#[must_use = "dropping the disarm ends its wait at once"]
+#[derive(Debug)]
+pub struct Disarm(#[expect(dead_code, reason = "held only to close on drop")] std::io::PipeWriter);
+
+/// The waiter's end of one disarmable wait, consumed by `wait_or_disarmed`.
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct Disarmed(std::io::PipeReader);
+
+/// One owner's [`Disarm`] and the [`Disarmed`] end its waiter consumes.
+///
+/// # Errors
+///
+/// Returns the kernel's refusal to create the pair.
+#[cfg(unix)]
+pub fn disarm() -> io::Result<(Disarm, Disarmed)> {
+    let (reader, writer) = std::io::pipe()?;
+    Ok((Disarm(writer), Disarmed(reader)))
+}
 
 /// One directory's next direct change, armed before the reader looks so a
 /// change between the look and the wait is not lost.
@@ -65,6 +104,28 @@ impl DirectObserver {
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "direct directory observer is unavailable on this Unix",
+            ))
+        }
+    }
+
+    /// Block until the watched directory changes once or the [`Disarm`]
+    /// paired with `disarmed` is dropped. Either way the observer is
+    /// released on return.
+    ///
+    /// # Errors
+    ///
+    /// Returns the kernel's refusal to deliver the change.
+    pub fn wait_or_disarmed(self, disarmed: Disarmed) -> io::Result<Woke> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            wait_or_disarmed(self.descriptor, &disarmed)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = disarmed;
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "direct directory observer is unavailable on this Unix",
@@ -222,6 +283,96 @@ fn wait_macos_event(descriptor: libc::c_int) -> io::Result<()> {
     }
 }
 
+/// Block until `descriptor` is readable, an inotify instance or pidfd, or
+/// until `disarmed`'s writer is dropped. A disarm wins a tie: nobody awaits
+/// the change any longer.
+#[cfg(target_os = "linux")]
+fn wait_or_disarmed(descriptor: libc::c_int, disarmed: &Disarmed) -> io::Result<Woke> {
+    use std::os::fd::AsRawFd as _;
+
+    let mut events = [
+        libc::pollfd {
+            fd: descriptor,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: disarmed.0.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    loop {
+        // SAFETY: both poll descriptors are valid and the array is writable.
+        let result = unsafe { libc::poll(events.as_mut_ptr(), 2, -1) };
+        if result > 0 {
+            return Ok(if events[1].revents == 0 {
+                Woke::Fired
+            } else {
+                Woke::Disarmed
+            });
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+/// Block until the armed kqueue `descriptor` delivers its event or until
+/// `disarmed`'s writer is dropped, which the same queue observes as the end
+/// of the disarm pipe. A disarm wins a tie: nobody awaits the change any
+/// longer.
+#[cfg(target_os = "macos")]
+fn wait_or_disarmed(descriptor: libc::c_int, disarmed: &Disarmed) -> io::Result<Woke> {
+    use std::os::fd::AsRawFd as _;
+
+    let reader = disarmed.0.as_raw_fd() as libc::uintptr_t;
+    let change = libc::kevent {
+        ident: reader,
+        filter: libc::EVFILT_READ,
+        flags: libc::EV_ADD | libc::EV_ONESHOT,
+        fflags: 0,
+        data: 0,
+        udata: std::ptr::null_mut(),
+    };
+    let mut events = [std::mem::MaybeUninit::<libc::kevent>::uninit(); 2];
+    loop {
+        // SAFETY: the registration is valid for this call, the output slots
+        // are writable, and no timeout is used. Registering the same oneshot
+        // filter again after an interruption replaces it.
+        let result = unsafe {
+            libc::kevent(
+                descriptor,
+                &change,
+                1,
+                events.as_mut_ptr().cast(),
+                2,
+                std::ptr::null(),
+            )
+        };
+        if result > 0 {
+            let delivered = usize::try_from(result).unwrap_or_default();
+            let mut woke = Woke::Fired;
+            for event in &events[..delivered] {
+                // SAFETY: kevent initialized the first `result` events.
+                let event = unsafe { event.assume_init() };
+                if event.flags & libc::EV_ERROR != 0 && event.data != 0 {
+                    return Err(io::Error::from_raw_os_error(event.data as i32));
+                }
+                if event.filter == libc::EVFILT_READ && event.ident == reader {
+                    woke = Woke::Disarmed;
+                }
+            }
+            return Ok(woke);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
 /// One process's exit, armed while the process can still be named.
 #[cfg(unix)]
 #[derive(Debug)]
@@ -320,6 +471,28 @@ impl ProcessExitObserver {
         {
             let _ = descriptor;
             Ok(())
+        }
+    }
+
+    /// Block until the observed process has exited or the [`Disarm`]
+    /// paired with `disarmed` is dropped. Either way the observer is
+    /// released on return.
+    ///
+    /// # Errors
+    ///
+    /// Returns the kernel's refusal to deliver the exit.
+    pub fn wait_or_disarmed(self, disarmed: Disarmed) -> io::Result<Woke> {
+        let Self::Watching(descriptor) = &self else {
+            return Ok(Woke::Fired);
+        };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            wait_or_disarmed(*descriptor, &disarmed)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = (descriptor, disarmed);
+            Ok(Woke::Fired)
         }
     }
 

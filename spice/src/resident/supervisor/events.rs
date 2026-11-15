@@ -1,5 +1,6 @@
 //! Blocking state and process-exit observation for detached supervisors.
 
+use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -8,7 +9,7 @@ use std::time::{Duration, Instant as Monotonic};
 use sill::{WaitError, WaitOutcome};
 
 use super::Handle;
-use crate::resident::daemon::observer::{self, DirectObserver};
+use crate::resident::daemon::observer::{self, DirectObserver, Disarm};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum StateSignal {
@@ -38,11 +39,13 @@ impl observer::ExitSender for mpsc::Sender<StateSignal> {
 
 /// The state file's directory, watched directly; each wake re-arms the watch
 /// before the reader looks, so what changes between a look and the next
-/// wait is not lost.
+/// wait is not lost. Dropping the events ends both watches.
 pub(super) struct StateEvents {
     directory: PathBuf,
     sender: mpsc::Sender<StateSignal>,
     receiver: mpsc::Receiver<StateSignal>,
+    change: Cell<Option<Disarm>>,
+    exit: Cell<Option<Disarm>>,
 }
 
 impl StateEvents {
@@ -64,18 +67,25 @@ impl StateEvents {
             directory: directory.to_path_buf(),
             sender,
             receiver,
+            change: Cell::new(None),
+            exit: Cell::new(None),
         };
         events.arm_watch()?;
         Ok(events)
     }
 
     pub(super) fn observe_exit(&self, supervisor: u32) {
-        observer::wait_for_exit(supervisor, self.sender.clone());
+        self.exit
+            .set(observer::wait_for_exit(supervisor, self.sender.clone()));
     }
 
     fn arm_watch(&self) -> io::Result<()> {
         let observer = DirectObserver::arm(&self.directory)?;
-        observer::wait_for_change(observer, self.sender.clone(), StateSignal::woke);
+        self.change.set(Some(observer::wait_for_change(
+            observer,
+            self.sender.clone(),
+            StateSignal::woke,
+        )?));
         Ok(())
     }
 

@@ -3,7 +3,11 @@
 
 use std::io;
 use std::os::windows::ffi::OsStrExt as _;
+use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::path::Path;
+use std::sync::Arc;
+
+use super::Woke;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INVALID_PARAMETER, FILETIME, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
@@ -17,9 +21,55 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, INFINITE, OpenProcess,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, INFINITE, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, SetEvent, WaitForMultipleObjects,
+    WaitForSingleObject,
 };
+
+/// The owner's end of one disarmable wait. Dropping it signals the shared
+/// event, which ends the paired wait.
+#[must_use = "dropping the disarm ends its wait at once"]
+#[derive(Debug)]
+pub struct Disarm(Arc<OwnedHandle>);
+
+impl Drop for Disarm {
+    fn drop(&mut self) {
+        // SAFETY: the shared event handle stays open while either end holds it.
+        unsafe { SetEvent(self.0.as_raw_handle()) };
+    }
+}
+
+/// The waiter's end of one disarmable wait, consumed by `wait_or_disarmed`.
+#[derive(Debug)]
+pub struct Disarmed(Arc<OwnedHandle>);
+
+/// One owner's [`Disarm`] and the [`Disarmed`] end its waiter consumes.
+///
+/// # Errors
+///
+/// Returns the kernel's refusal to create the shared event.
+pub fn disarm() -> io::Result<(Disarm, Disarmed)> {
+    // SAFETY: an unnamed manual-reset event starts unsignaled and is owned here.
+    let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+    if event.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: CreateEventW returned this handle and nothing else owns it.
+    let event = Arc::new(unsafe { OwnedHandle::from_raw_handle(event) });
+    Ok((Disarm(Arc::clone(&event)), Disarmed(event)))
+}
+
+/// Block until `handle` is signaled or the disarm event is, preferring the
+/// disarm when both are: nobody awaits the change any longer.
+fn signaled_or_disarmed(handle: HANDLE, disarmed: &Disarmed) -> io::Result<Woke> {
+    let handles = [disarmed.0.as_raw_handle(), handle];
+    // SAFETY: both handles stay open for the duration of the wait.
+    match unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, INFINITE) } {
+        WAIT_OBJECT_0 => Ok(Woke::Disarmed),
+        signaled if signaled == WAIT_OBJECT_0 + 1 => Ok(Woke::Fired),
+        _ => Err(io::Error::last_os_error()),
+    }
+}
 
 pub struct DirectObserver {
     notification: HANDLE,
@@ -61,6 +111,16 @@ impl DirectObserver {
     /// Returns the kernel's refusal to deliver the change.
     pub fn wait(self) -> io::Result<()> {
         signaled(self.notification)
+    }
+
+    /// Block until the watched directory changes once or the [`Disarm`]
+    /// paired with `disarmed` is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns the kernel's refusal to deliver the change.
+    pub fn wait_or_disarmed(self, disarmed: Disarmed) -> io::Result<Woke> {
+        signaled_or_disarmed(self.notification, &disarmed)
     }
 }
 
@@ -134,6 +194,13 @@ impl ProcessExitObserver {
         match &self {
             Self::Watching(process) => signaled(*process),
             Self::Ended => Ok(()),
+        }
+    }
+
+    pub fn wait_or_disarmed(self, disarmed: Disarmed) -> io::Result<Woke> {
+        match &self {
+            Self::Watching(process) => signaled_or_disarmed(*process, &disarmed),
+            Self::Ended => Ok(Woke::Fired),
         }
     }
 

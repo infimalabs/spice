@@ -68,4 +68,4 @@ pub use surface::{
     LockPoolReport, LockReport, LockShardReport, LockSurfaceError, LockTargetKind, LockTopology,
 };
 #[cfg(any(unix, windows))]
-pub use watch::{DirectObserver, ProcessExitObserver};
+pub use watch::{DirectObserver, Disarm, Disarmed, ProcessExitObserver, Woke, disarm};
