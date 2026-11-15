@@ -4,6 +4,7 @@ use super::*;
 pub(super) struct CommandBuilder<'a, E> {
     pub(super) root: &'a Path,
     pub(super) target: ReleaseTarget,
+    pub(super) app_root: &'a Path,
     pub(super) target_dir: &'a Path,
     pub(super) programs: &'a Programs,
     pub(super) version: &'a ProductVersion,
@@ -24,7 +25,15 @@ impl<E: Executor> Builder for CommandBuilder<'_, E> {
         if let Some(staged) = &self.canvas {
             return Ok(staged.canvas().clone());
         }
-        self.run(CommandSpec::new("app-build", &self.programs.xtask, ["app"]))?;
+        self.run(CommandSpec::new(
+            "app-build",
+            &self.programs.xtask,
+            [
+                OsString::from("app"),
+                OsString::from("--stage-root"),
+                self.app_root.as_os_str().to_owned(),
+            ],
+        ))?;
         let build = dist::build_info(self.root, dist::Build::Staged).map_err(BuildError::new)?;
         if &build.product != self.version {
             return Err(BuildError::new(format!(
@@ -32,7 +41,8 @@ impl<E: Executor> Builder for CommandBuilder<'_, E> {
                 self.version, build.product
             )));
         }
-        let staged = crate::app::StagedCanvas::read(self.root, &build).map_err(build_error)?;
+        let staged = crate::app::StagedCanvas::read_from(self.root, self.app_root, &build)
+            .map_err(build_error)?;
         let canvas = staged.canvas().clone();
         self.canvas = Some(staged);
         Ok(canvas)

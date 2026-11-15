@@ -75,6 +75,27 @@ pub fn app(environment: &ReleaseEnvironment, output: &mut impl Write) -> Result<
     app_from(&root, environment, output).map(|_| ())
 }
 
+/// Compile the browser app from this workspace into an explicit publication
+/// root.
+///
+/// # Errors
+///
+/// Returns the same errors as [`app`], and refuses a relative publication root.
+pub fn app_to(
+    environment: &ReleaseEnvironment,
+    publish_root: &Path,
+    output: &mut impl Write,
+) -> Result<(), AppBuildError> {
+    if !publish_root.is_absolute() {
+        return Err(AppBuildError::GeneratedStage(format!(
+            "app publication root is not absolute: {}",
+            publish_root.display()
+        )));
+    }
+    let root = workspace_root()?;
+    app_from_to(&root, publish_root, environment, output).map(|_| ())
+}
+
 /// The generation a worktree stage serves once [`app_from`] settles it, and
 /// the selected source identity that generation was compiled from.
 pub(crate) struct StagedApp {
@@ -89,10 +110,20 @@ pub(crate) fn app_from(
     environment: &ReleaseEnvironment,
     output: &mut impl Write,
 ) -> Result<StagedApp, AppBuildError> {
+    app_from_to(root, root, environment, output)
+}
+
+/// Stage sources from `root` under the independent writable `publish_root`.
+pub(crate) fn app_from_to(
+    root: &Path,
+    publish_root: &Path,
+    environment: &ReleaseEnvironment,
+    output: &mut impl Write,
+) -> Result<StagedApp, AppBuildError> {
     let sources = source::SourceSnapshot::capture(root)?;
     let source_identity = sources.identity().clone();
-    if let Some(identity) = current_generation_of(root, &source_identity) {
-        let generations = root
+    if let Some(identity) = current_generation_of(publish_root, &source_identity) {
+        let generations = publish_root
             .join(spice::serve::APP_STAGE)
             .join(spice::serve::APP_STAGE_GENERATIONS);
         if !archive_admits(&generations, &identity) {
@@ -102,7 +133,7 @@ pub(crate) fn app_from(
             output,
             "[app] {} generation {identity} from selected sources {} ({source_identity}) is \
              already current; the compiler was not run",
-            root.join(spice::serve::APP_STAGE).display(),
+            publish_root.join(spice::serve::APP_STAGE).display(),
             root.display(),
         )
         .map_err(AppBuildError::Output)?;
@@ -112,7 +143,7 @@ pub(crate) fn app_from(
         });
     }
     let generation = app_at(
-        root,
+        publish_root,
         &source_identity,
         output,
         |stage, output| run_trunk(root, environment, stage, &source_identity, output),
@@ -132,7 +163,12 @@ fn app_at<W: Write>(
     verify_sources: impl FnOnce() -> Result<(), AppBuildError>,
 ) -> Result<Digest, AppBuildError> {
     let stage = root.join(spice::serve::APP_STAGE);
-    let temporary = root.join("dist").join(format!(
+    let temporary_parent = root.join("dist");
+    fs::create_dir_all(&temporary_parent).map_err(|source| AppBuildError::Io {
+        path: temporary_parent.clone(),
+        source,
+    })?;
+    let temporary = temporary_parent.join(format!(
         ".stage-app-build-{}-{}",
         std::process::id(),
         NEXT_BUILD.fetch_add(1, Ordering::Relaxed)
@@ -356,21 +392,30 @@ impl LinkProfile {
 }
 
 impl StagedCanvas {
-    /// Assemble the rack from `generations/G.zip` for the generation the
-    /// current pointer names, the tracked sources under `root`, and `build`.
+    /// Assemble the rack from the app generation and tracked sources at `root`.
     ///
     /// # Errors
     ///
     /// Refuses an unadmitted current generation, an unreadable archive or
     /// source, and an archive that does not admit as G.
     pub fn read(root: &Path, build: &wire::manifest::BuildInfo) -> Result<Self, AppBuildError> {
-        let generation = spice::serve::AppSource::resolve(root)
+        Self::read_from(root, root, build)
+    }
+
+    /// Assemble a rack from tracked sources under `root` and an app generation
+    /// published under an independent writable root.
+    pub(crate) fn read_from(
+        root: &Path,
+        publish_root: &Path,
+        build: &wire::manifest::BuildInfo,
+    ) -> Result<Self, AppBuildError> {
+        let generation = spice::serve::AppSource::resolve(publish_root)
             .and_then(|source| source.current_generation())
             .map_err(|error| AppBuildError::GeneratedStage(error.to_string()))?
             .identity()
             .clone();
         let staged = read_regular(&archive_path(
-            &root
+            &publish_root
                 .join(spice::serve::APP_STAGE)
                 .join(spice::serve::APP_STAGE_GENERATIONS),
             &generation,
