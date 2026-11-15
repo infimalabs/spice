@@ -20,7 +20,7 @@ const USAGE: &str = concat!(
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
     "seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -346,26 +346,43 @@ fn run_stage_target(
     output: &mut impl io::Write,
     error_output: &mut impl io::Write,
 ) -> CommandResult {
-    let (target, unsigned, proof_container, staged_app) = match arguments.as_slice() {
-        [target] => (target.to_str(), false, None, false),
-        [target, flag] if flag == OsStr::new("--unsigned") => (target.to_str(), true, None, false),
+    let (target, unsigned, proof_container, scope) = match arguments.as_slice() {
+        [target] => (target.to_str(), false, None, StageScope::Target),
+        [target, flag] if flag == OsStr::new("--unsigned") => {
+            (target.to_str(), true, None, StageScope::Target)
+        }
         [target, flag, image] if flag == OsStr::new("--proof-container") => {
-            (target.to_str(), false, image.to_str(), false)
+            (target.to_str(), false, image.to_str(), StageScope::Target)
         }
         [target, unsigned_flag, image_flag, image]
             if unsigned_flag == OsStr::new("--unsigned")
                 && image_flag == OsStr::new("--proof-container") =>
         {
-            (target.to_str(), true, image.to_str(), false)
+            (target.to_str(), true, image.to_str(), StageScope::Target)
         }
-        [target, unsigned_flag, image_flag, image, staged_flag]
+        [target, unsigned_flag, scope_flag]
             if unsigned_flag == OsStr::new("--unsigned")
-                && image_flag == OsStr::new("--proof-container")
-                && staged_flag == OsStr::new("--staged-app") =>
+                && scope_flag == OsStr::new("--app-only") =>
         {
-            (target.to_str(), true, image.to_str(), true)
+            (target.to_str(), true, None, StageScope::AppOnly)
         }
-        _ => (None, false, None, false),
+        [target, unsigned_flag, image_flag, image, scope_flag]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && image_flag == OsStr::new("--proof-container") =>
+        {
+            let scope = if scope_flag == OsStr::new("--staged-app") {
+                Some(StageScope::StagedApp)
+            } else if scope_flag == OsStr::new("--app-only") {
+                Some(StageScope::AppOnly)
+            } else {
+                None
+            };
+            match scope {
+                Some(scope) => (target.to_str(), true, image.to_str(), scope),
+                None => (None, false, None, StageScope::Target),
+            }
+        }
+        _ => (None, false, None, StageScope::Target),
     };
     let Some(target) = target else {
         eprintln!("{}", help());
@@ -385,15 +402,33 @@ fn run_stage_target(
                 &resolved_proof_container
             }
         };
-        return xtask::windows_hosted_stage(&archive, proof_container, output, error_output)
-            .and_then(|execution| {
-                (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
-                    xtask::WindowsHostedError::ProviderResponse(format!(
-                        "hosted Windows staging exited {}",
-                        execution.exit_code()
-                    ))
-                })
+        return xtask::windows_hosted_stage(
+            &archive,
+            proof_container,
+            scope == StageScope::AppOnly,
+            output,
+            error_output,
+        )
+        .and_then(|execution| {
+            (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                xtask::WindowsHostedError::ProviderResponse(format!(
+                    "hosted Windows staging exited {}",
+                    execution.exit_code()
+                ))
             })
+        })
+        .map_err(Into::into);
+    }
+    if scope == StageScope::AppOnly {
+        let resolved_proof_container;
+        let proof_container = match proof_container {
+            Some(image) => image,
+            None => {
+                resolved_proof_container = xtask::release_proof_image()?;
+                &resolved_proof_container
+            }
+        };
+        return xtask::stage_target_app(target, environment, proof_container, output)
             .map_err(Into::into);
     }
     if target == "x86_64-unknown-linux-musl" && !cfg!(target_os = "linux") {
@@ -410,12 +445,23 @@ fn run_stage_target(
             environment,
             signing.as_ref(),
             proof_container,
-            staged_app,
+            scope == StageScope::StagedApp,
             output,
         )
         .map(|_| ())
         .map_err(Into::into)
     })
+}
+
+/// How much of one release target `stage-target` builds.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum StageScope {
+    /// Build the app and the target, and stage the target payload.
+    Target,
+    /// Link the app generation already staged in the workspace.
+    StagedApp,
+    /// Build only the app through the release executor, staging nothing.
+    AppOnly,
 }
 
 /// Release targets with no signing route yet. Their unsigned executables are
@@ -748,7 +794,11 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         rustup_home: read("RUSTUP_HOME"),
         rustup_toolchain: read("RUSTUP_TOOLCHAIN"),
         temporary: read("TMPDIR"),
+        temp: read("TEMP"),
+        tmp: read("TMP"),
         system_root: read("SystemRoot"),
+        path_ext: read("PATHEXT"),
+        trunk_offline: read("TRUNK_OFFLINE"),
         cc: read("CC"),
         cxx: read("CXX"),
         include: read("INCLUDE"),
