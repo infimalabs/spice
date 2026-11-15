@@ -139,10 +139,12 @@ jobs:
           name: spice-linux-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
 
-      - name: Sign result
+      - name: Sign result and staged files
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
-          subject-path: ${{ runner.temp }}/result/result.json
+          subject-path: |
+            ${{ runner.temp }}/result/result.json
+            ${{ runner.temp }}/result/stage/**
 
   retire:
     name: Retire one-use source ref

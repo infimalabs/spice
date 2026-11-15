@@ -148,10 +148,12 @@ jobs:
         with:
           subject-path: ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
 
-      - name: Sign result with GitHub OIDC identity
+      - name: Sign result and staged files with GitHub OIDC identity
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
-          subject-path: ${{ runner.temp }}\result.json
+          subject-path: |
+            ${{ runner.temp }}\result.json
+            ${{ runner.temp }}\spice-hosted-stage-${{ steps.request.outputs.challenge }}\**
 
       - name: Publish immutable result, runner, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
