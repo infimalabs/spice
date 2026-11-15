@@ -7,6 +7,26 @@ pub use windows_execution::hosted::client::{
     HostedExecution, HostedSource, WindowsHostedError, windows_hosted,
 };
 
+/// Stage the signed macOS release target on one fresh provider-hosted machine
+/// and publish its provider-attested files into `dist/stage`.
+pub fn macos_hosted_stage(
+    archive: &Path,
+    proof_container: &str,
+    output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let stage = windows_execution::hosted::client::macos_hosted_stage(
+        archive,
+        proof_container,
+        Path::new("dist/stage"),
+    )?;
+    writeln!(
+        output,
+        "hosted macOS run {} on {} staged aarch64-apple-darwin",
+        stage.run_id, stage.runner_image
+    )
+    .map_err(WindowsHostedError::Output)
+}
+
 /// Stage the Linux release target on one fresh provider-hosted machine from
 /// the release source archive at `archive`, writing the retained stage log to
 /// `output` and publishing the staged files into `dist/stage` when it exits

@@ -22,10 +22,11 @@ fi
 
 
 # A clean hosted runner has no installed Spice appliance yet. Its bootstrap
-# step may name the exact rustup-selected Cargo executable directly; every
-# ordinary repository build continues through the admitted `spice dev cargo`
-# surface. Refuse a relative or unusable override before it can affect vendor
-# identity or the sealed runner.
+# step may name the exact selected toolchain's Cargo executable directly; its
+# sibling Rustc is then the only compiler this script admits. Every ordinary
+# repository build continues through the admitted `spice dev cargo` surface.
+# Refuse a relative or unusable override before it can affect vendor identity
+# or the sealed runner.
 dev_cargo() {
     if [ -n "${SPICE_PROOF_CARGO:-}" ]; then # env-policy: allow
         case "$SPICE_PROOF_CARGO" in # env-policy: allow
@@ -57,8 +58,17 @@ unsealed() {
     dev_cargo run --locked -q -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
 }
 
-cargo_path=$(rustup which cargo) # env-policy: allow
-rustc_path=$(rustup which rustc) # env-policy: allow
+if [ -n "${SPICE_PROOF_CARGO:-}" ]; then # env-policy: allow
+    cargo_path=$SPICE_PROOF_CARGO # env-policy: allow
+    rustc_path=$(dirname "$cargo_path")/rustc # env-policy: allow
+    if [ ! -f "$rustc_path" ] || [ ! -x "$rustc_path" ]; then # env-policy: allow
+        printf 'SPICE_PROOF_CARGO has no executable sibling rustc: %s\n' "$rustc_path" >&2 # env-policy: allow
+        exit 65
+    fi
+else
+    cargo_path=$(rustup which cargo) # env-policy: allow
+    rustc_path=$(rustup which rustc) # env-policy: allow
+fi
 git_path=$(command -v git) # env-policy: allow
 sandbox_path=/usr/bin/sandbox-exec
 pins=$(printf '%s\n' \

@@ -400,51 +400,72 @@ pub fn restage_signed_darwin(
     symbol_bytes: &[u8],
     signed_native: Vec<u8>,
 ) -> Result<FinalizedDarwinStage, StageError> {
-    let payload = admit_unsigned_darwin_payload(payload_bytes)?;
-    let symbol_document =
-        admit_unsigned_darwin_artifacts(&payload, unsigned_native, symbol_bytes)?;
+    let payload = admit_darwin_payload(payload_bytes)?;
+    let symbol_document = admit_darwin_artifacts(&payload, unsigned_native, symbol_bytes)?;
     finalize_signed_darwin(payload, symbol_document, signed_native)
 }
 
-fn admit_unsigned_darwin_payload(payload_bytes: &[u8]) -> Result<TargetPayload, StageError> {
-    let payload: TargetPayload = wire::decode(payload_bytes).map_err(|error| {
-        native_build_error(format!("unsigned payload does not decode: {error}"))
-    })?;
+/// Admit one complete finalized Darwin payload and its two inventoried objects.
+///
+/// # Errors
+///
+/// Refuses noncanonical payloads, stale digests, malformed or unbound dSYM
+/// evidence, and executables whose linked canvas differs from the payload.
+pub fn admit_finalized_darwin(
+    payload_bytes: &[u8],
+    native: &[u8],
+    symbols: &[u8],
+) -> Result<TargetPayload, StageError> {
+    let payload = admit_darwin_payload(payload_bytes)?;
+    admit_darwin_artifacts(&payload, native, symbols)?;
+    let linked = rack::link::extract(native)
+        .map_err(|error| native_build_error(format!("Darwin canvas does not decode: {error}")))?;
+    let observed = Digest::compute(Domain::DistArtifact, linked);
+    if observed != payload.canvas {
+        return Err(native_build_error(format!(
+            "Darwin canvas differs: expected {}, observed {observed}",
+            payload.canvas
+        )));
+    }
+    Ok(payload)
+}
+
+fn admit_darwin_payload(payload_bytes: &[u8]) -> Result<TargetPayload, StageError> {
+    let payload: TargetPayload = wire::decode(payload_bytes)
+        .map_err(|error| native_build_error(format!("Darwin payload does not decode: {error}")))?;
     let canonical = wire::encode(&payload)?;
     if canonical != payload_bytes {
-        return Err(native_build_error("unsigned payload is not canonical"));
+        return Err(native_build_error("Darwin payload is not canonical"));
     }
     if payload.version != TARGET_PAYLOAD_VERSION
         || payload.target != ReleaseTarget::Aarch64AppleDarwin
     {
         return Err(native_build_error(
-            "signed Darwin restaging requires the current aarch64-apple-darwin payload",
+            "Darwin admission requires the current aarch64-apple-darwin payload",
         ));
     }
     let expected_pins = Digest::compute(Domain::DistPins, &wire::encode(&payload.pins)?);
     if payload.pins_digest != expected_pins {
-        return Err(native_build_error(
-            "unsigned payload has a stale pins digest",
-        ));
+        return Err(native_build_error("Darwin payload has a stale pins digest"));
     }
     let expected_inventory =
         Digest::compute(Domain::DistInventory, &wire::encode(&payload.inventory)?);
     if payload.inventory_digest != expected_inventory {
         return Err(native_build_error(
-            "unsigned payload has a stale inventory digest",
+            "Darwin payload has a stale inventory digest",
         ));
     }
     if payload.inventory.len() != 2 {
         return Err(native_build_error(
-            "unsigned Darwin payload does not contain exactly its executable and dSYM artifact",
+            "Darwin payload does not contain exactly its executable and dSYM artifact",
         ));
     }
     Ok(payload)
 }
 
-fn admit_unsigned_darwin_artifacts(
+fn admit_darwin_artifacts(
     payload: &TargetPayload,
-    unsigned_native: &[u8],
+    native: &[u8],
     symbol_bytes: &[u8],
 ) -> Result<MacSymbolArtifact, StageError> {
     let native_path = ReleaseTarget::Aarch64AppleDarwin.executable_path();
@@ -452,20 +473,20 @@ fn admit_unsigned_darwin_artifacts(
         .inventory
         .iter()
         .find(|entry| entry.path == native_path)
-        .ok_or_else(|| native_build_error("unsigned Darwin payload has no executable"))?;
+        .ok_or_else(|| native_build_error("Darwin payload has no executable"))?;
     let symbol_entry = payload
         .inventory
         .iter()
         .find(|entry| entry.path == MAC_SYMBOL_PATH)
-        .ok_or_else(|| native_build_error("unsigned Darwin payload has no dSYM artifact"))?;
-    let unsigned_digest = Digest::compute(Domain::DistArtifact, unsigned_native);
+        .ok_or_else(|| native_build_error("Darwin payload has no dSYM artifact"))?;
+    let native_digest = Digest::compute(Domain::DistArtifact, native);
     if native_entry.mode != EXECUTABLE_MODE
-        || native_entry.bytes != unsigned_native.len() as u64
-        || native_entry.digest != unsigned_digest
-        || payload.native != unsigned_digest
+        || native_entry.bytes != native.len() as u64
+        || native_entry.digest != native_digest
+        || payload.native != native_digest
     {
         return Err(native_build_error(
-            "unsigned Darwin executable does not match its payload",
+            "Darwin executable does not match its payload",
         ));
     }
     let symbol_digest = Digest::compute(Domain::DistArtifact, symbol_bytes);
@@ -474,7 +495,7 @@ fn admit_unsigned_darwin_artifacts(
         || symbol_entry.digest != symbol_digest
     {
         return Err(native_build_error(
-            "unsigned Darwin dSYM artifact does not match its inventory",
+            "Darwin dSYM artifact does not match its inventory",
         ));
     }
     let symbol_document = MacSymbolArtifact::decode(symbol_bytes)
@@ -482,17 +503,17 @@ fn admit_unsigned_darwin_artifacts(
     let symbol_metadata = payload
         .symbols
         .as_ref()
-        .ok_or_else(|| native_build_error("unsigned Darwin payload has no dSYM metadata"))?;
+        .ok_or_else(|| native_build_error("Darwin payload has no dSYM metadata"))?;
     if symbol_metadata.path != symbol_entry.path
         || symbol_metadata.mode != symbol_entry.mode
         || symbol_metadata.bytes != symbol_entry.bytes
         || symbol_metadata.digest != symbol_entry.digest
         || symbol_metadata.uuid != symbol_document.uuid
-        || symbol_metadata.executable != unsigned_digest
-        || symbol_document.executable != unsigned_digest
+        || symbol_metadata.executable != native_digest
+        || symbol_document.executable != native_digest
     {
         return Err(native_build_error(
-            "unsigned Darwin dSYM metadata does not bind its artifact and executable",
+            "Darwin dSYM metadata does not bind its artifact and executable",
         ));
     }
     Ok(symbol_document)
@@ -679,4 +700,3 @@ mod signed_darwin_tests {
         );
     }
 }
-

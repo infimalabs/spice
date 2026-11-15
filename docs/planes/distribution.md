@@ -231,13 +231,24 @@ online.
 
 Local Darwin staging owns the credentials throughout its one staging command.
 The hosted path instead completes a sealed unsigned stage with no signing
-credential or OIDC authority, then runs `sign-staged-darwin` in a separate job
-which can only sign, notarize, and rebind that exact executable and dSYM. A
-third credential-free job admits the final stage and gives only its payload
-and inventoried objects GitHub OIDC provenance. Cargo build scripts,
-proc-macros, Trunk, and the app toolchain therefore never share a process
-authority boundary with the Developer ID key, notary credential, or OIDC token
-request.
+credential or OIDC authority. Its signing job admits the native bytes from
+that stage and runs only host credential and Apple signing tools; no
+repository-built executable enters that job. A following job, holding neither
+credentials nor OIDC authority, runs the transported finalizer to rebind the
+payload and dSYM to the signed bytes and admits the resulting stage. The OIDC
+job only downloads those files and invokes GitHub's pinned provenance action.
+Cargo build scripts, proc-macros, Trunk, and the app toolchain therefore never
+execute with the Developer ID key, notary credential, unlocked signing
+keychain, or OIDC token request.
+
+`stage-target aarch64-apple-darwin` dispatches that workflow from the canonical
+source archive's parentless one-use commit and passes both the delivered
+archive identity and the exact proof-container identity. The provider client
+admits the final payload, executable, dSYM, file set, and Darwin bindings;
+verifies GitHub provenance for every published file against that commit and
+one-use ref; then publishes the payload last under `dist/stage`. Intermediate
+workflow artifacts are one-run transports and are all deleted after the
+client retains the admitted stage.
 
 The local signer is named by two machine-local Git-common keys,
 `release.darwin.identity` (a `Developer ID Application` keychain identity) and
@@ -366,31 +377,43 @@ so an interrupted publication leaves the prior file or none.
 ### Ephemeral signed macOS staging
 
 `.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
-GitHub image, macOS build, Xcode SDK, Rust toolchain, and downloaded tool
-digests recorded by `dist/darwin/hosted.toml`. Dispatch names the exact Git
-commit and canonical source-archive digest; the sealed native proof runner
-builds an unsigned `aarch64-apple-darwin` stage with networking denied. The
-workflow refuses image, source, archive, SDK, tool, or stage drift before
-credentials enter any job.
+GitHub image, macOS build, Xcode SDK, Rust toolchain, downloaded tool digests,
+and proof-container identity admitted by `dist/darwin/hosted.toml`. The client
+dispatches a one-use transport commit and the canonical source-archive digest;
+the sealed native proof runner builds an unsigned `aarch64-apple-darwin` stage
+with networking denied. The transport commit is checkout delivery only:
+payload admission compares the source identity with the canonical release
+commit recorded inside the archive. The workflow refuses image, source,
+archive, SDK, tool, or stage drift before credentials enter any job.
+The hosted bootstrap selects the exact Cargo executable and admits only its
+sibling Rustc; the proof build does not rediscover that toolchain through
+ambient `rustup`.
+Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
+dynamic libraries; extracting the executable alone is not an executable tool.
 
-The repository variable `MACOS_DEVELOPER_IDENTITY` names the Developer ID
-Application identity. Actions secrets `MACOS_DEVELOPER_ID_P12_B64`,
-`MACOS_DEVELOPER_ID_P12_PASSWORD`, `MACOS_NOTARY_KEY_B64`,
-`MACOS_NOTARY_KEY_ID`, and `MACOS_NOTARY_ISSUER_ID` carry the certificate,
-private key password, and App Store Connect notary API credential. The
-credential job imports them into a random-password ephemeral keychain, signs
-and notarizes the already-built executable, and destroys the keychain and
-decoded files on success, failure, cancellation, or timeout; destruction of
-the disposable hosted VM is the final boundary. Secrets are never inputs,
-outputs, logs, or uploaded artifacts.
+The repository variable `MACOS_DEVELOPER_IDENTITY` names the dedicated CI
+Developer ID Application identity. Actions secrets
+`MACOS_DEVELOPER_ID_P12_B64`, `MACOS_DEVELOPER_ID_P12_PASSWORD`,
+`MACOS_NOTARY_KEY_B64`, `MACOS_NOTARY_KEY_ID`, and
+`MACOS_NOTARY_ISSUER_ID` carry its certificate, private key password, and a
+separate least-authority App Store Connect notary API credential. The operator
+does not export a personal signing key for CI. The credential job imports
+these values into a random-password ephemeral keychain, makes only that
+keychain searchable to `codesign`, signs and notarizes only the admitted
+executable bytes with Apple tools, and destroys the keychain and decoded files
+on success, failure, cancellation, or timeout;
+destruction of the disposable hosted VM is the final boundary. Secrets are
+never inputs, outputs, logs, or uploaded artifacts.
 
 The signed stage is freshly assembled from only its canonical payload and the
-two content-addressed inventory objects. A job with no Apple credentials
-re-admits their canonical encodings, sizes, digests, dSYM executable binding,
-and linked canvas, verifies the strict code signature, gives those exact files
-GitHub OIDC build provenance, and uploads no other release file. Intermediate
-unsigned and signing transports expire after one day. A one-use
-`spice-hosted-*` source tag is retired on every terminal outcome.
+two content-addressed inventory objects. A job with no Apple credentials or
+OIDC authority re-admits their canonical encodings, sizes, digests, dSYM
+executable binding, and linked canvas and verifies the strict code signature.
+The next job runs no repository code; it only downloads those exact files and
+gives them GitHub OIDC build provenance. Intermediate unsigned, policy,
+finalizer, and signed-native transports expire after one day and the provider
+client deletes all run artifacts after retaining the admitted stage. A
+one-use `hosted-*` source tag is retired on every terminal outcome.
 
 
 ### Ephemeral native Windows execution

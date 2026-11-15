@@ -12,10 +12,13 @@ use wire::Digest;
 
 use super::{HostedSource, REMOTE, WindowsHostedError, command, successful, successful_text};
 
-/// The commit one hosted run checks out and the identities bound for it.
+/// The transport commit one hosted run checks out and canonical identities
+/// bound to its source.
 pub(super) struct PreparedSource {
-    /// The one-use commit pushed under the run's tag.
+    /// The one-use transport commit pushed under the run's tag.
     pub(super) commit: String,
+    /// The canonical release commit recorded by the transported source.
+    pub(super) canonical_commit: String,
     /// The identity of the source archive those bytes came from.
     pub(super) archive: Digest,
     /// SHA-256 of the commit's recursive Git listing, which the guest
@@ -34,8 +37,9 @@ pub(super) fn prepare(
     challenge: &str,
     source: HostedSource<'_>,
 ) -> Result<PreparedSource, WindowsHostedError> {
-    let (commit, archive) = match source {
+    let (commit, canonical_commit, archive) = match source {
         HostedSource::Worktree => {
+            let canonical_commit = canonical_source_commit(root)?;
             let commit = snapshot(root, scratch, challenge)?;
             let archive = scratch.join("source.tar");
             successful(
@@ -53,16 +57,18 @@ pub(super) fn prepare(
                     ],
                 )?,
             )?;
-            (commit, archive_identity(&archive)?)
+            (commit, canonical_commit, archive_identity(&archive)?)
         }
         HostedSource::Archive(archive) => {
             let identity = archive_identity(archive)?;
-            (archive_commit(root, scratch, archive, challenge)?, identity)
+            let (commit, canonical_commit) = archive_commit(root, scratch, archive, challenge)?;
+            (commit, canonical_commit, identity)
         }
     };
     let tree = tree_digest(root, &commit)?;
     Ok(PreparedSource {
         commit,
+        canonical_commit,
         archive,
         tree,
     })
@@ -122,14 +128,26 @@ fn archive_identity(path: &Path) -> Result<Digest, WindowsHostedError> {
     dist::source_archive_identity(path).map_err(WindowsHostedError::ProviderResponse)
 }
 
+fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
+    dist::source_identity(root)
+        .map_err(WindowsHostedError::ProviderResponse)?
+        .map(|identity| identity.commit().to_owned())
+        .ok_or_else(|| {
+            WindowsHostedError::ProviderResponse(format!(
+                "{} has no canonical source commit",
+                root.display()
+            ))
+        })
+}
+
 /// Commit the archive's exact tree, `dist/build.json` included, as one
-/// parentless one-use commit in this repository's object store.
+/// parentless transport commit and return its canonical source commit.
 fn archive_commit(
     root: &Path,
     scratch: &Path,
     archive: &Path,
     challenge: &str,
-) -> Result<String, WindowsHostedError> {
+) -> Result<(String, String), WindowsHostedError> {
     let extracted = scratch.join("source");
     fs::create_dir(&extracted).map_err(|source| WindowsHostedError::Io {
         path: extracted.clone(),
@@ -182,12 +200,14 @@ fn archive_commit(
         ])?,
     )?;
     let tree = successful_text("archive tree object", git(vec!["write-tree".into()])?)?;
-    commit_tree(
+    let canonical_commit = canonical_source_commit(&worktree)?;
+    let commit = commit_tree(
         root,
         tree.trim(),
         None,
         &format!("spice hosted source archive {challenge}\n"),
-    )
+    )?;
+    Ok((commit, canonical_commit))
 }
 
 /// Commit `tree` with the hosted runner's fixed authorship.

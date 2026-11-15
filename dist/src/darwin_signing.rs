@@ -128,7 +128,6 @@ impl ReleaseConfig {
             (None, Some(_)) => Err(DarwinSigningError::Unpaired("release.darwin.identity")),
         }
     }
-
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -139,7 +138,6 @@ struct DarwinSigningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     notary_profile: Option<NotaryProfile>,
 }
-
 
 /// Why a Darwin signing name or pair was refused.
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -194,7 +192,6 @@ mod tests {
             Err(DarwinSigningError::Unpaired("release.darwin.identity"))
         );
     }
-
 
     #[test]
     fn only_a_named_developer_id_application_identity_is_admitted() {
