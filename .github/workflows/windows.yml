@@ -1,10 +1,10 @@
-name: Spice hosted Windows execution
+name: Windows execution
 
 on:
   workflow_dispatch:
     inputs:
       request:
-        description: Canonical Spice hosted-execution request JSON
+        description: Canonical hosted-execution request JSON
         required: true
         type: string
 
@@ -49,7 +49,7 @@ jobs:
           & $rustup target add --toolchain 1.97.1-x86_64-pc-windows-msvc wasm32-unknown-unknown
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $ProgressPreference = 'SilentlyContinue'
-          $tools = 'C:\spice-hosted-tools\bin'
+          $tools = 'C:\hosted-tools\bin'
           $tar = "$env:SystemRoot\System32\tar.exe"
           New-Item -ItemType Directory -Force -Path $tools | Out-Null
 
@@ -153,16 +153,16 @@ jobs:
         with:
           subject-path: |
             ${{ runner.temp }}\result.json
-            ${{ runner.temp }}\spice-hosted-stage-${{ steps.request.outputs.challenge }}\**
+            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}\**
 
       - name: Publish immutable result, runner, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: spice-hosted-${{ steps.request.outputs.challenge }}
+          name: windows-${{ steps.request.outputs.challenge }}
           path: |
             ${{ runner.temp }}\result.json
             ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
-            ${{ runner.temp }}\spice-hosted-stage-${{ steps.request.outputs.challenge }}
+            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}
           if-no-files-found: error
           retention-days: 1
 
@@ -173,7 +173,7 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bootstrap-cargo"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bootstrap-target"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\spice-hosted-*"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
 
@@ -184,7 +184,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $sourceRef = $env:GITHUB_REF_NAME
-          if ($env:GITHUB_REF_TYPE -ne 'tag' -or -not $sourceRef.StartsWith('spice-hosted-')) {
+          if ($env:GITHUB_REF_TYPE -ne 'tag' -or -not $sourceRef.StartsWith('hosted-')) {
             throw "refusing to retire non-hosted source ref $env:GITHUB_REF"
           }
           $headers = @{

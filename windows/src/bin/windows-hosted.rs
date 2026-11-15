@@ -198,7 +198,7 @@ mod windows {
         let cargo_home = scratch.join("cargo-home");
         let target = scratch.join("target");
         let guest_result = scratch.join("result.json");
-        let stage = temp.join(format!("spice-hosted-stage-{}", request.challenge));
+        let stage = temp.join(format!("windows-stage-{}", request.challenge));
         create_empty(&scratch)?;
         create_empty(&stage)?;
 
@@ -320,7 +320,7 @@ mod windows {
         let scratch = scratch_root(&temp, &request.challenge);
         let cargo_home = scratch.join("cargo-home");
         let target = scratch.join("target");
-        let stage = temp.join(format!("spice-hosted-stage-{}", request.challenge));
+        let stage = temp.join(format!("windows-stage-{}", request.challenge));
         verify_read_only("source", &workspace, &request.challenge)?;
         fs::read(workspace.join("Cargo.toml"))
             .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
@@ -664,7 +664,7 @@ mod windows {
     /// name carries only the challenge prefix the guest account and firewall
     /// rule already use; the runner is disposable, so the prefix is unique.
     fn scratch_root(temp: &Path, challenge: &str) -> PathBuf {
-        temp.join(format!("spice-hosted-{}", &challenge[..16]))
+        temp.join(format!("hosted-{}", &challenge[..16]))
     }
 
     fn create_empty(path: &Path) -> Result<(), String> {
@@ -1184,7 +1184,7 @@ mod windows {
 
     impl Firewall {
         fn establish(challenge: &str, identity: &str) -> Result<Self, String> {
-            let name = format!("spice-hosted-{}", &challenge[..16]);
+            let name = format!("hosted-{}", &challenge[..16]);
             let addresses = NON_LOOPBACK_REMOTE
                 .iter()
                 .map(|address| ps_literal(address))

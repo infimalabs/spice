@@ -306,7 +306,7 @@ the app itself, offline, so no host toolchain touches any part of the release.
 stages Linux on one fresh GitHub-hosted `ubuntu-24.04` X64 machine from
 `dist/stage/source.tar`, never from the developer host. Like the hosted Windows
 route, the client commits the archive's exact tree as a parentless one-use
-commit under a temporary `refs/tags/spice-hosted-*` tag and dispatches
+commit under a temporary `refs/tags/hosted-*` tag and dispatches
 `.github/workflows/linux.yml` there with its challenge and the archive
 identity. The workflow's `stage` job has only Contents read: it admits the
 GitHub-hosted runner, the tag, and the request; builds `xtask` and the
@@ -465,7 +465,7 @@ staging instead commits the release source archive's tree, as described under
 request binds the identity of the archive those bytes came from and a
 cross-platform SHA-256 identity of the commit's recursive Git listing, which
 the guest verifies against its checkout before vouching for the archive, and
-the client pushes only a temporary `refs/tags/spice-hosted-*` ref. It never
+the client pushes only a temporary `refs/tags/hosted-*` ref. It never
 pushes or moves a branch. It deletes that ref and the result artifact after
 the run.
 
@@ -481,7 +481,7 @@ The Git credential needs Contents write permission to create and delete tags.
 The GitHub CLI credential needs Actions read/write, Attestations read, Contents
 read, and Metadata read for this repository; the workflow's short-lived
 `GITHUB_TOKEN` gets Attestations write for signing and Contents write only so
-its `always` cleanup can retire the exact one-use `spice-hosted-*` tag, plus
+its `always` cleanup can retire the exact one-use `hosted-*` tag, plus
 OIDC identity-token write. The client cancels the exact dispatched run on
 `SIGINT` or `SIGTERM`; its non-interactive provider subprocesses run in their
 own process group, so a terminal interrupt reaches only the client. After the

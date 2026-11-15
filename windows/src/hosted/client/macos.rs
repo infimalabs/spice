@@ -139,16 +139,35 @@ fn admit_stage(
     let payload_bytes = read_limited(&payload_path, PAYLOAD_LIMIT)?;
     let payload: wire::manifest::TargetPayload =
         wire::decode(&payload_bytes).map_err(WindowsHostedError::Decode)?;
-    if payload.target != ReleaseTarget::Aarch64AppleDarwin
-        || payload.source != Digest::compute(Domain::DistSourceCommit, source_commit.as_bytes())
-        || payload.archive.to_string() != source_archive
-        || payload.pins.rust != toolchain.rust
-        || payload.pins.wasm_target != "wasm32-unknown-unknown"
-        || payload.pins.trunk != toolchain.trunk
-        || payload.pins.proof_container != proof_container
-        || payload.inventory.len() != 2
-    {
-        return Err(differs("payload identity and pins"));
+    if payload.target != ReleaseTarget::Aarch64AppleDarwin {
+        return Err(differs("target"));
+    }
+    if payload.source != Digest::compute(Domain::DistSourceCommit, source_commit.as_bytes()) {
+        return Err(differs("source identity"));
+    }
+    if payload.archive.to_string() != source_archive {
+        return Err(differs("source archive"));
+    }
+    let Some((rust_pin, rust_metadata)) = toolchain.rust.split_once(" (") else {
+        return Err(WindowsHostedError::PolicyIdentity);
+    };
+    if rust_pin.is_empty() || !rust_metadata.ends_with(')') {
+        return Err(WindowsHostedError::PolicyIdentity);
+    }
+    if payload.pins.rust != rust_pin {
+        return Err(differs("Rust pin"));
+    }
+    if payload.pins.wasm_target != "wasm32-unknown-unknown" {
+        return Err(differs("WebAssembly target pin"));
+    }
+    if payload.pins.trunk != toolchain.trunk {
+        return Err(differs("Trunk pin"));
+    }
+    if payload.pins.proof_container != proof_container {
+        return Err(differs("proof-container pin"));
+    }
+    if payload.inventory.len() != 2 {
+        return Err(differs("inventory cardinality"));
     }
     let native = payload
         .inventory
