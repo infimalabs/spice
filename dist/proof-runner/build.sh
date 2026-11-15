@@ -20,17 +20,41 @@ if [ -n "$untracked" ]; then # env-policy: allow
     exit 65
 fi
 
+
+# A clean hosted runner has no installed Spice appliance yet. Its bootstrap
+# step may name the exact rustup-selected Cargo executable directly; every
+# ordinary repository build continues through the admitted `spice dev cargo`
+# surface. Refuse a relative or unusable override before it can affect vendor
+# identity or the sealed runner.
+dev_cargo() {
+    if [ -n "${SPICE_PROOF_CARGO:-}" ]; then # env-policy: allow
+        case "$SPICE_PROOF_CARGO" in # env-policy: allow
+            /*) ;;
+            *)
+                printf 'SPICE_PROOF_CARGO must name an absolute executable\n' >&2
+                exit 65
+                ;;
+        esac
+        if [ ! -f "$SPICE_PROOF_CARGO" ] || [ ! -x "$SPICE_PROOF_CARGO" ]; then # env-policy: allow
+            printf 'SPICE_PROOF_CARGO is not a regular executable: %s\n' "$SPICE_PROOF_CARGO" >&2 # env-policy: allow
+            exit 65
+        fi
+        "$SPICE_PROOF_CARGO" "$@" # env-policy: allow
+    else
+        spice dev cargo -- "$@" # env-policy: allow
+    fi
+}
 bundle="$root/target/proof-native-darwin" # env-policy: allow
 vendor="$bundle/vendor" # env-policy: allow
 rm -rf "$bundle" # env-policy: allow
 mkdir -p "$bundle/bin" # env-policy: allow
-spice dev cargo -- vendor --locked --respect-source-config "$vendor" # env-policy: allow
+dev_cargo vendor --locked --respect-source-config "$vendor" # env-policy: allow
 
 # The unsealed build of the runner is the one tool that computes the identities
 # the sealed build is pinned with, so the pins never come from a second
 # implementation that could disagree with the one enforcing them.
 unsealed() {
-    spice dev cargo -- run --locked -q -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
+    dev_cargo run --locked -q -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
 }
 
 cargo_path=$(rustup which cargo) # env-policy: allow
@@ -60,8 +84,8 @@ pins=$(printf '%s\n' \
     "path = \"$sandbox_path\"" \
     "digest = \"$(unsealed tool-digest "$sandbox_path")\"") # env-policy: allow
 
-env SPICE_NATIVE_PINS="$pins" \
-    spice dev cargo -- build --locked --release --target-dir "$root/target" \
+SPICE_NATIVE_PINS="$pins" \
+    dev_cargo build --locked --release --target-dir "$root/target" \
     -p proof --bin spice-proof-darwin-runner # env-policy: allow
 
 runner="$bundle/bin/spice-proof-darwin-runner" # env-policy: allow

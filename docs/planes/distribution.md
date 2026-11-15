@@ -216,21 +216,30 @@ Disposable repository commands run through `windows-hosted`, not through this
 release entry point.
 
 **Invariant —** Darwin staging gives the release executable a notarized
-Developer ID signature before the pipeline reads the bytes it digests: after
+Developer ID signature before the pipeline reads the bytes it publishes. After
 the dSYM is derived and the image stripped, it signs with the hardened runtime
 and a secure timestamp, submits an archive of the signed file to Apple
 notarization, and finishes only when strict `codesign` verification and
 Gatekeeper's primary-signature assessment accept the file as notarized. The
 target payload, its inventory, and the symbol artifact therefore bind the
-signed bytes, and no step changes the executable after they are read. The
-signature and notarization are a step of the one staging build, never a
-rebuild: Apple's timestamp makes two signings of the same image differ, so a
-signed digest is never reproduced, and nothing reproduces it. The artifact
-gate and proof replay verify the sealed digests of the bytes the stage wrote.
-The bare executable cannot carry a stapled ticket, so a recipient's first
-assessment is online.
+signed bytes, and no step changes the executable after they are read. Apple's
+timestamp makes two signings of the same image differ, so a signed digest is
+never reproduced, and nothing claims to reproduce it. The artifact gate and
+proof replay verify the sealed digests of the bytes the stage wrote. The bare
+executable cannot carry a stapled ticket, so a recipient's first assessment is
+online.
 
-The signer is named by two machine-local Git-common keys,
+Local Darwin staging owns the credentials throughout its one staging command.
+The hosted path instead completes a sealed unsigned stage with no signing
+credential or OIDC authority, then runs `sign-staged-darwin` in a separate job
+which can only sign, notarize, and rebind that exact executable and dSYM. A
+third credential-free job admits the final stage and gives only its payload
+and inventoried objects GitHub OIDC provenance. Cargo build scripts,
+proc-macros, Trunk, and the app toolchain therefore never share a process
+authority boundary with the Developer ID key, notary credential, or OIDC token
+request.
+
+The local signer is named by two machine-local Git-common keys,
 `release.darwin.identity` (a `Developer ID Application` keychain identity) and
 `release.darwin.notary_profile` (a `notarytool` keychain profile). Only names
 enter configuration; the certificate, private key, and notarization credential
@@ -321,6 +330,36 @@ ancestor that is a symlink or not a directory, or a destination that is not a
 regular file, refuses before mutation. Bytes and their exact mode land in a
 private same-directory file that replaces the destination only once complete,
 so an interrupted publication leaves the prior file or none.
+
+### Ephemeral signed macOS staging
+
+`.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
+GitHub image, macOS build, Xcode SDK, Rust toolchain, and downloaded tool
+digests recorded by `dist/darwin/hosted.toml`. Dispatch names the exact Git
+commit and canonical source-archive digest; the sealed native proof runner
+builds an unsigned `aarch64-apple-darwin` stage with networking denied. The
+workflow refuses image, source, archive, SDK, tool, or stage drift before
+credentials enter any job.
+
+The repository variable `MACOS_DEVELOPER_IDENTITY` names the Developer ID
+Application identity. Actions secrets `MACOS_DEVELOPER_ID_P12_B64`,
+`MACOS_DEVELOPER_ID_P12_PASSWORD`, `MACOS_NOTARY_KEY_B64`,
+`MACOS_NOTARY_KEY_ID`, and `MACOS_NOTARY_ISSUER_ID` carry the certificate,
+private key password, and App Store Connect notary API credential. The
+credential job imports them into a random-password ephemeral keychain, signs
+and notarizes the already-built executable, and destroys the keychain and
+decoded files on success, failure, cancellation, or timeout; destruction of
+the disposable hosted VM is the final boundary. Secrets are never inputs,
+outputs, logs, or uploaded artifacts.
+
+The signed stage is freshly assembled from only its canonical payload and the
+two content-addressed inventory objects. A job with no Apple credentials
+re-admits their canonical encodings, sizes, digests, dSYM executable binding,
+and linked canvas, verifies the strict code signature, gives those exact files
+GitHub OIDC build provenance, and uploads no other release file. Intermediate
+unsigned and signing transports expire after one day. A one-use
+`spice-hosted-*` source tag is retired on every terminal outcome.
+
 
 ### Ephemeral native Windows execution
 

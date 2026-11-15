@@ -1,0 +1,41 @@
+schema = 1
+provider = "github-actions"
+repository = "infimalabs/spice"
+workflow = ".github/workflows/macos.yml"
+
+[image]
+label = "macos-15"
+provider_os = "macos15"
+version = "20261104.0514.1"
+os_version = "15.8.2"
+os_build = "24H232"
+architecture = "ARM64"
+
+[xcode]
+developer_dir = "/Applications/Xcode_16.4.app/Contents/Developer"
+sdk = "macosx15.5"
+build = "16F6"
+
+[toolchain]
+rustup = "1.29.3"
+rust = "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+cargo = "cargo 1.97.1 (c980f4866 2026-06-30)"
+git = "git version 2.56.0"
+trunk = "trunk 0.22.1"
+wasm_bindgen = "wasm-bindgen 0.2.126"
+wasm_opt = "wasm-opt version 131 (version_131)"
+
+[tools.trunk]
+archive = "trunk-aarch64-apple-darwin.tar.gz"
+url = "https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-aarch64-apple-darwin.tar.gz"
+sha256 = "18e381936c848700fefb9ee3f64f362419fab700200eefee323ebc0d00a8e9db"
+
+[tools.wasm_bindgen]
+archive = "wasm-bindgen-0.2.126-aarch64-apple-darwin.tar.gz"
+url = "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.126/wasm-bindgen-0.2.126-aarch64-apple-darwin.tar.gz"
+sha256 = "7df536babe345deb68828148dbdc71179118afdab42d83547c7cebfbf1426bd5"
+
+[tools.wasm_opt]
+archive = "binaryen-version_131-arm64-macos.tar.gz"
+url = "https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-arm64-macos.tar.gz"
+sha256 = "e441b48dc22163d209b4f05e44dc7210909b01237642b6c9ae48fd710a3ef83e"

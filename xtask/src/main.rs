@@ -20,6 +20,8 @@ const USAGE: &str = concat!(
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
     "seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
+    "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
+    "verify-staged-darwin STAGE|",
     "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
@@ -87,6 +89,14 @@ fn main() -> ExitCode {
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("share-darwin") => {
             run_share_darwin(arguments.collect(), &mut output)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(value) if value == OsStr::new("sign-staged-darwin") => {
+            run_sign_staged_darwin(arguments.collect(), &mut output)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(value) if value == OsStr::new("verify-staged-darwin") => {
+            run_verify_staged_darwin(arguments.collect())
         }
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("source-archive") => {
@@ -338,6 +348,45 @@ fn run_share_darwin(arguments: Vec<OsString>, output: &mut impl io::Write) -> Co
     );
     xtask::share_darwin(&xtask::ShareDarwinRequest::new(executable, signing), output)
         .map_err(Into::into)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_sign_staged_darwin(arguments: Vec<OsString>, output: &mut impl io::Write) -> CommandResult {
+    let [
+        input,
+        destination,
+        identity_flag,
+        identity,
+        profile_flag,
+        profile,
+    ] = arguments.as_slice()
+    else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    if identity_flag != OsStr::new("--identity") || profile_flag != OsStr::new("--notary-profile") {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    }
+    let (Some(identity), Some(profile)) = (identity.to_str(), profile.to_str()) else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let signing = dist::DarwinSigning::new(
+        dist::DeveloperIdentity::new(identity)?,
+        dist::NotaryProfile::new(profile)?,
+    );
+    xtask::sign_staged_darwin(Path::new(input), Path::new(destination), signing, output)
+        .map_err(Into::into)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_verify_staged_darwin(arguments: Vec<OsString>) -> CommandResult {
+    let [stage] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    xtask::verify_staged_darwin(Path::new(stage)).map_err(Into::into)
 }
 
 fn run_stage_target(
