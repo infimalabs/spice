@@ -396,9 +396,10 @@ Developer ID Application identity. Actions secrets
 `MACOS_NOTARY_ISSUER_ID` carry its certificate, private key password, and a
 separate least-authority App Store Connect notary API credential. The operator
 does not export a personal signing key for CI. The credential job imports
-these values into a random-password ephemeral keychain, signs and notarizes
-only the admitted executable bytes with Apple tools, and destroys the
-keychain and decoded files on success, failure, cancellation, or timeout;
+these values into a random-password ephemeral keychain, makes only that
+keychain searchable to `codesign`, signs and notarizes only the admitted
+executable bytes with Apple tools, and destroys the keychain and decoded files
+on success, failure, cancellation, or timeout;
 destruction of the disposable hosted VM is the final boundary. Secrets are
 never inputs, outputs, logs, or uploaded artifacts.
 

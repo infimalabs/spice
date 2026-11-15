@@ -317,6 +317,7 @@ jobs:
           printf '%s' "$NOTARY_KEY_B64" | /usr/bin/base64 -D > "$api_key"
           chmod 0600 "$p12" "$api_key"
           security create-keychain -p "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
           security set-keychain-settings -lut 2700 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$p12" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
