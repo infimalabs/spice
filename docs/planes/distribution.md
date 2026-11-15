@@ -111,9 +111,12 @@ published. The hosted Windows route commits the archive's exact tree,
 `dist/build.json` included, as a parentless one-use commit; the signed request
 and result bind the archive identity, which the guest hands to its own
 `stage-target`, and the client refuses a returned payload recording any other
-archive. The release plan names the archive identity once; manifest
-publication refuses targets staged from two archives, and `spice release`
-refuses a sealed manifest whose archive is not the one at the stage root.
+archive. The tracked attributes keep both canonical `dist/version` inputs
+LF-only when the one-use source commit is checked out on Windows; compile-time
+inclusion preserves the canonical bytes their consumers require. The release
+names the archive identity once; manifest publication refuses targets staged
+from two archives, and `spice release` refuses a sealed manifest whose archive
+is not the one at the stage root.
 
 **Invariant —** Every appliance executable produced by a current build path
 links one spice rack: a ZIP whose `app/` members are the staged generation's
@@ -397,7 +400,10 @@ key through GitHub and the local keychain.
 executable, `PATH`, include, and library location. The bootstrap Cargo invokes
 the pinned `RUSTC` path under the same pinned `RUSTUP_TOOLCHAIN`; workflow-step
 scope never lets it fall back to the runner image's mutable stable proxy. The
-workflow pins every third-party action by full commit. Updating the image means
+workflow admits the pinned Trunk, wasm-bindgen, and Binaryen release archives by
+SHA-256 and each extracted executable by its reported version before the runner
+can use it. The workflow
+pins every third-party action by full commit. Updating the image means
 reviewing the matching `actions/runner-images` release manifest, changing every
 affected tool/path pin together, and proving the runner smoke before landing.
 
@@ -423,13 +429,15 @@ objects first and the mutable target payload pointer last.
 
 The guest gives the command batch a read-only source tree, one fresh Cargo home
 and target directory, bounded output per member, bounded member runtimes, and a
-machine-wide guest-firewall rule covering every non-loopback IPv4 and IPv6
-destination. Each command root is created suspended, assigned to a kill-on-close
+guest-principal firewall rule covering every non-loopback IPv4 and IPv6
+destination. The provider runner retains its control connection while the
+temporary non-admin guest account and every process inheriting its token remain
+offline. Each command root is created suspended, assigned to a kill-on-close
 Windows Job Object, and resumed only after assignment, so no descendant can run
 outside the owned tree. The guest passes each argv directly through
 `CreateProcess`, clears ambient environment, and names every executable by an
-admitted path. Result publication happens only after the rule is removed and
-scratch teardown succeeds. Provider cancellation or the
+admitted path. Result publication happens only after the rule and temporary
+account are removed and scratch teardown succeeds. Provider cancellation or the
 75-minute workflow limit destroys the ephemeral VM. GitHub-hosted concurrency
 and billing limits are the account's cost boundary; the repository requests
 one machine per dispatch and defines no persistent or autoscaling fleet.

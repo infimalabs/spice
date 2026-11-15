@@ -8,18 +8,20 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(windows)]
 mod windows {
+    use base64::Engine as _;
+    use sha2::{Digest as _, Sha256};
+    use sill::authority;
     use std::env;
     use std::fs::{self, File};
     use std::io::{self, Read, Write};
+    use std::net::{SocketAddr, TcpStream};
     use std::os::windows::io::AsRawHandle;
     use std::path::{Path, PathBuf};
     use std::process::{Command as ProcessCommand, ExitCode, Stdio};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
-
-    use sha2::{Digest as _, Sha256};
-    use sill::authority;
+    use std::time::Duration;
     use windows_execution::hosted::{
         Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument, WORKFLOW,
         X86_64_ARCHITECTURE,
@@ -37,8 +39,15 @@ mod windows {
     use wire::{Digest, Domain};
 
     const REFUSAL_EXIT: u8 = 70;
-    const NETSH: &str = r"C:\Windows\System32\netsh.exe";
-    const NON_LOOPBACK_REMOTE: &str = "remoteip=0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::-::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
+    const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+    const GUEST_ARGUMENT: &str = "--guest";
+    const NON_LOOPBACK_REMOTE: [&str; 4] = [
+        "0.0.0.0-126.255.255.255",
+        "128.0.0.0-255.255.255.255",
+        "::-::",
+        "::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    ];
+    const NETWORK_PROBE: &str = "1.1.1.1:443";
 
     pub fn main() -> ExitCode {
         match run() {
@@ -55,17 +64,125 @@ mod windows {
         if arguments.get(1).and_then(|value| value.to_str()) == Some("--smoke-argv") {
             return smoke_argv(&arguments[2..]);
         }
+        if arguments.get(1).and_then(|value| value.to_str()) == Some(GUEST_ARGUMENT) {
+            let [_, _, request_path, result_path, guest_identity] = arguments.as_slice() else {
+                return Err("usage: windows-hosted --guest REQUEST.json RESULT.json SID".to_owned());
+            };
+            return run_guest(request_path, result_path, guest_identity);
+        }
         let [_, request_path, result_path] = arguments.as_slice() else {
             return Err("usage: windows-hosted REQUEST.json RESULT.json".to_owned());
         };
-        let request_bytes = fs::read(request_path).map_err(|error| {
-            format!(
-                "cannot read request {}: {error}",
-                Path::new(request_path).display()
-            )
-        })?;
-        let request: Request = serde_json::from_slice(&request_bytes)
-            .map_err(|error| format!("request does not decode: {error}"))?;
+        run_parent(request_path, result_path)
+    }
+
+    fn run_parent(
+        request_path: &std::ffi::OsStr,
+        result_path: &std::ffi::OsStr,
+    ) -> Result<(), String> {
+        let request = read_request(request_path)?;
+        request.admit().map_err(|error| error.to_string())?;
+        admit_host(&request)?;
+
+        let workspace = required_path("GITHUB_WORKSPACE")?;
+        let temp = required_path("RUNNER_TEMP")?;
+        let vendor = required_path("SPICE_HOSTED_VENDOR")?; // env-policy: allow
+        let executable =
+            env::current_exe().map_err(|error| format!("runner path is unavailable: {error}"))?;
+        let tree = tree_digest(&request.toolchain.git_path, &workspace)?;
+        if tree != request.tree {
+            return Err(format!(
+                "source tree changed: expected {}, observed {}",
+                request.tree, tree
+            ));
+        }
+        admit_toolchain(&request)?;
+
+        let scratch = temp.join(format!("spice-hosted-{}", request.challenge));
+        let cargo_home = scratch.join("cargo-home");
+        let target = scratch.join("target");
+        let guest_result = scratch.join("result.json");
+        let stage = temp.join(format!("spice-hosted-stage-{}", request.challenge));
+        create_empty(&scratch)?;
+        create_empty(&stage)?;
+
+        eprintln!("[windows-hosted] creating isolated account");
+        let account = GuestAccount::create(&request.challenge)?;
+        eprintln!("[windows-hosted] sealing source and vendor");
+        grant_ancestor_traversal(&workspace, account.sid())?;
+        grant_ancestor_traversal(&vendor, account.sid())?;
+        grant_ancestor_traversal(&scratch, account.sid())?;
+        grant_ancestor_traversal(&stage, account.sid())?;
+        authority::grant_identity_mode(&scratch, account.sid(), 0o700)
+            .map_err(|error| format!("cannot grant guest scratch access: {error}"))?;
+        authority::grant_identity_mode(&stage, account.sid(), 0o700)
+            .map_err(|error| format!("cannot grant guest stage access: {error}"))?;
+        fs::create_dir(&cargo_home)
+            .map_err(|error| format!("cannot create fresh Cargo home: {error}"))?;
+        fs::create_dir(&target).map_err(|error| format!("cannot create fresh target: {error}"))?;
+        configure_cargo_home(&cargo_home, &vendor)?;
+
+        make_read_only("source", &workspace, &request.challenge, account.sid())?;
+        fs::read(workspace.join("Cargo.toml"))
+            .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
+        make_read_only(
+            "vendored dependencies",
+            &vendor,
+            &request.challenge,
+            account.sid(),
+        )?;
+        eprintln!("[windows-hosted] granting isolated tool access");
+        grant_file_access(Path::new(request_path), account.sid(), 0o400)?;
+        grant_file_access(&executable, account.sid(), 0o500)?;
+        let toolchain_root = Path::new(&request.toolchain.cargo_path)
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| "pinned Cargo path has no toolchain root".to_owned())?;
+        grant_ancestor_traversal(toolchain_root, account.sid())?;
+        grant_tree_access(toolchain_root, account.sid(), 0o500)?;
+        let trunk_root = Path::new(&request.toolchain.trunk_path)
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| "pinned Trunk path has no installation root".to_owned())?;
+        grant_ancestor_traversal(trunk_root, account.sid())?;
+        grant_tree_access(trunk_root, account.sid(), 0o500)?;
+
+        eprintln!("[windows-hosted] establishing principal firewall");
+        verify_non_loopback_available()?;
+        let firewall = Firewall::establish(&request.challenge, account.sid())?;
+        eprintln!("[windows-hosted] starting isolated guest");
+        let execution = account.execute(&executable, request_path, &guest_result);
+        let firewall_cleanup = firewall.close();
+        let account_cleanup = account.close();
+        combine_cleanup(execution, firewall_cleanup, account_cleanup)?;
+        eprintln!("[windows-hosted] isolated guest completed");
+
+        let encoded = fs::read(&guest_result)
+            .map_err(|error| format!("cannot read guest result: {error}"))?;
+        write_result(result_path, &encoded)?;
+        fs::remove_dir_all(&scratch)
+            .map_err(|error| format!("cannot tear down scratch: {error}"))?;
+        Ok(())
+    }
+
+    fn run_guest(
+        request_path: &std::ffi::OsStr,
+        result_path: &std::ffi::OsStr,
+        expected_identity: &std::ffi::OsStr,
+    ) -> Result<(), String> {
+        let expected_identity = expected_identity
+            .to_str()
+            .ok_or_else(|| "guest identity is not Unicode".to_owned())?;
+        let observed_identity = authority::process_owners()
+            .map_err(|error| format!("cannot inspect guest process identity: {error}"))?
+            .user;
+        if observed_identity != expected_identity {
+            return Err(format!(
+                "guest process identity drifted: expected {expected_identity}, observed {observed_identity}"
+            ));
+        }
+        eprintln!("[windows-hosted] guest identity admitted");
+        let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
         admit_host(&request)?;
 
@@ -85,24 +202,26 @@ mod windows {
             ));
         }
         admit_toolchain(&request)?;
+        verify_non_loopback_denied()?;
+        eprintln!("[windows-hosted] guest network isolation admitted");
 
         let scratch = temp.join(format!("spice-hosted-{}", request.challenge));
         let cargo_home = scratch.join("cargo-home");
         let target = scratch.join("target");
         let stage = temp.join(format!("spice-hosted-stage-{}", request.challenge));
-        create_empty(&scratch)?;
-        fs::create_dir(&cargo_home)
-            .map_err(|error| format!("cannot create fresh Cargo home: {error}"))?;
-        fs::create_dir(&target).map_err(|error| format!("cannot create fresh target: {error}"))?;
-        create_empty(&stage)?;
-        configure_cargo_home(&cargo_home, &vendor)?;
-        make_read_only("source", &workspace, &request.challenge)?;
+        verify_read_only("source", &workspace, &request.challenge)?;
         fs::read(workspace.join("Cargo.toml"))
             .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
-        make_read_only("vendored dependencies", &vendor, &request.challenge)?;
+        verify_read_only("vendored dependencies", &vendor, &request.challenge)?;
+        verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
+        verify_writable("fresh target", &target, &request.challenge)?;
+        verify_writable("staged output", &stage, &request.challenge)?;
+        eprintln!(
+            "[windows-hosted] guest filesystem admitted; executing {} command(s)",
+            request.commands.len()
+        );
 
-        let firewall = Firewall::establish(&request.challenge)?;
-        let executions = request
+        let outputs = request
             .commands
             .iter()
             .map(|command| {
@@ -122,17 +241,7 @@ mod windows {
                     stderr,
                 })
             })
-            .collect::<Result<Vec<_>, String>>();
-        let cleanup = firewall.close();
-        let outputs = match (executions, cleanup) {
-            (Ok(executions), Ok(())) => executions,
-            (Err(error), Ok(())) | (Ok(_), Err(error)) => return Err(error),
-            (Err(execution), Err(cleanup)) => {
-                return Err(format!(
-                    "{execution}; guest firewall teardown also failed: {cleanup}"
-                ));
-            }
-        };
+            .collect::<Result<Vec<_>, String>>()?;
         let artifacts = artifact_inventory(&stage)?;
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
@@ -160,19 +269,27 @@ mod windows {
         };
         let encoded = serde_json::to_vec(&result)
             .map_err(|error| format!("result does not encode: {error}"))?;
-        let mut file = File::create(result_path).map_err(|error| {
+        write_result(result_path, &encoded)
+    }
+
+    fn read_request(path: &std::ffi::OsStr) -> Result<Request, String> {
+        let bytes = fs::read(path).map_err(|error| {
+            format!("cannot read request {}: {error}", Path::new(path).display())
+        })?;
+        serde_json::from_slice(&bytes).map_err(|error| format!("request does not decode: {error}"))
+    }
+
+    fn write_result(path: &std::ffi::OsStr, encoded: &[u8]) -> Result<(), String> {
+        let mut file = File::create(path).map_err(|error| {
             format!(
                 "cannot create result {}: {error}",
-                Path::new(result_path).display()
+                Path::new(path).display()
             )
         })?;
-        file.write_all(&encoded)
+        file.write_all(encoded)
             .map_err(|error| format!("cannot write result: {error}"))?;
         file.sync_all()
-            .map_err(|error| format!("cannot sync result: {error}"))?;
-        fs::remove_dir_all(&scratch)
-            .map_err(|error| format!("cannot tear down scratch: {error}"))?;
-        Ok(())
+            .map_err(|error| format!("cannot sync result: {error}"))
     }
 
     fn smoke_argv(arguments: &[std::ffi::OsString]) -> Result<(), String> {
@@ -460,8 +577,17 @@ mod windows {
             .map_err(|error| format!("cannot configure fresh Cargo home: {error}"))
     }
 
-    fn make_read_only(kind: &str, path: &Path, challenge: &str) -> Result<(), String> {
-        seal_tree(path).map_err(|error| format!("cannot seal {kind}: {error}"))?;
+    fn make_read_only(
+        kind: &str,
+        path: &Path,
+        challenge: &str,
+        identity: &str,
+    ) -> Result<(), String> {
+        seal_tree(path, identity).map_err(|error| format!("cannot seal {kind}: {error}"))?;
+        verify_read_only(kind, path, challenge)
+    }
+
+    fn verify_read_only(kind: &str, path: &Path, challenge: &str) -> Result<(), String> {
         let probe = path.join(format!(".spice-read-only-{challenge}"));
         match fs::OpenOptions::new()
             .write(true)
@@ -479,25 +605,84 @@ mod windows {
         }
     }
 
-    fn seal_tree(path: &Path) -> io::Result<()> {
+    fn verify_writable(kind: &str, path: &Path, challenge: &str) -> Result<(), String> {
+        let probe = path.join(format!(".spice-writable-{challenge}"));
+        fs::write(&probe, b"write-authority")
+            .map_err(|error| format!("{kind} is not writable: {error}"))?;
+        fs::remove_file(&probe)
+            .map_err(|error| format!("cannot remove {kind} write probe: {error}"))
+    }
+
+    fn seal_tree(path: &Path, identity: &str) -> io::Result<()> {
         let metadata = fs::symlink_metadata(path)?;
         if authority::is_link_like(&metadata) {
             return Ok(());
         }
         let mode = if metadata.is_dir() {
             for entry in fs::read_dir(path)? {
-                seal_tree(&entry?.path())?;
+                seal_tree(&entry?.path(), identity)?;
             }
             0o500
         } else if metadata.is_file() {
-            0o400
+            0o500
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("{} is not a regular file or directory", path.display()),
             ));
         };
-        authority::set_owner_mode(path, mode)
+        authority::set_owner_and_identity_mode(path, identity, mode, mode)
+    }
+
+    fn grant_tree_access(path: &Path, identity: &str, mode: u32) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("cannot inspect guest tool {}: {error}", path.display()))?;
+        if authority::is_link_like(&metadata) {
+            return Err(format!(
+                "guest tool access refuses link-like path {}",
+                path.display()
+            ));
+        }
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).map_err(|error| {
+                format!("cannot enumerate guest tool {}: {error}", path.display())
+            })? {
+                let entry = entry.map_err(|error| {
+                    format!("cannot enumerate guest tool {}: {error}", path.display())
+                })?;
+                grant_tree_access(&entry.path(), identity, mode)?;
+            }
+        } else if !metadata.is_file() {
+            return Err(format!(
+                "guest tool path is not regular: {}",
+                path.display()
+            ));
+        }
+        authority::grant_identity_mode(path, identity, mode)
+            .map_err(|error| format!("cannot grant guest access to {}: {error}", path.display()))
+    }
+
+    fn grant_file_access(path: &Path, identity: &str, mode: u32) -> Result<(), String> {
+        grant_ancestor_traversal(path, identity)?;
+        authority::grant_identity_mode(path, identity, mode)
+            .map_err(|error| format!("cannot grant guest access to {}: {error}", path.display()))
+    }
+
+    fn grant_ancestor_traversal(path: &Path, identity: &str) -> Result<(), String> {
+        let mut directory = path.parent();
+        while let Some(parent) = directory {
+            if parent.parent().is_none() {
+                break;
+            }
+            authority::grant_identity_mode(parent, identity, 0o100).map_err(|error| {
+                format!(
+                    "cannot grant guest traversal through {}: {error}",
+                    parent.display()
+                )
+            })?;
+            directory = parent.parent();
+        }
+        Ok(())
     }
 
     fn resolve_program(
@@ -567,6 +752,7 @@ mod windows {
             .env("CARGO_HOME", cargo_home)
             .env("CARGO_TARGET_DIR", target)
             .env("CARGO_NET_OFFLINE", "true")
+            .env("TRUNK_OFFLINE", "true")
             .env("RUST_TEST_THREADS", "1")
             .env("TEMP", target)
             .env("TMP", target)
@@ -598,8 +784,8 @@ mod windows {
             .take()
             .ok_or_else(|| "stderr capture is unavailable".to_owned())?;
         let budget = Arc::new(AtomicUsize::new(output_limit));
-        let stdout = capture(stdout, Arc::clone(&budget));
-        let stderr = capture(stderr, budget);
+        let stdout = capture(stdout, Arc::clone(&budget), io::stdout());
+        let stderr = capture(stderr, budget, io::stderr());
         let completion = wait_for_owned(&mut child, runtime_seconds)?;
         drop(child);
         let stdout = stdout
@@ -614,6 +800,7 @@ mod windows {
     fn capture(
         mut stream: impl Read + Send + 'static,
         budget: Arc<AtomicUsize>,
+        mut live: impl Write + Send + 'static,
     ) -> thread::JoinHandle<Result<Capture, String>> {
         thread::spawn(move || {
             let mut retained = Vec::new();
@@ -636,6 +823,9 @@ mod windows {
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
+                            live.write_all(&buffer[..keep])
+                                .and_then(|()| live.flush())
+                                .map_err(|error| format!("live output failed: {error}"))?;
                             retained.extend_from_slice(&buffer[..keep]);
                             truncated |= keep < read;
                             break;
@@ -676,34 +866,186 @@ mod windows {
         }
     }
 
+    fn verify_non_loopback_available() -> Result<(), String> {
+        let address = NETWORK_PROBE
+            .parse::<SocketAddr>()
+            .map_err(|error| format!("invalid network probe address: {error}"))?;
+        TcpStream::connect_timeout(&address, Duration::from_secs(5))
+            .map(|stream| drop(stream))
+            .map_err(|error| format!("provider network was unavailable before isolation: {error}"))
+    }
+
+    fn verify_non_loopback_denied() -> Result<(), String> {
+        let address = NETWORK_PROBE
+            .parse::<SocketAddr>()
+            .map_err(|error| format!("invalid network probe address: {error}"))?;
+        match TcpStream::connect_timeout(&address, Duration::from_secs(3)) {
+            Ok(stream) => {
+                drop(stream);
+                Err("isolated guest retained non-loopback network access".to_owned())
+            }
+            Err(_) => Ok(()),
+        }
+    }
+
+    struct GuestAccount {
+        name: String,
+        password: String,
+        sid: String,
+        active: bool,
+    }
+
+    impl GuestAccount {
+        fn create(challenge: &str) -> Result<Self, String> {
+            let suffix = challenge
+                .get(..12)
+                .filter(|value| value.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+                .ok_or_else(|| "challenge cannot name a Windows guest account".to_owned())?;
+            let name = format!("spice{suffix}");
+            let mut random = [0_u8; 24];
+            getrandom::fill(&mut random)
+                .map_err(|error| format!("cannot generate guest account password: {error}"))?;
+            let password = format!(
+                "Sp1!{}",
+                random
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            );
+            let script = format!(
+                "$ErrorActionPreference = 'Stop'\n\
+                 $password = ConvertTo-SecureString {} -AsPlainText -Force\n\
+                 New-LocalUser -Name {} -Password $password \
+                     -AccountNeverExpires -PasswordNeverExpires \
+                     -UserMayNotChangePassword | Out-Null\n\
+                 $sid = (Get-LocalUser -Name {}).SID.ToString()\n\
+                 if ([string]::IsNullOrWhiteSpace($sid)) {{ \
+                     throw 'new local user has no SID' \
+                 }}\n\
+                 Write-Output $sid\n",
+                ps_literal(&password),
+                ps_literal(&name),
+                ps_literal(&name),
+            );
+            let sid = match powershell_output(&script, "create guest account") {
+                Ok(sid) => sid,
+                Err(error) => {
+                    let cleanup = delete_guest(&name).err();
+                    return Err(format!(
+                        "{error}{}",
+                        cleanup
+                            .map(|cleanup| { format!("; account cleanup also failed: {cleanup}") })
+                            .unwrap_or_default()
+                    ));
+                }
+            };
+            let sid = sid.trim().to_owned();
+            if !sid.starts_with("S-1-5-")
+                || !sid
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b'S' || byte == b'-')
+            {
+                let cleanup = delete_guest(&name).err();
+                return Err(format!(
+                    "guest account returned invalid SID {sid:?}{}",
+                    cleanup
+                        .map(|error| format!("; account cleanup also failed: {error}"))
+                        .unwrap_or_default()
+                ));
+            }
+            Ok(Self {
+                name,
+                password,
+                sid,
+                active: true,
+            })
+        }
+
+        fn sid(&self) -> &str {
+            &self.sid
+        }
+
+        fn execute(
+            &self,
+            executable: &Path,
+            request: &std::ffi::OsStr,
+            result: &Path,
+        ) -> Result<(), String> {
+            let guest_arguments = [
+                GUEST_ARGUMENT.to_owned(),
+                quoted_argument(Path::new(request)),
+                quoted_argument(result),
+                self.sid.clone(),
+            ]
+            .into_iter()
+            .map(|argument| ps_literal(&argument))
+            .collect::<Vec<_>>()
+            .join(", ");
+            let script = format!(
+                "$ErrorActionPreference = 'Stop'\n\
+                 $password = ConvertTo-SecureString {} -AsPlainText -Force\n\
+                 $credential = [Management.Automation.PSCredential]::new(\
+                     \"$env:COMPUTERNAME\\{}\", $password)\n\
+                 $process = Start-Process -FilePath {} -ArgumentList @({guest_arguments}) \
+                     -Credential $credential -NoNewWindow -PassThru\n\
+                 $process.WaitForExit()\n\
+                 exit $process.ExitCode\n",
+                ps_literal(&self.password),
+                self.name,
+                ps_literal(&executable.display().to_string()),
+            );
+            powershell_status(&script, "launch isolated guest")
+        }
+
+        fn close(mut self) -> Result<(), String> {
+            let result = delete_guest(&self.name);
+            if result.is_ok() {
+                self.active = false;
+            }
+            result
+        }
+    }
+
+    impl Drop for GuestAccount {
+        fn drop(&mut self) {
+            if self.active {
+                let _deleted = delete_guest(&self.name);
+            }
+        }
+    }
+
+    fn delete_guest(name: &str) -> Result<(), String> {
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\n\
+             Remove-LocalUser -Name {}\n",
+            ps_literal(name)
+        );
+        powershell_status(&script, "remove guest account")
+    }
+
     struct Firewall {
         name: String,
         active: bool,
     }
 
     impl Firewall {
-        fn establish(challenge: &str) -> Result<Self, String> {
+        fn establish(challenge: &str, identity: &str) -> Result<Self, String> {
             let name = format!("spice-hosted-{}", &challenge[..16]);
-            let name_argument = format!("name={name}");
-            // A machine-wide rule covers every descendant executable. Its
-            // explicit IPv4 and IPv6 ranges exclude only the two loopback
-            // spaces instead of relying on process-specific rules children
-            // could evade.
-            let status = ProcessCommand::new(NETSH)
-                .args(["advfirewall", "firewall", "add", "rule"])
-                .arg(&name_argument)
-                .args([
-                    "dir=out",
-                    "action=block",
-                    "enable=yes",
-                    "profile=any",
-                    NON_LOOPBACK_REMOTE,
-                ])
-                .status()
-                .map_err(|error| format!("cannot establish guest firewall: {error}"))?;
-            if !status.success() {
-                return Err(format!("guest firewall refused with {status}"));
-            }
+            let addresses = NON_LOOPBACK_REMOTE
+                .iter()
+                .map(|address| ps_literal(address))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let principal = format!("D:(A;;CC;;;{identity})");
+            let script = format!(
+                "$ErrorActionPreference = 'Stop'\n\
+                 New-NetFirewallRule -DisplayName {} -Direction Outbound -Action Block \
+                     -Enabled True -Profile Any -RemoteAddress @({addresses}) -LocalUser {} \
+                     | Out-Null\n",
+                ps_literal(&name),
+                ps_literal(&principal),
+            );
+            powershell_status(&script, "establish guest firewall")?;
             Ok(Self { name, active: true })
         }
 
@@ -725,17 +1067,109 @@ mod windows {
     }
 
     fn delete_firewall(name: &str) -> Result<(), String> {
-        let name = format!("name={name}");
-        let status = ProcessCommand::new(NETSH)
-            .args(["advfirewall", "firewall", "delete", "rule"])
-            .arg(name)
-            .status()
-            .map_err(|error| format!("cannot remove guest firewall: {error}"))?;
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\n\
+             Remove-NetFirewallRule -DisplayName {}\n",
+            ps_literal(name)
+        );
+        powershell_status(&script, "remove guest firewall")
+    }
+
+    fn combine_cleanup(
+        execution: Result<(), String>,
+        firewall: Result<(), String>,
+        account: Result<(), String>,
+    ) -> Result<(), String> {
+        let mut errors = [execution.err(), firewall.err(), account.err()]
+            .into_iter()
+            .flatten();
+        let Some(mut combined) = errors.next() else {
+            return Ok(());
+        };
+        for error in errors {
+            combined.push_str("; cleanup also failed: ");
+            combined.push_str(&error);
+        }
+        Err(combined)
+    }
+
+    fn quoted_argument(path: &Path) -> String {
+        format!("\"{}\"", path.display().to_string().replace('"', "\\\""))
+    }
+
+    fn ps_literal(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
+
+    fn powershell_output(script: &str, action: &str) -> Result<String, String> {
+        let output = powershell_command(script, Stdio::piped(), Stdio::piped(), action)?
+            .wait_with_output()
+            .map_err(|error| format!("cannot finish PowerShell to {action}: {error}"))?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() {
+            return Err(format!("PowerShell refused to {action}: {}", stderr.trim()));
+        }
+        if !stderr.trim().is_empty() {
+            return Err(format!(
+                "PowerShell reported an error while trying to {action}: {}",
+                stderr.trim()
+            ));
+        }
+        String::from_utf8(output.stdout)
+            .map_err(|_| format!("PowerShell returned non-UTF-8 output while trying to {action}"))
+    }
+
+    fn powershell_status(script: &str, action: &str) -> Result<(), String> {
+        let status = powershell_command(script, Stdio::inherit(), Stdio::inherit(), action)?
+            .wait()
+            .map_err(|error| format!("cannot finish PowerShell to {action}: {error}"))?;
         if status.success() {
             Ok(())
         } else {
-            Err(format!("guest firewall teardown refused with {status}"))
+            Err(format!("PowerShell refused to {action} with {status}"))
         }
+    }
+
+    fn powershell_command(
+        script: &str,
+        stdout: Stdio,
+        stderr: Stdio,
+        action: &str,
+    ) -> Result<std::process::Child, String> {
+        let mut guarded = String::with_capacity(script.len() + 160);
+        guarded.push_str(
+            "try {\n\
+             $ProgressPreference = 'SilentlyContinue'\n\
+             $ErrorActionPreference = 'Stop'\n",
+        );
+        guarded.push_str(script);
+        guarded.push_str(
+            "\nexit 0\n\
+             } catch {\n\
+             [Console]::Error.WriteLine(($_ | Out-String))\n\
+             exit 1\n\
+             }\n",
+        );
+        let encoded = guarded
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let encoded = base64::engine::general_purpose::STANDARD.encode(encoded);
+        let child = ProcessCommand::new(POWERSHELL)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+            ])
+            .arg(encoded)
+            .env_remove("PSModulePath")
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
+            .map_err(|error| format!("cannot start PowerShell to {action}: {error}"))?;
+        Ok(child)
     }
 
     fn required_path(name: &'static str) -> Result<PathBuf, String> {

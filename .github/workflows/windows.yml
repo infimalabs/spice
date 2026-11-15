@@ -48,10 +48,76 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $rustup target add --toolchain 1.97.1-x86_64-pc-windows-msvc wasm32-unknown-unknown
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $cargo = "$env:USERPROFILE\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin\cargo.exe"
-          $env:RUSTC = "$env:USERPROFILE\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin\rustc.exe"
-          & $cargo install --locked --root C:\spice-hosted-tools --version 0.22.1 trunk
+          $ProgressPreference = 'SilentlyContinue'
+          $tools = 'C:\spice-hosted-tools\bin'
+          $tar = "$env:SystemRoot\System32\tar.exe"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+
+          function Get-CheckedArchive {
+            param([string] $Name, [string] $Uri, [string] $Sha256)
+            $archive = Join-Path $env:RUNNER_TEMP $Name
+            Invoke-WebRequest -Uri $Uri -OutFile $archive
+            $observed = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($observed -ne $Sha256) {
+              throw "$Name drifted: expected $Sha256, observed $observed"
+            }
+            return $archive
+          }
+
+          $trunkArchive = Get-CheckedArchive `
+            'trunk-x86_64-pc-windows-msvc.zip' `
+            'https://github.com/trunk-rs/trunk/releases/download/v0.22.1/trunk-x86_64-pc-windows-msvc.zip' `
+            '1cc65012a9df60b02db948f5a3f0601e594ce952efb1cfd23147c9021c9f7d75'
+          Expand-Archive -LiteralPath $trunkArchive -DestinationPath $tools -Force
+          Remove-Item -Force -LiteralPath $trunkArchive
+
+          $bindgenArchive = Get-CheckedArchive `
+            'wasm-bindgen-0.2.126-x86_64-pc-windows-msvc.tar.gz' `
+            'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.126/wasm-bindgen-0.2.126-x86_64-pc-windows-msvc.tar.gz' `
+            '5a3773c7e69cfb2d865e235e9210de184c8c3af1787720646ec1a8bbe09c6179'
+          $bindgenExtract = Join-Path $env:RUNNER_TEMP 'wasm-bindgen'
+          New-Item -ItemType Directory -Force -Path $bindgenExtract | Out-Null
+          & $tar -xzf $bindgenArchive -C $bindgenExtract
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item `
+            (Join-Path $bindgenExtract 'wasm-bindgen-0.2.126-x86_64-pc-windows-msvc\wasm-bindgen.exe') `
+            (Join-Path $tools 'wasm-bindgen.exe')
+          Remove-Item -Recurse -Force -LiteralPath $bindgenExtract, $bindgenArchive
+
+          $binaryenArchive = Get-CheckedArchive `
+            'binaryen-version_131-x86_64-windows.tar.gz' `
+            'https://github.com/WebAssembly/binaryen/releases/download/version_131/binaryen-version_131-x86_64-windows.tar.gz' `
+            '2f4edac1703a2f695254d6ff52ede03481e67db1f094915763d863158c17d9bc'
+          $binaryenExtract = Join-Path $env:RUNNER_TEMP 'binaryen'
+          New-Item -ItemType Directory -Force -Path $binaryenExtract | Out-Null
+          & $tar -xzf $binaryenArchive -C $binaryenExtract
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item `
+            (Join-Path $binaryenExtract 'binaryen-version_131\bin\wasm-opt.exe') `
+            (Join-Path $tools 'wasm-opt.exe')
+          Remove-Item -Recurse -Force -LiteralPath $binaryenExtract, $binaryenArchive
+
+          $admissions = @(
+            @{
+              Path = Join-Path $tools 'trunk.exe'
+              Expected = 'trunk 0.22.1'
+            }
+            @{
+              Path = Join-Path $tools 'wasm-bindgen.exe'
+              Expected = 'wasm-bindgen 0.2.126'
+            }
+            @{
+              Path = Join-Path $tools 'wasm-opt.exe'
+              Expected = 'wasm-opt version 131 (version_131)'
+            }
+          )
+          foreach ($admission in $admissions) {
+            $observed = (& $admission.Path --version | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($observed -ne $admission.Expected) {
+              throw "$($admission.Path) drifted: expected $($admission.Expected), observed $observed"
+            }
+          }
       - name: Build repository-owned runner
         shell: pwsh
         env:
