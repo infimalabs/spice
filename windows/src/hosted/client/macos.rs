@@ -148,12 +148,7 @@ fn admit_stage(
     if payload.archive.to_string() != source_archive {
         return Err(differs("source archive"));
     }
-    let Some((rust_pin, rust_metadata)) = toolchain.rust.split_once(" (") else {
-        return Err(WindowsHostedError::PolicyIdentity);
-    };
-    if rust_pin.is_empty() || !rust_metadata.ends_with(')') {
-        return Err(WindowsHostedError::PolicyIdentity);
-    }
+    let rust_pin = rust_release_pin(&toolchain.rust).ok_or(WindowsHostedError::PolicyIdentity)?;
     if payload.pins.rust != rust_pin {
         return Err(differs("Rust pin"));
     }
@@ -210,6 +205,11 @@ fn admit_stage(
         });
     }
     Ok(artifacts)
+}
+
+fn rust_release_pin(identity: &str) -> Option<&str> {
+    let (pin, metadata) = identity.split_once(" (")?;
+    (!pin.is_empty() && !metadata.is_empty() && metadata.ends_with(')')).then_some(pin)
 }
 
 fn object_path(root: &Path, digest: &Digest, mode: u32) -> PathBuf {
@@ -277,4 +277,20 @@ fn differs(detail: &str) -> WindowsHostedError {
     WindowsHostedError::ProviderResponse(format!(
         "hosted macOS stage differs from its signed inventory: {detail}"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rust_release_pin;
+
+    #[test]
+    fn full_rustc_identity_projects_the_payload_release_pin() {
+        assert_eq!(
+            rust_release_pin("rustc 1.97.1 (8bab26f4f 2026-07-14)"),
+            Some("rustc 1.97.1")
+        );
+        for malformed in ["", "rustc 1.97.1", " (metadata)", "rustc 1.97.1 ("] {
+            assert_eq!(rust_release_pin(malformed), None);
+        }
+    }
 }
