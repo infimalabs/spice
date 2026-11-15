@@ -452,6 +452,8 @@ are developer evidence only: the guest publishes no receipt, satisfies no
 release, sealing, or package-replay claim, and no gate or release path executes
 or trusts it. Permanent tests stay fast and in process; every guest run is a
 throwaway smoke.
+The `windows-guest` command is compiled only on macOS, so native hosted
+Windows release staging builds the xtask without this developer-only module.
 
 **Hypervisor.** The guest runs under Homebrew QEMU (`qemu-system-aarch64
 -machine virt -accel hvf`) with edk2 UEFI firmware. QEMU is driven entirely
