@@ -112,8 +112,8 @@ published. The hosted Windows route commits the archive's exact tree,
 and result bind the archive identity, which the guest hands to its own
 `stage-target`, and the client refuses a returned payload recording any other
 archive. The tracked attributes keep both canonical `dist/version` inputs
-LF-only when the one-use source commit is checked out on Windows; their
-compile-time parsers refuse any platform newline rewrite. The release plan
+LF-only when the one-use source commit is checked out on Windows; compile-time
+inclusion preserves the canonical bytes their consumers require. The release
 names the archive identity once; manifest publication refuses targets staged
 from two archives, and `spice release` refuses a sealed manifest whose archive
 is not the one at the stage root.
