@@ -414,7 +414,9 @@ Nested release commands receive only the sealed executor environment; on
 Windows that environment carries the exact admitted `SystemRoot`, compiler
 paths, SDK include roots, and SDK library roots so Cargo and its host build
 scripts can resolve operating-system components without inheriting unrelated
-runner state.
+runner state. The release app publishes its generation under the admitted build root,
+not the sealed source tree; source and vendored dependency ACLs remain
+read-only through Trunk compilation.
 
 The sealing step builds the guest from the selected source and executes the
 sealed request in the disposable VM, then signs that exact

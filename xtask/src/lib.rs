@@ -28,7 +28,7 @@ mod windows_guest;
 mod windows_hosted;
 mod windows_msvc;
 
-pub use app::{AppBuildError, app};
+pub use app::{AppBuildError, app, app_to};
 #[cfg(not(target_arch = "wasm32"))]
 pub use app_demo::{AppDemoError, AppDemoMode, app_demo};
 pub use build_cache::{

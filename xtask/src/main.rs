@@ -12,7 +12,7 @@ const USAGE_EXIT: u8 = 2;
 type CommandResult = Result<(), Box<dyn std::error::Error>>;
 const USAGE: &str = concat!(
     "usage: spice dev xtask -- <help|verify --package PACKAGE|",
-    "gate [--report] ARM|app|app-demo [--open] [--scripted-omp]|",
+    "gate [--report] ARM|app [--stage-root DIR]|app-demo [--open] [--scripted-omp]|",
     "install [--host IP] [--port PORT] [--release] [--no-symbols] [--no-resident] ",
     "[-- UP-OPTION...]|",
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
@@ -168,6 +168,12 @@ fn run_app(
 ) -> CommandResult {
     match arguments.as_slice() {
         [] => xtask::app(&release_environment(ambient), output).map_err(Into::into),
+        [option, root] if option == OsStr::new("--stage-root") => xtask::app_to(
+            &release_environment(ambient),
+            std::path::Path::new(root),
+            output,
+        )
+        .map_err(Into::into),
         _ => {
             eprintln!("{}", help());
             Err(usage_error().into())

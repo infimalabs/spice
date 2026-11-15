@@ -43,6 +43,7 @@ impl Fixture {
         )
         .expect("write fixture source archive");
         let generations = root
+            .join("target/release-app")
             .join(spice::serve::APP_STAGE)
             .join(spice::serve::APP_STAGE_GENERATIONS);
         let app = generations.join(GENERATION);
@@ -94,7 +95,8 @@ impl Fixture {
         )
         .expect("rack writes");
         fs::write(
-            root.join(spice::serve::APP_STAGE)
+            root.join("target/release-app")
+                .join(spice::serve::APP_STAGE)
                 .join(spice::serve::APP_STAGE_CURRENT),
             format!("{GENERATION}\n"),
         )
@@ -129,6 +131,10 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.root).expect("fixture cleanup");
     }
+}
+
+fn staged_canvas(root: &Path) -> Result<crate::app::StagedCanvas, crate::app::AppBuildError> {
+    crate::app::StagedCanvas::read_from(root, &root.join("target/release-app"), &fixture_build())
 }
 
 struct FakeExecutor {
@@ -360,7 +366,14 @@ fn all_targets_use_the_fixed_commands_and_real_artifact_bytes() {
                 .collect::<Vec<_>>(),
             ["app-build", "native-build"]
         );
-        assert_eq!(build_records[0].arguments, [OsString::from("app")]);
+        assert_eq!(
+            build_records[0].arguments,
+            [
+                OsString::from("app"),
+                OsString::from("--stage-root"),
+                fixture.root.join("target/release-app").into_os_string(),
+            ]
+        );
         assert_eq!(build_records[0].program, programs.xtask);
         let staged = assert_native_build(
             build_records[1],
@@ -443,8 +456,7 @@ fn a_prebuilt_canvas_skips_the_target_app_build() {
             .join(dist::SOURCE_ARCHIVE_FILE),
     )
     .expect("fixture source archive");
-    let canvas = crate::app::StagedCanvas::read(&fixture.root, &fixture_build())
-        .expect("fixture host app is staged");
+    let canvas = staged_canvas(&fixture.root).expect("fixture host app is staged");
     let version = ProductVersion::parse(FIXTURE_VERSION).expect("fixture version is canonical");
 
     let build = stage_with_roots(
@@ -542,8 +554,7 @@ fn assert_native_build(
         .find_map(|argument| argument.strip_prefix("link-arg="))
         .expect("the native build links the stable canvas object");
     let object = fs::read(link).expect("the canvas object is written");
-    let staged =
-        crate::app::StagedCanvas::read(root, &fixture_build()).expect("fixture canvas is staged");
+    let staged = staged_canvas(root).expect("fixture canvas is staged");
     let object_target = match target {
         ReleaseTarget::Aarch64AppleDarwin => rack::link::Target::MacAarch64,
         ReleaseTarget::X86_64UnknownLinuxMusl => rack::link::Target::LinuxX86_64,
@@ -659,12 +670,9 @@ fn release_environment(cargo_target_dir: Option<&str>) -> ReleaseEnvironment {
     }
 }
 
-/// The cleared release environment freezes the compiler discovery already made.
-///
-/// `programs.rustc` is the workspace-root, selected-`CARGO_HOME`, five-rank
-/// answer. Installing it as `RUSTC` puts that answer at Cargo's highest rank
-/// for app-build and native-build; copying `CARGO_BUILD_RUSTC`
-/// would be a second, lower-ranked answer rather than additional authority.
+/// The cleared release environment freezes compiler discovery and the admitted
+/// toolchain inputs. `programs.rustc` is the workspace-root five-rank answer;
+/// `RUSTC` outranks `CARGO_BUILD_RUSTC`, so only the selected answer is copied.
 #[test]
 fn system_executor_overrides_machine_local_cargo_build_state() {
     let fixture = Fixture::new();
@@ -979,7 +987,7 @@ fn a_refusing_build_command_publishes_no_pointer_over_the_previous_one() {
         "the refusal has to stop the first build step, not be noticed later"
     );
     assert!(
-        crate::app::StagedCanvas::read(&fixture.root, &fixture_build()).is_ok(),
+        staged_canvas(&fixture.root).is_ok(),
         "the archive the ignored status would have linked must still be readable"
     );
 

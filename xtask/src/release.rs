@@ -505,8 +505,10 @@ fn stage_with_roots<E: Executor>(
 
     let pipeline = Pipeline::new(required.clone(), version.clone());
     let target_dir = build_root.join("release-appliance");
+    let app_root = build_root.join("release-app");
     let mut builder = CommandBuilder {
         root,
+        app_root: &app_root,
         target,
         target_dir: &target_dir,
         programs,
