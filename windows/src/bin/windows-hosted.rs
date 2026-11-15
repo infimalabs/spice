@@ -917,7 +917,7 @@ mod windows {
                  New-LocalUser -Name {} -Password $password \
                      -AccountNeverExpires -PasswordNeverExpires \
                      -UserMayNotChangePassword | Out-Null\n\
-                 $sid = (Get-LocalUser -Name {}).SID.Value\n\
+                 $sid = (Get-LocalUser -Name {}).SID.ToString()\n\
                  if ([string]::IsNullOrWhiteSpace($sid)) {{ \
                      throw 'new local user has no SID' \
                  }}\n\
