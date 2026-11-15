@@ -14,7 +14,9 @@ use windows_sys::Win32::Foundation::{
     LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo,
+    ConvertSidToStringSidW, ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS,
+    GetSecurityInfo, SE_FILE_OBJECT, SetEntriesInAclW, SetSecurityInfo, TRUSTEE_IS_SID,
+    TRUSTEE_IS_USER, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_FLAGS, ACE_HEADER, ACL, ACL_REVISION, AddAccessAllowedAceEx,
@@ -126,6 +128,66 @@ pub(super) fn set_owner_mode(path: &Path, mode: u32) -> io::Result<()> {
     )
 }
 
+pub(super) fn set_owner_and_identity_mode(
+    path: &Path,
+    identity: &str,
+    owner_mode: u32,
+    identity_mode: u32,
+) -> io::Result<()> {
+    let file = open(path, READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)?;
+    let directory = file.metadata()?.is_dir();
+    let owner = Principal::current()?;
+    let identity = LocalSid::parse(identity)?;
+    let acl = identity_acl(
+        owner.user(),
+        owner_mode >> 6,
+        identity.as_ptr(),
+        identity_mode >> 6,
+        directory,
+    )?;
+    apply_protected_dacl(&file, &acl)
+}
+
+pub(super) fn grant_identity_mode(path: &Path, identity: &str, mode: u32) -> io::Result<()> {
+    let file = open(path, READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES)?;
+    let directory = file.metadata()?.is_dir();
+    let identity = LocalSid::parse(identity)?;
+    let descriptor = Descriptor::read(&file)?;
+    if descriptor.dacl.is_null() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "cannot narrow a null DACL while adding one identity",
+        ));
+    }
+    let inheritance = if directory {
+        u32::from(CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE)
+    } else {
+        0
+    };
+    let trustee = TRUSTEE_W {
+        TrusteeForm: TRUSTEE_IS_SID,
+        TrusteeType: TRUSTEE_IS_USER,
+        ptstrName: identity.as_ptr().cast(),
+        ..TRUSTEE_W::default()
+    };
+    let entry = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: rights(mode >> 6, directory),
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: inheritance,
+        Trustee: trustee,
+    };
+    let mut acl = ptr::null_mut();
+    // SAFETY: `entry` and the descriptor's DACL remain valid for the call;
+    // `acl` receives one LocalAlloc allocation.
+    let status = unsafe { SetEntriesInAclW(1, &raw const entry, descriptor.dacl, &raw mut acl) };
+    win32_status(status)?;
+    // SAFETY: `SetEntriesInAclW` returned a live ACL allocation.
+    let result = apply_dacl(&file, acl, false);
+    // SAFETY: `SetEntriesInAclW` allocated `acl` with LocalAlloc.
+    unsafe { LocalFree(acl.cast()) };
+    result
+}
+
 pub(super) fn set_file_mode(file: &File, mode: u32) -> io::Result<()> {
     if mode & !0o700 != 0 {
         return Err(io::Error::new(
@@ -148,16 +210,24 @@ fn protect(file: &File, mode: u32) -> io::Result<()> {
 /// Replace the DACL of the object `file` holds open with `WRITE_DAC` by `acl`,
 /// protected from inheritance.
 fn apply_protected_dacl(file: &File, acl: &[u32]) -> io::Result<()> {
-    // SAFETY: the handle is open with `WRITE_DAC`, and `acl` is an initialized
-    // ACL that outlives the call.
+    apply_dacl(file, acl.as_ptr().cast_mut().cast::<ACL>(), true)
+}
+
+fn apply_dacl(file: &File, acl: *mut ACL, protected: bool) -> io::Result<()> {
+    let mut information = DACL_SECURITY_INFORMATION;
+    if protected {
+        information |= PROTECTED_DACL_SECURITY_INFORMATION;
+    }
+    // SAFETY: the handle is open with `WRITE_DAC`, and `acl` is initialized
+    // and remains live for the call.
     let status = unsafe {
         SetSecurityInfo(
             file.as_raw_handle(),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            information,
             ptr::null_mut(),
             ptr::null_mut(),
-            acl.as_ptr().cast::<ACL>(),
+            acl,
             ptr::null(),
         )
     };
@@ -906,10 +976,74 @@ impl Drop for Descriptor {
     }
 }
 
-/// A protected owner-only DACL granting `bits` to `user`.
-///
-/// A directory also carries inherit-only grants: subdirectories receive
-/// `rwx` and files receive `rw-`, the equivalent of a `077` umask.
+/// One SID allocated by a Windows string conversion.
+struct LocalSid(PSID);
+
+impl LocalSid {
+    fn parse(identity: &str) -> io::Result<Self> {
+        if identity.contains('\0') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Windows identity contains NUL",
+            ));
+        }
+        let identity = OsStr::new(identity)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let mut sid = ptr::null_mut();
+        // SAFETY: `identity` is NUL-terminated and `sid` receives a LocalAlloc
+        // SID on success.
+        if unsafe { ConvertStringSidToSidW(identity.as_ptr(), &raw mut sid) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(sid))
+    }
+
+    fn as_ptr(&self) -> PSID {
+        self.0
+    }
+}
+
+impl Drop for LocalSid {
+    fn drop(&mut self) {
+        // SAFETY: `ConvertStringSidToSidW` allocated this SID with LocalAlloc.
+        unsafe { LocalFree(self.0.cast()) };
+    }
+}
+
+fn identity_acl(
+    owner: PSID,
+    owner_bits: u32,
+    identity: PSID,
+    identity_bits: u32,
+    directory: bool,
+) -> io::Result<Vec<u32>> {
+    let owner_entries = principal_entries(owner_bits, directory);
+    let identity_entries = principal_entries(identity_bits, directory);
+    grant_acls(&[
+        (owner, owner_entries.as_slice()),
+        (identity, identity_entries.as_slice()),
+    ])
+}
+
+fn principal_entries(bits: u32, directory: bool) -> Vec<(ACE_FLAGS, u32)> {
+    let mut entries = vec![(0, rights(bits & ALL_BITS, directory))];
+    if directory {
+        entries.extend([
+            (
+                CONTAINER_INHERIT_ACE | INHERIT_ONLY_ACE,
+                rights(bits & ALL_BITS, true),
+            ),
+            (
+                OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE,
+                rights(bits & (READ_BITS | WRITE_BITS), false),
+            ),
+        ]);
+    }
+    entries
+}
+
 fn owner_acl(user: PSID, bits: u32, directory: bool) -> io::Result<Vec<u32>> {
     let object = (0, rights(bits & ALL_BITS, directory));
     let entries: &[(ACE_FLAGS, u32)] = if directory {
@@ -930,12 +1064,15 @@ fn owner_acl(user: PSID, bits: u32, directory: bool) -> io::Result<Vec<u32>> {
     grant_acl(user, entries)
 }
 
-/// A DACL whose only entries allow `user` each flagged access mask.
-fn grant_acl(user: PSID, entries: &[(ACE_FLAGS, u32)]) -> io::Result<Vec<u32>> {
-    // SAFETY: `user` is a valid SID.
-    let sid_bytes = unsafe { GetLengthSid(user) } as usize;
-    let ace_bytes = size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>() + sid_bytes;
-    let acl_bytes = size_of::<ACL>() + ace_bytes * entries.len();
+/// A DACL whose only entries allow each SID its flagged access masks.
+fn grant_acls(principals: &[(PSID, &[(ACE_FLAGS, u32)])]) -> io::Result<Vec<u32>> {
+    let mut acl_bytes = size_of::<ACL>();
+    for &(sid, entries) in principals {
+        // SAFETY: each `sid` is valid for the call.
+        let sid_bytes = unsafe { GetLengthSid(sid) } as usize;
+        let ace_bytes = size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>() + sid_bytes;
+        acl_bytes += ace_bytes * entries.len();
+    }
     let mut buffer = vec![0_u32; acl_bytes.div_ceil(size_of::<u32>())];
     let acl = buffer.as_mut_ptr().cast::<ACL>();
     // SAFETY: `buffer` is DWORD-aligned and `acl_bytes` long, enough for the
@@ -943,13 +1080,20 @@ fn grant_acl(user: PSID, entries: &[(ACE_FLAGS, u32)]) -> io::Result<Vec<u32>> {
     if unsafe { InitializeAcl(acl, acl_bytes as u32, ACL_REVISION) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    for &(flags, mask) in entries {
-        // SAFETY: as above; `user` stays valid for the call.
-        if unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, flags, mask, user) } == 0 {
-            return Err(io::Error::last_os_error());
+    for &(sid, entries) in principals {
+        for &(flags, mask) in entries {
+            // SAFETY: as above; `sid` stays valid for the call.
+            if unsafe { AddAccessAllowedAceEx(acl, ACL_REVISION, flags, mask, sid) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
         }
     }
     Ok(buffer)
+}
+
+/// A DACL whose only entries allow `user` each flagged access mask.
+fn grant_acl(user: PSID, entries: &[(ACE_FLAGS, u32)]) -> io::Result<Vec<u32>> {
+    grant_acls(&[(user, entries)])
 }
 
 /// Rights for owner permission `bits`.

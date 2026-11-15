@@ -66,6 +66,54 @@ pub fn set_owner_mode(path: &Path, mode: u32) -> io::Result<()> {
     platform::set_owner_mode(path, mode)
 }
 
+/// Make `path` accessible only to the current Windows token user and one
+/// additional SID, with the respective owner-bit modes.
+///
+/// The DACL is protected from inherited grants. The caller must have refused
+/// links first.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for a mode beyond owner bits or a malformed SID, or
+/// an operating-system refusal applying the DACL.
+#[cfg(windows)]
+pub fn set_owner_and_identity_mode(
+    path: &Path,
+    identity: &str,
+    owner_mode: u32,
+    identity_mode: u32,
+) -> io::Result<()> {
+    for mode in [owner_mode, identity_mode] {
+        if mode & !0o700 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("principal mode {mode:04o} grants access beyond one identity"),
+            ));
+        }
+    }
+    platform::set_owner_and_identity_mode(path, identity, owner_mode, identity_mode)
+}
+
+/// Add one Windows SID's owner-bit access to `path` without replacing its
+/// existing DACL.
+///
+/// A directory grant is inherited by child files and directories.
+///
+/// # Errors
+///
+/// Returns `InvalidInput` for a mode beyond owner bits or a malformed SID, or
+/// an operating-system refusal reading or updating the DACL.
+#[cfg(windows)]
+pub fn grant_identity_mode(path: &Path, identity: &str, mode: u32) -> io::Result<()> {
+    if mode & !0o700 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("principal mode {mode:04o} grants access beyond one identity"),
+        ));
+    }
+    platform::grant_identity_mode(path, identity, mode)
+}
+
 /// Give the file `file` holds open exactly the POSIX permission bits `mode`.
 ///
 /// Unix applies the full `0o7777` mode. Windows expresses only owner-only
