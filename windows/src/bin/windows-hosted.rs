@@ -1093,10 +1093,14 @@ mod windows {
         let output = powershell_command(script, Stdio::piped(), Stdio::piped(), action)?
             .wait_with_output()
             .map_err(|error| format!("cannot finish PowerShell to {action}: {error}"))?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
+            return Err(format!("PowerShell refused to {action}: {}", stderr.trim()));
+        }
+        if !stderr.trim().is_empty() {
             return Err(format!(
-                "PowerShell refused to {action}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
+                "PowerShell reported an error while trying to {action}: {}",
+                stderr.trim()
             ));
         }
         String::from_utf8(output.stdout)
@@ -1120,6 +1124,16 @@ mod windows {
         stderr: Stdio,
         action: &str,
     ) -> Result<std::process::Child, String> {
+        let mut guarded = String::with_capacity(script.len() + 160);
+        guarded.push_str("try {\n$ErrorActionPreference = 'Stop'\n");
+        guarded.push_str(script);
+        guarded.push_str(
+            "\nexit 0\n\
+             } catch {\n\
+             [Console]::Error.WriteLine(($_ | Out-String))\n\
+             exit 1\n\
+             }\n",
+        );
         let mut child = ProcessCommand::new(POWERSHELL)
             .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "-"])
             .stdin(Stdio::piped())
@@ -1132,7 +1146,7 @@ mod windows {
             .take()
             .ok_or_else(|| format!("PowerShell stdin unavailable while trying to {action}"))?;
         stdin
-            .write_all(script.as_bytes())
+            .write_all(guarded.as_bytes())
             .map_err(|error| format!("cannot send PowerShell script to {action}: {error}"))?;
         drop(stdin);
         Ok(child)
