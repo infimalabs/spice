@@ -108,7 +108,7 @@ pub fn macos_hosted_stage(
             let stage = download_artifact(&run, run_id, &format!("darwin-stage-{challenge}"))?;
             let artifacts = admit_stage(
                 &stage,
-                &source.commit,
+                &source.canonical_commit,
                 &source_archive,
                 proof_container,
                 &policy.toolchain,

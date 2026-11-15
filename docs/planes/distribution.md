@@ -379,10 +379,12 @@ so an interrupted publication leaves the prior file or none.
 `.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
 GitHub image, macOS build, Xcode SDK, Rust toolchain, downloaded tool digests,
 and proof-container identity admitted by `dist/darwin/hosted.toml`. The client
-dispatches the exact Git commit and canonical source-archive digest; the sealed
-native proof runner builds an unsigned `aarch64-apple-darwin` stage with
-networking denied. The workflow refuses image, source, archive, SDK, tool, or
-stage drift before credentials enter any job.
+dispatches a one-use transport commit and the canonical source-archive digest;
+the sealed native proof runner builds an unsigned `aarch64-apple-darwin` stage
+with networking denied. The transport commit is checkout delivery only:
+payload admission compares the source identity with the canonical release
+commit recorded inside the archive. The workflow refuses image, source,
+archive, SDK, tool, or stage drift before credentials enter any job.
 The hosted bootstrap selects the exact Cargo executable and admits only its
 sibling Rustc; the proof build does not rediscover that toolchain through
 ambient `rustup`.
