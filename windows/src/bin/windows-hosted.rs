@@ -598,8 +598,8 @@ mod windows {
             .take()
             .ok_or_else(|| "stderr capture is unavailable".to_owned())?;
         let budget = Arc::new(AtomicUsize::new(output_limit));
-        let stdout = capture(stdout, Arc::clone(&budget));
-        let stderr = capture(stderr, budget);
+        let stdout = capture(stdout, Arc::clone(&budget), io::stdout());
+        let stderr = capture(stderr, budget, io::stderr());
         let completion = wait_for_owned(&mut child, runtime_seconds)?;
         drop(child);
         let stdout = stdout
@@ -614,6 +614,7 @@ mod windows {
     fn capture(
         mut stream: impl Read + Send + 'static,
         budget: Arc<AtomicUsize>,
+        mut live: impl Write + Send + 'static,
     ) -> thread::JoinHandle<Result<Capture, String>> {
         thread::spawn(move || {
             let mut retained = Vec::new();
@@ -636,6 +637,9 @@ mod windows {
                         Ordering::Acquire,
                     ) {
                         Ok(_) => {
+                            live.write_all(&buffer[..keep])
+                                .and_then(|()| live.flush())
+                                .map_err(|error| format!("live output failed: {error}"))?;
                             retained.extend_from_slice(&buffer[..keep]);
                             truncated |= keep < read;
                             break;
