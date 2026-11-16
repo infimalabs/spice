@@ -67,25 +67,28 @@ jobs:
           "$RUNNER_TEMP/bootstrap-target/debug/xtask" release-inputs \
             "$RUNNER_TEMP/release-inputs"
 
-      - name: Resolve shared proof identity
+      - name: Build shared proof image archive
         id: proof
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/proof-image.tar"
+          mkdir "$RUNNER_TEMP/proof-image"
+          archive="$RUNNER_TEMP/proof-image/proof-image.tar"
           "$RUNNER_TEMP/bootstrap-target/debug/xtask" proof-image build "$archive" \
             | tee "$RUNNER_TEMP/proof-image.out"
           identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
           [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
+          checksum="$(sha256sum "$archive" | cut -d' ' -f1)"
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          rm -f "$archive" "$archive.sha256" "$archive.identity"
+          echo "archive_sha256=$checksum" >> "$GITHUB_OUTPUT"
 
       - name: Record immutable producer result
         env:
           CHALLENGE: ${{ inputs.challenge }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           PROOF_IDENTITY: ${{ steps.proof.outputs.identity }}
+          PROOF_ARCHIVE_SHA256: ${{ steps.proof.outputs.archive_sha256 }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/release-inputs"
@@ -102,6 +105,7 @@ jobs:
             --arg source_commit "$SOURCE_COMMIT" \
             --arg tree "$tree" \
             --arg proof_identity "$PROOF_IDENTITY" \
+            --arg proof_archive_sha256 "$PROOF_ARCHIVE_SHA256" \
             --arg workflow ".github/workflows/release-inputs.yml" \
             --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
@@ -117,6 +121,7 @@ jobs:
               source_commit: $source_commit,
               tree: $tree,
               proof_identity: $proof_identity,
+              proof_archive_sha256: $proof_archive_sha256,
               workflow: $workflow,
               workflow_ref: $workflow_ref,
               workflow_sha: $workflow_sha,
@@ -135,6 +140,17 @@ jobs:
             ${{ runner.temp }}/release-inputs/source.tar
             ${{ runner.temp }}/release-inputs/canvas.zip
             ${{ runner.temp }}/release-inputs/result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish shared proof image archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: proof-image-${{ inputs.challenge }}
+          path: |
+            ${{ runner.temp }}/proof-image/proof-image.tar
+            ${{ runner.temp }}/proof-image/proof-image.tar.sha256
+            ${{ runner.temp }}/proof-image/proof-image.tar.identity
           if-no-files-found: error
           retention-days: 7
 

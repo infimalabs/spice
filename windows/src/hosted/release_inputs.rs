@@ -27,6 +27,7 @@ pub struct ResultManifest {
     pub app: Digest,
     pub canvas: Digest,
     pub proof_identity: String,
+    pub proof_archive_sha256: String,
     pub workflow: String,
     pub workflow_ref: String,
     pub workflow_sha: String,
@@ -85,6 +86,11 @@ impl ResultManifest {
             .strip_prefix("sha256:")
             .ok_or_else(|| AdmissionError::new("proof_identity must be a sha256 digest"))?;
         require_hex("proof_identity", proof, DIGEST_HEX_LENGTH)?;
+        require_hex(
+            "proof_archive_sha256",
+            &self.proof_archive_sha256,
+            DIGEST_HEX_LENGTH,
+        )?;
         require_nonempty("workflow", &self.workflow)?;
         if !self
             .workflow_ref

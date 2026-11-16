@@ -12,8 +12,6 @@ use sha2::{Digest as _, Sha256};
 const IMAGE_PLATFORM: &str = "amd64 linux";
 const VENDOR_OPERATION: &str = "cargo vendor --locked --respect-source-config";
 const VENDOR_SET_BUILD_ARGUMENT: &str = "spice_vendor_set";
-const SOURCE_DATE_EPOCH_BUILD_ARGUMENT: &str = "SOURCE_DATE_EPOCH=0";
-const REPRODUCIBLE_DOCKER_EXPORT: &str = "type=docker,rewrite-timestamp=true";
 const DEFAULT_FAILURE: u8 = 1;
 const REFUSAL: u8 = 65;
 const TOOL_CHECK: &str = concat!(
@@ -163,16 +161,13 @@ fn run_image_build<R: Runner>(
         &[
             "buildx".into(),
             "build".into(),
-            "--output".into(),
-            REPRODUCIBLE_DOCKER_EXPORT.into(),
+            "--load".into(),
             "--platform".into(),
             "linux/amd64".into(),
             "--provenance=false".into(),
             "--sbom=false".into(),
             "--build-arg".into(),
             format!("{VENDOR_SET_BUILD_ARGUMENT}={vendor_set}").into(),
-            "--build-arg".into(),
-            SOURCE_DATE_EPOCH_BUILD_ARGUMENT.into(),
             "--tag".into(),
             tag.into(),
             context.as_os_str().to_owned(),
@@ -851,20 +846,6 @@ mod tests {
             }),
             "image build did not receive the admitted vendor set"
         );
-        assert!(runner.calls[1].arguments.windows(2).any(|arguments| {
-            arguments
-                == [
-                    OsString::from("--build-arg"),
-                    OsString::from(SOURCE_DATE_EPOCH_BUILD_ARGUMENT),
-                ]
-        }));
-        assert!(runner.calls[1].arguments.windows(2).any(|arguments| {
-            arguments
-                == [
-                    OsString::from("--output"),
-                    OsString::from(REPRODUCIBLE_DOCKER_EXPORT),
-                ]
-        }));
         assert!(runner.calls[1].arguments.windows(2).any(|arguments| {
             arguments
                 == [
