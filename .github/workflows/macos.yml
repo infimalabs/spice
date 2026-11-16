@@ -44,10 +44,6 @@ on:
         description: Digest of the provider-built canvas this stage links
         required: true
         type: string
-      canvas:
-        description: Digest of the staged Linux canvas this stage links
-        required: true
-        type: string
 
 jobs:
 
