@@ -448,6 +448,9 @@ jobs:
           if [ "$GITHUB_REF_TYPE" != tag ] || [[ "$GITHUB_REF_NAME" != hosted-* ]]; then
             exit 0
           fi
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" || {
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" >/dev/null 2>&1 && exit 1
-          }
+          if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null; then
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              echo "source ref $GITHUB_REF_NAME survived deletion" >&2
+              exit 1
+            fi
+          fi
