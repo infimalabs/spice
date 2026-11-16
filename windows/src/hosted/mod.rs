@@ -23,6 +23,9 @@ pub const GITHUB_PROVIDER: &str = "github-actions";
 pub const X86_64_ARCHITECTURE: &str = "X64";
 /// Repository-owned workflow that is allowed to sign a result.
 pub const WORKFLOW: &str = ".github/workflows/windows.yml";
+/// Name prefix of the provider artifact carrying a staged Linux canvas; the
+/// canvas digest completes the name.
+pub const CANVAS_ARTIFACT_PREFIX: &str = "canvas-";
 
 const DIGEST_HEX_LENGTH: usize = 64;
 const SOURCE_REF_CHALLENGE_LENGTH: usize = 24;
@@ -35,7 +38,8 @@ const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 /// `source` is the identity of the source archive the one-use commit at
 /// `source_ref` was built from; `tree` is the exact file listing of that
 /// commit, which the guest verifies against its checkout before it vouches
-/// for `source`.
+/// for `source`. A release stage's `canvas` names the staged Linux canvas
+/// the guest links instead of compiling the app.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -50,6 +54,25 @@ pub struct Request {
     pub toolchain: ToolchainPins,
     pub limits: Limits,
     pub commands: Vec<Command>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canvas: Option<CanvasPin>,
+}
+
+/// The staged Linux canvas one release stage adopts: the provider run whose
+/// `canvas-DIGEST` artifact carries it, and the canvas digest.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanvasPin {
+    pub run_id: u64,
+    pub digest: Digest,
+}
+
+impl CanvasPin {
+    /// The provider artifact name carrying this canvas.
+    #[must_use]
+    pub fn artifact(&self) -> String {
+        format!("{CANVAS_ARTIFACT_PREFIX}{}", self.digest)
+    }
 }
 
 impl Request {
@@ -107,6 +130,13 @@ impl Request {
             {
                 return Err(AdmissionError::Arguments);
             }
+        }
+        if self
+            .canvas
+            .as_ref()
+            .is_some_and(|canvas| canvas.run_id == 0)
+        {
+            return Err(AdmissionError::Canvas);
         }
         for (name, value) in [
             ("rust", self.toolchain.rust.as_str()),
@@ -285,6 +315,7 @@ pub enum AdmissionError {
     SourceRef(String),
     Architecture(String),
     Image,
+    Canvas,
     Runtime(u32),
     Output(u32),
     Commands,
@@ -320,6 +351,7 @@ impl fmt::Display for AdmissionError {
                 "unsupported hosted architecture {architecture:?}"
             ),
             Self::Image => formatter.write_str("hosted image identity drifted or is incomplete"),
+            Self::Canvas => formatter.write_str("hosted canvas names no provider run"),
             Self::Runtime(seconds) => write!(
                 formatter,
                 "hosted runtime bound {seconds}s is outside 1..=3600"
@@ -406,6 +438,7 @@ mod tests {
                 program: "@runner".to_owned(),
                 arguments: vec!["space value".to_owned(), "雪".to_owned()],
             }],
+            canvas: None,
         }
     }
 

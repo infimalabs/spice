@@ -227,6 +227,15 @@ mod windows {
             &request.challenge,
             account.sid(),
         )?;
+        if let Some(linux) = admitted_linux_stage(&temp, &request)? {
+            grant_ancestor_traversal(&linux, account.sid())?;
+            make_read_only(
+                "staged Linux canvas",
+                &linux,
+                &request.challenge,
+                account.sid(),
+            )?;
+        }
         eprintln!("[windows-hosted] granting isolated tool access");
         grant_file_access(Path::new(request_path), account.sid(), 0o400)?;
         grant_file_access(&executable, account.sid(), 0o500)?;
@@ -325,6 +334,13 @@ mod windows {
         fs::read(workspace.join("Cargo.toml"))
             .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
         verify_read_only("vendored dependencies", &vendor, &request.challenge)?;
+        let linux = request
+            .canvas
+            .as_ref()
+            .map(|_| linux_stage(&temp, &request));
+        if let Some(linux) = &linux {
+            verify_read_only("staged Linux canvas", linux, &request.challenge)?;
+        }
         verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
         verify_writable("fresh target", &target, &request.challenge)?;
         verify_writable("staged output", &stage, &request.challenge)?;
@@ -346,6 +362,7 @@ mod windows {
                     &target,
                     &system_root,
                     &stage,
+                    linux.as_deref(),
                     &request,
                 )
                 .map(|(completion, stdout, stderr)| CommandResult {
@@ -556,6 +573,33 @@ mod windows {
             }
         }
         Ok(())
+    }
+
+    /// Where the workflow downloads the staged Linux canvas a release
+    /// request names.
+    fn linux_stage(temp: &Path, request: &Request) -> PathBuf {
+        temp.join(format!("linux-stage-{}", request.challenge))
+    }
+
+    /// The downloaded Linux stage the request's canvas names, refused unless
+    /// its payload records exactly that canvas.
+    fn admitted_linux_stage(temp: &Path, request: &Request) -> Result<Option<PathBuf>, String> {
+        let Some(canvas) = &request.canvas else {
+            return Ok(None);
+        };
+        let stage = linux_stage(temp, request);
+        let path = stage.join("targets/x86_64-unknown-linux-musl/payload.json");
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("staged Linux payload is unreadable: {error}"))?;
+        let payload: wire::manifest::TargetPayload = wire::decode(&bytes)
+            .map_err(|error| format!("staged Linux payload does not decode: {error}"))?;
+        if payload.canvas != canvas.digest {
+            return Err(format!(
+                "staged Linux payload records canvas {}, not the requested {}",
+                payload.canvas, canvas.digest
+            ));
+        }
+        Ok(Some(stage))
     }
 
     fn tree_digest(git: &str, workspace: &Path) -> Result<String, String> {
@@ -887,6 +931,7 @@ mod windows {
         target: &Path,
         system_root: &Path,
         stage: &Path,
+        linux: Option<&Path>,
         request: &Request,
     ) -> Result<(Completion, Capture, Capture), String> {
         let toolchain = &request.toolchain;
@@ -923,6 +968,9 @@ mod windows {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(linux) = linux {
+            command.env("SPICE_LINUX_STAGE", linux); // env-policy: allow
+        }
         let mut child =
             sill::spawn_owned_command(&mut command, sill::ProcessGroup::New).map_err(|error| {
                 format!("hosted command did not start inside its process-tree boundary: {error}")

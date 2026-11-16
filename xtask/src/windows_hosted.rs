@@ -103,6 +103,7 @@ pub fn windows_hosted_stage(
         (!app_only).then_some(Path::new("dist/stage")),
         HostedSource::Archive(archive),
         attach,
+        !app_only,
     )?;
     let first = &execution.outputs[0];
     output

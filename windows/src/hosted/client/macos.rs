@@ -9,9 +9,9 @@ use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use super::{
-    Attach, Bound, Cancellation, HostedSource, Scratch, WindowsHostedError, download_artifact,
-    drive, publish_artifacts, require_public_attestation_repository, verify_attestation, watch_run,
-    workspace_root,
+    Attach, Bound, Cancellation, HostedSource, Scratch, WindowsHostedError, canvas,
+    download_artifact, drive, publish_artifacts, require_public_attestation_repository,
+    verify_attestation, watch_run, workspace_root,
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
@@ -93,6 +93,7 @@ pub fn macos_hosted_stage(
     let challenge = &bound.challenge;
     let source = &bound.source;
     let source_archive = source.archive.to_string();
+    let canvas = canvas::locate(&root, &policy.repository, &destination, &source_archive)?;
     let cancellation = Cancellation::install()?;
     let run = bound.run(&root, scratch.path(), &policy.repository);
     let inputs = serde_json::json!({
@@ -100,6 +101,8 @@ pub fn macos_hosted_stage(
         "source": source.commit,
         "archive": source_archive,
         "proof_container": proof_container,
+        "linux_run": canvas.pin.run_id.to_string(),
+        "canvas": canvas.pin.digest.to_string(),
     });
     drive(
         &run,
@@ -120,7 +123,13 @@ pub fn macos_hosted_stage(
             for artifact in &artifacts {
                 verify_attestation(&run, WORKFLOW_PATH, &stage.join(&artifact.path))?;
             }
-            publish_artifacts(&stage, &artifacts, &destination, &source_archive)?;
+            publish_artifacts(
+                &stage,
+                &artifacts,
+                &destination,
+                &source_archive,
+                Some(&canvas),
+            )?;
             Ok(MacosHostedStage {
                 run_id,
                 runner_image: format!(

@@ -484,15 +484,15 @@ fn run_stage_target(
     } else {
         None
     };
-    // A local Darwin or Windows stage links the canvas of the Linux payload
-    // staged from the same archive. A hosted runner, handed only the archive
-    // identity, still compiles its own.
+    // Every Darwin or Windows stage links the canvas of the Linux payload
+    // staged from the same archive: the local stage root's, or the one a
+    // hosted runner downloaded beside its checkout.
     let app = if scope == StageScope::StagedApp {
         xtask::AppOrigin::Workspace
-    } else if target != LINUX_TARGET && environment.source_archive.is_none() {
-        xtask::AppOrigin::Linux
-    } else {
+    } else if target == LINUX_TARGET {
         xtask::AppOrigin::Compile
+    } else {
+        xtask::AppOrigin::Linux
     };
     preflight_native_release(target).and_then(|()| {
         xtask::stage_target(
@@ -989,6 +989,7 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         build_rustc: read("CARGO_BUILD_RUSTC"),
         stage_root: read("SPICE_HOSTED_STAGE"), // env-policy: allow
         source_archive: read("SPICE_SOURCE_ARCHIVE"), // env-policy: allow
+        linux_stage: read("SPICE_LINUX_STAGE"), // env-policy: allow
     }
 }
 

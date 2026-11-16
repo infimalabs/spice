@@ -26,6 +26,7 @@ use serde::Deserialize;
 use wire::{Digest, Domain};
 
 mod attach;
+mod canvas;
 mod dispatch;
 mod linux;
 mod macos;
@@ -95,7 +96,7 @@ pub fn windows_hosted(
 pub fn windows_hosted_commands(
     commands: Vec<HostedCommand>,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    windows_hosted_commands_into(commands, None, HostedSource::Worktree, None)
+    windows_hosted_commands_into(commands, None, HostedSource::Worktree, None, false)
 }
 
 /// Which source tree one hosted run builds.
@@ -149,12 +150,15 @@ fn admit_public_attestation_visibility(
 }
 
 /// Dispatch a hosted batch, or re-enter the provider run `attach` names, and
-/// publish its signed artifact files when requested.
+/// publish its signed artifact files when requested. A `linux_canvas` release
+/// stage binds the canvas of the Linux payload staged in `destination`, and
+/// admits only a returned payload linking it.
 pub fn windows_hosted_commands_into(
     commands: Vec<HostedCommand>,
     destination: Option<&Path>,
     source: HostedSource<'_>,
     attach: Option<Attach>,
+    linux_canvas: bool,
 ) -> Result<HostedExecution, WindowsHostedError> {
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
     policy.admit()?;
@@ -175,6 +179,20 @@ pub fn windows_hosted_commands_into(
         source,
         attach,
     )?;
+    let canvas = match destination.as_deref() {
+        Some(stage) if linux_canvas => Some(canvas::locate(
+            &root,
+            &policy.repository,
+            stage,
+            &bound.source.archive.to_string(),
+        )?),
+        _ if linux_canvas => {
+            return Err(WindowsHostedError::Canvas(
+                "a release stage adopting the Linux canvas publishes no stage".to_owned(),
+            ));
+        }
+        _ => None,
+    };
     let request = Request {
         version: super::PROTOCOL_VERSION,
         challenge: bound.challenge.clone(),
@@ -190,6 +208,7 @@ pub fn windows_hosted_commands_into(
             output_bytes: MAX_OUTPUT_BYTES,
         },
         commands,
+        canvas: canvas.as_ref().map(|canvas| canvas.pin.clone()),
     };
     request.admit().map_err(WindowsHostedError::Admission)?;
 
@@ -207,7 +226,7 @@ pub fn windows_hosted_commands_into(
                 &run,
                 &request,
                 run_id,
-                destination.as_deref(),
+                destination.as_deref().map(|stage| (stage, canvas.as_ref())),
                 &cancellation,
             )
         },
@@ -422,7 +441,7 @@ fn complete_dispatched_run(
     run: &HostedRun<'_>,
     request: &Request,
     run_id: u64,
-    destination: Option<&Path>,
+    destination: Option<(&Path, Option<&canvas::LinuxCanvas>)>,
     cancellation: &Cancellation,
 ) -> Result<HostedExecution, WindowsHostedError> {
     watch_run(run.root, run.repository, run_id, cancellation)?;
@@ -460,7 +479,7 @@ fn complete_dispatched_run(
             })
         })
         .collect::<Result<Vec<_>, WindowsHostedError>>()?;
-    if let Some(destination) = destination {
+    if let Some((destination, canvas)) = destination {
         if outputs
             .iter()
             .all(|output| matches!(output.completion, Completion::Exited { code: 0 }))
@@ -470,6 +489,7 @@ fn complete_dispatched_run(
                 &result.artifacts,
                 destination,
                 &request.source,
+                canvas,
             )?;
         }
     } else if !result.artifacts.is_empty() {
@@ -600,6 +620,7 @@ fn publish_artifacts(
     artifacts: &[super::Artifact],
     destination: &Path,
     source_archive: &str,
+    canvas: Option<&canvas::LinuxCanvas>,
 ) -> Result<(), WindowsHostedError> {
     for artifact in artifacts {
         let path = source.join(&artifact.path);
@@ -617,7 +638,7 @@ fn publish_artifacts(
             )));
         }
         if artifact.path.ends_with("/payload.json") {
-            admit_payload_source(&path, source_archive)?;
+            admit_payload_source(&path, source_archive, canvas)?;
         }
     }
     let mut published = artifacts.iter().collect::<Vec<_>>();
@@ -643,22 +664,26 @@ fn publish_artifacts(
     Ok(())
 }
 
-/// A staged target payload records the source archive this run was bound to.
-fn admit_payload_source(path: &Path, source: &str) -> Result<(), WindowsHostedError> {
+/// A staged target payload records the source archive this run was bound to,
+/// and links the adopted Linux canvas when the stage adopts one.
+fn admit_payload_source(
+    path: &Path,
+    source: &str,
+    canvas: Option<&canvas::LinuxCanvas>,
+) -> Result<(), WindowsHostedError> {
     let bytes = fs::read(path).map_err(|source| WindowsHostedError::Io {
         path: path.to_path_buf(),
         source,
     })?;
     let payload: wire::manifest::TargetPayload =
         wire::decode(&bytes).map_err(WindowsHostedError::Decode)?;
-    if payload.archive.as_str() == source {
-        Ok(())
-    } else {
-        Err(WindowsHostedError::ProviderResponse(format!(
+    if payload.archive.as_str() != source {
+        return Err(WindowsHostedError::ProviderResponse(format!(
             "hosted target payload records source archive {}, not the requested {source}",
             payload.archive
-        )))
+        )));
     }
+    canvas.map_or(Ok(()), |canvas| canvas::admit_payload(&payload, canvas))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -667,17 +692,19 @@ enum ArtifactCleanupAction {
     Delete(Vec<u64>),
 }
 
+/// Delete every artifact of a settled run except a staged canvas, which the
+/// release's other targets still download; its retention expires it.
 fn artifact_cleanup_action(inventory: &ArtifactInventory) -> ArtifactCleanupAction {
-    if inventory.artifacts.is_empty() {
+    let retired = inventory
+        .artifacts
+        .iter()
+        .filter(|artifact| !artifact.name.starts_with(super::CANVAS_ARTIFACT_PREFIX))
+        .map(|artifact| artifact.id)
+        .collect::<Vec<_>>();
+    if retired.is_empty() {
         ArtifactCleanupAction::Complete
     } else {
-        ArtifactCleanupAction::Delete(
-            inventory
-                .artifacts
-                .iter()
-                .map(|artifact| artifact.id)
-                .collect(),
-        )
+        ArtifactCleanupAction::Delete(retired)
     }
 }
 
@@ -1282,6 +1309,7 @@ struct ArtifactInventory {
 #[derive(Deserialize)]
 struct Artifact {
     id: u64,
+    name: String,
 }
 
 /// Why no provider-authenticated execution result could be returned.
@@ -1337,6 +1365,9 @@ pub enum WindowsHostedError {
     },
     /// No provider run is adoptable for this stage's attachment.
     AttachRefused(String),
+    /// A release stage cannot adopt, or returned other than, the staged
+    /// Linux canvas.
+    Canvas(String),
     Output(io::Error),
     RunOperationAndCleanup {
         operation: Box<WindowsHostedError>,
@@ -1427,6 +1458,7 @@ impl fmt::Display for WindowsHostedError {
             Self::AttachRefused(detail) => {
                 write!(formatter, "hosted attachment refused: {detail}")
             }
+            Self::Canvas(detail) => write!(formatter, "hosted release canvas refused: {detail}"),
             Self::Output(source) => write!(formatter, "hosted output failed: {source}"),
             Self::RunOperationAndCleanup { operation, cleanup } => write!(
                 formatter,

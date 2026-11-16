@@ -149,6 +149,9 @@ pub struct ReleaseEnvironment {
     pub stage_root: Option<OsString>,
     /// The identity of the source archive whose tree a hosted guest builds.
     pub source_archive: Option<OsString>,
+    /// The stage holding the Linux payload a hosted release stage adopts the
+    /// canvas of; otherwise the stage root holds it.
+    pub linux_stage: Option<OsString>,
 }
 
 impl ReleaseEnvironment {
@@ -390,7 +393,11 @@ pub fn stage_target(
         AppOrigin::Linux => {
             let build = dist::build_info(&root, dist::Build::Staged)
                 .map_err(TargetBuildError::SourceVersion)?;
-            let linux = adopted::linux_canvas(&stage_root, &archive.digest)?;
+            let linux_stage = environment
+                .linux_stage
+                .as_ref()
+                .map_or_else(|| stage_root.clone(), PathBuf::from);
+            let linux = adopted::linux_canvas(&linux_stage, &archive.digest)?;
             Some(
                 crate::app::StagedCanvas::adopt(&root, &linux.bytes, &linux.generation, &build)
                     .map_err(TargetBuildError::Application)?,
