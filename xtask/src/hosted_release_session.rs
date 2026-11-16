@@ -334,17 +334,26 @@ impl TargetState {
             })
     }
 
+    /// The source workflow until one of its results proves unadmittable; from
+    /// then on every fresh dispatch binds the branch's current workflow, so a
+    /// later ordinary failure retries instead of refusing the source again.
     fn workflow(&self) -> TargetWorkflow {
         match self.attempts.last() {
-            None
-            | Some(Attempt {
+            None => TargetWorkflow::Source,
+            Some(Attempt {
+                outcome: AttemptOutcome::Failed { .. } | AttemptOutcome::SchemaFailed { .. },
+                ..
+            }) if self
+                .attempts
+                .iter()
+                .any(|attempt| matches!(attempt.outcome, AttemptOutcome::SchemaFailed { .. })) =>
+            {
+                TargetWorkflow::Current
+            }
+            Some(Attempt {
                 outcome: AttemptOutcome::Failed { .. },
                 ..
             }) => TargetWorkflow::Source,
-            Some(Attempt {
-                outcome: AttemptOutcome::SchemaFailed { .. },
-                ..
-            }) => TargetWorkflow::Current,
             Some(attempt) => TargetWorkflow::Exact(attempt.workflow_blob.clone()),
         }
     }
@@ -694,6 +703,19 @@ mod tests {
         );
         session
             .record(NativeTarget::Linux, &binding(104, "linux-b", true))
+            .unwrap();
+
+        session
+            .targets
+            .linux
+            .failed(true, false, "provider failed".to_owned())
+            .unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Linux).workflow(),
+            TargetWorkflow::Current
+        );
+        session
+            .record(NativeTarget::Linux, &binding(105, "linux-c", false))
             .unwrap();
     }
 
