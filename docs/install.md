@@ -158,7 +158,7 @@ Both paths change the executable in place. They refuse before signing when the
 identity or profile is unavailable, retrieve Apple's log when notarization is
 rejected, and finish only after strict `codesign` verification and
 Gatekeeper's primary-signature assessment (`spctl --assess --type open
-`--context context:primary-signature`) accept the file as notarized. A bare
+--context context:primary-signature`) accept the file as notarized. A bare
 Mach-O cannot carry a stapled ticket, so its first Gatekeeper assessment needs
 network access. The hosted finalizer retries that assessment while Apple's
 accepted ticket propagates, then refuses if Gatekeeper still cannot observe it.
