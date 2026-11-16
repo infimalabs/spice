@@ -5,6 +5,7 @@ use super::*;
 use spice::serve::canvas::BUILD;
 
 mod artifact_capture;
+mod canvas_adoption;
 mod environment;
 #[cfg(unix)]
 mod signing;

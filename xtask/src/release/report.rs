@@ -105,6 +105,8 @@ pub enum TargetBuildError {
     Output(io::Error),
     Spec(sill::SpecError),
     Application(crate::app::AppBuildError),
+    /// The canvas a non-Linux target adopts from the staged Linux payload.
+    AdoptedCanvas(String),
     Build(dist::BuildError),
     Pins(dist::PinError),
     SourceVersion(String),
@@ -175,6 +177,9 @@ impl fmt::Display for TargetBuildError {
                 "release process specification is invalid: {source}"
             ),
             Self::Application(error) => write!(formatter, "app build failed: {error}"),
+            Self::AdoptedCanvas(reason) => {
+                write!(formatter, "release canvas adoption refused: {reason}")
+            }
             Self::Build(error) => write!(formatter, "native build failed: {error}"),
             Self::SourceVersion(detail) => write!(formatter, "product version refused: {detail}"),
             Self::ProofImage(detail) => write!(formatter, "proof image refused: {detail}"),

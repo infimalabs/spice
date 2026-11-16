@@ -324,7 +324,7 @@ fn run_seal_darwin(
         release_environment(ambient),
         signing.as_ref(),
         None,
-        false,
+        xtask::AppSource::Compile,
         output,
     )?;
     if let Some(directory) = destination {
@@ -484,13 +484,23 @@ fn run_stage_target(
     } else {
         None
     };
+    // A local Darwin or Windows stage links the canvas of the Linux payload
+    // staged from the same archive. A hosted runner, handed only the archive
+    // identity, still compiles its own.
+    let app = if scope == StageScope::StagedApp {
+        xtask::AppSource::Workspace
+    } else if target != LINUX_TARGET && environment.source_archive.is_none() {
+        xtask::AppSource::Linux
+    } else {
+        xtask::AppSource::Compile
+    };
     preflight_native_release(target).and_then(|()| {
         xtask::stage_target(
             target,
             environment,
             signing.as_ref(),
             proof_container,
-            scope == StageScope::StagedApp,
+            app,
             output,
         )
         .map(|_| ())
