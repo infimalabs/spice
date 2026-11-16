@@ -1,47 +1,46 @@
-//! The one-use source commit one hosted run builds and the archive identity
-//! its signed request binds.
+//! Canonical source-archive materialization and the identities every hosted
+//! run admits before execution.
 
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Read as _, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use sha2::{Digest as _, Sha256};
 use wire::Digest;
 
-use super::{HostedSource, REMOTE, WindowsHostedError, command, successful, successful_text};
+use super::{HostedSource, WindowsHostedError, command, successful, successful_text};
 
-/// The transport commit one hosted run checks out and canonical identities
-/// bound to its source.
+/// One canonical source archive and the identities a hosted run binds.
 pub(super) struct PreparedSource {
-    /// The one-use transport commit pushed under the run's tag.
-    pub(super) commit: String,
+    /// The exact archive uploaded for provider delivery.
+    pub(super) archive_path: PathBuf,
     /// The canonical release commit recorded by the transported source.
     pub(super) canonical_commit: String,
-    /// The identity of the source archive those bytes came from.
+    /// The domain-separated identity of the source archive.
     pub(super) archive: Digest,
-    /// SHA-256 of the commit's recursive Git listing, which the guest
-    /// verifies against its checkout.
+    /// Raw SHA-256 of the transported `source.tar` bytes.
+    pub(super) archive_sha256: String,
+    /// SHA-256 of the archive's recursive Git listing.
     pub(super) tree: String,
+    /// Git blob identity of the workflow this archive admits.
+    pub(super) workflow_blob: String,
 }
 
-/// Build the one-use commit for `source` in this repository's object store.
-///
-/// A worktree snapshot commits the exact worktree on top of HEAD and derives
-/// its archive identity from the archive of that commit; a release archive is
-/// extracted and committed as a parentless tree equal to the archive's.
+/// Materialize `source` as one canonical archive and derive every identity a
+/// provider must admit before using it.
 pub(super) fn prepare(
     root: &Path,
     scratch: &Path,
-    challenge: &str,
+    workflow: &str,
     source: HostedSource<'_>,
 ) -> Result<PreparedSource, WindowsHostedError> {
-    let (commit, canonical_commit, archive) = match source {
+    let (archive_path, canonical_commit, archive, tree, workflow_root) = match source {
         HostedSource::Worktree => {
             let canonical_commit = canonical_source_commit(root)?;
-            let commit = snapshot(root, scratch, challenge)?;
-            let archive = scratch.join("source.tar");
+            let commit = snapshot(root, scratch)?;
+            let archive_path = scratch.join("source.tar");
             successful(
                 "snapshot archive",
                 command(
@@ -52,29 +51,46 @@ pub(super) fn prepare(
                         OsString::from("--format=tar"),
                         OsString::from("--prefix=spice/"),
                         OsString::from("--output"),
-                        archive.as_os_str().to_owned(),
+                        archive_path.as_os_str().to_owned(),
                         OsString::from(&commit),
                     ],
                 )?,
             )?;
-            (commit, canonical_commit, archive_identity(&archive)?)
+            let archive = archive_identity(&archive_path)?;
+            let tree = tree_digest(root, &commit)?;
+            (
+                archive_path,
+                canonical_commit,
+                archive,
+                tree,
+                root.to_path_buf(),
+            )
         }
-        HostedSource::Archive(archive) => {
-            let source = archive_source(root, scratch, archive)?;
-            let commit = commit_tree(root, &source.tree, None, &archive_message(challenge))?;
-            (commit, source.canonical_commit, source.archive)
+        HostedSource::Archive(archive_path) => {
+            let source = archive_source(root, scratch, archive_path)?;
+            let tree = tree_digest(&source.worktree, "HEAD")?;
+            (
+                archive_path.to_path_buf(),
+                source.canonical_commit,
+                source.archive,
+                tree,
+                source.worktree,
+            )
         }
     };
-    let tree = tree_digest(root, &commit)?;
+    let workflow_blob = blob_identity(root, &workflow_root.join(workflow))?;
+    let archive_sha256 = file_sha256(&archive_path)?;
     Ok(PreparedSource {
-        commit,
+        archive_path,
         canonical_commit,
         archive,
+        archive_sha256,
         tree,
+        workflow_blob,
     })
 }
 
-fn snapshot(root: &Path, scratch: &Path, challenge: &str) -> Result<String, WindowsHostedError> {
+fn snapshot(root: &Path, scratch: &Path) -> Result<String, WindowsHostedError> {
     let index = scratch.join("index");
     let git = |arguments: Vec<OsString>| -> Result<Output, WindowsHostedError> {
         Command::new("git")
@@ -119,7 +135,7 @@ fn snapshot(root: &Path, scratch: &Path, challenge: &str) -> Result<String, Wind
         root,
         tree.trim(),
         Some(parent.trim()),
-        &format!("spice hosted source {challenge}\n"),
+        "spice hosted source snapshot\n",
     )
 }
 
@@ -128,51 +144,14 @@ fn archive_identity(path: &Path) -> Result<Digest, WindowsHostedError> {
     dist::source_archive_identity(path).map_err(WindowsHostedError::ProviderResponse)
 }
 
-/// One release source archive's identities, its exact tree written to this
-/// repository's object store.
+/// One release source archive's identities and extracted local repository.
 pub(super) struct ArchiveSource {
-    /// The Git tree equal to the archive's tree, `dist/build.json` included.
-    pub(super) tree: String,
     /// The canonical release commit the archive's record names.
     pub(super) canonical_commit: String,
     /// The identity of the archive's bytes.
     pub(super) archive: Digest,
-}
-
-/// Bind an attached provider run's one-use `commit`, already proven to carry
-/// `source.tree`, to the archive it was built from.
-pub(super) fn attached(
-    root: &Path,
-    source: ArchiveSource,
-    commit: String,
-) -> Result<PreparedSource, WindowsHostedError> {
-    let tree = tree_digest(root, &source.tree)?;
-    Ok(PreparedSource {
-        commit,
-        canonical_commit: source.canonical_commit,
-        archive: source.archive,
-        tree,
-    })
-}
-
-const ARCHIVE_MESSAGE: &str = "spice hosted source archive ";
-/// Hex digits of one hosted challenge's 32 random bytes.
-const CHALLENGE_HEX_LENGTH: usize = 64;
-
-/// The message of the one-use archive commit for `challenge`.
-fn archive_message(challenge: &str) -> String {
-    format!("{ARCHIVE_MESSAGE}{challenge}\n")
-}
-
-/// The challenge a one-use archive commit's `message` records, if it is one.
-pub(super) fn archive_challenge(message: &str) -> Option<&str> {
-    let rest = message.strip_prefix(ARCHIVE_MESSAGE)?;
-    let challenge = rest.strip_suffix('\n').unwrap_or(rest);
-    (challenge.len() == CHALLENGE_HEX_LENGTH
-        && challenge
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
-    .then_some(challenge)
+    /// The exact extracted worktree used for tree and workflow admission.
+    pub(super) worktree: PathBuf,
 }
 
 fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
@@ -187,8 +166,8 @@ fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
         })
 }
 
-/// Extract the archive and write its exact tree, `dist/build.json` included,
-/// to this repository's object store.
+/// Extract the archive and materialize its exact tree, `dist/build.json`
+/// included, in one credential-free scratch repository.
 pub(super) fn archive_source(
     root: &Path,
     scratch: &Path,
@@ -213,22 +192,11 @@ pub(super) fn archive_source(
             ],
         )?,
     )?;
-    let git_dir = successful_text(
-        "archive commit repository",
-        command(
-            root,
-            "git",
-            ["rev-parse", "--absolute-git-dir"].map(OsString::from),
-        )?,
-    )?;
     let worktree = extracted.join("spice");
-    let index = scratch.join("index");
+    let canonical_commit = canonical_source_commit(&worktree)?;
     let git = |arguments: Vec<OsString>| -> Result<Output, WindowsHostedError> {
         Command::new("git")
             .current_dir(&worktree)
-            .env("GIT_DIR", git_dir.trim())
-            .env("GIT_WORK_TREE", &worktree)
-            .env("GIT_INDEX_FILE", &index)
             .args(arguments)
             .output()
             .map_err(|source| WindowsHostedError::Launch {
@@ -236,6 +204,15 @@ pub(super) fn archive_source(
                 source,
             })
     };
+    successful("archive repository", git(vec!["init".into(), "-q".into()])?)?;
+    successful(
+        "archive checkout policy",
+        git(vec![
+            "config".into(),
+            "core.autocrlf".into(),
+            "false".into(),
+        ])?,
+    )?;
     successful(
         "archive tree",
         git(vec![
@@ -246,12 +223,23 @@ pub(super) fn archive_source(
             ".".into(),
         ])?,
     )?;
-    let tree = successful_text("archive tree object", git(vec!["write-tree".into()])?)?;
-    let canonical_commit = canonical_source_commit(&worktree)?;
+    successful(
+        "archive commit",
+        git(vec![
+            "-c".into(),
+            "user.name=spice-hosted".into(),
+            "-c".into(),
+            "user.email=hosted@invalid".into(),
+            "commit".into(),
+            "-q".into(),
+            "-m".into(),
+            format!("canonical source {canonical_commit}").into(),
+        ])?,
+    )?;
     Ok(ArchiveSource {
-        tree: tree.trim().to_owned(),
         canonical_commit,
         archive: identity,
+        worktree,
     })
 }
 
@@ -342,6 +330,39 @@ fn stage_head_build_record(
     Ok(())
 }
 
+fn blob_identity(root: &Path, path: &Path) -> Result<String, WindowsHostedError> {
+    successful_text(
+        "source workflow blob",
+        command(
+            root,
+            "git",
+            [
+                OsString::from("hash-object"),
+                OsString::from("--no-filters"),
+                path.as_os_str().to_owned(),
+            ],
+        )?,
+    )
+    .map(|identity| identity.trim().to_owned())
+}
+
+fn file_sha256(path: &Path) -> Result<String, WindowsHostedError> {
+    let mut file = fs::File::open(path).map_err(|source| WindowsHostedError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(WindowsHostedError::Output)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 fn tree_digest(root: &Path, commit: &str) -> Result<String, WindowsHostedError> {
     let mut child = Command::new("git")
         .current_dir(root)
@@ -375,54 +396,4 @@ fn tree_digest(root: &Path, commit: &str) -> Result<String, WindowsHostedError> 
         })?;
     successful("source tree", output)?;
     Ok(format!("{:x}", digest.finalize()))
-}
-
-pub(super) fn push_source(
-    root: &Path,
-    commit: &str,
-    source_ref: &str,
-) -> Result<(), WindowsHostedError> {
-    successful(
-        "source transfer",
-        command(
-            root,
-            "git",
-            [
-                OsString::from("push"),
-                OsString::from(REMOTE),
-                OsString::from(format!("{commit}:refs/tags/{source_ref}")),
-            ],
-        )?,
-    )?;
-    Ok(())
-}
-
-pub(super) fn delete_source(root: &Path, source_ref: &str) -> Result<(), WindowsHostedError> {
-    let deletion = command(
-        root,
-        "git",
-        [
-            OsString::from("push"),
-            OsString::from(REMOTE),
-            OsString::from(format!(":refs/tags/{source_ref}")),
-        ],
-    )?;
-    if deletion.status.success() {
-        return Ok(());
-    }
-    let observed = command(
-        root,
-        "git",
-        [
-            OsString::from("ls-remote"),
-            OsString::from("--tags"),
-            OsString::from(REMOTE),
-            OsString::from(format!("refs/tags/{source_ref}")),
-        ],
-    )?;
-    if observed.status.success() && observed.stdout.is_empty() {
-        return Ok(());
-    }
-    successful("source retirement", deletion)?;
-    Ok(())
 }

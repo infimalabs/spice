@@ -1,21 +1,20 @@
 //! Re-entry into one hosted stage's provider run after its client stopped
 //! observing it.
 //!
-//! Nothing local records a dispatched run. Attachment re-derives the archive's
-//! exact tree and admits a provider run only when its dispatch builds that
-//! tree: a `workflow_dispatch` run of the stage's workflow in the configured
-//! repository, from a parentless one-use commit carrying the archive's tree,
-//! at the tag naming the challenge that commit records. The stage then
-//! rebuilds its request from that challenge and admits the signed result as
-//! a fresh dispatch would.
+//! Nothing local records a dispatched run. Attachment re-derives the archive
+//! identities, reads the challenge from the run title, admits the retained
+//! immutable archive asset for that challenge, and requires the run to use the
+//! exact workflow blob carried by the archive on the configured branch.
 
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
 
 use serde::Deserialize;
-use serde::de::{DeserializeOwned, IgnoredAny};
+use serde::de::DeserializeOwned;
 
-use super::source::{self, PreparedSource};
+use super::source::PreparedSource;
+use super::transport::{self, Transport};
 use super::{WindowsHostedError, command, successful_text};
 
 /// Which provider run a hosted stage re-enters.
@@ -39,18 +38,19 @@ impl Attach {
     }
 }
 
-/// One provider run proven to build the current archive's one-use source.
+/// One provider run proven to consume the current canonical source archive.
 pub(super) struct Attached {
     pub(super) run_id: u64,
     pub(super) challenge: String,
-    pub(super) source: PreparedSource,
+    pub(super) transport: Transport,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct ProviderRun {
     id: u64,
     path: String,
     event: String,
+    display_title: String,
     head_branch: Option<String>,
     head_sha: String,
     status: Option<String>,
@@ -62,33 +62,34 @@ struct RunPage {
 }
 
 #[derive(Deserialize)]
-struct ProviderCommit {
-    tree: ProviderTree,
-    parents: Vec<IgnoredAny>,
-    message: String,
+struct ArtifactPage {
+    artifacts: Vec<ProviderArtifact>,
 }
 
 #[derive(Deserialize)]
-struct ProviderTree {
-    sha: String,
+struct ProviderArtifact {
+    expired: bool,
+    workflow_run: Option<ArtifactRun>,
+}
+#[derive(Deserialize)]
+struct ArtifactRun {
+    id: u64,
 }
 
-/// Admit the provider run `attach` names for the source archive at `archive`.
+/// Admit the provider run `attach` names for `source`.
 ///
 /// # Errors
 ///
-/// Refuses a run of another repository, workflow, or event, one whose one-use
-/// source is not the archive's exact tree, no unfinished matching run, or
-/// several; returns provider and archive failures.
+/// Refuses another repository, workflow, branch, event, challenge, workflow
+/// blob, or archive transport; returns provider and archive failures.
 pub(super) fn attach(
     root: &Path,
-    scratch: &Path,
     repository: &str,
+    branch: &str,
     workflow: &str,
-    archive: &Path,
+    source: &PreparedSource,
     attach: Attach,
 ) -> Result<Attached, WindowsHostedError> {
-    let archive = source::archive_source(root, scratch, archive)?;
     let candidates = match attach {
         Attach::Run(run_id) => vec![api(
             root,
@@ -102,27 +103,33 @@ pub(super) fn attach(
                     "repos/{repository}/actions/workflows/{file}/runs?event=workflow_dispatch&per_page=100"
                 ),
             )?;
-            unfinished(runs.workflow_runs)
+            let artifacts: ArtifactPage = api(
+                root,
+                format!("repos/{repository}/actions/artifacts?per_page=100"),
+            )?;
+            let releases = transport::releases(root, repository)?;
+            unretired(runs.workflow_runs, &artifacts.artifacts, &releases)
         }
     };
     let mut admitted = Vec::new();
     let mut refused = Vec::new();
     for run in candidates {
-        let commit = if is_object_id(&run.head_sha) {
-            api::<ProviderCommit>(
-                root,
-                format!("repos/{repository}/git/commits/{}", run.head_sha),
-            )
-            .map_err(|error| error.to_string())
-        } else {
-            Err("its source commit is malformed".to_owned())
-        };
-        match commit.and_then(|commit| admit_run(&run, &commit, workflow, &archive.tree)) {
-            Ok(challenge) => admitted.push(Candidate {
+        let admission = admit_run(&run, workflow, branch).and_then(|challenge| {
+            let workflow_blob = workflow_blob(root, repository, workflow, &run.head_sha)
+                .map_err(|error| error.to_string())?;
+            if workflow_blob != source.workflow_blob {
+                return Err("its workflow differs from the current source archive".to_owned());
+            }
+            let transport = transport::find(root, repository, &challenge, source)
+                .map_err(|error| error.to_string())?;
+            Ok(Candidate {
                 run_id: run.id,
-                commit: run.head_sha,
                 challenge,
-            }),
+                transport,
+            })
+        });
+        match admission {
+            Ok(candidate) => admitted.push(candidate),
             Err(reason) => refused.push(format!("run {}: {reason}", run.id)),
         }
     }
@@ -130,52 +137,139 @@ pub(super) fn attach(
     Ok(Attached {
         run_id: selected.run_id,
         challenge: selected.challenge,
-        source: source::attached(root, archive, selected.commit)?,
+        transport: selected.transport,
     })
 }
 
-/// One run whose dispatch builds the current archive.
+/// One admitted run and its retained source transport.
 #[derive(Debug, Eq, PartialEq)]
 struct Candidate {
     run_id: u64,
-    commit: String,
     challenge: String,
+    transport: Transport,
 }
 
-/// Runs the provider has not finished. A settled run keeps its artifacts as
-/// evidence, so only its explicit id re-enters it.
-fn unfinished(runs: Vec<ProviderRun>) -> Vec<ProviderRun> {
+/// Runs that still hold provider state: unfinished, owning an unexpired result
+/// artifact, or owning a retained archive transport.
+fn unretired(
+    runs: Vec<ProviderRun>,
+    artifacts: &[ProviderArtifact],
+    releases: &[transport::Release],
+) -> Vec<ProviderRun> {
+    let owners = artifacts
+        .iter()
+        .filter(|artifact| !artifact.expired)
+        .filter_map(|artifact| artifact.workflow_run.as_ref().map(|run| run.id))
+        .collect::<BTreeSet<_>>();
+    let transports = releases
+        .iter()
+        .map(|release| release.tag_name.as_str())
+        .collect::<BTreeSet<_>>();
     runs.into_iter()
-        .filter(|run| run.status.as_deref() != Some("completed"))
+        .filter(|run| {
+            run.status.as_deref() != Some("completed")
+                || owners.contains(&run.id)
+                || challenge_from_title(&run.display_title).is_some_and(|challenge| {
+                    transports.contains(transport::release_name(challenge).as_str())
+                })
+        })
         .collect()
 }
 
-/// The challenge `run` was dispatched with, when its dispatch builds `tree`
-/// through `workflow`; otherwise why it is unrelated.
-fn admit_run(
-    run: &ProviderRun,
-    commit: &ProviderCommit,
-    workflow: &str,
-    tree: &str,
-) -> Result<String, String> {
+/// The challenge `run` was dispatched with when it runs `workflow` from the
+/// configured branch.
+fn admit_run(run: &ProviderRun, workflow: &str, branch: &str) -> Result<String, String> {
     if run.path != workflow {
         return Err(format!("it runs {}, not {workflow}", run.path));
     }
     if run.event != "workflow_dispatch" {
         return Err(format!("it was started by {}, not a dispatch", run.event));
     }
-    if !commit.parents.is_empty() || commit.tree.sha != tree {
-        return Err("its source is not the current source archive's one-use commit".to_owned());
-    }
-    let challenge = source::archive_challenge(&commit.message)
-        .ok_or_else(|| "its source commit records no hosted challenge".to_owned())?;
-    let source_ref = format!("hosted-{}", &challenge[..24]);
-    if run.head_branch.as_deref() != Some(source_ref.as_str()) {
+    if run.head_branch.as_deref() != Some(branch) {
         return Err(format!(
-            "its source ref is not {source_ref}, the tag its commit's challenge names"
+            "its workflow branch is {:?}, not {branch}",
+            run.head_branch
         ));
     }
-    Ok(challenge.to_owned())
+    if !is_object_id(&run.head_sha) {
+        return Err("its workflow commit is malformed".to_owned());
+    }
+    challenge_from_title(&run.display_title)
+        .map(str::to_owned)
+        .ok_or_else(|| "its run title records no hosted challenge".to_owned())
+}
+
+const RUN_TITLE_PREFIX: &str = "Hosted archive ";
+const CHALLENGE_HEX_LENGTH: usize = 64;
+fn challenge_from_title(title: &str) -> Option<&str> {
+    let challenge = title.strip_prefix(RUN_TITLE_PREFIX)?;
+    (challenge.len() == CHALLENGE_HEX_LENGTH
+        && challenge
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then_some(challenge)
+}
+
+fn workflow_blob(
+    root: &Path,
+    repository: &str,
+    workflow: &str,
+    commit: &str,
+) -> Result<String, WindowsHostedError> {
+    #[derive(Deserialize)]
+    struct Content {
+        sha: String,
+    }
+    let content: Content = api(
+        root,
+        format!("repos/{repository}/contents/{workflow}?ref={commit}"),
+    )?;
+    Ok(content.sha)
+}
+
+/// Require the configured provider branch to carry the workflow blob admitted
+/// by the selected source before creating provider state.
+pub(super) fn admit_branch_workflow(
+    root: &Path,
+    repository: &str,
+    branch: &str,
+    workflow: &str,
+    expected_blob: &str,
+) -> Result<(), WindowsHostedError> {
+    let blob = workflow_blob(root, repository, workflow, branch)?;
+    if blob != expected_blob {
+        return Err(WindowsHostedError::ProviderResponse(format!(
+            "provider branch {branch} carries workflow blob {blob}, not {expected_blob}"
+        )));
+    }
+    Ok(())
+}
+
+/// Admit one run's workflow identity before trusting its attestations.
+pub(super) fn workflow_commit(
+    root: &Path,
+    repository: &str,
+    branch: &str,
+    workflow: &str,
+    challenge: &str,
+    expected_blob: &str,
+    run_id: u64,
+) -> Result<String, WindowsHostedError> {
+    let run: ProviderRun = api(root, format!("repos/{repository}/actions/runs/{run_id}"))?;
+    let observed =
+        admit_run(&run, workflow, branch).map_err(WindowsHostedError::ProviderResponse)?;
+    if observed != challenge {
+        return Err(WindowsHostedError::ProviderResponse(format!(
+            "provider run {run_id} records challenge {observed}, not {challenge}"
+        )));
+    }
+    let blob = workflow_blob(root, repository, workflow, &run.head_sha)?;
+    if blob != expected_blob {
+        return Err(WindowsHostedError::ProviderResponse(format!(
+            "provider run {run_id} used workflow blob {blob}, not {expected_blob}"
+        )));
+    }
+    Ok(run.head_sha)
 }
 
 fn select(
@@ -223,12 +317,14 @@ fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHoste
 #[cfg(test)]
 mod tests {
     use super::{
-        Attach, Candidate, ProviderCommit, ProviderRun, ProviderTree, admit_run, select, unfinished,
+        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, admit_run,
+        challenge_from_title, select, unretired,
     };
     use crate::hosted::client::WindowsHostedError;
+    use crate::hosted::client::transport::Transport;
 
     const WORKFLOW: &str = ".github/workflows/linux.yml";
-    const TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const BRANCH: &str = "main";
     const CHALLENGE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn run(id: u64, status: &str) -> ProviderRun {
@@ -236,27 +332,21 @@ mod tests {
             id,
             path: WORKFLOW.to_owned(),
             event: "workflow_dispatch".to_owned(),
-            head_branch: Some(format!("hosted-{}", &CHALLENGE[..24])),
+            display_title: format!("Hosted archive {CHALLENGE}"),
+            head_branch: Some(BRANCH.to_owned()),
             head_sha: "a".repeat(40),
             status: Some(status.to_owned()),
-        }
-    }
-
-    fn commit() -> ProviderCommit {
-        ProviderCommit {
-            tree: ProviderTree {
-                sha: TREE.to_owned(),
-            },
-            parents: Vec::new(),
-            message: format!("spice hosted source archive {CHALLENGE}\n"),
         }
     }
 
     fn candidate(run_id: u64) -> Candidate {
         Candidate {
             run_id,
-            commit: "a".repeat(40),
             challenge: CHALLENGE.to_owned(),
+            transport: Transport {
+                release_id: 11,
+                asset_id: 12,
+            },
         }
     }
 
@@ -269,12 +359,11 @@ mod tests {
     }
 
     #[test]
-    fn only_the_archive_one_use_dispatch_is_adoptable() {
+    fn only_the_policy_workflow_dispatch_is_adoptable() {
         assert_eq!(
-            admit_run(&run(1, "in_progress"), &commit(), WORKFLOW, TREE).as_deref(),
+            admit_run(&run(1, "in_progress"), WORKFLOW, BRANCH).as_deref(),
             Ok(CHALLENGE)
         );
-
         let other_workflow = ProviderRun {
             path: ".github/workflows/windows.yml".to_owned(),
             ..run(1, "in_progress")
@@ -283,41 +372,47 @@ mod tests {
             event: "push".to_owned(),
             ..run(1, "in_progress")
         };
-        let other_tag = ProviderRun {
-            head_branch: Some("hosted-ffffffffffffffffffffffff".to_owned()),
+        let other_branch = ProviderRun {
+            head_branch: Some("release".to_owned()),
             ..run(1, "in_progress")
         };
-        for unrelated in [other_workflow, pushed, other_tag] {
-            assert!(admit_run(&unrelated, &commit(), WORKFLOW, TREE).is_err());
+        let other_title = ProviderRun {
+            display_title: "Hosted archive not-a-challenge".to_owned(),
+            ..run(1, "in_progress")
+        };
+        for unrelated in [other_workflow, pushed, other_branch, other_title] {
+            assert!(admit_run(&unrelated, WORKFLOW, BRANCH).is_err());
         }
-
-        let other_tree = ProviderCommit {
-            tree: ProviderTree {
-                sha: "b".repeat(40),
-            },
-            ..commit()
-        };
-        let parented = ProviderCommit {
-            parents: vec![serde::de::IgnoredAny],
-            ..commit()
-        };
-        let snapshot = ProviderCommit {
-            message: format!("spice hosted source {CHALLENGE}\n"),
-            ..commit()
-        };
-        for unrelated in [other_tree, parented, snapshot] {
-            assert!(admit_run(&run(1, "in_progress"), &unrelated, WORKFLOW, TREE).is_err());
-        }
+        assert_eq!(
+            challenge_from_title(&format!("Hosted archive {CHALLENGE}")),
+            Some(CHALLENGE)
+        );
     }
 
     #[test]
-    fn sole_considers_only_unfinished_runs() {
-        let runs = vec![run(1, "in_progress"), run(2, "completed"), run(3, "queued")];
-        let ids = unfinished(runs)
+    fn sole_considers_unfinished_runs_and_retained_results() {
+        let artifacts = [
+            ProviderArtifact {
+                expired: false,
+                workflow_run: Some(ArtifactRun { id: 2 }),
+            },
+            ProviderArtifact {
+                expired: true,
+                workflow_run: Some(ArtifactRun { id: 3 }),
+            },
+        ];
+        let runs = vec![
+            run(1, "in_progress"),
+            run(2, "completed"),
+            run(3, "completed"),
+            run(4, "queued"),
+            run(5, "completed"),
+        ];
+        let ids = unretired(runs, &artifacts, &[])
             .iter()
             .map(|run| run.id)
             .collect::<Vec<_>>();
-        assert_eq!(ids, [1, 3]);
+        assert_eq!(ids, [1, 2, 4]);
     }
 
     #[test]

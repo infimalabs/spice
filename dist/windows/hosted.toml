@@ -2,6 +2,7 @@ schema = 1
 provider = "github-actions"
 repository = "infimalabs/spice"
 workflow = ".github/workflows/windows.yml"
+branch = "main"
 
 [image]
 label = "windows-2025"

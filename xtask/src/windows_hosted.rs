@@ -1,4 +1,4 @@
-//! GitHub-hosted disposable Windows execution over a content-addressed source ref.
+//! GitHub-hosted disposable Windows execution over a canonical source archive.
 
 use std::io::Write;
 use std::path::Path;
