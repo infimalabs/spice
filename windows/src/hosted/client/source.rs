@@ -78,7 +78,7 @@ pub(super) fn prepare(
             )
         }
     };
-    let workflow_blob = blob_identity(root, &workflow_root.join(workflow))?;
+    let workflow_blob = workflow_blob(root, &workflow_root.join(workflow))?;
     let archive_sha256 = file_sha256(&archive_path)?;
     Ok(PreparedSource {
         archive_path,
@@ -154,7 +154,7 @@ pub(super) struct ArchiveSource {
     pub(super) worktree: PathBuf,
 }
 
-fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
+pub(super) fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
     dist::source_identity(root)
         .map_err(WindowsHostedError::ProviderResponse)?
         .map(|identity| identity.commit().to_owned())
@@ -330,7 +330,7 @@ fn stage_head_build_record(
     Ok(())
 }
 
-fn blob_identity(root: &Path, path: &Path) -> Result<String, WindowsHostedError> {
+pub(super) fn workflow_blob(root: &Path, path: &Path) -> Result<String, WindowsHostedError> {
     successful_text(
         "source workflow blob",
         command(
@@ -346,7 +346,7 @@ fn blob_identity(root: &Path, path: &Path) -> Result<String, WindowsHostedError>
     .map(|identity| identity.trim().to_owned())
 }
 
-fn file_sha256(path: &Path) -> Result<String, WindowsHostedError> {
+pub(super) fn file_sha256(path: &Path) -> Result<String, WindowsHostedError> {
     let mut file = fs::File::open(path).map_err(|source| WindowsHostedError::Io {
         path: path.to_path_buf(),
         source,

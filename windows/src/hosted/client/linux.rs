@@ -15,10 +15,10 @@ use sha2::{Digest as _, Sha256};
 use wire::Domain;
 
 use super::{
-    Attach, Bound, Cancellation, HostedSource, POLICY, Policy, Scratch, WindowsHostedError,
-    command, digest_file, download_artifact, drive, publish_artifacts,
-    require_public_attestation_repository, successful_text, verify_attestation, watch_run,
-    workspace_root,
+    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs, Scratch,
+    WindowsHostedError, challenge, command, digest_file, download_artifact, drive,
+    publish_artifacts, require_public_attestation_repository, source, successful_text,
+    verify_attestation, watch_run, workspace_root,
 };
 
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
@@ -48,7 +48,10 @@ struct LinuxResult {
     run_id: u64,
     source_commit: String,
     archive_sha256: String,
-    transport_asset: u64,
+    release_inputs_run: u64,
+    release_inputs_challenge: String,
+    app: String,
+    canvas: String,
     tree: String,
     image_os: String,
     image_version: String,
@@ -81,7 +84,7 @@ struct LinuxArtifact {
 /// failures. A stage that ran and failed is an `Ok` outcome carrying its exit
 /// and log.
 pub fn linux_hosted_stage(
-    archive: &Path,
+    release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
     destination: &Path,
 ) -> Result<LinuxHostedStage, WindowsHostedError> {
@@ -92,111 +95,183 @@ pub fn linux_hosted_stage(
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
     let cancellation = Cancellation::install()?;
-    let bound = Bound::new(
+    let source = source::prepare(
         &root,
         scratch.path(),
-        super::ProviderRoute {
-            repository: &policy.repository,
-            branch: &policy.branch,
-            workflow: WORKFLOW_PATH,
-        },
-        HostedSource::Archive(archive),
-        attach,
-        &cancellation,
+        WORKFLOW_PATH,
+        HostedSource::Archive(release_inputs.source()),
     )?;
-    let challenge = &bound.challenge;
-    let source = &bound.source;
+    super::attach::admit_branch_workflow(
+        &root,
+        &policy.repository,
+        &policy.branch,
+        WORKFLOW_PATH,
+        &source.workflow_blob,
+    )?;
+    let (challenge, attached) = match attach {
+        None => (challenge()?, None),
+        Some(attach) => {
+            let attached = super::attach::attach_run(
+                &root,
+                &policy.repository,
+                &policy.branch,
+                WORKFLOW_PATH,
+                &source.workflow_blob,
+                attach,
+            )?;
+            (attached.challenge, Some(attached.run_id))
+        }
+    };
+    let manifest = release_inputs.manifest();
     let source_archive = source.archive.to_string();
     let proof_receipt = proof_receipt_path(&root, &source_archive)?;
-    let transport_asset = bound.transport.asset_id;
-    let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
+    let run = HostedRun {
+        root: &root,
+        scratch: scratch.path(),
+        repository: &policy.repository,
+        branch: &policy.branch,
+        challenge: &challenge,
+        workflow_blob: &source.workflow_blob,
+        transport: None,
+    };
     let inputs = Ok(serde_json::json!({
         "challenge": challenge,
         "source_commit": source.canonical_commit,
         "source": source_archive,
         "archive_sha256": source.archive_sha256,
-        "transport_asset": bound.transport.asset_id.to_string(),
+        "release_inputs_run": manifest.run_id.to_string(),
+        "release_inputs_challenge": manifest.challenge,
+        "app": manifest.app,
+        "canvas": manifest.canvas,
+        "proof_identity": manifest.proof_identity,
         "tree": source.tree,
     }));
+    let completion = Completion {
+        run,
+        cancellation: &cancellation,
+        challenge: &challenge,
+        source: &source,
+        manifest,
+        destination: &destination,
+        source_archive: &source_archive,
+        proof_receipt: &proof_receipt,
+    };
     drive(
         &run,
-        bound.attached,
+        attached,
         &cancellation,
         WORKFLOW_PATH,
         inputs,
-        |run_id| {
-            watch_run(run.root, run.repository, run_id, &cancellation)?;
-            let artifact = download_artifact(&run, run_id, &format!("linux-{challenge}"))?;
-            let result_path = artifact.join("result.json");
-            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
-            let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
-                path: result_path.clone(),
-                source,
-            })?;
-            let result: LinuxResult =
-                serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
-            admit_result(&result, challenge, source, transport_asset, run_id)?;
-            let log_path = artifact.join("stage.log");
-            let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
-                path: log_path.clone(),
-                source,
-            })?;
-            if sha256(&log) != result.log_sha256 {
-                return Err(differs("stage.log"));
-            }
-            let stage = artifact.join("stage");
-            let artifacts = admit_inventory(&stage, &result.artifacts)?;
-            let proof_log_path = artifact.join("proof.log");
-            verify_attestation(&run, WORKFLOW_PATH, run_id, &proof_log_path)?;
-            let proof_log = fs::read(&proof_log_path).map_err(|source| WindowsHostedError::Io {
-                path: proof_log_path.clone(),
-                source,
-            })?;
-            if sha256(&proof_log) != result.proof_log_sha256 {
-                return Err(differs("proof.log"));
-            }
-            let proof = artifact.join("proof");
-            let proof_artifacts = admit_inventory(&proof, &result.proof_artifacts)?;
-            admit_proof_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
-            if result.exit_code == 0 {
-                verify_attestation(&run, WORKFLOW_PATH, run_id, &proof.join(PROOF_RECEIPT))?;
-                publish_artifacts(&stage, &artifacts, &destination, &source_archive, None)?;
-                publish_artifacts(
-                    &proof,
-                    &proof_artifacts,
-                    proof_receipt
-                        .parent()
-                        .expect("proof receipt path has a parent"),
-                    &source_archive,
-                    None,
-                )?;
-            }
-            Ok(LinuxHostedStage {
-                run_id,
-                exit_code: result.exit_code,
-                proof_image: result.proof_image,
-                proof_exit_code: result.proof_exit_code,
-                proof_log,
-                runner_image: format!("{} {}", result.image_os, result.image_version),
-                log,
-            })
-        },
+        |run_id| complete_run(&completion, run_id),
     )
+}
+
+struct Completion<'a> {
+    run: HostedRun<'a>,
+    cancellation: &'a Cancellation,
+    challenge: &'a str,
+    source: &'a super::source::PreparedSource,
+    manifest: &'a crate::hosted::release_inputs::ResultManifest,
+    destination: &'a Path,
+    source_archive: &'a str,
+    proof_receipt: &'a Path,
+}
+
+fn complete_run(
+    completion: &Completion<'_>,
+    run_id: u64,
+) -> Result<LinuxHostedStage, WindowsHostedError> {
+    let Completion {
+        run,
+        cancellation,
+        challenge,
+        source,
+        manifest,
+        destination,
+        source_archive,
+        proof_receipt,
+    } = completion;
+    watch_run(run.root, run.repository, run_id, cancellation)?;
+    let artifact = download_artifact(run, run_id, &format!("linux-{challenge}"))?;
+    let result_path = artifact.join("result.json");
+    verify_attestation(run, WORKFLOW_PATH, run_id, &result_path)?;
+    let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
+        path: result_path.clone(),
+        source,
+    })?;
+    let result: LinuxResult = serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
+    admit_result(&result, challenge, source, manifest, run_id)?;
+    let log_path = artifact.join("stage.log");
+    let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
+        path: log_path.clone(),
+        source,
+    })?;
+    if sha256(&log) != result.log_sha256 {
+        return Err(differs("stage.log"));
+    }
+    let stage = artifact.join("stage");
+    let artifacts = admit_inventory(&stage, &result.artifacts)?;
+    let proof_log_path = artifact.join("proof.log");
+    verify_attestation(run, WORKFLOW_PATH, run_id, &proof_log_path)?;
+    let proof_log = fs::read(&proof_log_path).map_err(|source| WindowsHostedError::Io {
+        path: proof_log_path.clone(),
+        source,
+    })?;
+    if sha256(&proof_log) != result.proof_log_sha256 {
+        return Err(differs("proof.log"));
+    }
+    let proof = artifact.join("proof");
+    let proof_artifacts = admit_inventory(&proof, &result.proof_artifacts)?;
+    admit_proof_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
+    if result.exit_code == 0 {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &proof.join(PROOF_RECEIPT))?;
+        publish_artifacts(
+            &stage,
+            &artifacts,
+            destination,
+            source_archive,
+            None,
+            Some(manifest),
+        )?;
+        publish_artifacts(
+            &proof,
+            &proof_artifacts,
+            proof_receipt
+                .parent()
+                .expect("proof receipt path has a parent"),
+            source_archive,
+            None,
+            None,
+        )?;
+    }
+    Ok(LinuxHostedStage {
+        run_id,
+        exit_code: result.exit_code,
+        proof_image: result.proof_image,
+        proof_exit_code: result.proof_exit_code,
+        proof_log,
+        runner_image: format!("{} {}", result.image_os, result.image_version),
+        log,
+    })
 }
 
 fn admit_result(
     result: &LinuxResult,
     challenge: &str,
     source: &super::source::PreparedSource,
-    transport_asset: u64,
+    inputs: &crate::hosted::release_inputs::ResultManifest,
     run_id: u64,
 ) -> Result<(), WindowsHostedError> {
     if result.challenge != challenge
         || result.source != source.archive.to_string()
         || result.source_commit != source.canonical_commit
         || result.archive_sha256 != source.archive_sha256
-        || result.transport_asset != transport_asset
+        || result.release_inputs_run != inputs.run_id
+        || result.release_inputs_challenge != inputs.challenge
+        || result.app != inputs.app.to_string()
+        || result.canvas != inputs.canvas.to_string()
         || result.tree != source.tree
+        || result.proof_image != inputs.proof_identity
     {
         return Err(WindowsHostedError::ProviderResponse(
             "hosted Linux result answers another request".to_owned(),

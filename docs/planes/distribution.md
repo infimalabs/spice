@@ -102,40 +102,31 @@ is the app's only carrier.
 The app source identity spells each relative path as UTF-8 components joined by
 `/` and orders inputs by that spelling, independent of the host path separator.
 
-**Invariant —** The release app is compiled once, by the Linux target build.
-Compiled Wasm is not yet byte-identical across build hosts: remapped paths
-keep host separators, and Cargo's crate hashes take in host-built
-proc-macros. A Darwin or Windows `stage-target` therefore runs no app
-compiler. It reads the Linux payload staged from the same archive, from
-`SPICE_LINUX_STAGE` or else the stage root, extracts the rack its executable
-links, and requires that rack's digest to equal the payload's recorded canvas.
-It then re-assembles the rack from that rack's app members and its own tracked
-sources, and links it only when the result is byte-identical. A missing Linux
-payload, one from another archive, or any mismatch refuses before the native
-build. A hosted runner adopts the same canvas from the Linux run's artifact,
-described below.
+**Invariant —** The provider preflight compiles the release app exactly once.
+`.github/workflows/release-inputs.yml` checks out one exact landed `main` SHA,
+creates the canonical `source.tar`, compiles the app, assembles its admitted
+rack as `canvas.zip`, and publishes both with `result.json` as
+`release-inputs-CHALLENGE`. GitHub OIDC attests all three files. The signed
+result binds the source commit and tree, archive and canvas identities, app
+generation, proof identity, toolchains, request, workflow, and run.
 
-**Invariant —** One release stages every target from one source archive.
-`spice dev xtask -- source-archive` is the one point staging reads Git: it
-requires a checkout exactly at HEAD, with no tracked change, no untracked path
-outside release output, and no index flag hiding either, and writes HEAD's
-tree with its canonical `dist/build.json` to `dist/stage/source.tar`. A local
-`stage-target` extracts that archive into a fresh scratch root under the build
-root and builds there with no `.git`, so the version is the record the archive
-carries and the rack `build.json` is byte-identical to the archive's; the
-archive bytes are rechecked immediately before the target payload pointer is
-published. Every hosted route uploads those exact archive bytes as an immutable
-challenge-bound asset; the workflow verifies their raw digest, extracts them
-into an empty workspace, and creates only a local credential-free repository
-for build-tool discovery. Each signed request and result binds the asset,
-archive identity, canonical commit, recursive tree, workflow, and run; the
-client refuses a returned payload recording any other archive. Tracked
-attributes classify binary paths without conversion and force every text
-checkout to LF on every host, so the archive's app inputs remain byte-identical
-on Windows, Linux, and macOS. The release
-names the archive identity once; manifest publication refuses targets staged
-from two archives, and `spice release` refuses a sealed manifest whose archive
-is not the one at the stage root.
+Linux, Darwin, and Windows receive the same preflight run ID. Each downloads
+and admits those exact source and canvas bytes before building. Every native
+stage links `canvas.zip` unchanged through `SPICE_RELEASE_CANVAS` and records
+the preflight app and canvas identities in its payload; no native host compiles
+or re-assembles the app. A payload with another archive, app, or canvas is
+refused before publication.
+
+**Invariant —** One release stages every target from one provider-produced
+source archive. No workstation or native target produces release input bytes.
+The preflight requires a clean checkout exactly at the requested landed SHA
+and writes its tree with canonical `dist/build.json` to `source.tar`. Native
+workflows verify its raw SHA-256, canonical archive identity, source commit,
+recursive tree, preflight workflow, challenge, and run before extraction into
+an empty workspace. Tracked attributes classify binary paths without
+conversion and force every text checkout to LF on every host. Manifest
+publication refuses targets staged from different archive, app, or canvas
+identities.
 
 **Invariant —** Every appliance executable produced by a current build path
 links one spice rack: a ZIP whose `app/` members are the staged generation's
@@ -336,51 +327,28 @@ files with GitHub OIDC provenance. Linux, Darwin, and Windows download and
 admit those exact files independently, so no workstation or native target
 creates release input bytes and the three native builds can run in parallel.
 
-**Invariant —** `stage-target x86_64-unknown-linux-musl --unsigned --hosted`
-stages Linux on one fresh GitHub-hosted `ubuntu-24.04` X64 machine from
-`dist/stage/source.tar`, never from the developer host. The client uploads the
-archive unchanged as the sole asset of a challenge-bound draft GitHub Release
-and dispatches `.github/workflows/linux.yml` from `main`. The workflow admits
-the asset ID, raw archive SHA-256, canonical archive identity, source commit,
-recursive tree digest, workflow blob, challenge, and GitHub-hosted runner
-before any build. It extracts the archive into an empty workspace, creates a
-local credential-free Git repository for repository discovery, builds `xtask`
-and the current vendor-set proof image, runs `stage-target … --sealed`, and
-uploads the stage log, staged files without the archive, and `result.json`.
-That signed result records every admitted source field, the run and runner,
-proof-image identity, stage exit, log digest, and the size and SHA-256 of every
-staged file. A separate `attest` job, which runs no repository code, alone
-holds OIDC identity-token and Attestations write and signs `result.json` plus
-every staged file. The client verifies those attestations against the exact
-admitted `linux.yml` blob on `main`, requires the result to answer its own
-request and run on `ubuntu24` `X64`, and requires the downloaded log and stage
-to match the signed digests and inventory. Only after a zero exit, and with
-every payload recording the requested archive, does it publish into
-`dist/stage`, payload pointer last. It cancels an interrupted run and deletes
-the direct archive transport after every terminal outcome; run artifacts remain
-evidence until provider retention expires them.
+**Invariant —** Hosted release staging starts with one successful
+`release-inputs.yml` preflight, then dispatches Linux, Darwin, and Windows
+concurrently against that pinned run. `spice dev xtask -- stage-hosted-release
+INPUTS_RUN` performs that fan-out. Each platform remains independently
+dispatchable with `stage-target … --hosted --release-inputs INPUTS_RUN`, and
+may re-enter its own native run with `--attach RUN_ID`.
 
-**Invariant —** A successful hosted Linux run also uploads its payload and
-executable object as the artifact `canvas-DIGEST`, named by the payload's
-canvas digest; it expires after seven days. Before dispatch, hosted Darwin and
-Windows clients read the Linux payload staged in `dist/stage` from the same
-archive, find the newest unexpired artifact with that name whose owner is a
-completed-success `linux.yml` run, and bind its run id and digest into the
-request: `linux_run` and `canvas` inputs for `macos.yml`, a `canvas` pin in the
-Windows request. An artifact from a failed, incomplete, or different workflow
-is never eligible. Each runner downloads the admitted artifact beside its
-checkout and refuses a payload recording another canvas. Windows seals it
-read-only for the guest. The stage then adopts it through `SPICE_LINUX_STAGE`.
-The client publishes a returned payload only when its app generation and canvas
-equal the staged Linux payload's. No ref is pushed for the canvas. A missing
-Linux payload or eligible unexpired artifact refuses before dispatch.
+The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
+workflow downloads the preflight artifact, admits its signed source, app,
+canvas, proof, tree, workflow, and run identities, then builds `xtask` and the
+current vendor-set proof image. It requires the image identity to equal the
+preflight proof identity, runs `stage-target … --sealed` with the raw provider
+canvas, and uploads its log, staged files, and `result.json`. A separate
+credential-only job attests those outputs. The client verifies every
+attestation against the exact admitted workflow blob and publishes only a
+zero-exit payload recording the requested archive, app, and canvas.
 
-**Invariant —** One retained hosted publication stages Linux first so its
-provider-built proof image supplies the exact `sha256:...` identity. Darwin and
-Windows then receive that identity through `--proof-container`; all three
-payloads must record it byte-identically. Hosted Linux refuses an explicit
-image because the sealed provider job owns that build, while hosted Darwin and
-Windows refuse publication without the selected identity.
+Darwin and Windows independently download the same preflight artifact and
+perform the same identity admissions. Windows seals the source and raw canvas
+read-only for the isolated guest. No platform depends on another native run,
+discovers a Linux canvas, pushes a temporary source ref, or uses an alternate
+source route.
 
 The successful Linux stage immediately runs its staged executable's `spice
 proof --target x86_64-unknown-linux-musl` on the same hosted runner, while the
@@ -565,28 +533,19 @@ has transport-retirement authority, and the client never deletes workflow runs.
 
 **Invariant —** Losing observation never ends a healthy run. After dispatch,
 the client waits a short bounded interval and requires the provider's REST API
-to answer for the exact returned run before observation begins. A run that
-remains unreadable is left with its archive transport, and the refusal names the
-run for attachment; dispatch never repeats. The watcher then refreshes every 30
-seconds, so parallel target clients stay well inside the account's shared hourly
-REST quota for a full-length run. When the watcher exits, the client asks the
-provider for the run's state and restarts it while the run is unfinished. When
-the quota is spent, the client waits for its announced reset; a completion step
-that fails while the quota is spent leaves the run whole instead of reporting
-it failed. When the client cannot observe the run otherwise, it leaves the run,
-its artifacts, and its archive transport untouched and names the run id. Every
-hosted stage re-enters such a run without redispatch through `--attach RUN_ID`,
-or a bare `--attach`: the Windows route and the `--hosted` Linux and Darwin
-routes accept it. No local record names a dispatched run. Attachment re-derives
-every source identity from `dist/stage/source.tar`, reads the challenge from the
-run title, admits the exact retained draft-release asset, and requires a
-`workflow_dispatch` run of the configured workflow from the admitted `main`
-workflow blob. A bare `--attach` considers only runs that still hold provider
-state: unfinished, owning an unexpired result artifact, or owning a retained
-archive transport. It refuses unless exactly one matches. The stage rebuilds
-its request from that challenge and admits, publishes, and retires exactly as a
-fresh dispatch does; explicit cancellation of an attached run still cancels it
-and deletes only its archive transport.
+to answer for the exact returned run before observation begins. An unreadable
+run is left intact and the refusal names its run for attachment; dispatch never
+repeats. The watcher refreshes every 30 seconds. When it exits, the client asks
+the provider for current state and resumes while unfinished; spent quota waits
+for its announced reset.
+
+Every provider preflight and native stage re-enters without redispatch through
+an explicit run ID. Native attachment also names the pinned preflight run, so
+it reconstructs the same signed request without local recovery state. The
+client admits the exact workflow, challenge, request, result, artifacts, and
+source/app/canvas identities before publication. Bare native attachment
+considers only unfinished runs or runs retaining their signed result artifact
+and refuses unless exactly one matches.
 
 Tokens, mutable endpoints, and provider account configuration are never tracked
 policy. Rotate or revoke GitHub credentials in the provider, then run

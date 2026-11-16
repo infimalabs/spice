@@ -9,9 +9,9 @@ use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use super::{
-    Attach, Bound, Cancellation, HostedSource, Scratch, WindowsHostedError, canvas,
-    download_artifact, drive, publish_artifacts, require_public_attestation_repository,
-    verify_attestation, watch_run, workspace_root,
+    Attach, Cancellation, HostedRun, HostedSource, ReleaseInputs, Scratch, WindowsHostedError,
+    challenge, download_artifact, drive, publish_artifacts, require_public_attestation_repository,
+    source, verify_attestation, watch_run, workspace_root,
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
@@ -34,9 +34,10 @@ struct MacosResult {
     source_commit: String,
     source: String,
     archive_sha256: String,
-    transport_asset: u64,
+    release_inputs_run: u64,
+    release_inputs_challenge: String,
     tree: String,
-    linux_run: u64,
+    app: String,
     canvas: String,
     run_id: u64,
     image_os: String,
@@ -47,11 +48,9 @@ struct MacosResult {
 struct ExpectedResult<'a> {
     challenge: &'a str,
     source: &'a super::source::PreparedSource,
-    transport_asset: u64,
+    inputs: &'a crate::hosted::release_inputs::ResultManifest,
     run_id: u64,
-    proof_container: &'a str,
     image: &'a Image,
-    canvas: &'a canvas::LinuxCanvas,
 }
 
 #[derive(Deserialize)]
@@ -100,9 +99,8 @@ impl Policy {
 /// Returns provider, attestation, attachment, stage-admission, and
 /// publication failures.
 pub fn macos_hosted_stage(
-    archive: &Path,
+    release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
-    proof_container: &str,
     destination: &Path,
 ) -> Result<MacosHostedStage, WindowsHostedError> {
     require_public_attestation_repository()?;
@@ -112,38 +110,59 @@ pub fn macos_hosted_stage(
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
     let cancellation = Cancellation::install()?;
-    let bound = Bound::new(
+    let source = source::prepare(
         &root,
         scratch.path(),
-        super::ProviderRoute {
-            repository: &policy.repository,
-            branch: &policy.branch,
-            workflow: WORKFLOW_PATH,
-        },
-        HostedSource::Archive(archive),
-        attach,
-        &cancellation,
+        WORKFLOW_PATH,
+        HostedSource::Archive(release_inputs.source()),
     )?;
-    let challenge = &bound.challenge;
-    let source = &bound.source;
+    super::attach::admit_branch_workflow(
+        &root,
+        &policy.repository,
+        &policy.branch,
+        WORKFLOW_PATH,
+        &source.workflow_blob,
+    )?;
+    let (challenge, attached) = match attach {
+        None => (challenge()?, None),
+        Some(attach) => {
+            let attached = super::attach::attach_run(
+                &root,
+                &policy.repository,
+                &policy.branch,
+                WORKFLOW_PATH,
+                &source.workflow_blob,
+                attach,
+            )?;
+            (attached.challenge, Some(attached.run_id))
+        }
+    };
+    let manifest = release_inputs.manifest();
     let source_archive = source.archive.to_string();
-    let transport_asset = bound.transport.asset_id;
-    let canvas = canvas::locate(&root, &policy.repository, &destination, &source_archive)?;
-    let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
+    let run = HostedRun {
+        root: &root,
+        scratch: scratch.path(),
+        repository: &policy.repository,
+        branch: &policy.branch,
+        challenge: &challenge,
+        workflow_blob: &source.workflow_blob,
+        transport: None,
+    };
     let inputs = Ok(serde_json::json!({
         "challenge": challenge,
         "source_commit": source.canonical_commit,
         "source": source_archive,
         "archive_sha256": source.archive_sha256,
-        "transport_asset": bound.transport.asset_id.to_string(),
+        "release_inputs_run": manifest.run_id.to_string(),
+        "release_inputs_challenge": manifest.challenge,
         "tree": source.tree,
-        "proof_container": proof_container,
-        "linux_run": canvas.pin.run_id.to_string(),
-        "canvas": canvas.pin.digest.to_string(),
+        "proof_container": manifest.proof_identity,
+        "app": manifest.app,
+        "canvas": manifest.canvas,
     }));
     drive(
         &run,
-        bound.attached,
+        attached,
         &cancellation,
         WORKFLOW_PATH,
         inputs,
@@ -157,20 +176,20 @@ pub fn macos_hosted_stage(
             admit_result(
                 &result,
                 &ExpectedResult {
-                    challenge,
-                    source,
-                    transport_asset,
+                    challenge: &challenge,
+                    source: &source,
+                    inputs: manifest,
                     run_id,
-                    proof_container,
                     image: &policy.image,
-                    canvas: &canvas,
                 },
             )?;
             let artifacts = admit_stage(
                 &stage,
                 &source.canonical_commit,
                 &source_archive,
-                proof_container,
+                &manifest.proof_identity,
+                &manifest.canvas,
+                &manifest.app,
                 &policy.toolchain,
             )?;
             verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
@@ -182,7 +201,8 @@ pub fn macos_hosted_stage(
                 &artifacts,
                 &destination,
                 &source_archive,
-                Some(&canvas),
+                None,
+                Some(manifest),
             )?;
             Ok(MacosHostedStage {
                 run_id,
@@ -202,15 +222,16 @@ fn admit_result(
         || result.source_commit != expected.source.canonical_commit
         || result.source != expected.source.archive.to_string()
         || result.archive_sha256 != expected.source.archive_sha256
-        || result.transport_asset != expected.transport_asset
+        || result.release_inputs_run != expected.inputs.run_id
+        || result.release_inputs_challenge != expected.inputs.challenge
         || result.tree != expected.source.tree
         || result.run_id != expected.run_id
         || result.image_os != expected.image.provider_os
         || result.image_version != expected.image.version
         || result.architecture != "arm64"
-        || result.linux_run != expected.canvas.pin.run_id
-        || result.canvas != expected.canvas.pin.digest.to_string()
-        || result.proof_container != expected.proof_container
+        || result.app != expected.inputs.app.to_string()
+        || result.canvas != expected.inputs.canvas.to_string()
+        || result.proof_container != expected.inputs.proof_identity
     {
         return Err(differs("signed request identity"));
     }
@@ -222,6 +243,8 @@ fn admit_stage(
     source_commit: &str,
     source_archive: &str,
     proof_container: &str,
+    canvas: &Digest,
+    app: &Digest,
     toolchain: &Toolchain,
 ) -> Result<Vec<crate::hosted::Artifact>, WindowsHostedError> {
     let payload_path = stage.join(PAYLOAD_PATH);
@@ -236,6 +259,9 @@ fn admit_stage(
     }
     if payload.archive.to_string() != source_archive {
         return Err(differs("source archive"));
+    }
+    if &payload.canvas != canvas || &payload.app != app {
+        return Err(differs("provider canvas"));
     }
     let rust_pin = rust_release_pin(&toolchain.rust).ok_or(WindowsHostedError::PolicyIdentity)?;
     if payload.pins.rust != rust_pin {

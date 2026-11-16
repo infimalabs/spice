@@ -20,8 +20,24 @@ on:
         description: Raw SHA-256 of source.tar
         required: true
         type: string
-      transport_asset:
-        description: Immutable source.tar release-asset ID
+      release_inputs_run:
+        description: Provider run that produced the canonical release inputs
+        required: true
+        type: string
+      release_inputs_challenge:
+        description: Challenge naming the canonical release-input artifact
+        required: true
+        type: string
+      app:
+        description: Canonical app generation
+        required: true
+        type: string
+      canvas:
+        description: Canonical app canvas identity
+        required: true
+        type: string
+      proof_identity:
+        description: Shared proof image identity
         required: true
         type: string
       tree:
@@ -37,28 +53,54 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
-      contents: write
+      actions: read
     steps:
-      - name: Admit runner and direct source transport
+      - name: Download canonical release inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-inputs-${{ inputs.release_inputs_challenge }}
+          run-id: ${{ inputs.release_inputs_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-inputs
+
+      - name: Admit runner and canonical release inputs
         env:
-          GH_TOKEN: ${{ github.token }}
           CHALLENGE: ${{ inputs.challenge }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE: ${{ inputs.source }}
           ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
-          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          INPUTS_RUN: ${{ inputs.release_inputs_run }}
+          INPUTS_CHALLENGE: ${{ inputs.release_inputs_challenge }}
+          APP: ${{ inputs.app }}
+          CANVAS: ${{ inputs.canvas }}
+          PROOF_IDENTITY: ${{ inputs.proof_identity }}
           TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
           [[ "$CHALLENGE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$TRANSPORT_ASSET" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INPUTS_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$INPUTS_CHALLENGE" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$APP" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANVAS" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PROOF_IDENTITY" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TREE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$GITHUB_REF" == refs/heads/main ]]
           [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$ImageOS" == ubuntu24 && "$RUNNER_ARCH" == X64 ]]
-          archive="$RUNNER_TEMP/source.tar"
-          gh api -H "Accept: application/octet-stream" \
-            "repos/$GITHUB_REPOSITORY/releases/assets/$TRANSPORT_ASSET" > "$archive"
+          root="$RUNNER_TEMP/release-inputs"
+          result="$root/result.json"
+          test "$(jq -r .challenge "$result")" = "$INPUTS_CHALLENGE"
+          test "$(jq -r .run_id "$result")" = "$INPUTS_RUN"
+          test "$(jq -r .source_commit "$result")" = "$SOURCE_COMMIT"
+          test "$(jq -r .source "$result")" = "$SOURCE"
+          test "$(jq -r .archive_sha256 "$result")" = "$ARCHIVE_SHA256"
+          test "$(jq -r .tree "$result")" = "$TREE"
+          test "$(jq -r .app "$result")" = "$APP"
+          test "$(jq -r .canvas "$result")" = "$CANVAS"
+          test "$(jq -r .proof_identity "$result")" = "$PROOF_IDENTITY"
+          archive="$root/source.tar"
           test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
@@ -84,18 +126,21 @@ jobs:
         id: image
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+          EXPECTED_PROOF_IDENTITY: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
           "$xtask" proof-image build "$RUNNER_TEMP/proof-image.tar" | tee "$RUNNER_TEMP/proof-image.out"
           identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
-          [[ -n "$identity" ]]
+          [[ "$identity" == "$EXPECTED_PROOF_IDENTITY" ]]
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           rm -f "$RUNNER_TEMP/proof-image.tar"
 
       - name: Stage in the sealed image
         env:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
+          SPICE_RELEASE_CANVAS: ${{ runner.temp }}/release-inputs/canvas.zip
+          SPICE_RELEASE_APP: ${{ inputs.app }}
         run: |
           set -uo pipefail
           sudo install -d -o 0 -g 0 -m 0755 dist/stage
@@ -141,9 +186,12 @@ jobs:
           SOURCE_COMMIT: ${{ inputs.source_commit }}
           SOURCE: ${{ inputs.source }}
           ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
-          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          RELEASE_INPUTS_RUN: ${{ inputs.release_inputs_run }}
+          RELEASE_INPUTS_CHALLENGE: ${{ inputs.release_inputs_challenge }}
+          APP: ${{ inputs.app }}
+          CANVAS: ${{ inputs.canvas }}
           TREE: ${{ inputs.tree }}
-          PROOF_IMAGE: ${{ steps.image.outputs.identity }}
+          PROOF_IMAGE: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/linux-$CHALLENGE"
@@ -173,7 +221,10 @@ jobs:
             --arg source_commit "$SOURCE_COMMIT" \
             --arg source "$SOURCE" \
             --arg archive_sha256 "$ARCHIVE_SHA256" \
-            --argjson transport_asset "$TRANSPORT_ASSET" \
+            --argjson release_inputs_run "$RELEASE_INPUTS_RUN" \
+            --arg release_inputs_challenge "$RELEASE_INPUTS_CHALLENGE" \
+            --arg app "$APP" \
+            --arg canvas "$CANVAS" \
             --arg tree "$TREE" \
             --argjson run_id "$GITHUB_RUN_ID" \
             --arg image_os "$ImageOS" \
@@ -187,12 +238,13 @@ jobs:
             --slurpfile artifacts "$RUNNER_TEMP/artifacts.json" \
             --slurpfile proof_artifacts "$RUNNER_TEMP/proof-artifacts.json" \
             '{challenge: $challenge, source_commit: $source_commit, source: $source,
-              archive_sha256: $archive_sha256, transport_asset: $transport_asset, tree: $tree,
-              run_id: $run_id, image_os: $image_os, image_version: $image_version,
-              architecture: $architecture, proof_image: $proof_image, exit_code: $exit_code,
-              log_sha256: $log_sha256, proof_exit_code: $proof_exit_code,
-              proof_log_sha256: $proof_log_sha256, artifacts: $artifacts[0],
-              proof_artifacts: $proof_artifacts[0]}' > "$out/result.json"
+              archive_sha256: $archive_sha256, release_inputs_run: $release_inputs_run,
+              release_inputs_challenge: $release_inputs_challenge, tree: $tree,
+              app: $app, canvas: $canvas, run_id: $run_id, image_os: $image_os,
+              image_version: $image_version, architecture: $architecture,
+              proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
+              proof_exit_code: $proof_exit_code, proof_log_sha256: $proof_log_sha256,
+              artifacts: $artifacts[0], proof_artifacts: $proof_artifacts[0]}' > "$out/result.json"
 
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -202,33 +254,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # The release's Darwin and Windows stages link this run's canvas instead
-      # of compiling their own app. Like every run artifact, the digest-named
-      # canvas persists until its retention expires it.
-      - name: Collect staged canvas
-        id: canvas
-        run: |
-          set -euo pipefail
-          [[ "$(cat "$RUNNER_TEMP/stage.exit")" == 0 ]] || exit 0
-          payload=dist/stage/targets/x86_64-unknown-linux-musl/payload.json
-          canvas="$RUNNER_TEMP/canvas"
-          mkdir -p "$canvas/targets/x86_64-unknown-linux-musl" "$canvas/objects"
-          cp "$payload" "$canvas/targets/x86_64-unknown-linux-musl/payload.json"
-          jq -r '.inventory[] | "\(.digest) \(.mode)"' "$payload" \
-            | while read -r digest mode; do
-                object="$(printf '%s-%04o' "$digest" "$mode")"
-                cp "dist/stage/objects/$object" "$canvas/objects/$object"
-              done
-          echo "name=canvas-$(jq -r .canvas "$payload")" >> "$GITHUB_OUTPUT"
-
-      - name: Publish staged canvas
-        if: steps.canvas.outputs.name != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ${{ steps.canvas.outputs.name }}
-          path: ${{ runner.temp }}/canvas
-          if-no-files-found: error
-          retention-days: 7
 
   attest:
     name: Sign result with GitHub OIDC identity

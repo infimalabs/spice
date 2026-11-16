@@ -152,6 +152,10 @@ pub struct ReleaseEnvironment {
     /// The stage holding the Linux payload a hosted release stage adopts the
     /// canvas of; otherwise the stage root holds it.
     pub linux_stage: Option<OsString>,
+    /// Raw provider-built canvas adopted by every native release stage.
+    pub release_canvas: Option<OsString>,
+    /// App generation carried by `release_canvas`.
+    pub release_app: Option<OsString>,
 }
 
 impl ReleaseEnvironment {
@@ -331,6 +335,8 @@ pub enum AppOrigin {
     /// Link the canvas the staged Linux payload's executable links, built
     /// from the same archive, so every target ships one app generation.
     Linux,
+    /// Link one provider-built canvas shared by every native target.
+    Provider,
 }
 
 /// Build and atomically stage one supported release target from the release's
@@ -373,37 +379,7 @@ pub fn stage_target(
     };
     let version = spice::version::source_version(&root, dist::Build::Staged)
         .map_err(TargetBuildError::SourceVersion)?;
-    let canvas = match app {
-        AppOrigin::Compile => None,
-        AppOrigin::Workspace => {
-            let expected = dist::build_info(&root, dist::Build::Staged)
-                .map_err(TargetBuildError::SourceVersion)?;
-            let staged = spice::version::build_info(&workspace, dist::Build::Staged)
-                .map_err(TargetBuildError::SourceVersion)?;
-            if staged != expected {
-                return Err(TargetBuildError::SourceVersion(format!(
-                    "staged app build {staged:?} does not match release build {expected:?}"
-                )));
-            }
-            Some(
-                crate::app::StagedCanvas::read(&workspace, &staged)
-                    .map_err(TargetBuildError::Application)?,
-            )
-        }
-        AppOrigin::Linux => {
-            let build = dist::build_info(&root, dist::Build::Staged)
-                .map_err(TargetBuildError::SourceVersion)?;
-            let linux_stage = environment
-                .linux_stage
-                .as_ref()
-                .map_or_else(|| stage_root.clone(), PathBuf::from);
-            let linux = adopted::linux_canvas(&linux_stage, &archive.digest)?;
-            Some(
-                crate::app::StagedCanvas::adopt(&root, &linux.bytes, &linux.generation, &build)
-                    .map_err(TargetBuildError::Application)?,
-            )
-        }
-    };
+    let canvas = release_canvas(app, &root, &workspace, &stage_root, &environment, &archive)?;
     let programs = Programs::discover(&root, &environment, target)?;
     let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
     match stage_with_roots(
@@ -428,6 +404,74 @@ pub fn stage_target(
         Err(error) => {
             render_command_records(output, &executor.records())?;
             Err(error)
+        }
+    }
+}
+fn release_canvas(
+    app: AppOrigin,
+    root: &Path,
+    workspace: &Path,
+    stage_root: &Path,
+    environment: &ReleaseEnvironment,
+    archive: &SourceArchive,
+) -> Result<Option<crate::app::StagedCanvas>, TargetBuildError> {
+    match app {
+        AppOrigin::Compile => Ok(None),
+        AppOrigin::Workspace => {
+            let expected = dist::build_info(root, dist::Build::Staged)
+                .map_err(TargetBuildError::SourceVersion)?;
+            let staged = spice::version::build_info(workspace, dist::Build::Staged)
+                .map_err(TargetBuildError::SourceVersion)?;
+            if staged != expected {
+                return Err(TargetBuildError::SourceVersion(format!(
+                    "staged app build {staged:?} does not match release build {expected:?}"
+                )));
+            }
+            crate::app::StagedCanvas::read(workspace, &staged)
+                .map(Some)
+                .map_err(TargetBuildError::Application)
+        }
+        AppOrigin::Linux => {
+            let build = dist::build_info(root, dist::Build::Staged)
+                .map_err(TargetBuildError::SourceVersion)?;
+            let linux_stage = environment
+                .linux_stage
+                .as_ref()
+                .map_or_else(|| stage_root.to_path_buf(), PathBuf::from);
+            let linux = adopted::linux_canvas(&linux_stage, &archive.digest)?;
+            crate::app::StagedCanvas::adopt(root, &linux.bytes, &linux.generation, &build)
+                .map(Some)
+                .map_err(TargetBuildError::Application)
+        }
+        AppOrigin::Provider => {
+            let canvas_path = environment
+                .release_canvas
+                .as_ref()
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    TargetBuildError::AdoptedCanvas(
+                        "SPICE_RELEASE_CANVAS names no provider canvas".to_owned(),
+                    )
+                })?;
+            let generation = environment
+                .release_app
+                .as_ref()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<Digest>().ok())
+                .ok_or_else(|| {
+                    TargetBuildError::AdoptedCanvas(
+                        "SPICE_RELEASE_APP is not a canonical app generation".to_owned(),
+                    )
+                })?;
+            let bytes = fs::read(&canvas_path).map_err(|error| {
+                TargetBuildError::AdoptedCanvas(format!(
+                    "cannot read provider canvas {}: {error}",
+                    canvas_path.display()
+                ))
+            })?;
+            crate::app::StagedCanvas::provided(bytes, &generation)
+                .map(Some)
+                .map_err(TargetBuildError::Application)
         }
     }
 }

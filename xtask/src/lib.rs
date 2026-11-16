@@ -72,8 +72,9 @@ pub use source_archive::source_archive;
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
-    Attach, HostedExecution, WindowsHostedError, linux_hosted_stage, macos_hosted_stage,
-    windows_hosted, windows_hosted_stage,
+    Attach, HostedExecution, ReleaseInputs, WindowsHostedError, hosted_release_inputs,
+    hosted_release_stage, linux_hosted_stage, macos_hosted_stage, windows_hosted,
+    windows_hosted_stage,
 };
 pub use windows_msvc::{WindowsMsvcError, windows_msvc};
 
