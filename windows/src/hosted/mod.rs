@@ -279,7 +279,7 @@ pub fn admit_result(
     if &result.request != request {
         return Err(AdmissionError::Request);
     }
-    let identity = &result.identity;
+    let mut identity = result.identity.clone();
     if identity.provider != request.provider {
         return Err(AdmissionError::Provider(identity.provider.clone()));
     }
@@ -289,13 +289,13 @@ pub fn admit_result(
     if identity.run_id == 0 || identity.run_attempt == 0 {
         return Err(AdmissionError::RunIdentity);
     }
-    if !image_admits(&request.image, &identity.image) {
+    if !image_admits(&request.image, &mut identity.image) {
         return Err(AdmissionError::Image);
     }
     if identity.source != request.source {
         return Err(AdmissionError::Source);
     }
-    if !toolchain_admits(&request.toolchain, &identity.toolchain) {
+    if !toolchain_admits(&request.toolchain, &mut identity.toolchain) {
         return Err(AdmissionError::Toolchain("observed"));
     }
     if &identity.runner != runner {
@@ -306,34 +306,27 @@ pub fn admit_result(
     }
     admit_outputs(request, &result.outputs)?;
     admit_artifacts(&result.artifacts)?;
-    Ok(identity.clone())
+    Ok(identity)
 }
 
-fn image_admits(expected: &ImagePin, observed: &ImagePin) -> bool {
-    !observed.version.is_empty()
-        && observed.label == expected.label
-        && observed.provider_os == expected.provider_os
-        && observed.os_version == expected.os_version
-        && observed.architecture == expected.architecture
+fn image_admits(expected: &ImagePin, observed: &mut ImagePin) -> bool {
+    if observed.version.is_empty() {
+        return false;
+    }
+    let version = std::mem::replace(&mut observed.version, expected.version.clone());
+    let admits = observed == expected;
+    observed.version = version;
+    admits
 }
 
-fn toolchain_admits(expected: &ToolchainPins, observed: &ToolchainPins) -> bool {
-    !observed.git.is_empty()
-        && observed.rust == expected.rust
-        && observed.cargo == expected.cargo
-        && observed.trunk == expected.trunk
-        && observed.msvc == expected.msvc
-        && observed.sdk == expected.sdk
-        && observed.rustc_path == expected.rustc_path
-        && observed.cargo_path == expected.cargo_path
-        && observed.git_path == expected.git_path
-        && observed.trunk_path == expected.trunk_path
-        && observed.cl_path == expected.cl_path
-        && observed.rc_path == expected.rc_path
-        && observed.link_path == expected.link_path
-        && observed.path == expected.path
-        && observed.include == expected.include
-        && observed.lib == expected.lib
+fn toolchain_admits(expected: &ToolchainPins, observed: &mut ToolchainPins) -> bool {
+    if observed.git.is_empty() {
+        return false;
+    }
+    let git = std::mem::replace(&mut observed.git, expected.git.clone());
+    let admits = observed == expected;
+    observed.git = git;
+    admits
 }
 
 impl Isolation {
