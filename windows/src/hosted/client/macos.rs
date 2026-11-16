@@ -131,12 +131,20 @@ pub fn macos_hosted_stage_controlled(
         WORKFLOW_PATH,
         HostedSource::Archive(release_inputs.source()),
     )?;
-    let (challenge, attached) = super::attach::dispatch_or_attach(
+    let workflow_blob = control.workflow_blob(
         &root,
         &policy.repository,
         &policy.branch,
         WORKFLOW_PATH,
         &source.workflow_blob,
+        attach.is_some(),
+    )?;
+    let (challenge, attached) = super::attach::dispatch_or_attach(
+        &root,
+        &policy.repository,
+        &policy.branch,
+        WORKFLOW_PATH,
+        &workflow_blob,
         RUN_TITLE_PREFIX,
         attach,
     )?;
@@ -148,7 +156,7 @@ pub fn macos_hosted_stage_controlled(
         repository: &policy.repository,
         branch: &policy.branch,
         challenge: &challenge,
-        workflow_blob: &source.workflow_blob,
+        workflow_blob: &workflow_blob,
         run_title_prefix: RUN_TITLE_PREFIX,
         transport: None,
     };

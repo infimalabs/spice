@@ -6,12 +6,15 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::hosted_release_session::{
-    NativeTarget, ReleaseSession, SessionError, terminal_provider_failure,
+    NativeTarget, ReleaseSession, SessionError, TargetWorkflow, schema_provider_failure,
+    terminal_provider_failure,
 };
 pub use windows_execution::hosted::client::{
     Attach, HostedExecution, ReleaseInputs, WindowsHostedError, landed_commit, windows_hosted,
 };
-use windows_execution::hosted::client::{HostedRunControl, Preflight};
+use windows_execution::hosted::client::{
+    HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight,
+};
 
 /// Re-enter one provider preflight; its signed result names the source.
 pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
@@ -60,6 +63,9 @@ pub fn hosted_release_stage_with_inputs(
     let linux_attach = session.attachment(NativeTarget::Linux)?;
     let macos_attach = session.attachment(NativeTarget::Macos)?;
     let windows_attach = session.attachment(NativeTarget::Windows)?;
+    let linux_workflow = session.workflow(NativeTarget::Linux)?;
+    let macos_workflow = session.workflow(NativeTarget::Macos)?;
+    let windows_workflow = session.workflow(NativeTarget::Windows)?;
     let linux_recorder = session.recorder(NativeTarget::Linux);
     let macos_recorder = session.recorder(NativeTarget::Macos);
     let windows_recorder = session.recorder(NativeTarget::Windows);
@@ -67,20 +73,20 @@ pub fn hosted_release_stage_with_inputs(
     let outcomes = std::thread::scope(|scope| {
         let linux = scope.spawn(|| {
             let mut output = Vec::new();
-            let control = HostedRunControl::resumable(&linux_recorder);
+            let control = resumable_control(&linux_recorder, &linux_workflow);
             let result = linux_hosted_stage_controlled(inputs, linux_attach, control, &mut output);
             PlatformOutcome::new(NativeTarget::Linux, output, Vec::new(), result)
         });
         let macos = scope.spawn(|| {
             let mut output = Vec::new();
-            let control = HostedRunControl::resumable(&macos_recorder);
+            let control = resumable_control(&macos_recorder, &macos_workflow);
             let result = macos_hosted_stage_controlled(inputs, macos_attach, control, &mut output);
             PlatformOutcome::new(NativeTarget::Macos, output, Vec::new(), result)
         });
         let windows = scope.spawn(|| {
             let mut output = Vec::new();
             let mut error = Vec::new();
-            let control = HostedRunControl::resumable(&windows_recorder);
+            let control = resumable_control(&windows_recorder, &windows_workflow);
             let result = windows_hosted_stage_controlled(
                 inputs,
                 windows_attach,
@@ -126,6 +132,7 @@ pub fn hosted_release_stage_with_inputs(
                 if let Err(error) = session.failed(
                     outcome.target,
                     terminal_provider_failure(&error) || detail.contains(" staging exited "),
+                    schema_provider_failure(&error),
                     detail.clone(),
                 ) {
                     failures.push(format!("{} session record: {error}", outcome.target.name()));
@@ -145,6 +152,18 @@ pub fn hosted_release_stage_with_inputs(
     } else {
         Err(HostedReleaseError::Platform(failures))
     }
+}
+
+fn resumable_control<'a>(
+    observer: &'a dyn HostedRunObserver,
+    workflow: &'a TargetWorkflow,
+) -> HostedRunControl<'a> {
+    let workflow = match workflow {
+        TargetWorkflow::Source => HostedWorkflow::Source,
+        TargetWorkflow::Current => HostedWorkflow::Current,
+        TargetWorkflow::Exact(blob) => HostedWorkflow::Exact(blob),
+    };
+    HostedRunControl::resumable(observer, workflow)
 }
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine,
