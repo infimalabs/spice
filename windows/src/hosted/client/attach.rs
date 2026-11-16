@@ -25,17 +25,14 @@ pub enum Attach {
     /// Exactly this run of the stage's workflow.
     Run(u64),
     /// The one unretired run of the stage's workflow that builds the current
-    /// source archive.
-    Latest,
+    /// source archive; a bare `--attach` names it.
+    Sole,
 }
 
 impl Attach {
-    /// `latest`, or a positive decimal provider run id.
+    /// A positive decimal provider run id.
     #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        if value == "latest" {
-            return Some(Self::Latest);
-        }
+    pub fn run(value: &str) -> Option<Self> {
         if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
             return None;
         }
@@ -114,7 +111,7 @@ pub(super) fn attach(
             root,
             format!("repos/{repository}/actions/runs/{run_id}"),
         )?],
-        Attach::Latest => {
+        Attach::Sole => {
             let file = workflow.rsplit('/').next().unwrap_or(workflow);
             let runs: RunPage = api(
                 root,
@@ -223,10 +220,10 @@ fn select(
     };
     Err(WindowsHostedError::AttachRefused(match attach {
         Attach::Run(run_id) => format!("provider run {run_id} is not adoptable{detail}"),
-        Attach::Latest if admitted.is_empty() => {
+        Attach::Sole if admitted.is_empty() => {
             format!("no unretired run of {workflow} builds the current source archive{detail}")
         }
-        Attach::Latest => format!(
+        Attach::Sole => format!(
             "runs {} of {workflow} all build the current source archive; attach one by its run id",
             admitted
                 .iter()
@@ -291,11 +288,10 @@ mod tests {
     }
 
     #[test]
-    fn attach_names_latest_or_one_positive_run_id() {
-        assert_eq!(Attach::parse("latest"), Some(Attach::Latest));
-        assert_eq!(Attach::parse("19342"), Some(Attach::Run(19342)));
-        for refused in ["", "0", "+7", "-7", "7a", "Latest", "18446744073709551616"] {
-            assert_eq!(Attach::parse(refused), None, "{refused:?}");
+    fn attach_names_one_positive_run_id() {
+        assert_eq!(Attach::run("19342"), Some(Attach::Run(19342)));
+        for refused in ["", "0", "+7", "-7", "7a", "latest", "18446744073709551616"] {
+            assert_eq!(Attach::run(refused), None, "{refused:?}");
         }
     }
 
@@ -342,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_considers_only_runs_still_holding_provider_state() {
+    fn sole_considers_only_runs_still_holding_provider_state() {
         let artifacts = [
             ProviderArtifact {
                 expired: false,
@@ -370,10 +366,10 @@ mod tests {
     #[test]
     fn attachment_admits_exactly_one_matching_run() {
         assert_eq!(
-            select(Attach::Latest, WORKFLOW, vec![candidate(7)], &[]).ok(),
+            select(Attach::Sole, WORKFLOW, vec![candidate(7)], &[]).ok(),
             Some(candidate(7))
         );
-        for attach in [Attach::Latest, Attach::Run(7)] {
+        for attach in [Attach::Sole, Attach::Run(7)] {
             assert!(matches!(
                 select(
                     attach,
@@ -386,7 +382,7 @@ mod tests {
         }
         assert!(matches!(
             select(
-                Attach::Latest,
+                Attach::Sole,
                 WORKFLOW,
                 vec![candidate(7), candidate(8)],
                 &[]

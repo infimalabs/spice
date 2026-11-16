@@ -22,7 +22,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-pc-windows-msvc --unsigned [--proof-container IMAGE] [--app-only] --attach <RUN_ID|latest>|stage-target x86_64-unknown-linux-musl --unsigned --hosted [--attach <RUN_ID|latest>]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted [--attach <RUN_ID|latest>]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted [--attach <RUN_ID|latest>]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-pc-windows-msvc --unsigned [--proof-container IMAGE] [--app-only] --attach [RUN_ID]|stage-target x86_64-unknown-linux-musl --unsigned --hosted [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -453,10 +453,6 @@ fn run_stage_target(
         })
         .map_err(Into::into);
     }
-    if attach.is_some() {
-        eprintln!("{}", help());
-        return Err(usage_error().into());
-    }
     if scope == StageScope::AppOnly {
         let proof_container = resolve_proof_container(proof_container)?;
         return xtask::stage_target_app(target, environment, &proof_container, output)
@@ -473,6 +469,12 @@ fn run_stage_target(
             }
             _ => unreachable!("hosted route parser admits only hosted targets"),
         };
+    }
+    // Only the hosted guest's own Windows stage reaches here with a run to
+    // re-enter, and it has none.
+    if attach.is_some() {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
     }
     if target == LINUX_TARGET && (route == StageRoute::Sealed || !cfg!(target_os = "linux")) {
         return xtask::linux_sealed_stage(&environment, output, error_output).map_err(Into::into);
@@ -515,8 +517,9 @@ struct StageRequest<'a> {
 
 fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     let (attach, arguments) = match arguments {
-        [rest @ .., flag, value] if flag == OsStr::new("--attach") => {
-            (Some(xtask::Attach::parse(value.to_str()?)?), rest)
+        [rest @ .., flag] if flag == OsStr::new("--attach") => (Some(xtask::Attach::Sole), rest),
+        [rest @ .., flag, run_id] if flag == OsStr::new("--attach") => {
+            (Some(xtask::Attach::run(run_id.to_str()?)?), rest)
         }
         _ => (None, arguments),
     };
@@ -1055,29 +1058,28 @@ mod tests {
             parse_stage_target(&arguments).map(|request| (request.route, request.attach))
         };
         assert_eq!(
-            parse(&[LINUX_TARGET, "--unsigned", "--hosted", "--attach", "latest"]),
-            Some((StageRoute::Hosted, Some(xtask::Attach::Latest)))
+            parse(&[LINUX_TARGET, "--unsigned", "--hosted", "--attach"]),
+            Some((StageRoute::Hosted, Some(xtask::Attach::Sole)))
+        );
+        assert_eq!(
+            parse(&[LINUX_TARGET, "--unsigned", "--hosted"]),
+            Some((StageRoute::Hosted, None))
         );
         assert_eq!(
             parse(&[WINDOWS_TARGET, "--unsigned", "--attach", "19342"]),
             Some((StageRoute::Default, Some(xtask::Attach::Run(19342))))
         );
         assert_eq!(
-            parse(&[
-                WINDOWS_TARGET,
-                "--unsigned",
-                "--app-only",
-                "--attach",
-                "latest"
-            ]),
-            Some((StageRoute::Default, Some(xtask::Attach::Latest)))
+            parse(&[WINDOWS_TARGET, "--unsigned", "--app-only", "--attach"]),
+            Some((StageRoute::Default, Some(xtask::Attach::Sole)))
         );
         for unhosted in [
-            &[LINUX_TARGET, "--unsigned", "--attach", "latest"][..],
-            &[LINUX_TARGET, "--unsigned", "--sealed", "--attach", "latest"],
-            &[DARWIN_TARGET, "--attach", "latest"],
+            &[LINUX_TARGET, "--unsigned", "--attach"][..],
+            &[LINUX_TARGET, "--unsigned", "--sealed", "--attach", "7"],
+            &[DARWIN_TARGET, "--attach"],
             &[LINUX_TARGET, "--unsigned", "--hosted", "--attach", "0"],
-            &[LINUX_TARGET, "--unsigned", "--hosted", "--attach"],
+            &[LINUX_TARGET, "--unsigned", "--hosted", "--attach", "latest"],
+            &[LINUX_TARGET, "--unsigned", "--attach", "--hosted"],
         ] {
             assert_eq!(parse(unhosted), None, "{unhosted:?}");
         }

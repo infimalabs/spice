@@ -513,15 +513,15 @@ provider watcher exits, the client asks the provider for the run's state and
 restarts the watcher while the run is unfinished. When the client cannot
 observe the run at all, it leaves the run, its artifacts, and its tag
 untouched and names the run id. Every hosted stage re-enters such a run
-without redispatch through `--attach RUN_ID`, or `--attach latest`: the
+without redispatch through `--attach RUN_ID`, or a bare `--attach`: the
 Windows route and the `--hosted` Linux and Darwin routes accept it. No local
 record names a dispatched run. Attachment re-derives the archive's exact tree
 from `dist/stage/source.tar` and admits a run only if it is a
 `workflow_dispatch` run of the stage's workflow in the configured repository,
 built from a parentless one-use commit carrying that tree, at the tag named by
-the challenge the commit records. `latest` considers only runs that still hold
-provider state, meaning unfinished or owning an unexpired artifact, and
-refuses unless exactly one matches. The stage then rebuilds its request from
+the challenge the commit records. A bare `--attach` considers only runs that
+still hold provider state, meaning unfinished or owning an unexpired artifact,
+and refuses unless exactly one matches. The stage then rebuilds its request from
 that challenge and admits, publishes, and retires exactly as a fresh dispatch
 does; an explicit cancellation of an attached run still cancels it and
 removes its artifacts and tag.
