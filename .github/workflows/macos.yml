@@ -245,9 +245,8 @@ jobs:
           set -euo pipefail
           export PATH="$RUNNER_TEMP/bootstrap-target/release:$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
-          "$cargo" build --locked --release --package xtask
-          "$cargo" build --locked --release --package spice --bin spice
-          SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh
+          "$cargo" build --locked --release --package xtask --package spice --bin xtask --bin spice
+          SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh "$CARGO_TARGET_DIR"
           SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
             SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
             "$RUNNER_TEMP/bootstrap-target/release/xtask" \

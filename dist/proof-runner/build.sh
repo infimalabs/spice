@@ -46,6 +46,12 @@ dev_cargo() {
     fi
 }
 bundle="$root/target/proof-native-darwin" # env-policy: allow
+# The unsealed and sealed runner builds share one release target directory, the
+# optional first argument or this worktree's `target/`, so the sealed build
+# recompiles only the runner after `SPICE_NATIVE_PINS` changes rather than its
+# whole dependency graph a second time. A caller that already built release
+# tools passes its own target directory to reuse that graph too.
+target=${1:-$root/target} # env-policy: allow
 vendor="$bundle/vendor" # env-policy: allow
 rm -rf "$bundle" # env-policy: allow
 mkdir -p "$bundle/bin" # env-policy: allow
@@ -55,7 +61,8 @@ dev_cargo vendor --locked --respect-source-config "$vendor" # env-policy: allow
 # the sealed build is pinned with, so the pins never come from a second
 # implementation that could disagree with the one enforcing them.
 unsealed() {
-    dev_cargo run --locked -q -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
+    dev_cargo run --locked -q --release --target-dir "$target" \
+        -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
 }
 
 if [ -n "${SPICE_PROOF_CARGO:-}" ]; then # env-policy: allow
@@ -95,11 +102,11 @@ pins=$(printf '%s\n' \
     "digest = \"$(unsealed tool-digest "$sandbox_path")\"") # env-policy: allow
 
 SPICE_NATIVE_PINS="$pins" \
-    dev_cargo build --locked --release --target-dir "$root/target" \
+    dev_cargo build --locked --release --target-dir "$target" \
     -p proof --bin spice-proof-darwin-runner # env-policy: allow
 
 runner="$bundle/bin/spice-proof-darwin-runner" # env-policy: allow
-install -m 555 "$root/target/release/spice-proof-darwin-runner" "$runner" # env-policy: allow
+install -m 555 "$target/release/spice-proof-darwin-runner" "$runner" # env-policy: allow
 identity=$("$runner" runner-identity "$runner") # env-policy: allow
 # The runner names its scratch root after the challenge, so this exercise mints
 # a fresh one the way the host does. A fixed spelling collides with any seal
