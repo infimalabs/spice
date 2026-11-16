@@ -27,8 +27,10 @@ use wire::{Digest, Domain};
 
 mod attach;
 mod canvas;
+mod control;
 mod dispatch;
 mod inputs;
+mod lifecycle;
 mod linux;
 mod macos;
 mod observation;
@@ -38,12 +40,19 @@ mod release_stage;
 mod source;
 mod transport;
 pub use attach::Attach;
+pub use control::{
+    HostedRunBinding, HostedRunControl, HostedRunObserver, ReleaseWorkflowBlobs,
+    release_workflow_blobs,
+};
 pub use inputs::{ReleaseInputs, release_inputs};
-pub use linux::{LinuxHostedStage, linux_hosted_stage};
-pub use macos::{MacosHostedStage, macos_hosted_stage};
+#[cfg(test)]
+use lifecycle::retains_provider_state;
+use lifecycle::{HostedRun, drive};
+pub use linux::{LinuxHostedStage, linux_hosted_stage, linux_hosted_stage_controlled};
+pub use macos::{MacosHostedStage, macos_hosted_stage, macos_hosted_stage_controlled};
 use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
 use ownership::RunAuthority;
-pub use release_stage::windows_release_commands_into;
+pub use release_stage::{windows_release_commands_into, windows_release_commands_into_controlled};
 use source::PreparedSource;
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -242,6 +251,7 @@ pub fn windows_hosted_commands_into(
                 "request": request,
             })
         }),
+        HostedRunControl::default(),
         |authority| {
             complete_dispatched_run(
                 &run,
@@ -347,138 +357,6 @@ impl Bound {
             run_title_prefix: attach::RUN_TITLE_PREFIX,
             transport: Some(self.transport),
         }
-    }
-}
-
-/// Dispatch a fresh run of `workflow`, or re-enter the attached one; settle it
-/// through `complete` and retire its directly uploaded source archive. Only a
-/// fresh dispatch grants authority to cancel the run.
-fn drive<T>(
-    run: &HostedRun<'_>,
-    attached: Option<u64>,
-    cancellation: &Cancellation,
-    workflow: &str,
-    inputs: Result<serde_json::Value, WindowsHostedError>,
-    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    let operation = inputs.and_then(|inputs| match attached {
-        None if cancellation.requested() => Err(WindowsHostedError::Cancelled { run_id: None }),
-        None => dispatch(run, cancellation, workflow, &inputs, complete),
-        Some(run_id) => settle(run, &RunAuthority::Observed { run_id }, complete),
-    });
-    retire_transport(run, operation)
-}
-
-/// One hosted run and the exact provider state it binds.
-#[derive(Clone, Copy)]
-struct HostedRun<'a> {
-    root: &'a Path,
-    scratch: &'a Path,
-    repository: &'a str,
-    branch: &'a str,
-    challenge: &'a str,
-    workflow_blob: &'a str,
-    run_title_prefix: &'a str,
-    transport: Option<transport::Transport>,
-}
-
-/// Delete an optional source transport after `operation`, unless the client
-/// lost observation of a run that may still need it for attachment.
-fn retire_transport<T>(
-    run: &HostedRun<'_>,
-    operation: Result<T, WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    if operation.as_ref().is_err_and(retains_provider_state) {
-        return operation;
-    }
-    let Some(transport) = run.transport else {
-        return operation;
-    };
-    let cleanup = transport::delete(run.root, run.repository, transport.release_id);
-    match (operation, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(error), Err(cleanup)) => Err(WindowsHostedError::OperationAndCleanup {
-            operation: Box::new(error),
-            cleanup: Box::new(cleanup),
-        }),
-    }
-}
-
-/// Whether a failure leaves its provider run, artifacts, and archive transport
-/// in place for a later attachment.
-fn retains_provider_state(error: &WindowsHostedError) -> bool {
-    matches!(
-        error,
-        WindowsHostedError::Detached { .. } | WindowsHostedError::DispatchUnreadable { .. }
-    )
-}
-
-/// Dispatch `workflow` from the admitted canonical branch and settle the
-/// provider run it starts.
-fn dispatch<T>(
-    run: &HostedRun<'_>,
-    cancellation: &Cancellation,
-    workflow: &str,
-    inputs: &serde_json::Value,
-    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    let HostedRun {
-        root,
-        repository,
-        branch,
-        ..
-    } = *run;
-    let dispatched = command_with_input(
-        root,
-        "gh",
-        [
-            OsString::from("workflow"),
-            OsString::from("run"),
-            OsString::from(workflow),
-            OsString::from("--repo"),
-            OsString::from(repository),
-            OsString::from("--ref"),
-            OsString::from(branch),
-            OsString::from("--json"),
-        ],
-        serde_json::to_vec(inputs).map_err(WindowsHostedError::Encode)?,
-    )?;
-    let url = successful_text("workflow dispatch", dispatched)?;
-    let run_id = url
-        .trim()
-        .rsplit('/')
-        .next()
-        .and_then(|value| value.parse::<u64>().ok())
-        .ok_or_else(|| {
-            WindowsHostedError::ProviderResponse(format!("dispatch returned no run URL: {url:?}"))
-        })?;
-    let authority = RunAuthority::dispatched(run, workflow, run_id);
-    dispatch::await_readable(run, &authority, cancellation)?;
-    settle(run, &authority, complete)
-}
-
-/// Complete the provider run through `complete`. On any other failure, cancel
-/// a run this client owns and the provider still shows as dispatched; leave
-/// any other run whole for a later attachment. Run artifacts are evidence;
-/// provider retention expires them.
-fn settle<T>(
-    run: &HostedRun<'_>,
-    authority: &RunAuthority,
-    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    match complete(authority) {
-        Err(error) if retains_provider_state(&error) => Err(error),
-        Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
-        // A spent quota fails every provider read without saying anything
-        // about the run; keep it whole for a later attachment.
-        Err(error) if quota::spent_until(run.root).is_some() => Err(WindowsHostedError::Detached {
-            run_id: authority.run_id(),
-            reason: Box::new(error),
-        }),
-        Err(error) => ownership::abandon(run.root, authority, error),
-        success => success,
     }
 }
 

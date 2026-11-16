@@ -18,6 +18,23 @@ pub fn windows_release_commands_into(
     release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
 ) -> Result<HostedExecution, WindowsHostedError> {
+    windows_release_commands_into_controlled(
+        commands,
+        destination,
+        release_inputs,
+        attach,
+        super::HostedRunControl::default(),
+    )
+}
+
+/// Dispatch Windows while recording the exact provider run for aggregate resume.
+pub fn windows_release_commands_into_controlled(
+    commands: Vec<HostedCommand>,
+    destination: &Path,
+    release_inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    control: super::HostedRunControl<'_>,
+) -> Result<HostedExecution, WindowsHostedError> {
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
     policy.admit()?;
     let root = workspace_root()?;
@@ -110,6 +127,7 @@ pub fn windows_release_commands_into(
                 "request": request,
             })
         }),
+        control,
         |authority| {
             complete_dispatched_run(
                 &run,

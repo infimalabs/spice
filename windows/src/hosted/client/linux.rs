@@ -77,16 +77,25 @@ struct LinuxArtifact {
 /// the source archive at `archive`, or re-enter the provider run `attach`
 /// names for it, publishing its staged files below `destination` when the
 /// stage exits zero.
-///
-/// # Errors
-///
-/// Returns provider, attestation, attachment, admission, and publication
-/// failures. A stage that ran and failed is an `Ok` outcome carrying its exit
-/// and log.
 pub fn linux_hosted_stage(
     release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
     destination: &Path,
+) -> Result<LinuxHostedStage, WindowsHostedError> {
+    linux_hosted_stage_controlled(
+        release_inputs,
+        attach,
+        destination,
+        super::HostedRunControl::default(),
+    )
+}
+
+/// Stage Linux while recording the exact provider run for aggregate resume.
+pub fn linux_hosted_stage_controlled(
+    release_inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    destination: &Path,
+    control: super::HostedRunControl<'_>,
 ) -> Result<LinuxHostedStage, WindowsHostedError> {
     require_public_attestation_repository()?;
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
@@ -164,6 +173,7 @@ pub fn linux_hosted_stage(
         &cancellation,
         WORKFLOW_PATH,
         inputs,
+        control,
         |authority| complete_run(&completion, authority),
     )
 }

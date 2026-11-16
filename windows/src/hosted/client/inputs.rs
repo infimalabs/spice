@@ -90,6 +90,7 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
         &cancellation,
         release_inputs::WORKFLOW,
         inputs,
+        super::HostedRunControl::default(),
         |authority| {
             watch_run(run.root, run.repository, authority, &cancellation)?;
             let run_id = authority.run_id();
