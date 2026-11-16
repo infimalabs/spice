@@ -138,6 +138,16 @@ impl PublicationPlan {
     }
 }
 
+fn source_identities_match(
+    payload_commit: &Digest,
+    payload_archive: &Digest,
+    source_commit: &str,
+    source_archive: &Digest,
+) -> bool {
+    payload_commit == &Digest::compute(Domain::DistSourceCommit, source_commit.as_bytes())
+        && payload_archive == source_archive
+}
+
 fn capture_target(
     worktree: &Path,
     assets_root: &Path,
@@ -151,8 +161,12 @@ fn capture_target(
     if wire::encode(&payload).map_err(PublishError::Encode)? != payload_bytes
         || payload.version != TARGET_PAYLOAD_VERSION
         || payload.target != target
-        || payload.source != inputs.source
-        || payload.archive != inputs.artifacts[0].digest
+        || !source_identities_match(
+            &payload.source,
+            &payload.archive,
+            &inputs.source_commit,
+            &inputs.source,
+        )
         || payload.app != inputs.app
         || payload.canvas != inputs.canvas
     {
@@ -298,6 +312,32 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn source_identity_admission_distinguishes_commit_from_archive() {
+        let source_commit = "1".repeat(40);
+        let commit = Digest::compute(Domain::DistSourceCommit, source_commit.as_bytes());
+        let archive = Digest::compute(Domain::DistSourceArchive, b"archive");
+
+        assert!(source_identities_match(
+            &commit,
+            &archive,
+            &source_commit,
+            &archive,
+        ));
+        assert!(!source_identities_match(
+            &archive,
+            &archive,
+            &source_commit,
+            &archive,
+        ));
+        assert!(!source_identities_match(
+            &commit,
+            &Digest::compute(Domain::DistSourceArchive, b"other archive"),
+            &source_commit,
+            &archive,
+        ));
     }
 
     #[test]
