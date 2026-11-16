@@ -164,6 +164,10 @@ network access. The hosted finalizer retries that assessment while Apple's
 accepted ticket propagates, then refuses if Gatekeeper still cannot observe it.
 `share-darwin` does not mutate or replace any sealed release artifact.
 
+The hosted publisher admits every staged payload against two distinct preflight
+identities: the selected Git commit and the exact source archive. Either
+identity moving refuses publication before a tag or GitHub Release is written.
+
 ## Stage the Linux release on macOS
 
 A Mac cannot link or run the Linux release, so
