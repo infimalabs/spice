@@ -69,6 +69,7 @@ pub const UNOWNED_WORK_REMEDY: &str = concat!(
 pub struct Metadata<'a> {
     pub label: &'a str,
     pub title: &'a str,
+    pub pitch: &'a str,
     /// Absolute topic path, or empty for none.
     pub topic: &'a str,
     pub phase: &'a str,
@@ -765,7 +766,7 @@ fn publish_inner(
     };
     if let Some((active, preflight)) = resolution {
         let local_commits = ahead_count(root, &upstream_head)?;
-        let message = compose_message(meta);
+        let message = compose_message(meta)?;
         let integrated = resolution::complete(
             root,
             meta,
@@ -805,7 +806,7 @@ fn publish_inner(
         observed_head
     };
     let local_commits = ahead_count(root, &upstream_head)?;
-    let message = compose_message(meta);
+    let message = compose_message(meta)?;
     // Bind the authored tree and any non-empty lane command before the merge.
     // An empty lane declaration deliberately defers to each integrated tree.
     let admission = Admission::resolve(repository, ambient, &agent_head)?;

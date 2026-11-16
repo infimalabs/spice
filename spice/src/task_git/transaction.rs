@@ -455,6 +455,17 @@ fn landing_message_matches(message: &str, meta: Metadata<'_>) -> Result<bool, Er
         .iter()
         .rposition(|line| line.trim().is_empty())
         .map_or(0, |index| index + 1);
+    let Some(trailer_separator) = start.checked_sub(1) else {
+        return Ok(false);
+    };
+    let narrative = &lines[..trailer_separator];
+    let Some(body_separator) = narrative.iter().rposition(|line| line.trim().is_empty()) else {
+        return Ok(false);
+    };
+    let body = &narrative[body_separator + 1..];
+    if body.len() != 1 || body[0].strip_suffix('\r').unwrap_or(body[0]) != meta.pitch {
+        return Ok(false);
+    }
     let mut fields = BTreeMap::new();
     for line in &lines[start..] {
         let Some((name, value)) = line.strip_suffix('\r').unwrap_or(line).split_once(": ") else {
@@ -494,7 +505,14 @@ fn task_stamp(label: &str) -> &str {
     label.rsplit_once('-').map_or(label, |(_, stamp)| stamp)
 }
 
-pub(super) fn compose_message(meta: Metadata<'_>) -> String {
+pub(super) fn compose_message(meta: Metadata<'_>) -> Result<String, Error> {
+    wire::pitch::admit(meta.pitch).map_err(|error| {
+        Error::refusal(
+            "git::task-pitch-unavailable",
+            error.reason(),
+            error.remedy(),
+        )
+    })?;
     let prefix = if meta.topic.is_empty() {
         String::new()
     } else {
@@ -524,7 +542,10 @@ pub(super) fn compose_message(meta: Metadata<'_>) -> String {
         .map(|(name, value)| format!("{name}: {value}"))
         .collect::<Vec<_>>()
         .join("\n");
-    format!("{prefix}{title} {}{phase}\n\n{trailers}", meta.label)
+    Ok(format!(
+        "{prefix}{title} {}{phase}\n\n{}\n\n{trailers}",
+        meta.label, meta.pitch
+    ))
 }
 
 pub(super) fn recover_pending(root: Worktree<'_>) -> Result<(), Error> {
@@ -824,10 +845,13 @@ pub(super) fn filesystem_fault(action: &str, path: &Path, error: std::io::Error)
 mod tests {
     use super::*;
 
+    const PITCH: &str = "Automatic landings need durable task rationale.";
+
     fn landing_metadata() -> Metadata<'static> {
         Metadata {
             label: "GIT-1kQb17Ytx",
             title: "Finish task landing trailer cleanup",
+            pitch: PITCH,
             topic: "/task/git",
             phase: "todo",
             actor: "lane:00000000-0000-4000-8000-000000000123",
@@ -836,11 +860,12 @@ mod tests {
 
     #[test]
     fn landing_message_emits_one_canonical_trailer_block() {
-        let message = compose_message(landing_metadata());
+        let message = compose_message(landing_metadata()).expect("admitted pitch");
         assert_eq!(
             message,
             concat!(
                 "task: Finish task landing trailer cleanup GIT-1kQb17Ytx\n\n",
+                "Automatic landings need durable task rationale.\n\n",
                 "Task-Phase: todo\n",
                 "Task-Stamp: 1kQb17Ytx\n",
                 "Task-Topic: /task/git",
@@ -854,6 +879,7 @@ mod tests {
         let meta = landing_metadata();
         let canonical = concat!(
             "task: Independently authored landing\n\n",
+            "Automatic landings need durable task rationale.\n\n",
             "Task-Phase: todo\n",
             "Task-Stamp: 1kQb17Ytx\n",
             "Task-Topic: /task/git\n",
@@ -864,6 +890,11 @@ mod tests {
         assert!(!landing_message_matches(&mismatched, meta).unwrap());
         let prefixed = canonical.replace("Task-Stamp: 1kQb17Ytx", "Task-Stamp: GIT-1kQb17Ytx");
         assert!(!landing_message_matches(&prefixed, meta).unwrap());
+        let moved_pitch = canonical.replace(
+            "Automatic landings need durable task rationale.",
+            "Different rationale.",
+        );
+        assert!(!landing_message_matches(&moved_pitch, meta).unwrap());
     }
 
     #[test]
@@ -879,6 +910,7 @@ mod tests {
 
         let duplicate = concat!(
             "task: Duplicate landing\n\n",
+            "Automatic landings need durable task rationale.\n\n",
             "Task-Phase: todo\n",
             "Task-Stamp: 1kQb17Ytx\n",
             "Task-Stamp: 1kQb17Ytx\n",
@@ -892,10 +924,12 @@ mod tests {
         let message = compose_message(Metadata {
             label: "GATE-1kQb17Ytx",
             title: "Refresh topic contracts",
+            pitch: PITCH,
             topic: "/gate/dialect/steer",
             phase: "todo",
             actor: "lane:00000000-0000-4000-8000-000000000123",
-        });
+        })
+        .expect("admitted pitch");
         assert_eq!(
             message.lines().next(),
             Some("gate: Refresh topic contracts GATE-1kQb17Ytx")
@@ -904,13 +938,24 @@ mod tests {
         let message = compose_message(Metadata {
             label: "GATE-1kQb17Ytx",
             title: "Refresh topic contracts",
+            pitch: PITCH,
             topic: "/gate",
             phase: "todo",
             actor: "lane:00000000-0000-4000-8000-000000000123",
-        });
+        })
+        .expect("admitted pitch");
         assert_eq!(
             message.lines().next(),
             Some("gate: Refresh topic contracts GATE-1kQb17Ytx")
         );
+    }
+
+    #[test]
+    fn landing_message_refuses_an_unavailable_pitch() {
+        let mut meta = landing_metadata();
+        meta.pitch = "";
+        let error = compose_message(meta).expect_err("missing pitch must refuse");
+        assert_eq!(error.reason(), "git::task-pitch-unavailable");
+        assert_eq!(error.class(), ErrorClass::Refusal);
     }
 }
