@@ -289,13 +289,13 @@ pub fn admit_result(
     if identity.run_id == 0 || identity.run_attempt == 0 {
         return Err(AdmissionError::RunIdentity);
     }
-    if identity.image != request.image {
+    if !image_admits(&request.image, &identity.image) {
         return Err(AdmissionError::Image);
     }
     if identity.source != request.source {
         return Err(AdmissionError::Source);
     }
-    if identity.toolchain != request.toolchain {
+    if !toolchain_admits(&request.toolchain, &identity.toolchain) {
         return Err(AdmissionError::Toolchain("observed"));
     }
     if &identity.runner != runner {
@@ -307,6 +307,33 @@ pub fn admit_result(
     admit_outputs(request, &result.outputs)?;
     admit_artifacts(&result.artifacts)?;
     Ok(identity.clone())
+}
+
+fn image_admits(expected: &ImagePin, observed: &ImagePin) -> bool {
+    !observed.version.is_empty()
+        && observed.label == expected.label
+        && observed.provider_os == expected.provider_os
+        && observed.os_version == expected.os_version
+        && observed.architecture == expected.architecture
+}
+
+fn toolchain_admits(expected: &ToolchainPins, observed: &ToolchainPins) -> bool {
+    !observed.git.is_empty()
+        && observed.rust == expected.rust
+        && observed.cargo == expected.cargo
+        && observed.trunk == expected.trunk
+        && observed.msvc == expected.msvc
+        && observed.sdk == expected.sdk
+        && observed.rustc_path == expected.rustc_path
+        && observed.cargo_path == expected.cargo_path
+        && observed.git_path == expected.git_path
+        && observed.trunk_path == expected.trunk_path
+        && observed.cl_path == expected.cl_path
+        && observed.rc_path == expected.rc_path
+        && observed.link_path == expected.link_path
+        && observed.path == expected.path
+        && observed.include == expected.include
+        && observed.lib == expected.lib
 }
 
 impl Isolation {
@@ -561,6 +588,37 @@ mod tests {
         assert_eq!(
             result.outputs[0].stdout.bytes().expect("capture"),
             "space value\n雪\n".as_bytes()
+        );
+    }
+
+    #[test]
+    fn provider_image_revision_and_bundled_git_are_evidence_not_gates() {
+        let request = request();
+        let mut result = result(&request);
+        result.identity.image.version = "20261115.999.1".to_owned();
+        result.identity.toolchain.git = "git version 2.56.0.windows.99".to_owned();
+
+        let identity = admit_result(&request, &result, &result.identity.runner)
+            .expect("provider-only revisions admit");
+        assert_eq!(identity.image.version, "20261115.999.1");
+        assert_eq!(identity.toolchain.git, "git version 2.56.0.windows.99");
+
+        let mut changed_os = result.clone();
+        changed_os.identity.image.os_version = "10.0.26100.99999".to_owned();
+        assert_eq!(
+            admit_result(&request, &changed_os, &changed_os.identity.runner),
+            Err(AdmissionError::Image)
+        );
+
+        let mut changed_compiler = result;
+        changed_compiler.identity.toolchain.msvc = "19.45.99999".to_owned();
+        assert_eq!(
+            admit_result(
+                &request,
+                &changed_compiler,
+                &changed_compiler.identity.runner
+            ),
+            Err(AdmissionError::Toolchain("observed"))
         );
     }
 

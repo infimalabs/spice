@@ -7,14 +7,14 @@ branch = "main"
 [image]
 label = "windows-2025"
 provider_os = "win25-vs2026"
-version = "20261103.298.1"
+version = "20261103.298.1" # provenance baseline; the observed provider revision is recorded, not gated
 os_version = "10.0.26100.33674"
 architecture = "X64"
 
 [toolchain]
 rust = "rustc 1.97.1 (8bab26f4f 2026-07-14)"
 cargo = "cargo 1.97.1 (c980f4866 2026-06-30)"
-git = "git version 2.56.0.windows.4"
+git = "git version 2.56.0.windows.4" # provenance baseline; the observed bundled patch is recorded, not gated
 trunk = "trunk 0.22.1"
 msvc = "14.44.35207"
 sdk = "10.0.26100.0"
