@@ -64,6 +64,7 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
                 &policy.branch,
                 release_inputs::WORKFLOW,
                 &workflow_blob,
+                release_inputs::RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))

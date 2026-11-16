@@ -12,6 +12,8 @@ const COMMIT_HEX_LENGTH: usize = 40;
 pub const WORKFLOW: &str = ".github/workflows/release-inputs.yml";
 /// Artifact prefix used by the provider workflow.
 pub const ARTIFACT_PREFIX: &str = "release-inputs-";
+/// Prefix of the provider run title carrying the release-input challenge.
+pub const RUN_TITLE_PREFIX: &str = "Release inputs ";
 
 /// Provider-produced canonical archive and app canvas identities.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -58,6 +58,7 @@ pub(super) fn attach_run(
     branch: &str,
     workflow: &str,
     expected_workflow_blob: &str,
+    run_title_prefix: &str,
     attach: Attach,
 ) -> Result<AttachedRun, WindowsHostedError> {
     let candidates = match attach {
@@ -83,7 +84,7 @@ pub(super) fn attach_run(
     let mut admitted = Vec::new();
     let mut refused = Vec::new();
     for run in candidates {
-        let admission = admit_run(&run, workflow, branch).and_then(|challenge| {
+        let admission = admit_run(&run, workflow, branch, run_title_prefix).and_then(|challenge| {
             let observed = workflow_blob(root, repository, workflow, &run.head_sha)
                 .map_err(|error| error.to_string())?;
             if observed != expected_workflow_blob {
@@ -192,7 +193,7 @@ pub(super) fn attach(
     let mut admitted = Vec::new();
     let mut refused = Vec::new();
     for run in candidates {
-        let admission = admit_run(&run, workflow, branch).and_then(|challenge| {
+        let admission = admit_run(&run, workflow, branch, RUN_TITLE_PREFIX).and_then(|challenge| {
             let workflow_blob = workflow_blob(root, repository, workflow, &run.head_sha)
                 .map_err(|error| error.to_string())?;
             if workflow_blob != source.workflow_blob {
@@ -247,16 +248,21 @@ fn unretired(
         .filter(|run| {
             run.status.as_deref() != Some("completed")
                 || owners.contains(&run.id)
-                || challenge_from_title(&run.display_title).is_some_and(|challenge| {
-                    transports.contains(transport::release_name(challenge).as_str())
-                })
+                || challenge_from_title(&run.display_title, RUN_TITLE_PREFIX).is_some_and(
+                    |challenge| transports.contains(transport::release_name(challenge).as_str()),
+                )
         })
         .collect()
 }
 
 /// The challenge `run` was dispatched with when it runs `workflow` from the
 /// configured branch.
-fn admit_run(run: &ProviderRun, workflow: &str, branch: &str) -> Result<String, String> {
+fn admit_run(
+    run: &ProviderRun,
+    workflow: &str,
+    branch: &str,
+    run_title_prefix: &str,
+) -> Result<String, String> {
     if run.path != workflow {
         return Err(format!("it runs {}, not {workflow}", run.path));
     }
@@ -272,15 +278,15 @@ fn admit_run(run: &ProviderRun, workflow: &str, branch: &str) -> Result<String, 
     if !is_object_id(&run.head_sha) {
         return Err("its workflow commit is malformed".to_owned());
     }
-    challenge_from_title(&run.display_title)
+    challenge_from_title(&run.display_title, run_title_prefix)
         .map(str::to_owned)
-        .ok_or_else(|| "its run title records no hosted challenge".to_owned())
+        .ok_or_else(|| "its run title records no challenge".to_owned())
 }
 
-const RUN_TITLE_PREFIX: &str = "Hosted archive ";
+pub(super) const RUN_TITLE_PREFIX: &str = "Hosted archive ";
 const CHALLENGE_HEX_LENGTH: usize = 64;
-fn challenge_from_title(title: &str) -> Option<&str> {
-    let challenge = title.strip_prefix(RUN_TITLE_PREFIX)?;
+fn challenge_from_title<'a>(title: &'a str, prefix: &str) -> Option<&'a str> {
+    let challenge = title.strip_prefix(prefix)?;
     (challenge.len() == CHALLENGE_HEX_LENGTH
         && challenge
             .bytes()
@@ -334,8 +340,8 @@ pub(super) fn workflow_commit(
     run_id: u64,
 ) -> Result<String, WindowsHostedError> {
     let run: ProviderRun = api(root, format!("repos/{repository}/actions/runs/{run_id}"))?;
-    let observed =
-        admit_run(&run, workflow, branch).map_err(WindowsHostedError::ProviderResponse)?;
+    let observed = admit_run(&run, workflow, branch, RUN_TITLE_PREFIX)
+        .map_err(WindowsHostedError::ProviderResponse)?;
     if observed != challenge {
         return Err(WindowsHostedError::ProviderResponse(format!(
             "provider run {run_id} records challenge {observed}, not {challenge}"
@@ -395,7 +401,7 @@ fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHoste
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, admit_run,
+        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, RUN_TITLE_PREFIX, admit_run,
         challenge_from_title, select, unretired,
     };
     use crate::hosted::client::WindowsHostedError;
@@ -439,7 +445,7 @@ mod tests {
     #[test]
     fn only_the_policy_workflow_dispatch_is_adoptable() {
         assert_eq!(
-            admit_run(&run(1, "in_progress"), WORKFLOW, BRANCH).as_deref(),
+            admit_run(&run(1, "in_progress"), WORKFLOW, BRANCH, RUN_TITLE_PREFIX).as_deref(),
             Ok(CHALLENGE)
         );
         let other_workflow = ProviderRun {
@@ -459,10 +465,14 @@ mod tests {
             ..run(1, "in_progress")
         };
         for unrelated in [other_workflow, pushed, other_branch, other_title] {
-            assert!(admit_run(&unrelated, WORKFLOW, BRANCH).is_err());
+            assert!(admit_run(&unrelated, WORKFLOW, BRANCH, RUN_TITLE_PREFIX).is_err());
         }
         assert_eq!(
-            challenge_from_title(&format!("Hosted archive {CHALLENGE}")),
+            challenge_from_title(&format!("{RUN_TITLE_PREFIX}{CHALLENGE}"), RUN_TITLE_PREFIX),
+            Some(CHALLENGE)
+        );
+        assert_eq!(
+            challenge_from_title(&format!("Release inputs {CHALLENGE}"), "Release inputs "),
             Some(CHALLENGE)
         );
     }
