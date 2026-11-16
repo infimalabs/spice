@@ -26,6 +26,9 @@ pub(super) struct PreparedSource {
     pub(super) tree: String,
     /// Git blob identity of the workflow this archive admits.
     pub(super) workflow_blob: String,
+    /// The tree the identities were read from: the worktree or the extracted
+    /// archive with its build record.
+    pub(super) worktree: PathBuf,
 }
 
 /// Materialize `source` as one canonical archive and derive every identity a
@@ -87,6 +90,7 @@ pub(super) fn prepare(
         archive_sha256,
         tree,
         workflow_blob,
+        worktree: workflow_root,
     })
 }
 

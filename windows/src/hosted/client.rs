@@ -40,11 +40,8 @@ mod release_stage;
 mod source;
 mod transport;
 pub use attach::Attach;
-pub use control::{
-    HostedRunBinding, HostedRunControl, HostedRunObserver, ReleaseWorkflowBlobs,
-    release_workflow_blobs,
-};
-pub use inputs::{ReleaseInputs, release_inputs};
+pub use control::{HostedRunBinding, HostedRunControl, HostedRunObserver, ReleaseWorkflowBlobs};
+pub use inputs::{Preflight, ReleaseInputs, landed_commit, release_inputs};
 #[cfg(test)]
 use lifecycle::retains_provider_state;
 use lifecycle::{HostedRun, drive};

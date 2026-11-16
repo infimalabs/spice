@@ -323,21 +323,26 @@ the preflight rebuilds the image. The preflight re-checks the cached trunk
 version on every run.
 
 **Invariant —** `spice dev xtask -- publish-hosted-release` is the sole
-publication command. It selects the current landed `main` commit, creates or
-resumes that commit's `input.yml` preflight, then creates or resumes Linux,
-macOS, and Windows concurrently against the pinned input run. Its Git-common
-records bind the source and input identities, all four workflow blobs, every
-native challenge and run, and each last admitted outcome. Repeating the command
-attaches to recorded healthy or successful runs and dispatches only a missing
-target or a target whose provider run ended in failure. It reports all three
-outcomes before failing, so one failed platform never hides or redispatches
-successful siblings. A changed bound identity refuses before a provider
-dispatch: only a new dispatch requires `main` to carry the source's workflow
-blob, while an attached run is admitted against the blob its own workflow
-commit carries, so a later landing never strands a recorded session.
-`stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic;
-each platform is also independently dispatchable with `stage-target … --hosted
---release-inputs INPUTS_RUN` and may re-enter its own run with `--attach RUN_ID`.
+publication command. A new request reads `main` exactly once and pins that
+commit; the local checkout never selects the release. It creates or resumes
+that commit's `input.yml` preflight, then creates or resumes Linux, macOS, and
+Windows concurrently against the pinned input run. Its Git-common records bind
+the pinned request, the source and input identities, all four workflow blobs
+read from the admitted source archive, every native challenge and run, and each
+last admitted outcome. Repeating the command resumes the pinned request without
+consulting `main` until it publishes; it attaches to recorded healthy or
+successful runs and dispatches only a missing target or a target whose provider
+run ended in failure. It reports all three outcomes before failing, so one
+failed platform never hides or redispatches successful siblings. A changed
+bound identity refuses before a provider dispatch: only a new dispatch requires
+`main` to carry the source's workflow blob, while an attached run is admitted
+against the blob its own workflow commit carries, so a later landing never
+strands a recorded session. The publication plan takes its version from the
+admitted archive's build record. `stage-hosted-release INPUTS_RUN` remains the
+staging-only diagnostic; each platform is also independently dispatchable with
+`stage-target … --hosted --release-inputs INPUTS_RUN` and may re-enter its own
+run with `--attach RUN_ID`. An attached preflight's signed result names its own
+landed commit, and its workflow must equal the one that commit carries.
 
 The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
 workflow downloads the preflight artifacts, admits their signed source, app,

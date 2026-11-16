@@ -93,6 +93,22 @@ fn admit_or_create_local_tag(root: &Path, plan: &PublicationPlan) -> Result<(), 
         }
         return Ok(());
     }
+    let commit = format!("{}^{{commit}}", plan.source_commit);
+    if !command(root, "git", &["cat-file", "-e", &commit], true)?
+        .status
+        .success()
+    {
+        git(
+            root,
+            &[
+                "fetch",
+                "--no-tags",
+                "--no-write-fetch-head",
+                "origin",
+                &plan.source_commit,
+            ],
+        )?;
+    }
     let timestamp = git(root, &["show", "-s", "--format=%ct", &plan.source_commit])?;
     let mut tag = Command::new("git");
     tag.current_dir(root)

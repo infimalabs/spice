@@ -1,13 +1,13 @@
 use std::error::Error;
 use std::fmt;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
 use windows_execution::hosted::client::Attach;
 
 use crate::windows_hosted::{
-    hosted_release_inputs, hosted_release_inputs_fresh, hosted_release_stage_with_inputs,
+    hosted_release_inputs, hosted_release_inputs_dispatch, hosted_release_stage_with_inputs,
+    landed_commit,
 };
 
 mod plan;
@@ -15,34 +15,43 @@ mod provider;
 mod session;
 
 use plan::PublicationPlan;
-use session::PublicationSession;
+use session::Publications;
 
 /// Create or resume all hosted native stages, publish their exact executables,
 /// and read the public release back from fresh storage.
+///
+/// A new request reads `main` once and pins that commit; every later
+/// invocation resumes the pinned request without consulting `main` until it
+/// publishes. The local checkout never selects the release.
 pub fn publish_hosted_release(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), PublishError> {
     let worktree = current_worktree()?;
-    let source_commit = git(&worktree, &["rev-parse", "--verify", "HEAD^{commit}"])?;
-    let session = PublicationSession::open(&worktree, &source_commit)?;
-    let inputs = match session.inputs_run(&source_commit)? {
-        Some(run) => hosted_release_inputs(Attach::Run(run))?,
-        None => {
-            let inputs = hosted_release_inputs_fresh()?;
-            if inputs.manifest().source_commit != source_commit {
-                return Err(PublishError::Refused(
-                    "provider preflight selected a different source commit".into(),
-                ));
-            }
-            session.record_inputs(inputs.manifest())?;
-            inputs
-        }
+    let publications = Publications::lock(&worktree)?;
+    let source_commit = match publications.pending()? {
+        Some(commit) => commit,
+        None => landed_commit()?,
     };
+    let session = publications.begin(&source_commit)?;
+    let inputs = match session.inputs_run()? {
+        Some(run) => hosted_release_inputs(Attach::Run(run))?,
+        None => hosted_release_inputs_dispatch(source_commit)?,
+    };
+    if inputs.manifest().source_commit != session.source_commit() {
+        return Err(PublishError::Refused(format!(
+            "provider preflight {} names {}, not the requested {}",
+            inputs.manifest().run_id,
+            inputs.manifest().source_commit,
+            session.source_commit()
+        )));
+    }
+    session.record_inputs(inputs.manifest())?;
     hosted_release_stage_with_inputs(inputs.manifest().run_id, &inputs, output, error_output)?;
-    let plan = PublicationPlan::capture(&worktree, session.root(), inputs.manifest())?;
+    let plan = PublicationPlan::capture(&worktree, session.root(), &inputs)?;
     plan.persist(session.root())?;
     provider::publish_and_verify(&worktree, session.root(), &plan)?;
+    publications.finish()?;
     writeln!(
         output,
         "published and freshly verified {} at {} from {}",
@@ -61,26 +70,6 @@ fn current_worktree() -> Result<PathBuf, PublishError> {
     let repository = spice::repository::Repository::discover(&current)
         .map_err(|error| PublishError::Refused(error.to_string()))?;
     Ok(repository.worktree_root().to_path_buf())
-}
-
-fn git(root: &Path, arguments: &[&str]) -> Result<String, PublishError> {
-    let output = Command::new("git")
-        .current_dir(root)
-        .args(arguments)
-        .output()
-        .map_err(|source| PublishError::Launch {
-            program: "git".into(),
-            source,
-        })?;
-    if !output.status.success() {
-        return Err(PublishError::Command {
-            program: "git".into(),
-            detail: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    String::from_utf8(output.stdout)
-        .map(|text| text.trim().to_owned())
-        .map_err(|_| PublishError::Refused("Git output was not UTF-8".into()))
 }
 
 #[derive(Debug)]

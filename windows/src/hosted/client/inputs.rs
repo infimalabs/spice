@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use wire::{Digest, Domain};
 
 use super::{
-    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, Scratch, WindowsHostedError,
-    digest_file, download_artifact, drive, require_public_attestation_repository, source,
-    verify_attestation, watch_run, workspace_root,
+    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseWorkflowBlobs, Scratch,
+    WORKFLOW_PATH, WindowsHostedError, attach, challenge, digest_file, download_artifact, drive,
+    linux, macos, require_public_attestation_repository, source, verify_attestation, watch_run,
+    workspace_root,
 };
 use crate::hosted::release_inputs::{self, ResultManifest};
 
@@ -17,6 +18,8 @@ pub struct ReleaseInputs {
     manifest: ResultManifest,
     source: PathBuf,
     canvas: PathBuf,
+    workflows: ReleaseWorkflowBlobs,
+    tree: PathBuf,
     _scratch: Scratch,
 }
 
@@ -35,28 +38,75 @@ impl ReleaseInputs {
     pub fn canvas(&self) -> &Path {
         &self.canvas
     }
+
+    /// Every hosted release workflow blob the admitted source archive carries.
+    #[must_use]
+    pub fn workflows(&self) -> &ReleaseWorkflowBlobs {
+        &self.workflows
+    }
+
+    /// The admitted source archive extracted with its build record.
+    #[must_use]
+    pub fn tree(&self) -> &Path {
+        &self.tree
+    }
 }
 
-/// Dispatch or attach to the provider preflight for the current landed source.
-pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHostedError> {
+/// Which provider preflight supplies the release inputs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Preflight {
+    /// Dispatch one fresh preflight that archives this landed commit.
+    Dispatch(String),
+    /// Re-enter one existing preflight; its signed result names the source.
+    Attach(Attach),
+}
+
+/// The commit the provider branch names now. A release request reads it once
+/// and pins everything after it to that commit.
+pub fn landed_commit() -> Result<String, WindowsHostedError> {
+    let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
+    policy.admit_route()?;
+    attach::branch_commit(&workspace_root()?, &policy.repository, &policy.branch)
+}
+
+/// Dispatch or attach to one provider preflight.
+pub fn release_inputs(preflight: Preflight) -> Result<ReleaseInputs, WindowsHostedError> {
     require_public_attestation_repository()?;
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
     policy.admit_route()?;
     let root = workspace_root()?;
     let scratch = Scratch::new()?;
     let cancellation = Cancellation::install()?;
-    let source_commit = source::canonical_source_commit(&root)?;
-    let workflow_path = root.join(release_inputs::WORKFLOW);
-    let workflow_blob = source::workflow_blob(&root, &workflow_path)?;
-    let (challenge, attached) = super::attach::dispatch_or_attach(
-        &root,
-        &policy.repository,
-        &policy.branch,
-        release_inputs::WORKFLOW,
-        &workflow_blob,
-        release_inputs::RUN_TITLE_PREFIX,
-        attach,
-    )?;
+    let (source_commit, workflow_blob, challenge, attached) = match preflight {
+        Preflight::Dispatch(commit) => {
+            let blob = attach::workflow_blob(
+                &root,
+                &policy.repository,
+                release_inputs::WORKFLOW,
+                &commit,
+            )?;
+            attach::admit_branch_workflow(
+                &root,
+                &policy.repository,
+                &policy.branch,
+                release_inputs::WORKFLOW,
+                &blob,
+            )?;
+            (Some(commit), blob, challenge()?, None)
+        }
+        Preflight::Attach(selection) => {
+            let run = attach::attach_run(
+                &root,
+                &policy.repository,
+                &policy.branch,
+                release_inputs::WORKFLOW,
+                None,
+                release_inputs::RUN_TITLE_PREFIX,
+                selection,
+            )?;
+            (None, run.workflow_blob, run.challenge, Some(run.run_id))
+        }
+    };
     let run = HostedRun {
         root: &root,
         scratch: scratch.path(),
@@ -71,7 +121,7 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
         "challenge": challenge,
         "source_commit": source_commit,
     }));
-    let (manifest, source, canvas) = drive(
+    let (manifest, source, canvas, tree) = drive(
         &run,
         attached,
         &cancellation,
@@ -104,13 +154,13 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
             })?;
             let manifest: ResultManifest =
                 serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
-            admit_manifest(
+            let tree = admit_manifest(
                 &manifest,
                 &ExpectedManifest {
                     root: &root,
                     scratch: scratch.path(),
                     challenge: &challenge,
-                    source_commit: &source_commit,
+                    source_commit: source_commit.as_deref(),
                     workflow_blob: &workflow_blob,
                     workflow_sha: &workflow_sha,
                     run_id,
@@ -118,13 +168,22 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
                     canvas: &canvas,
                 },
             )?;
-            Ok((manifest, source, canvas))
+            Ok((manifest, source, canvas, tree))
         },
     )?;
+    let resolve = |workflow: &str| source::workflow_blob(&root, &tree.join(workflow));
+    let workflows = ReleaseWorkflowBlobs {
+        release_inputs: resolve(release_inputs::WORKFLOW)?,
+        linux: resolve(linux::WORKFLOW_PATH)?,
+        macos: resolve(macos::WORKFLOW_PATH)?,
+        windows: resolve(WORKFLOW_PATH)?,
+    };
     Ok(ReleaseInputs {
         manifest,
         source,
         canvas,
+        workflows,
+        tree,
         _scratch: scratch,
     })
 }
@@ -133,7 +192,9 @@ struct ExpectedManifest<'a> {
     root: &'a Path,
     scratch: &'a Path,
     challenge: &'a str,
-    source_commit: &'a str,
+    /// The commit a fresh dispatch requested; an attached run's signed result
+    /// names its own landed commit.
+    source_commit: Option<&'a str>,
     workflow_blob: &'a str,
     workflow_sha: &'a str,
     run_id: u64,
@@ -141,15 +202,18 @@ struct ExpectedManifest<'a> {
     canvas: &'a Path,
 }
 
+/// Admit the signed result and its files, returning the extracted source tree.
 fn admit_manifest(
     manifest: &ResultManifest,
     expected: &ExpectedManifest<'_>,
-) -> Result<(), WindowsHostedError> {
+) -> Result<PathBuf, WindowsHostedError> {
     manifest
         .admit()
         .map_err(|error| WindowsHostedError::ProviderResponse(error.to_string()))?;
     if manifest.challenge != expected.challenge
-        || manifest.source_commit != expected.source_commit
+        || expected
+            .source_commit
+            .is_some_and(|commit| manifest.source_commit != commit)
         || manifest.workflow != release_inputs::WORKFLOW
         || manifest.workflow_sha != expected.workflow_sha
         || manifest.run_id != expected.run_id
@@ -189,7 +253,7 @@ fn admit_manifest(
         expected.canvas,
         Domain::DistArtifact,
     )?;
-    Ok(())
+    Ok(prepared.worktree)
 }
 
 fn admit_file(

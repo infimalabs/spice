@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use windows_execution::hosted::client::ReleaseInputs;
 use windows_execution::hosted::release_inputs::ResultManifest;
 use wire::manifest::{ReleaseTarget, TARGET_PAYLOAD_VERSION, TargetPayload};
 use wire::{Digest, Domain};
@@ -40,19 +41,23 @@ pub(super) struct PublicationAsset {
 }
 
 impl PublicationPlan {
+    /// Capture the plan for the commit `inputs` signed: its version comes from
+    /// the admitted source archive's build record, its bytes from the stage
+    /// under `worktree`, never from the checkout's own commit.
     pub(super) fn capture(
         worktree: &Path,
         operation: &Path,
-        inputs: &ResultManifest,
+        release_inputs: &ReleaseInputs,
     ) -> Result<Self, PublishError> {
-        let build = spice::version::build_info(worktree, dist::Build::Staged)
+        let inputs = release_inputs.manifest();
+        let build = spice::version::build_info(release_inputs.tree(), dist::Build::Staged)
             .map_err(PublishError::Refused)?;
         let source = build.source.ok_or_else(|| {
             PublishError::Refused("release source has no immutable commit".into())
         })?;
         if source.commit != inputs.source_commit {
             return Err(PublishError::Refused(format!(
-                "staged source names {}, not preflight {}",
+                "admitted source archive names {}, not preflight {}",
                 source.commit, inputs.source_commit
             )));
         }

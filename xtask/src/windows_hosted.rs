@@ -9,17 +9,22 @@ use crate::hosted_release_session::{
     NativeTarget, ReleaseSession, SessionError, terminal_provider_failure,
 };
 pub use windows_execution::hosted::client::{
-    Attach, HostedExecution, ReleaseInputs, WindowsHostedError, windows_hosted,
+    Attach, HostedExecution, ReleaseInputs, WindowsHostedError, landed_commit, windows_hosted,
 };
-use windows_execution::hosted::client::{HostedRunControl, release_workflow_blobs};
+use windows_execution::hosted::client::{HostedRunControl, Preflight};
+
+/// Re-enter one provider preflight; its signed result names the source.
 pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
-    windows_execution::hosted::client::release_inputs(Some(attach))
+    windows_execution::hosted::client::release_inputs(Preflight::Attach(attach))
 }
 
-/// Dispatch one fresh provider preflight for the current landed source.
-pub fn hosted_release_inputs_fresh() -> Result<ReleaseInputs, WindowsHostedError> {
-    windows_execution::hosted::client::release_inputs(None)
+/// Dispatch one fresh provider preflight of `source_commit`.
+pub fn hosted_release_inputs_dispatch(
+    source_commit: String,
+) -> Result<ReleaseInputs, WindowsHostedError> {
+    windows_execution::hosted::client::release_inputs(Preflight::Dispatch(source_commit))
 }
+
 /// Dispatch or resume all native release stages concurrently from one admitted
 /// provider preflight. Every run binding lands in the Git-common session before
 /// its watcher starts.
@@ -44,8 +49,7 @@ pub fn hosted_release_stage_with_inputs(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), HostedReleaseError> {
-    let workflows = release_workflow_blobs()?;
-    let session = ReleaseSession::open(inputs_run, workflows, inputs)?;
+    let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
     writeln!(
         output,
         "hosted release session {}",
