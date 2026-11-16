@@ -135,7 +135,7 @@ pub fn macos_hosted_stage(
         "source_commit": source.canonical_commit,
         "source": source_archive,
         "archive_sha256": source.archive_sha256,
-        "transport_asset": bound.transport.asset_id,
+        "transport_asset": bound.transport.asset_id.to_string(),
         "tree": source.tree,
         "proof_container": proof_container,
         "linux_run": canvas.pin.run_id.to_string(),
