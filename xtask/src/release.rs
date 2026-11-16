@@ -319,7 +319,7 @@ fn release_proof_image_at(workspace: &Path) -> Result<String, TargetBuildError> 
 
 /// Where one release stage's canvas comes from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppSource {
+pub enum AppOrigin {
     /// Compile the app from the stage's source tree.
     Compile,
     /// Link the generation already staged in the workspace, admitted only
@@ -342,14 +342,14 @@ pub enum AppSource {
 /// the archive identity the signed request bound. A `signing` pair gives the
 /// Darwin executable a notarized Developer ID signature before its bytes are
 /// digested; it is admitted against the keychain and notary service before
-/// the first build. Unless `app` is [`AppSource::Compile`], the app compiler
+/// the first build. Unless `app` is [`AppOrigin::Compile`], the app compiler
 /// does not run.
 pub fn stage_target(
     spelling: &str,
     environment: ReleaseEnvironment,
     signing: Option<&DarwinSigning>,
     proof_container: Option<&str>,
-    app: AppSource,
+    app: AppOrigin,
     output: &mut impl Write,
 ) -> Result<TargetBuild, TargetBuildError> {
     let target = parse_target(spelling)?;
@@ -371,8 +371,8 @@ pub fn stage_target(
     let version = spice::version::source_version(&root, dist::Build::Staged)
         .map_err(TargetBuildError::SourceVersion)?;
     let canvas = match app {
-        AppSource::Compile => None,
-        AppSource::Workspace => {
+        AppOrigin::Compile => None,
+        AppOrigin::Workspace => {
             let expected = dist::build_info(&root, dist::Build::Staged)
                 .map_err(TargetBuildError::SourceVersion)?;
             let staged = spice::version::build_info(&workspace, dist::Build::Staged)
@@ -387,7 +387,7 @@ pub fn stage_target(
                     .map_err(TargetBuildError::Application)?,
             )
         }
-        AppSource::Linux => {
+        AppOrigin::Linux => {
             let build = dist::build_info(&root, dist::Build::Staged)
                 .map_err(TargetBuildError::SourceVersion)?;
             let linux = adopted::linux_canvas(&stage_root, &archive.digest)?;
