@@ -32,8 +32,8 @@ pub struct LinuxHostedStage {
     pub exit_code: i32,
     pub proof_image: String,
     pub runner_image: String,
-    pub proof_exit_code: i32,
-    pub proof_log: Vec<u8>,
+    pub smoke_exit_code: i32,
+    pub smoke_log: Vec<u8>,
     pub log: Vec<u8>,
 }
 
@@ -57,10 +57,10 @@ struct LinuxResult {
     proof_image: String,
     exit_code: i32,
     log_sha256: String,
-    proof_exit_code: i32,
-    proof_log_sha256: String,
+    smoke_exit_code: i32,
+    smoke_log_sha256: String,
     artifacts: Vec<LinuxArtifact>,
-    proof_artifacts: Vec<LinuxArtifact>,
+    smoke_artifacts: Vec<LinuxArtifact>,
 }
 
 #[derive(Deserialize)]
@@ -218,18 +218,18 @@ fn complete_run(
     }
     let stage = artifact.join("stage");
     let artifacts = admit_inventory(&stage, &result.artifacts)?;
-    let proof_log_path = artifact.join("proof.log");
-    verify_attestation(run, WORKFLOW_PATH, run_id, &proof_log_path)?;
-    let proof_log = fs::read(&proof_log_path).map_err(|source| WindowsHostedError::Io {
-        path: proof_log_path.clone(),
+    let smoke_log_path = artifact.join("smoke.log");
+    verify_attestation(run, WORKFLOW_PATH, run_id, &smoke_log_path)?;
+    let smoke_log = fs::read(&smoke_log_path).map_err(|source| WindowsHostedError::Io {
+        path: smoke_log_path.clone(),
         source,
     })?;
-    if sha256(&proof_log) != result.proof_log_sha256 {
-        return Err(differs("proof.log"));
+    if sha256(&smoke_log) != result.smoke_log_sha256 {
+        return Err(differs("smoke.log"));
     }
-    let proof = artifact.join("proof");
-    let proof_artifacts = admit_inventory(&proof, &result.proof_artifacts)?;
-    admit_smoke_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
+    let smoke = artifact.join("smoke");
+    let smoke_artifacts = admit_inventory(&smoke, &result.smoke_artifacts)?;
+    admit_smoke_result(result.exit_code, result.smoke_exit_code, &smoke_artifacts)?;
     if result.exit_code == 0 {
         publish_artifacts(
             &stage,
@@ -244,8 +244,8 @@ fn complete_run(
         run_id,
         exit_code: result.exit_code,
         proof_image: result.proof_image,
-        proof_exit_code: result.proof_exit_code,
-        proof_log,
+        smoke_exit_code: result.smoke_exit_code,
+        smoke_log,
         runner_image: format!("{} {}", result.image_os, result.image_version),
         log,
     })
@@ -374,10 +374,10 @@ fn collect_files(
 fn admit_smoke_result(
     stage_exit: i32,
     smoke_exit: i32,
-    proof_artifacts: &[crate::hosted::Artifact],
+    smoke_artifacts: &[crate::hosted::Artifact],
 ) -> Result<(), WindowsHostedError> {
-    if !proof_artifacts.is_empty() {
-        return Err(differs("unexpected proof artifact"));
+    if !smoke_artifacts.is_empty() {
+        return Err(differs("unexpected smoke artifact"));
     }
     if stage_exit == 0 && smoke_exit != 0 {
         return Err(differs("native version smoke"));
@@ -457,15 +457,15 @@ mod tests {
     }
 
     #[test]
-    fn native_smoke_admits_no_proof_artifact() {
-        let receipt = crate::hosted::Artifact {
-            path: "receipt.json".to_owned(),
+    fn native_smoke_admits_no_side_artifact() {
+        let extra = crate::hosted::Artifact {
+            path: "unexpected".to_owned(),
             bytes: 1,
             digest: wire::Digest::compute(wire::Domain::DistArtifact, b"x"),
         };
         assert!(admit_smoke_result(0, 0, &[]).is_ok());
         assert!(admit_smoke_result(0, 1, &[]).is_err());
-        assert!(admit_smoke_result(0, 0, &[receipt]).is_err());
+        assert!(admit_smoke_result(0, 0, &[extra]).is_err());
         assert!(admit_smoke_result(1, 125, &[]).is_ok());
     }
 }

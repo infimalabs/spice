@@ -202,12 +202,12 @@ fn linux_hosted_stage_controlled(
         .write_all(&stage.log)
         .map_err(WindowsHostedError::Output)?;
     output
-        .write_all(&stage.proof_log)
+        .write_all(&stage.smoke_log)
         .map_err(WindowsHostedError::Output)?;
     writeln!(
         output,
-        "hosted Linux run {} on {} with proof image {} staged {} and proved {}",
-        stage.run_id, stage.runner_image, stage.proof_image, stage.exit_code, stage.proof_exit_code
+        "hosted Linux run {} on {} with proof image {} stage exit {} and native smoke exit {}",
+        stage.run_id, stage.runner_image, stage.proof_image, stage.exit_code, stage.smoke_exit_code
     )
     .map_err(WindowsHostedError::Output)?;
     if stage.exit_code == 0 {
