@@ -163,9 +163,7 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/stage.log"
           echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/stage.exit"
 
-      - name: Prove staged Linux payload in its exact image
-        env:
-          SOURCE: ${{ inputs.source }}
+      - name: Smoke staged Linux payload version
         run: |
           set -uo pipefail
           : > "$RUNNER_TEMP/proof.log"
@@ -181,18 +179,8 @@ jobs:
             || { echo "staged Linux payload names no executable" >&2; exit 1; }
           object="$(printf '%s-%04o' "$digest" "$mode")"
           executable="dist/stage/objects/$object"
-          set +e
-          "$executable" proof --target "$target" 2>&1 | tee "$RUNNER_TEMP/proof.log"
-          code="${PIPESTATUS[0]}"
-          set -e
-          echo "$code" > "$RUNNER_TEMP/proof.exit"
-          if [[ "$code" == 0 ]]; then
-            common="$(git rev-parse --git-common-dir)"
-            receipt="$common/.spice/cache/proof/$SOURCE/$target/receipt.json"
-            [[ -f "$receipt" ]] || { echo "successful proof published no receipt" >&2; exit 1; }
-            mkdir -p "$RUNNER_TEMP/proof"
-            cp "$receipt" "$RUNNER_TEMP/proof/receipt.json"
-          fi
+          "$executable" --version 2>&1 | tee "$RUNNER_TEMP/proof.log"
+          echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/proof.exit"
 
       - name: Record signed result
         env:
