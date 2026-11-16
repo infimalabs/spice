@@ -69,6 +69,7 @@ struct ArtifactPage {
 
 #[derive(Deserialize)]
 struct ProviderArtifact {
+    name: String,
     expired: bool,
     workflow_run: Option<ArtifactRun>,
 }
@@ -164,11 +165,17 @@ struct Candidate {
 }
 
 /// Runs that still hold provider state: unfinished, or owning an unexpired
-/// artifact. A completed run without artifacts was already retired.
+/// artifact. A completed run without artifacts was already retired; a staged
+/// canvas outlives its retired Linux run for the release's other targets.
 fn unretired(runs: Vec<ProviderRun>, artifacts: &[ProviderArtifact]) -> Vec<ProviderRun> {
     let owners = artifacts
         .iter()
-        .filter(|artifact| !artifact.expired)
+        .filter(|artifact| {
+            !artifact.expired
+                && !artifact
+                    .name
+                    .starts_with(super::super::CANVAS_ARTIFACT_PREFIX)
+        })
         .filter_map(|artifact| artifact.workflow_run.as_ref().map(|run| run.id))
         .collect::<BTreeSet<_>>();
     runs.into_iter()
@@ -339,15 +346,15 @@ mod tests {
 
     #[test]
     fn sole_considers_only_runs_still_holding_provider_state() {
+        let artifact = |name: &str, expired, id| ProviderArtifact {
+            name: name.to_owned(),
+            expired,
+            workflow_run: Some(ArtifactRun { id }),
+        };
         let artifacts = [
-            ProviderArtifact {
-                expired: false,
-                workflow_run: Some(ArtifactRun { id: 2 }),
-            },
-            ProviderArtifact {
-                expired: true,
-                workflow_run: Some(ArtifactRun { id: 3 }),
-            },
+            artifact("linux-result", false, 2),
+            artifact("linux-result", true, 3),
+            artifact("canvas-staged", false, 5),
         ];
         let runs = vec![
             run(1, "in_progress"),

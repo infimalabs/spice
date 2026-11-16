@@ -123,6 +123,34 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # The release's Darwin and Windows stages link this run's canvas instead
+      # of compiling their own app. The digest-named artifact outlives the
+      # run's retirement and expires with its retention.
+      - name: Collect staged canvas
+        id: canvas
+        run: |
+          set -euo pipefail
+          [[ "$(cat "$RUNNER_TEMP/stage.exit")" == 0 ]] || exit 0
+          payload=dist/stage/targets/x86_64-unknown-linux-musl/payload.json
+          canvas="$RUNNER_TEMP/canvas"
+          mkdir -p "$canvas/targets/x86_64-unknown-linux-musl" "$canvas/objects"
+          cp "$payload" "$canvas/targets/x86_64-unknown-linux-musl/payload.json"
+          jq -r '.inventory[] | "\(.digest) \(.mode)"' "$payload" \
+            | while read -r digest mode; do
+                object="$(printf '%s-%04o' "$digest" "$mode")"
+                cp "dist/stage/objects/$object" "$canvas/objects/$object"
+              done
+          echo "name=canvas-$(jq -r .canvas "$payload")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish staged canvas
+        if: steps.canvas.outputs.name != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.canvas.outputs.name }}
+          path: ${{ runner.temp }}/canvas
+          if-no-files-found: error
+          retention-days: 7
+
   attest:
     name: Sign result with GitHub OIDC identity
     needs: stage

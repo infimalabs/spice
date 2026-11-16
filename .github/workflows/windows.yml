@@ -9,6 +9,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: write
   id-token: write
   attestations: write
@@ -39,6 +40,19 @@ jobs:
           )
           $request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
           "challenge=$($request.challenge)" >> $env:GITHUB_OUTPUT
+          if ($null -ne $request.canvas) {
+            "canvas=$($request.canvas.digest)" >> $env:GITHUB_OUTPUT
+            "linux_run=$($request.canvas.run_id)" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Download staged Linux canvas
+        if: steps.request.outputs.canvas != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: canvas-${{ steps.request.outputs.canvas }}
+          run-id: ${{ steps.request.outputs.linux_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}\linux-stage-${{ steps.request.outputs.challenge }}
 
       - name: Install exact Rust and release tools
         shell: pwsh
@@ -174,6 +188,7 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bootstrap-target"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\linux-stage-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
 

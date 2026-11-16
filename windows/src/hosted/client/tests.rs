@@ -113,9 +113,15 @@ fn provider_watch_outcomes_remain_typed_without_cancellation() {
 }
 
 #[test]
-fn artifact_inventory_deletes_every_run_artifact() {
-    let inventory = |ids: &[u64]| ArtifactInventory {
-        artifacts: ids.iter().map(|id| Artifact { id: *id }).collect(),
+fn artifact_inventory_deletes_every_run_artifact_but_a_staged_canvas() {
+    let inventory = |artifacts: &[(u64, &str)]| ArtifactInventory {
+        artifacts: artifacts
+            .iter()
+            .map(|(id, name)| Artifact {
+                id: *id,
+                name: (*name).to_owned(),
+            })
+            .collect(),
     };
 
     assert_eq!(
@@ -123,12 +129,20 @@ fn artifact_inventory_deletes_every_run_artifact() {
         ArtifactCleanupAction::Complete
     );
     assert_eq!(
-        artifact_cleanup_action(&inventory(&[42])),
+        artifact_cleanup_action(&inventory(&[(42, "linux-result")])),
         ArtifactCleanupAction::Delete(vec![42])
     );
     assert_eq!(
-        artifact_cleanup_action(&inventory(&[42, 43])),
-        ArtifactCleanupAction::Delete(vec![42, 43])
+        artifact_cleanup_action(&inventory(&[
+            (42, "linux-result"),
+            (43, "canvas-staged"),
+            (44, "windows-result"),
+        ])),
+        ArtifactCleanupAction::Delete(vec![42, 44])
+    );
+    assert_eq!(
+        artifact_cleanup_action(&inventory(&[(43, "canvas-staged")])),
+        ArtifactCleanupAction::Complete
     );
 }
 

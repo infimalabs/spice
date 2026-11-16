@@ -105,14 +105,15 @@ The app source identity spells each relative path as UTF-8 components joined by
 **Invariant —** The release app is compiled once, by the Linux target build.
 Compiled Wasm is not yet byte-identical across build hosts: remapped paths
 keep host separators, and Cargo's crate hashes take in host-built
-proc-macros. A Darwin or Windows `stage-target` that is not handed a source
-archive therefore runs no app compiler. It reads the Linux payload staged from
-the same archive, extracts the rack its executable links, and requires that
-rack's digest to equal the payload's recorded canvas. It then re-assembles the
-rack from that rack's app members and its own tracked sources, and links it
-only when the result is byte-identical. A missing Linux payload, one from
-another archive, or any mismatch refuses before the native build. Hosted
-Darwin and Windows runners, handed the archive, still compile their own app.
+proc-macros. A Darwin or Windows `stage-target` therefore runs no app
+compiler. It reads the Linux payload staged from the same archive, from
+`SPICE_LINUX_STAGE` or else the stage root, extracts the rack its executable
+links, and requires that rack's digest to equal the payload's recorded canvas.
+It then re-assembles the rack from that rack's app members and its own tracked
+sources, and links it only when the result is byte-identical. A missing Linux
+payload, one from another archive, or any mismatch refuses before the native
+build. A hosted runner adopts the same canvas from the Linux run's artifact,
+described below.
 
 **Invariant —** One release stages every target from one source archive.
 `spice dev xtask -- source-archive` is the one point staging reads Git: it
@@ -344,7 +345,23 @@ It then requires the downloaded log and staged tree to match the signed
 digests and inventory exactly, and writes the log. Only after a zero exit, and
 with every target payload recording the requested archive, does it publish the
 stage into `dist/stage`, payload pointer last. It cancels the run on
-interrupt and deletes the tag and the run's artifact afterward.
+interrupt and deletes the tag and the run's artifacts afterward, except the
+staged canvas below.
+
+**Invariant —** A successful hosted Linux run also uploads its payload and
+executable object as the artifact `canvas-DIGEST`, named by the payload's
+canvas digest. Run retirement keeps that artifact, and it expires after seven
+days. A bare `--attach` does not count it as provider state. Before dispatch,
+hosted Darwin and Windows clients read the Linux payload staged in
+`dist/stage` from the same archive, find the newest unexpired artifact with
+that name, and bind its run id and digest into the request: `linux_run` and
+`canvas` inputs for `macos.yml`, a `canvas` pin in the Windows request. Each
+runner downloads that artifact beside its checkout and refuses a payload
+recording another canvas. Windows seals it read-only for the guest. The stage
+then adopts it through `SPICE_LINUX_STAGE`. The client publishes a returned
+payload only when its app generation and canvas equal the staged Linux
+payload's. No ref is pushed for the canvas. A missing Linux payload or an
+expired artifact refuses before dispatch.
 
 **Invariant —** One retained hosted publication stages Linux first so its
 provider-built proof image supplies the exact `sha256:...` identity. Darwin and

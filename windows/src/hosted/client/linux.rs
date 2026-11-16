@@ -120,7 +120,7 @@ pub fn linux_hosted_stage(
             let stage = artifact.join("stage");
             let artifacts = admit_inventory(&stage, &result.artifacts)?;
             if result.exit_code == 0 {
-                publish_artifacts(&stage, &artifacts, &destination, &source_archive)?;
+                publish_artifacts(&stage, &artifacts, &destination, &source_archive, None)?;
             }
             Ok(LinuxHostedStage {
                 run_id,
