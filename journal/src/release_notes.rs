@@ -72,6 +72,20 @@ pub(crate) fn apply<'a>(
     Ok(())
 }
 
+/// Replace the projection with the one `facts`, in journal order, derive.
+pub(crate) fn rebuild<'a>(
+    transaction: &Transaction<'_>,
+    facts: impl IntoIterator<Item = (wire::Seq, &'a wire::AnyFact)>,
+) -> Result<(), ProjectionWriteError> {
+    transaction
+        .execute_batch("DELETE FROM release_landings; DELETE FROM release_corrections;")
+        .map_err(ProjectionWriteError::Sqlite)?;
+    for (seq, fact) in facts {
+        apply(transaction, [fact], &[seq])?;
+    }
+    Ok(())
+}
+
 impl JournalRead<'_> {
     /// Read the typed landing and correction authority for release-note folding.
     pub fn release_note_authority(&self) -> Result<ReleaseNoteAuthority, GuardError> {
@@ -144,6 +158,9 @@ fn terminal(
 )> {
     if let Some(done) = fact.read::<wire::body::TaskDone>() {
         return Some((done.task, done.git, None));
+    }
+    if let Some(arrived) = fact.read::<wire::body::TaskArrived>() {
+        return Some((arrived.task, arrived.git, None));
     }
     fact.read::<wire::body::TaskReviewed>()
         .map(|reviewed| (reviewed.task, reviewed.git, Some(reviewed.verdict)))

@@ -172,8 +172,9 @@ impl Journal {
         verify_connection(&self.connection)
     }
 
-    /// Rebuilds the derived thread index and room-authority projection in one
-    /// transaction; immutable facts and heads are never rewritten.
+    /// Rebuilds the derived thread index, room-authority projection, and
+    /// release-note landing projection in one transaction; immutable facts and
+    /// heads are never rewritten.
     pub fn reindex(&mut self) -> Result<ReindexReport, ReindexError> {
         let transaction = self
             .connection
@@ -200,6 +201,24 @@ impl Journal {
             return Err(ReindexError::Violations(violations));
         }
         crate::rooms::write_projection(&transaction, &rooms).map_err(ReindexError::Sqlite)?;
+        crate::release_notes::rebuild(
+            &transaction,
+            facts.iter().filter_map(|(seq, record)| {
+                Some((wire::Seq::new(*seq)?, &record.envelope.as_ref()?.fact))
+            }),
+        )
+        .map_err(|error| match error {
+            crate::release_notes::ProjectionWriteError::Sqlite(error) => {
+                ReindexError::Sqlite(error)
+            }
+            crate::release_notes::ProjectionWriteError::Refused(detail) => {
+                ReindexError::Violations(vec![Violation::new(
+                    ViolationClass::Head,
+                    "release_landings",
+                    detail,
+                )])
+            }
+        })?;
 
         transaction
             .execute("DELETE FROM thread_index", [])
