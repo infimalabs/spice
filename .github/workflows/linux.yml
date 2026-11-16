@@ -1,14 +1,31 @@
 name: Linux staging
+run-name: Hosted archive ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
     inputs:
       challenge:
-        description: Client challenge naming this run's one-use source ref and artifact
+        description: Unique lowercase 64-hex execution challenge
+        required: true
+        type: string
+      source_commit:
+        description: Canonical source commit recorded by source.tar
         required: true
         type: string
       source:
-        description: Identity of the canonical source archive whose tree the ref is
+        description: Canonical source-archive identity
+        required: true
+        type: string
+      archive_sha256:
+        description: Raw SHA-256 of source.tar
+        required: true
+        type: string
+      transport_asset:
+        description: Immutable source.tar release-asset ID
+        required: true
+        type: string
+      tree:
+        description: Exact canonical source tree digest
         required: true
         type: string
 
@@ -22,24 +39,37 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Admit runner and request
+      - name: Admit runner and direct source transport
         env:
+          GH_TOKEN: ${{ github.token }}
           CHALLENGE: ${{ inputs.challenge }}
-          SOURCE: ${{ inputs.source }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
-          [[ "$CHALLENGE" =~ ^[0-9a-f]{64}$ ]] || { echo "challenge is not 32 hex bytes" >&2; exit 1; }
-          [[ "$SOURCE" =~ ^[0-9A-Za-z:._-]+$ ]] || { echo "source identity is malformed" >&2; exit 1; }
-          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == "hosted-${CHALLENGE:0:24}" ]] \
-            || { echo "refusing source ref $GITHUB_REF for this challenge" >&2; exit 1; }
-          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$ImageOS" == ubuntu24 && "$RUNNER_ARCH" == X64 ]] \
-            || { echo "runner is not a GitHub-hosted ubuntu24 X64 machine" >&2; exit 1; }
-
-      - name: Check out exact source ref
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          fetch-depth: 1
+          [[ "$CHALLENGE" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$TRANSPORT_ASSET" =~ ^[1-9][0-9]*$ ]]
+          [[ "$TREE" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$ImageOS" == ubuntu24 && "$RUNNER_ARCH" == X64 ]]
+          archive="$RUNNER_TEMP/source.tar"
+          gh api -H "Accept: application/octet-stream" \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$TRANSPORT_ASSET" > "$archive"
+          test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          test "$(jq -r '.source.commit' dist/build.json)" = "$SOURCE_COMMIT"
+          git init -q
+          git config core.autocrlf false
+          git config user.name spice-hosted
+          git config user.email hosted@invalid
+          git add -A -f -- .
+          git commit -q -m "canonical source $SOURCE_COMMIT"
+          test "$(git ls-tree -r -z --full-tree HEAD | sha256sum | cut -d' ' -f1)" = "$TREE"
 
       - name: Install exact Rust
         run: rustup toolchain install --no-self-update
@@ -59,7 +89,7 @@ jobs:
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
           "$xtask" proof-image build "$RUNNER_TEMP/proof-image.tar" | tee "$RUNNER_TEMP/proof-image.out"
           identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
-          [[ -n "$identity" ]] || { echo "proof image build named no identity" >&2; exit 1; }
+          [[ -n "$identity" ]]
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           rm -f "$RUNNER_TEMP/proof-image.tar"
 
@@ -68,9 +98,6 @@ jobs:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
         run: |
           set -uo pipefail
-          # The proof image runs as UID 0 with every capability dropped. Give
-          # that exact principal the sole writable workspace mount without
-          # making the checkout or Git common directory writable.
           sudo install -d -o 0 -g 0 -m 0755 dist/stage
           common="$(git rev-parse --git-common-dir)"
           mkdir -p "$common/.spice"
@@ -82,7 +109,11 @@ jobs:
       - name: Record signed result
         env:
           CHALLENGE: ${{ inputs.challenge }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
           SOURCE: ${{ inputs.source }}
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          TREE: ${{ inputs.tree }}
           PROOF_IMAGE: ${{ steps.image.outputs.identity }}
         run: |
           set -euo pipefail
@@ -101,7 +132,11 @@ jobs:
               done | jq -s . > "$RUNNER_TEMP/artifacts.json"
           jq -n \
             --arg challenge "$CHALLENGE" \
+            --arg source_commit "$SOURCE_COMMIT" \
             --arg source "$SOURCE" \
+            --arg archive_sha256 "$ARCHIVE_SHA256" \
+            --argjson transport_asset "$TRANSPORT_ASSET" \
+            --arg tree "$TREE" \
             --argjson run_id "$GITHUB_RUN_ID" \
             --arg image_os "$ImageOS" \
             --arg image_version "$ImageVersion" \
@@ -110,10 +145,11 @@ jobs:
             --argjson exit_code "$(cat "$RUNNER_TEMP/stage.exit")" \
             --arg log_sha256 "$(sha256sum "$out/stage.log" | cut -d' ' -f1)" \
             --slurpfile artifacts "$RUNNER_TEMP/artifacts.json" \
-            '{challenge: $challenge, source: $source, run_id: $run_id, image_os: $image_os,
-              image_version: $image_version, architecture: $architecture,
-              proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
-              artifacts: $artifacts[0]}' > "$out/result.json"
+            '{challenge: $challenge, source_commit: $source_commit, source: $source,
+              archive_sha256: $archive_sha256, transport_asset: $transport_asset, tree: $tree,
+              run_id: $run_id, image_os: $image_os, image_version: $image_version,
+              architecture: $architecture, proof_image: $proof_image, exit_code: $exit_code,
+              log_sha256: $log_sha256, artifacts: $artifacts[0]}' > "$out/result.json"
 
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -173,26 +209,3 @@ jobs:
           subject-path: |
             ${{ runner.temp }}/result/result.json
             ${{ runner.temp }}/result/stage/**
-
-  retire:
-    name: Retire one-use source ref
-    needs: [stage, attest]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Delete source tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == hosted-* ]] \
-            || { echo "refusing to retire non-hosted source ref $GITHUB_REF" >&2; exit 1; }
-          if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null; then
-            if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              echo "source ref $GITHUB_REF_NAME survived deletion" >&2
-              exit 1
-            fi
-          fi

@@ -124,15 +124,15 @@ tree with its canonical `dist/build.json` to `dist/stage/source.tar`. A local
 root and builds there with no `.git`, so the version is the record the archive
 carries and the rack `build.json` is byte-identical to the archive's; the
 archive bytes are rechecked immediately before the target payload pointer is
-published. The hosted Windows route commits the archive's exact tree,
-`dist/build.json` included, as a parentless one-use commit; the signed request
-and result bind the archive identity, which the guest hands to its own
-`stage-target`, and the client refuses a returned payload recording any other
-archive. Tracked attributes classify binary paths without conversion and force
-every text checkout to LF on every host. The explicit release-version and
-installed-skill declarations remain as release-critical local contracts, while
-the repository-wide rule makes the parentless source commit's app inputs
-byte-identical on Windows, Linux, and macOS. The release
+published. Every hosted route uploads those exact archive bytes as an immutable
+challenge-bound asset; the workflow verifies their raw digest, extracts them
+into an empty workspace, and creates only a local credential-free repository
+for build-tool discovery. Each signed request and result binds the asset,
+archive identity, canonical commit, recursive tree, workflow, and run; the
+client refuses a returned payload recording any other archive. Tracked
+attributes classify binary paths without conversion and force every text
+checkout to LF on every host, so the archive's app inputs remain byte-identical
+on Windows, Linux, and macOS. The release
 names the archive identity once; manifest publication refuses targets staged
 from two archives, and `spice release` refuses a sealed manifest whose archive
 is not the one at the stage root.
@@ -260,14 +260,16 @@ Cargo build scripts, proc-macros, Trunk, and the app toolchain therefore never
 execute with the Developer ID key, notary credential, unlocked signing
 keychain, or OIDC token request.
 
-`stage-target aarch64-apple-darwin` dispatches that workflow from the canonical
-source archive's parentless one-use commit and passes both the delivered
-archive identity and the exact proof-container identity. The provider client
-admits the final payload, executable, dSYM, file set, and Darwin bindings;
-verifies GitHub provenance for every published file against that commit and
-one-use ref; then publishes the payload last under `dist/stage`. Workflow
-artifacts are the run's evidence: the client never deletes them, and provider
-retention expires them.
+`stage-target aarch64-apple-darwin` uploads the canonical `source.tar` as an
+immutable challenge-bound draft-release asset and dispatches the workflow from
+the admitted `main` workflow blob. The provider verifies the raw archive
+SHA-256, canonical source identity, commit, and tree before any build, and also
+receives the exact proof-container and Linux-canvas identities. The client
+admits the signed result plus final payload, executable, dSYM, file set, and
+Darwin bindings; verifies GitHub provenance against that exact workflow commit
+and branch; then publishes the payload last under `dist/stage`. Run artifacts
+remain evidence until provider retention expires them; the client deletes the
+challenge transport after every terminal outcome.
 
 The local signer is named by two machine-local Git-common keys,
 `release.darwin.identity` (a `Developer ID Application` keychain identity) and
@@ -323,45 +325,42 @@ the app itself, offline, so no host toolchain touches any part of the release.
 
 **Invariant —** `stage-target x86_64-unknown-linux-musl --unsigned --hosted`
 stages Linux on one fresh GitHub-hosted `ubuntu-24.04` X64 machine from
-`dist/stage/source.tar`, never from the developer host. Like the hosted Windows
-route, the client commits the archive's exact tree as a parentless one-use
-commit under a temporary `refs/tags/hosted-*` tag and dispatches
-`.github/workflows/linux.yml` there with its challenge and the archive
-identity. The workflow's `stage` job has only Contents read: it admits the
-GitHub-hosted runner, the tag, and the request; builds `xtask` and the
-current vendor-set proof image; runs `stage-target … --sealed` with that
-identity; and uploads the stage log, the staged files without the archive,
-and `result.json`. That result records the challenge, archive identity, run
-id, runner image, proof-image identity, stage exit, log digest, and the
-size and SHA-256 of every staged file. A separate `attest` job, which runs no
-repository code, alone holds OIDC identity-token and Attestations write. It
-signs `result.json` and every staged file as subjects of one attestation, so a
-released executable verifies directly with `gh attestation verify`; a third job
-retires the tag. The client verifies that
-attestation against `linux.yml` at the one-use commit and tag on a
-GitHub-hosted runner. Before it accepts anything else, it requires the result
-to answer its own challenge, archive, and dispatched run on `ubuntu24` `X64`.
-It then requires the downloaded log and staged tree to match the signed
-digests and inventory exactly, and writes the log. Only after a zero exit, and
-with every target payload recording the requested archive, does it publish the
-stage into `dist/stage`, payload pointer last. It cancels the run on
-interrupt and deletes the tag afterward.
+`dist/stage/source.tar`, never from the developer host. The client uploads the
+archive unchanged as the sole asset of a challenge-bound draft GitHub Release
+and dispatches `.github/workflows/linux.yml` from `main`. The workflow admits
+the asset ID, raw archive SHA-256, canonical archive identity, source commit,
+recursive tree digest, workflow blob, challenge, and GitHub-hosted runner
+before any build. It extracts the archive into an empty workspace, creates a
+local credential-free Git repository for repository discovery, builds `xtask`
+and the current vendor-set proof image, runs `stage-target … --sealed`, and
+uploads the stage log, staged files without the archive, and `result.json`.
+That signed result records every admitted source field, the run and runner,
+proof-image identity, stage exit, log digest, and the size and SHA-256 of every
+staged file. A separate `attest` job, which runs no repository code, alone
+holds OIDC identity-token and Attestations write and signs `result.json` plus
+every staged file. The client verifies those attestations against the exact
+admitted `linux.yml` blob on `main`, requires the result to answer its own
+request and run on `ubuntu24` `X64`, and requires the downloaded log and stage
+to match the signed digests and inventory. Only after a zero exit, and with
+every payload recording the requested archive, does it publish into
+`dist/stage`, payload pointer last. It cancels an interrupted run and deletes
+the direct archive transport after every terminal outcome; run artifacts remain
+evidence until provider retention expires them.
 
 **Invariant —** A successful hosted Linux run also uploads its payload and
 executable object as the artifact `canvas-DIGEST`, named by the payload's
-canvas digest; it expires after seven days. Before dispatch,
-hosted Darwin and Windows clients read the Linux payload staged in
-`dist/stage` from the same archive, find the newest unexpired artifact with
-that name whose owner is a completed-success `linux.yml` run, and bind its run
-id and digest into the request: `linux_run` and `canvas` inputs for `macos.yml`,
-a `canvas` pin in the Windows request. An artifact from a failed, incomplete,
-or different workflow is never eligible. Each runner downloads the admitted
-artifact beside its checkout and refuses a payload recording another canvas.
-Windows seals it read-only for the guest. The stage then adopts it through
-`SPICE_LINUX_STAGE`. The client publishes a returned payload only when its app
-generation and canvas equal the staged Linux payload's. No ref is pushed for
-the canvas. A missing Linux payload or eligible unexpired artifact refuses
-before dispatch.
+canvas digest; it expires after seven days. Before dispatch, hosted Darwin and
+Windows clients read the Linux payload staged in `dist/stage` from the same
+archive, find the newest unexpired artifact with that name whose owner is a
+completed-success `linux.yml` run, and bind its run id and digest into the
+request: `linux_run` and `canvas` inputs for `macos.yml`, a `canvas` pin in the
+Windows request. An artifact from a failed, incomplete, or different workflow
+is never eligible. Each runner downloads the admitted artifact beside its
+checkout and refuses a payload recording another canvas. Windows seals it
+read-only for the guest. The stage then adopts it through `SPICE_LINUX_STAGE`.
+The client publishes a returned payload only when its app generation and canvas
+equal the staged Linux payload's. No ref is pushed for the canvas. A missing
+Linux payload or eligible unexpired artifact refuses before dispatch.
 
 **Invariant —** One retained hosted publication stages Linux first so its
 provider-built proof image supplies the exact `sha256:...` identity. Darwin and
@@ -429,12 +428,12 @@ so an interrupted publication leaves the prior file or none.
 `.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
 GitHub image, macOS build, Xcode SDK, Rust toolchain, downloaded tool digests,
 and proof-container identity admitted by `dist/darwin/hosted.toml`. The client
-dispatches a one-use transport commit and the canonical source-archive digest;
-the sealed native proof runner builds an unsigned `aarch64-apple-darwin` stage
-with networking denied. The transport commit is checkout delivery only:
-payload admission compares the source identity with the canonical release
-commit recorded inside the archive. The workflow refuses image, source,
-archive, SDK, tool, or stage drift before credentials enter any job.
+uploads the canonical source archive unchanged as a challenge-bound immutable
+asset. The build job verifies its raw digest, canonical archive identity,
+source commit, tree, and admitted workflow before the sealed native proof
+runner builds an unsigned `aarch64-apple-darwin` stage with networking denied.
+The workflow refuses image, source, archive, SDK, tool, or stage drift before
+credentials enter any job.
 The hosted bootstrap selects the exact Cargo executable and admits only its
 sibling Rustc; the proof build does not rediscover that toolchain through
 ambient `rustup`.
@@ -458,12 +457,13 @@ never inputs, outputs, logs, or uploaded artifacts.
 The signed stage is freshly assembled from only its canonical payload and the
 two content-addressed inventory objects. A job with no Apple credentials or
 OIDC authority re-admits their canonical encodings, sizes, digests, dSYM
-executable binding, and linked canvas and verifies the strict code signature.
-The next job runs no repository code; it only downloads those exact files and
-gives them GitHub OIDC build provenance. Intermediate unsigned, policy,
-finalizer, and signed-native transports expire after one day; the client
-deletes none of them. A one-use `hosted-*` source tag is retired on every
-terminal outcome.
+executable binding, linked canvas, strict code signature, and the exact
+archive-transport request. The next job runs no repository code; it only
+downloads those exact files and gives the signed request plus stage GitHub OIDC
+build provenance. Intermediate unsigned, policy, finalizer, and signed-native
+transports expire after one day. Run artifacts remain evidence until provider
+retention expires them; after a terminal outcome the client deletes only the
+challenge-bound archive transport.
 
 
 ### Ephemeral native Windows execution
@@ -508,15 +508,15 @@ spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned --app-only
 `PROGRAM` is either a path beneath the selected worktree or one admitted tool
 token: `@runner`, `@cargo`, `@rustc`, `@git`, `@cl`, or `@rc`. Proof replay
 sends its five commands as one bounded batch, so one signed provider run
-identity covers the complete battery. An ad hoc command materializes the
-selected worktree in a temporary Git index and creates a one-use commit of it;
-staging instead commits the release source archive's tree, as described under
-[Proof is sealed per target and composed last](#proof-is-sealed-per-target-and-composed-last). Either way the
-request binds the identity of the archive those bytes came from and a
-cross-platform SHA-256 identity of the commit's recursive Git listing, which
-the guest verifies against its checkout before vouching for the archive, and
-the client pushes only a temporary `refs/tags/hosted-*` ref. It never
-pushes or moves a branch. It deletes that ref after the run.
+identity covers the complete battery. The client materializes an ad hoc
+worktree or accepts the canonical release archive, derives one exact
+`source.tar`, and uploads those unchanged bytes as the sole asset of a
+challenge-bound draft GitHub Release. The request binds the asset ID, raw
+SHA-256, canonical archive identity and commit, and the cross-platform SHA-256
+of its recursive Git listing. The workflow extracts those bytes into an empty
+workspace and creates a local credential-free Git repository; the guest
+re-verifies the commit and tree before vouching for the archive. No temporary
+Git ref is created, pushed, discovered, or deleted.
 
 GitHub registers `workflow_dispatch` only from the default branch. The
 repository command therefore becomes live only after
@@ -525,48 +525,43 @@ client but predates that landing refuses at dispatch rather than selecting
 another workflow.
 
 The supported provider repository is `github.com/infimalabs/spice`.
-Authenticate the machine-local `gh` client and Git transport separately.
-The Git credential needs Contents write permission to create and delete tags.
-The GitHub CLI credential needs Actions read/write, Attestations read, Contents
-read, and Metadata read for this repository; the workflow's short-lived
-`GITHUB_TOKEN` gets Attestations write for signing and Contents write only so
-its `always` cleanup can retire the exact one-use `hosted-*` tag, plus
-OIDC identity-token write. The client cancels the exact dispatched run on
-`SIGINT` or `SIGTERM`; its non-interactive provider subprocesses run in their
-own process group, so a terminal interrupt reaches only the client. After the
-provider returns an exact run identity, every failure first confirms that run
-is terminal, cancelling it if necessary. The client deletes no workflow run
-or artifact; each artifact persists until its upload's `retention-days` or the
-repository's retention setting expires it, and GitHub removes runs after the
-repository retention period. The one-use tag is retired whenever a push was
-attempted. Provider cleanup accepts only that tag and is the backstop when the
-client disappears before it can act.
+Authenticate the machine-local `gh` client. Its credential needs Actions
+read/write, Attestations read, Contents read, Metadata read, and Releases
+write for this repository. The workflow's short-lived `GITHUB_TOKEN` gets
+Contents read for the exact archive asset plus Attestations and OIDC
+identity-token write for signing. The client cancels the exact dispatched run
+on `SIGINT` or `SIGTERM`; its non-interactive provider subprocesses run in
+their own process group, so a terminal interrupt reaches only the client.
+After the provider returns an exact run identity, every failure first confirms
+that run is terminal, cancelling it if necessary. Run artifacts remain evidence
+until provider retention expires them; success, failure, cancellation, and
+verification refusal delete the challenge-bound draft release. No workflow job
+has transport-retirement authority, and the client never deletes workflow runs.
 
 **Invariant —** Losing observation never ends a healthy run. After dispatch,
 the client waits a short bounded interval and requires the provider's REST API
 to answer for the exact returned run before observation begins. A run that
-remains unreadable is left with its one-use source tag, and the refusal names
-both for attachment; dispatch never repeats. The watcher then refreshes every
-30 seconds, so parallel target clients stay well inside the account's shared
-hourly REST quota for a full-length run. When the watcher exits, the client
-reports the exit and provider state, then restarts the watcher while the run is
-unfinished. When the quota is spent, the client reports the reset boundary and
-waits for it; a completion step that fails while the quota is spent leaves the
-run whole instead of reporting it failed. When the client cannot observe the
-run otherwise, it leaves the run and its tag untouched and names the run id.
-Every
-hosted stage re-enters such a run without redispatch through
-`--attach RUN_ID`, or a bare `--attach`: the
-Windows route and the `--hosted` Linux and Darwin routes accept it. No local
-record names a dispatched run. Attachment re-derives the archive's exact tree
-from `dist/stage/source.tar` and admits a run only if it is a
-`workflow_dispatch` run of the stage's workflow in the configured repository,
-built from a parentless one-use commit carrying that tree, at the tag named by
-the challenge the commit records. A bare `--attach` considers only unfinished
-runs and refuses unless exactly one matches; a settled run is re-entered by its
-explicit run id. The stage then rebuilds its request from that challenge and
-admits, publishes, and retires exactly as a fresh dispatch does; an explicit
-cancellation of an attached run still cancels it and retires its tag.
+remains unreadable is left with its archive transport, and the refusal names the
+run for attachment; dispatch never repeats. The watcher then refreshes every 30
+seconds, so parallel target clients stay well inside the account's shared hourly
+REST quota for a full-length run. When the watcher exits, the client asks the
+provider for the run's state and restarts it while the run is unfinished. When
+the quota is spent, the client waits for its announced reset; a completion step
+that fails while the quota is spent leaves the run whole instead of reporting
+it failed. When the client cannot observe the run otherwise, it leaves the run,
+its artifacts, and its archive transport untouched and names the run id. Every
+hosted stage re-enters such a run without redispatch through `--attach RUN_ID`,
+or a bare `--attach`: the Windows route and the `--hosted` Linux and Darwin
+routes accept it. No local record names a dispatched run. Attachment re-derives
+every source identity from `dist/stage/source.tar`, reads the challenge from the
+run title, admits the exact retained draft-release asset, and requires a
+`workflow_dispatch` run of the configured workflow from the admitted `main`
+workflow blob. A bare `--attach` considers only runs that still hold provider
+state: unfinished, owning an unexpired result artifact, or owning a retained
+archive transport. It refuses unless exactly one matches. The stage rebuilds
+its request from that challenge and admits, publishes, and retires exactly as a
+fresh dispatch does; explicit cancellation of an attached run still cancels it
+and deletes only its archive transport.
 
 Tokens, mutable endpoints, and provider account configuration are never tracked
 policy. Rotate or revoke GitHub credentials in the provider, then run
@@ -574,7 +569,7 @@ policy. Rotate or revoke GitHub credentials in the provider, then run
 key through GitHub and the local keychain.
 
 `dist/windows/hosted.toml` is the tracked trust policy. Its `provider`,
-`repository`, and `workflow` keys bind dispatch; `[image]` pins the
+`repository`, `workflow`, and `branch` keys bind dispatch; `[image]` pins the
 `windows-2025` label, image version, OS build, and `X64` architecture; and
 `[toolchain]` pins Rust, Cargo, Git, MSVC, Windows SDK and Trunk, plus every
 executable, `PATH`, include, and library location. The bootstrap Cargo invokes
@@ -600,23 +595,23 @@ app publishes its generation under the admitted build root,
 not the sealed source tree; source and vendored dependency ACLs remain
 read-only through Trunk compilation.
 
-The sealing step builds the guest from the selected source and executes the
+The sealing step builds the guest from the transported source and executes the
 sealed request in the disposable VM, then signs that exact
 `windows-hosted.exe`, and separately its result together with every staged
-file, with GitHub's workload identity.
-Nothing publishes unless both attestations succeed. Verification rejects
-self-hosted attestations and binds both attestations to the one-use source ref and
-commit. The guest hashes itself under
-`spice.proof.native-runner.v1`; the client verifies both attestations, hashes
-the downloaded runner, and refuses unless that independent identity equals the
-one in the result. Runner or pin changes require the same native smoke before
-landing.
+file, with GitHub's workload identity. Nothing publishes unless both
+attestations succeed. Verification rejects self-hosted attestations and binds
+both attestations to the exact admitted workflow blob and `main` commit. The
+guest hashes itself under `spice.proof.native-runner.v1`; the client verifies
+both attestations, hashes the downloaded runner, and refuses unless that
+independent identity equals the one in the result. Runner or pin changes
+require the same native smoke before landing.
 
-Every dispatch has a fresh 256-bit challenge. The signed result must name that
-challenge, this repository and workflow, the provider run and attempt, the
-exact source archive, image, toolchain, runner digest, and every returned
-staging artifact's path, length, and digest. After inventory, the guest grants
-the admitted provider identity read-only file access and directory traversal;
+Every dispatch has a fresh 256-bit challenge. The signed result embeds the
+exact request and names that challenge, repository and workflow, provider run
+and attempt, archive asset, raw and canonical archive digests, source commit
+and tree, image, toolchain, runner digest, and every returned staging
+artifact's path, length, and digest. After inventory, the guest grants the
+admitted provider identity read-only file access and directory traversal;
 the provider re-inventories the same bytes after removing the guest account and
 before writing the result that the workflow signs and uploads. The client
 verifies GitHub's Sigstore/OIDC attestations before it reads the result as

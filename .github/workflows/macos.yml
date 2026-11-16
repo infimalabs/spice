@@ -1,4 +1,5 @@
 name: macOS staging
+run-name: Hosted archive ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
@@ -7,12 +8,24 @@ on:
         description: Unique lowercase 64-hex execution challenge
         required: true
         type: string
-      source:
-        description: Exact lowercase Git commit selected for the release
+      source_commit:
+        description: Canonical source commit recorded by source.tar
         required: true
         type: string
-      archive:
-        description: Canonical source-archive digest
+      source:
+        description: Canonical source-archive identity
+        required: true
+        type: string
+      archive_sha256:
+        description: Raw SHA-256 of source.tar
+        required: true
+        type: string
+      transport_asset:
+        description: Immutable source.tar release-asset ID
+        required: true
+        type: string
+      tree:
+        description: Exact canonical source tree digest
         required: true
         type: string
       proof_container:
@@ -38,17 +51,44 @@ jobs:
       actions: read
       contents: read
     steps:
-      - name: Check out exact source ref
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
-        with:
-          persist-credentials: false
-          fetch-depth: 1
-
+      - name: Admit direct source transport
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          TREE: ${{ inputs.tree }}
+        run: |
+          set -euo pipefail
+          case "$SOURCE_COMMIT" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#SOURCE_COMMIT}" -eq 40
+          case "$ARCHIVE_SHA256" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#ARCHIVE_SHA256}" -eq 64
+          case "$TRANSPORT_ASSET" in *[!0-9]*|'') exit 65 ;; esac
+          test "$TRANSPORT_ASSET" -gt 0
+          case "$TREE" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#TREE}" -eq 64
+          test "$GITHUB_REF" = refs/heads/main
+          archive="$RUNNER_TEMP/source.tar"
+          gh api -H "Accept: application/octet-stream" \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$TRANSPORT_ASSET" > "$archive"
+          test "$(shasum -a 256 "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          test "$(python3 -c 'import json; print(json.load(open("dist/build.json"))["source"]["commit"])')" = "$SOURCE_COMMIT"
+          git init -q
+          git config core.autocrlf false
+          git config user.name spice-hosted
+          git config user.email hosted@invalid
+          git add -A -f -- .
+          git commit -q -m "canonical source $SOURCE_COMMIT"
+          test "$(git ls-tree -r -z --full-tree HEAD | shasum -a 256 | cut -d' ' -f1)" = "$TREE"
       - name: Admit request and runner image
         shell: bash
         env:
-          EXPECTED_SOURCE: ${{ inputs.source }}
-          EXPECTED_ARCHIVE: ${{ inputs.archive }}
+          EXPECTED_SOURCE: ${{ inputs.source_commit }}
+          EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
           CHALLENGE: ${{ inputs.challenge }}
           LINUX_RUN: ${{ inputs.linux_run }}
@@ -68,7 +108,6 @@ jobs:
           case "$LINUX_RUN" in *[!0-9]*|''|0) exit 65 ;; esac
           case "$CANVAS" in *[!0-9a-f]*|'') exit 65 ;; esac
           test "${#CANVAS}" -eq 64
-          test "$(git rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_SOURCE"
           test "$(uname -m)" = arm64
           python3 - <<'PY' >> "$GITHUB_ENV"
           import tomllib
@@ -102,7 +141,7 @@ jobs:
       - name: Install exact Rust and release tools
         shell: bash
         env:
-          EXPECTED_SOURCE: ${{ inputs.source }}
+          EXPECTED_SOURCE: ${{ inputs.source_commit }}
         run: |
           set -euo pipefail
           sudo xcode-select --switch "$DEVELOPER_DIR"
@@ -196,7 +235,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
-          EXPECTED_ARCHIVE: ${{ inputs.archive }}
+          EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
         run: |
           set -euo pipefail
@@ -286,7 +325,7 @@ jobs:
       - name: Admit signing host and prepare exact input
         shell: bash
         env:
-          EXPECTED_ARCHIVE: ${{ inputs.archive }}
+          EXPECTED_ARCHIVE: ${{ inputs.source }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/sign"
@@ -438,6 +477,30 @@ jobs:
           "$work/xtask" verify-staged-darwin "$work/stage"
           codesign --verify --deep --strict --verbose=2 "$native"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
+          python3 - \
+            "$work/stage/result.json" \
+            '${{ inputs.challenge }}' \
+            '${{ inputs.source_commit }}' \
+            '${{ inputs.source }}' \
+            '${{ inputs.archive_sha256 }}' \
+            '${{ inputs.transport_asset }}' \
+            '${{ inputs.tree }}' \
+            "$GITHUB_RUN_ID" "$ImageOS" "$ImageVersion" "$(uname -m)" \
+            '${{ inputs.proof_container }}' '${{ inputs.linux_run }}' '${{ inputs.canvas }}' <<'PY'
+          import json, sys
+          output, challenge, source_commit, source, archive_sha256, transport_asset, tree, run_id, image_os, image_version, architecture, proof_container, linux_run, canvas = sys.argv[1:]
+          result = {
+              "challenge": challenge, "source_commit": source_commit, "source": source,
+              "archive_sha256": archive_sha256, "transport_asset": int(transport_asset),
+              "tree": tree, "run_id": int(run_id), "image_os": image_os,
+              "image_version": image_version, "architecture": architecture,
+              "proof_container": proof_container, "linux_run": int(linux_run),
+              "canvas": canvas,
+          }
+          with open(output, "w", encoding="utf-8", newline="\n") as destination:
+              json.dump(result, destination, sort_keys=True, separators=(",", ":"))
+              destination.write("\n")
+          PY
 
       - name: Upload exact signed stage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -467,30 +530,7 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
           subject-path: |
+            ${{ runner.temp }}/stage/result.json
             ${{ runner.temp }}/stage/targets/aarch64-apple-darwin/payload.json
             ${{ runner.temp }}/stage/objects/*
 
-  retire:
-    name: Retire disposable source ref
-    if: always()
-    needs: [build, sign, finalize, attest]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Delete only one-use hosted source tags
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" != tag ] || [[ "$GITHUB_REF_NAME" != hosted-* ]]; then
-            exit 0
-          fi
-          if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$GITHUB_REF_NAME" >/dev/null; then
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              echo "source ref $GITHUB_REF_NAME survived deletion" >&2
-              exit 1
-            fi
-          fi

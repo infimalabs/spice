@@ -2,6 +2,7 @@ schema = 1
 provider = "github-actions"
 repository = "infimalabs/spice"
 workflow = ".github/workflows/macos.yml"
+branch = "main"
 
 [image]
 label = "macos-15"
