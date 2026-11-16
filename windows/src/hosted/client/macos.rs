@@ -229,7 +229,10 @@ fn admit_result(
         || result.tree != expected.source.tree
         || result.run_id != expected.run_id
         || result.image_os != expected.image.provider_os
-        || result.architecture != expected.image.architecture
+        // The runner reports `uname -m` (`arm64`); policy spells the provider's `ARM64`.
+        || !result
+            .architecture
+            .eq_ignore_ascii_case(&expected.image.architecture)
         || result.app != expected.inputs.app.to_string()
         || result.canvas != expected.inputs.canvas.to_string()
         || result.proof_container != expected.inputs.proof_identity
