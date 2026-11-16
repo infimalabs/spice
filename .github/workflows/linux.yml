@@ -63,6 +63,14 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/release-inputs
 
+      - name: Download shared proof image archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: proof-image-${{ inputs.release_inputs_challenge }}
+          run-id: ${{ inputs.release_inputs_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/proof-image
+
       - name: Admit runner and canonical release inputs
         env:
           CHALLENGE: ${{ inputs.challenge }}
@@ -122,19 +130,23 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
         run: cargo build --locked --package xtask
 
-      - name: Build vendor-set proof image
+      - name: Load shared proof image
         id: image
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
           EXPECTED_PROOF_IDENTITY: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
+          result="$RUNNER_TEMP/release-inputs/result.json"
+          archive="$RUNNER_TEMP/proof-image/proof-image.tar"
+          checksum="$(jq -r .proof_archive_sha256 "$result")"
+          test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$checksum"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          "$xtask" proof-image build "$RUNNER_TEMP/proof-image.tar" | tee "$RUNNER_TEMP/proof-image.out"
-          identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
+          "$xtask" proof-image load "$archive" | tee "$RUNNER_TEMP/proof-image.out"
+          identity="$(sed -n 's/^loaded proof image //p' "$RUNNER_TEMP/proof-image.out")"
           [[ "$identity" == "$EXPECTED_PROOF_IDENTITY" ]]
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          rm -f "$RUNNER_TEMP/proof-image.tar"
+          rm -rf "$RUNNER_TEMP/proof-image"
 
       - name: Stage in the sealed image
         env:

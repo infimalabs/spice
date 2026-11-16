@@ -293,13 +293,10 @@ platform, and `org.spice.vendor-set` label, and carries that exact identity into
 the staged payload's `proof_container` pin. Every target shares that pin, so
 Darwin staging and the hosted Windows client resolve the same image on the
 host before building and hand it to a guest as `--proof-container`; staging
-any target needs the current vendor-set image loaded. The repository build fixes
-`SOURCE_DATE_EPOCH` at the Unix epoch and asks the BuildKit Docker exporter to
-rewrite layer timestamps, so independent runners with the same pinned inputs
-produce the same image identity. A lockfile change requires only
-`spice dev xtask -- proof-image build`; no tracked file records the resulting
-image digest. A stale or absent image refuses before app or Rust compilation
-and names that build command.
+any target needs the current vendor-set image loaded. A lockfile change
+requires only `spice dev xtask -- proof-image build`; no tracked file records
+the resulting image digest. A stale or absent image refuses before app or
+Rust compilation and names that build command.
 
 The admitted image uses the linker its root Cargo config pins, and
 `release:canvas-version` executes the built executable inside it. The host
@@ -324,11 +321,15 @@ runner, and publishes `release-inputs-CHALLENGE`. That artifact contains the
 canonical `source.tar`, the one compiled app rack as `canvas.zip`, and
 `result.json`. The result binds their byte counts, SHA-256 checksums,
 domain-separated archive and canvas identities, source commit and recursive
-tree, app generation, proof-image identity, workflow and run, runner image,
-and toolchain. A separate job that runs no repository code signs all three
-files with GitHub OIDC provenance. Linux, Darwin, and Windows download and
-admit those exact files independently, so no workstation or native target
-creates release input bytes and the three native builds can run in parallel.
+tree, app generation, proof-image identity and archive SHA-256, workflow and
+run, runner image, and toolchain. The same run publishes the `docker save`
+archive of the proof image it built as the separate artifact
+`proof-image-CHALLENGE`, so only the Linux stage downloads it. A separate job
+that runs no repository code signs all three release-input files with GitHub
+OIDC provenance; the signed result carries the proof archive's checksum.
+Linux, Darwin, and Windows download and admit those exact files independently,
+so no workstation or native target creates release input bytes and the three
+native builds can run in parallel.
 
 **Invariant —** Hosted release staging starts with one successful
 `release-inputs.yml` preflight, then dispatches Linux, Darwin, and Windows
@@ -338,10 +339,13 @@ dispatchable with `stage-target … --hosted --release-inputs INPUTS_RUN`, and
 may re-enter its own native run with `--attach RUN_ID`.
 
 The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
-workflow downloads the preflight artifact, admits its signed source, app,
-canvas, proof, tree, workflow, and run identities, then builds `xtask` and the
-current vendor-set proof image. It requires the image identity to equal the
-preflight proof identity, runs `stage-target … --sealed` with the raw provider
+workflow downloads the preflight artifacts, admits their signed source, app,
+canvas, proof, tree, workflow, and run identities, then builds `xtask`. It
+loads the preflight's proof-image archive only after its SHA-256 equals the
+signed result and `proof-image load` admits the loaded image ID as the signed
+proof identity with the vendor-set label and Linux/amd64 platform. No native
+stage rebuilds the proof image, because independent image builds need not be
+byte-identical. It runs `stage-target … --sealed` with the raw provider
 canvas, and uploads its log, staged files, and `result.json`. A separate
 credential-only job attests those outputs. The client verifies every
 attestation against the exact admitted workflow blob and publishes only a
