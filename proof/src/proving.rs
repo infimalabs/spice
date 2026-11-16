@@ -30,6 +30,7 @@ mod tests;
 /// One admitted payload and the detached-receipt location its layout selects,
 /// before any environment exists.
 pub(crate) struct Staged {
+    target: ReleaseTarget,
     payload: AdmittedPayload,
     receipt: ReceiptInput,
 }
@@ -42,7 +43,11 @@ impl Staged {
         let receipt = layout
             .receipt_for(payload.value())
             .map_err(ProofError::Layout)?;
-        Ok(Self { payload, receipt })
+        Ok(Self {
+            target: layout.target(),
+            payload,
+            receipt,
+        })
     }
 
     /// The exact detached-receipt location this payload's layout selects.
@@ -57,8 +62,9 @@ impl Staged {
         workspace: impl AsRef<Path>,
         limits: Limits,
     ) -> Result<Proved, ProofError> {
-        let environment = SealedEnvironment::current(config, &self.payload, workspace, limits)
-            .map_err(ProofError::Environment)?;
+        let environment =
+            SealedEnvironment::selected(self.target, config, &self.payload, workspace, limits)
+                .map_err(ProofError::Environment)?;
         self.bind(environment.target(), || replay(&environment))
     }
 

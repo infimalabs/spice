@@ -1,4 +1,4 @@
-//! Closed compiled-host selection for the two sealed proof environments.
+//! Closed selected-target routing for the three sealed proof environments.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -16,7 +16,7 @@ use crate::container::{
 use crate::native::{NativeError, NativeRunner};
 use crate::payload::AdmittedPayload;
 
-/// The sole admitted sealed environment for the compiled release target.
+/// The sole admitted sealed environment for the selected release target.
 #[derive(Clone, Debug)]
 pub struct SealedEnvironment {
     target: ReleaseTarget,
@@ -31,27 +31,22 @@ enum EnvironmentKind {
 }
 
 impl SealedEnvironment {
-    /// Select and admit the environment fixed by the compiled host tuple.
+    /// Select and admit the environment fixed by `target`.
     ///
-    /// Host selection happens before any configured path is inspected. The
+    /// Target selection happens before any configured path is inspected. The
     /// selected branch reads only its corresponding optional local path.
     ///
     /// # Errors
     ///
-    /// Refuses every host except exact `aarch64-apple-darwin` and
-    /// `x86_64-unknown-linux-musl`, a missing selected path, or failed runtime
-    /// admission.
-    pub fn current(
+    /// Refuses a payload for another target, a missing selected path, or failed
+    /// runtime admission.
+    pub fn selected(
+        target: ReleaseTarget,
         config: &Config,
         payload: &AdmittedPayload,
         workspace: impl AsRef<Path>,
         limits: Limits,
     ) -> Result<Self, EnvironmentError> {
-        let target = if payload.value().target == ReleaseTarget::X86_64PcWindowsMsvc {
-            ReleaseTarget::X86_64PcWindowsMsvc
-        } else {
-            compiled_target().map_err(EnvironmentError::UnsupportedHost)?
-        };
         validate_payload_target(target, payload.value().target)?;
         let selected = Self::for_target(target, config, workspace.as_ref(), limits)?;
         if let EnvironmentKind::Oci(container) = &selected.kind {
@@ -85,7 +80,7 @@ impl SealedEnvironment {
         Ok(Self { target, kind })
     }
 
-    /// Release target selected solely from the compiled host.
+    /// Release target selected by the proof command.
     #[must_use]
     pub const fn target(&self) -> ReleaseTarget {
         self.target
@@ -416,10 +411,9 @@ impl fmt::Display for UnsupportedHost {
 
 impl Error for UnsupportedHost {}
 
-/// Why the one compiled-host environment could not be established.
+/// Why the selected proof environment could not be established.
 #[derive(Debug)]
 pub enum EnvironmentError {
-    UnsupportedHost(UnsupportedHost),
     PayloadTarget {
         selected: ReleaseTarget,
         payload: ReleaseTarget,
@@ -437,10 +431,9 @@ pub enum EnvironmentError {
 impl fmt::Display for EnvironmentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedHost(source) => source.fmt(formatter),
             Self::PayloadTarget { selected, payload } => write!(
                 formatter,
-                "compiled host selects {selected}, but admitted payload targets {payload}"
+                "proof command selects {selected}, but admitted payload targets {payload}"
             ),
             Self::ImageMismatch { payload, resolved } => write!(
                 formatter,
@@ -464,7 +457,6 @@ impl fmt::Display for EnvironmentError {
 impl Error for EnvironmentError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::UnsupportedHost(source) => Some(source),
             Self::Oci(source) => Some(source),
             Self::Native(source) => Some(source),
             Self::PayloadTarget { .. }

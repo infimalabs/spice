@@ -359,12 +359,12 @@ impl Failure {
 
     fn environment(error: EnvironmentError) -> Self {
         match &error {
-            EnvironmentError::UnsupportedHost(_) | EnvironmentError::PayloadTarget { .. } => {
+            EnvironmentError::PayloadTarget { .. } => {
                 return Self::refusal(
                     "proof::target-refused",
-                    "the payload target selected by this compiled host",
+                    "the payload target selected by the proof command",
                     error.to_string(),
-                    "stage the payload built for this executable's exact release target",
+                    "stage the payload for the exact selected release target",
                 );
             }
             EnvironmentError::ImageMismatch { .. } => {
