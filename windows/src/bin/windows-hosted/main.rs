@@ -25,8 +25,8 @@ mod windows {
     use std::thread;
     use std::time::Duration;
     use windows_execution::hosted::{
-        Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument, WORKFLOW,
-        X86_64_ARCHITECTURE,
+        Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument, ToolchainPins,
+        WORKFLOW, X86_64_ARCHITECTURE,
     };
     use windows_execution::protocol::{
         Capture, Command as HostedCommand, CommandResult, Completion,
@@ -59,6 +59,7 @@ mod windows {
         vendor: PathBuf,
         system_root: PathBuf,
         provider_identity: String,
+        image_version: String,
         run_id: u64,
         run_attempt: u32,
     }
@@ -68,8 +69,8 @@ mod windows {
             exact_env("GITHUB_REPOSITORY", &request.repository)?;
             exact_env("GITHUB_REF", &request.workflow_ref)?;
             exact_env("ImageOS", &request.image.provider_os)?;
-            exact_env("ImageVersion", &request.image.version)?;
             exact_env("RUNNER_ARCH", X86_64_ARCHITECTURE)?;
+            let image_version = required_env("ImageVersion")?;
             let environment = Self {
                 workspace: required_path("GITHUB_WORKSPACE")?,
                 temp: required_path("RUNNER_TEMP")?,
@@ -78,6 +79,7 @@ mod windows {
                 provider_identity: authority::process_owners()
                     .map_err(|error| format!("cannot inspect provider process identity: {error}"))?
                     .user,
+                image_version,
                 run_id: required_u64("GITHUB_RUN_ID")?,
                 run_attempt: required_u32("GITHUB_RUN_ATTEMPT")?,
             };
@@ -123,6 +125,9 @@ mod windows {
                 || !components.all(|component| component.parse::<u32>().is_ok())
             {
                 return Err("guest provider identity is not a canonical user SID".to_owned());
+            }
+            if self.image_version.is_empty() || self.image_version.contains(['\0', '\r', '\n']) {
+                return Err("guest provider image revision is malformed".to_owned());
             }
             if !self.system_root.is_dir() {
                 return Err("guest system root is not a directory".to_owned());
@@ -313,6 +318,7 @@ mod windows {
             vendor,
             system_root,
             provider_identity,
+            image_version,
             run_id,
             run_attempt,
         } = GuestEnvironment::decode(encoded_environment)?;
@@ -328,7 +334,7 @@ mod windows {
                 request.tree, tree
             ));
         }
-        admit_toolchain(&request)?;
+        let observed_toolchain = admit_toolchain(&request)?;
         verify_non_loopback_denied()?;
         eprintln!("[windows-hosted] guest network isolation admitted");
 
@@ -377,6 +383,8 @@ mod windows {
             .collect::<Result<Vec<_>, String>>()?;
         let artifacts = artifact_inventory(&stage)?;
         grant_tree_contents_access(&stage, &provider_identity, 0o400, 0o500)?;
+        let mut observed_image = request.image.clone();
+        observed_image.version = image_version;
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
@@ -387,10 +395,10 @@ mod windows {
                 workflow: WORKFLOW.to_owned(),
                 run_id,
                 run_attempt,
-                image: request.image.clone(),
+                image: observed_image,
                 runner,
                 source: request.source.clone(),
-                toolchain: request.toolchain.clone(),
+                toolchain: observed_toolchain,
             },
             outputs,
             artifacts,
@@ -497,7 +505,7 @@ mod windows {
         ))
     }
 
-    fn admit_toolchain(request: &Request) -> Result<(), String> {
+    fn admit_toolchain(request: &Request) -> Result<ToolchainPins, String> {
         exact_version(
             &request.toolchain.rustc_path,
             &["--version"],
@@ -508,11 +516,8 @@ mod windows {
             &["--version"],
             &request.toolchain.cargo,
         )?;
-        exact_version(
-            &request.toolchain.git_path,
-            &["--version"],
-            &request.toolchain.git,
-        )?;
+        let mut observed = request.toolchain.clone();
+        observed.git = tool_version(&request.toolchain.git_path, &["--version"])?;
         exact_version(
             &request.toolchain.trunk_path,
             &["--version"],
@@ -532,10 +537,20 @@ mod windows {
         path_list(&request.toolchain.path, "PATH")?;
         path_list(&request.toolchain.include, "INCLUDE")?;
         path_list(&request.toolchain.lib, "LIB")?;
-        Ok(())
+        Ok(observed)
     }
 
     fn exact_version(program: &str, arguments: &[&str], expected: &str) -> Result<(), String> {
+        let observed = tool_version(program, arguments)?;
+        if observed != expected {
+            return Err(format!(
+                "pinned tool {program} drifted: expected {expected:?}, observed {observed:?}",
+            ));
+        }
+        Ok(())
+    }
+
+    fn tool_version(program: &str, arguments: &[&str]) -> Result<String, String> {
         let output = ProcessCommand::new(program)
             .args(arguments)
             .env_clear()
@@ -544,15 +559,9 @@ mod windows {
         if !output.status.success() {
             return Err(format!("pinned tool {program} refused version inspection"));
         }
-        let observed = String::from_utf8(output.stdout)
-            .map_err(|_| format!("pinned tool {program} returned a non-UTF-8 version"))?;
-        if observed.trim() != expected {
-            return Err(format!(
-                "pinned tool {program} drifted: expected {expected:?}, observed {:?}",
-                observed.trim()
-            ));
-        }
-        Ok(())
+        String::from_utf8(output.stdout)
+            .map(|observed| observed.trim().to_owned())
+            .map_err(|_| format!("pinned tool {program} returned a non-UTF-8 version"))
     }
 
     fn path_carries(path: &str, pin: &str, name: &str) -> Result<(), String> {
