@@ -36,6 +36,7 @@ pub enum LinuxSealedError {
     Image(proof::ContainerError),
     App(AppBuildError),
     SourceArchive,
+    ProviderCanvas,
     Run(proof::ContainerError),
     Output(io::Error),
     Staging(Option<i32>),
@@ -64,6 +65,10 @@ impl fmt::Display for LinuxSealedError {
             Self::SourceArchive => {
                 formatter.write_str("the delivered source archive identity is not Unicode")
             }
+            Self::ProviderCanvas => formatter.write_str(concat!(
+                "SPICE_RELEASE_CANVAS and SPICE_RELEASE_APP name a provider canvas only ",
+                "together, as Unicode, for a delivered source archive"
+            )),
             Self::App(error) => write!(formatter, "app stage for Linux staging: {error}"),
             Self::Run(error) => write!(formatter, "sealed Linux staging did not run: {error}"),
             Self::Output(error) => write!(formatter, "cannot write staging output: {error}"),
@@ -84,7 +89,9 @@ impl Error for LinuxSealedError {
             Self::Runtime { error, .. } | Self::Image(error) | Self::Run(error) => Some(error),
             Self::App(error) => Some(error),
             Self::Output(error) => Some(error),
-            Self::RuntimeUnset | Self::SourceArchive | Self::Staging(_) => None,
+            Self::RuntimeUnset | Self::SourceArchive | Self::ProviderCanvas | Self::Staging(_) => {
+                None
+            }
         }
     }
 }
@@ -133,7 +140,8 @@ pub fn linux_sealed_stage(
     let container = proof::Container::new(admitted, repository.worktree_root(), limits)
         .map_err(LinuxSealedError::Image)?;
     // A delivered archive identity names the exact tree this workspace is, so
-    // the image builds the app itself; otherwise it links this host's stage.
+    // the image links the provider canvas it is handed or builds the app
+    // itself; otherwise it links this host's stage.
     let delivered = match &environment.source_archive {
         Some(identity) => Some(identity.to_str().ok_or(LinuxSealedError::SourceArchive)?),
         None => {
@@ -141,8 +149,9 @@ pub fn linux_sealed_stage(
             None
         }
     };
+    let canvas = provider_canvas(environment, delivered.is_some())?;
     let stage = container
-        .stage_release(repository.common_dir(), delivered)
+        .stage_release(repository.common_dir(), delivered, canvas)
         .map_err(LinuxSealedError::Run)?;
     output
         .write_all(&stage.stdout)
@@ -154,5 +163,21 @@ pub fn linux_sealed_stage(
         Ok(())
     } else {
         Err(LinuxSealedError::Staging(stage.code))
+    }
+}
+
+/// The provider-built canvas and app generation the environment hands a
+/// delivered stage, named together or not at all.
+fn provider_canvas(
+    environment: &ReleaseEnvironment,
+    delivered: bool,
+) -> Result<Option<proof::ProviderCanvas<'_>>, LinuxSealedError> {
+    match (&environment.release_canvas, &environment.release_app) {
+        (None, None) => Ok(None),
+        (Some(path), Some(app)) if delivered => Ok(Some(proof::ProviderCanvas {
+            path: Path::new(path),
+            app: app.to_str().ok_or(LinuxSealedError::ProviderCanvas)?,
+        })),
+        _ => Err(LinuxSealedError::ProviderCanvas),
     }
 }
