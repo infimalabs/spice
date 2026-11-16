@@ -31,11 +31,12 @@ records, but cannot tag or publish a GitHub Release. The publication command
 crosses those boundaries only after all three native version smokes succeed and
 their exact staged bytes are admitted.
 
-**Invariant —** Resumption observes the annotated tag and GitHub Release
-directly. A matching object is already converged; an absent object is created;
-a partial release receives only missing planned assets. No resumption retags,
-reuploads a matching asset, changes release metadata, or tolerates an extra
-asset.
+**Invariant —** Resumption observes the annotated tag and every GitHub Release,
+including drafts, directly. A matching published object is already converged;
+an absent object starts as a draft; a matching partial draft receives only
+missing planned assets and is then published. No resumption retags, duplicates
+a release, reuploads a matching asset, changes release metadata, or tolerates
+an extra asset. A mismatched or duplicate draft refuses.
 
 **Invariant —** Release documents remain inspectable local files. `spice
 release notes` writes the operator-facing history document, while the

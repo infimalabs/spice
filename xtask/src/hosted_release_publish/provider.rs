@@ -9,8 +9,6 @@ use serde::Deserialize;
 use super::PublishError;
 use super::plan::{CHECKSUMS, PublicationAsset, PublicationPlan, sha256};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ReleaseView {
     tag_name: String,
     name: String,
@@ -25,6 +23,21 @@ struct AssetView {
     name: String,
     digest: Option<String>,
     state: String,
+}
+
+struct ReleaseAdmission {
+    is_draft: bool,
+    missing: Vec<PublicationAsset>,
+}
+
+#[derive(Deserialize)]
+struct ApiReleaseView {
+    tag_name: String,
+    name: Option<String>,
+    body: Option<String>,
+    draft: bool,
+    prerelease: bool,
+    assets: Vec<AssetView>,
 }
 
 pub(super) fn publish_and_verify(
@@ -130,34 +143,33 @@ fn converge_release(
         source,
     })?;
     let observed = release_view(root, &plan.tag)?;
-    let missing = match observed {
+    let admission = match observed {
         None => {
-            let mut arguments = vec![
-                "release".to_owned(),
-                "create".to_owned(),
-                plan.tag.clone(),
-                "--verify-tag".to_owned(),
-                "--title".to_owned(),
-                plan.tag.clone(),
-                "--notes-file".to_owned(),
-                notes.to_string_lossy().into_owned(),
-            ];
-            arguments.extend(plan.assets.iter().map(|asset| {
-                plan.asset_path(operation, asset)
-                    .to_string_lossy()
-                    .into_owned()
-            }));
             gh(
                 root,
-                &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+                &[
+                    "release",
+                    "create",
+                    &plan.tag,
+                    "--verify-tag",
+                    "--draft",
+                    "--title",
+                    &plan.tag,
+                    "--notes-file",
+                    notes.to_string_lossy().as_ref(),
+                ],
             )?;
-            Vec::new()
+            let view = release_view(root, &plan.tag)?.ok_or_else(|| {
+                PublishError::Refused("draft GitHub Release remained absent".into())
+            })?;
+            admit_release(view, plan)?
         }
         Some(view) => admit_release(view, plan)?,
     };
-    if !missing.is_empty() {
+    if !admission.missing.is_empty() {
         let mut arguments = vec!["release", "upload", plan.tag.as_str()];
-        let paths = missing
+        let paths = admission
+            .missing
             .iter()
             .map(|asset| {
                 plan.asset_path(operation, asset)
@@ -168,13 +180,17 @@ fn converge_release(
         arguments.extend(paths.iter().map(String::as_str));
         gh(root, &arguments)?;
     }
+    if admission.is_draft {
+        gh(root, &["release", "edit", &plan.tag, "--draft=false"])?;
+    }
     let view = release_view(root, &plan.tag)?
         .ok_or_else(|| PublishError::Refused("GitHub Release remained absent".into()))?;
-    if admit_release(view, plan)?.is_empty() {
+    let final_admission = admit_release(view, plan)?;
+    if !final_admission.is_draft && final_admission.missing.is_empty() {
         Ok(())
     } else {
         Err(PublishError::Refused(
-            "GitHub Release remained incomplete after upload".into(),
+            "GitHub Release remained draft or incomplete after publication".into(),
         ))
     }
 }
@@ -182,11 +198,10 @@ fn converge_release(
 fn admit_release(
     view: ReleaseView,
     plan: &PublicationPlan,
-) -> Result<Vec<PublicationAsset>, PublishError> {
+) -> Result<ReleaseAdmission, PublishError> {
     if view.tag_name != plan.tag
         || view.name != plan.tag
         || view.body != plan.notes
-        || view.is_draft
         || view.is_prerelease
     {
         return Err(PublishError::Refused(
@@ -218,37 +233,50 @@ fn admit_release(
             "GitHub Release has unexpected asset {name}"
         )));
     }
-    Ok(missing)
+    Ok(ReleaseAdmission {
+        is_draft: view.is_draft,
+        missing,
+    })
 }
 
 fn release_view(root: &Path, tag: &str) -> Result<Option<ReleaseView>, PublishError> {
-    let output = command(
+    let payload = gh(
         root,
-        "gh",
         &[
-            "release",
-            "view",
-            tag,
-            "--json",
-            "tagName,name,body,isDraft,isPrerelease,assets",
+            "api",
+            "--paginate",
+            "--slurp",
+            "repos/{owner}/{repo}/releases?per_page=100",
         ],
-        true,
     )?;
-    if output.status.success() {
-        serde_json::from_slice(&output.stdout)
-            .map(Some)
-            .map_err(PublishError::Decode)
-    } else {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        if detail.to_ascii_lowercase().contains("release not found") {
-            Ok(None)
-        } else {
-            Err(PublishError::Command {
-                program: "gh".into(),
-                detail: detail.trim().to_owned(),
-            })
-        }
+    let pages = serde_json::from_str(&payload).map_err(PublishError::Decode)?;
+    select_release(pages, tag)
+}
+
+fn select_release(
+    pages: Vec<Vec<ApiReleaseView>>,
+    tag: &str,
+) -> Result<Option<ReleaseView>, PublishError> {
+    let mut matching = pages
+        .into_iter()
+        .flatten()
+        .filter(|view| view.tag_name == tag);
+    let Some(view) = matching.next() else {
+        return Ok(None);
+    };
+    if matching.next().is_some() {
+        return Err(PublishError::Refused(format!(
+            "multiple GitHub Releases name tag {tag}"
+        )));
     }
+    Ok(Some(ReleaseView {
+        tag_name: view.tag_name,
+        name: view.name.unwrap_or_default(),
+        body: view.body.unwrap_or_default(),
+        is_draft: view.draft,
+        is_prerelease: view.prerelease,
+        assets: view.assets,
+    }))
 }
 
 fn verify_fresh_download(
@@ -445,26 +473,71 @@ mod tests {
         }
     }
 
+    fn api_view(plan: &PublicationPlan, draft: bool) -> ApiReleaseView {
+        let view = view(plan);
+        ApiReleaseView {
+            tag_name: view.tag_name,
+            name: Some(view.name),
+            body: Some(view.body),
+            draft,
+            prerelease: view.is_prerelease,
+            assets: view.assets,
+        }
+    }
+
     #[test]
     fn provider_release_converges_only_with_the_exact_asset_inventory() {
         let plan = plan();
-        assert!(
-            admit_release(view(&plan), &plan)
-                .expect("exact release")
-                .is_empty()
-        );
+        let exact = admit_release(view(&plan), &plan).expect("exact release");
+        assert!(!exact.is_draft);
+        assert!(exact.missing.is_empty());
 
         let mut partial = view(&plan);
         partial.assets.pop();
-        assert_eq!(
-            admit_release(partial, &plan).expect("missing assets may resume"),
-            vec![plan.assets[1].clone()]
-        );
+        let partial = admit_release(partial, &plan).expect("missing assets may resume");
+        assert!(!partial.is_draft);
+        assert_eq!(partial.missing, vec![plan.assets[1].clone()]);
 
         let mut moved = view(&plan);
         moved.assets[0].digest = Some(format!("sha256:{}", "f".repeat(64)));
         assert!(matches!(
             admit_release(moved, &plan),
+            Err(PublishError::Refused(_))
+        ));
+    }
+
+    #[test]
+    fn matching_draft_resumes_but_moved_draft_refuses() {
+        let plan = plan();
+        let mut draft = view(&plan);
+        draft.is_draft = true;
+        draft.assets.pop();
+        let admitted = admit_release(draft, &plan).expect("matching draft");
+        assert!(admitted.is_draft);
+        assert_eq!(admitted.missing, vec![plan.assets[1].clone()]);
+
+        let mut moved = view(&plan);
+        moved.is_draft = true;
+        moved.body.push_str("moved");
+        assert!(matches!(
+            admit_release(moved, &plan),
+            Err(PublishError::Refused(_))
+        ));
+    }
+
+    #[test]
+    fn release_selection_includes_drafts_and_refuses_duplicates() {
+        let plan = plan();
+        let selected = select_release(vec![vec![api_view(&plan, true)]], &plan.tag)
+            .expect("release selection")
+            .expect("draft release");
+        assert!(selected.is_draft);
+
+        assert!(matches!(
+            select_release(
+                vec![vec![api_view(&plan, false), api_view(&plan, true)]],
+                &plan.tag
+            ),
             Err(PublishError::Refused(_))
         ));
     }
