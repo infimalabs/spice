@@ -18,7 +18,7 @@ const USAGE: &str = concat!(
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
-    "seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
+    "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
@@ -105,6 +105,10 @@ fn main() -> ExitCode {
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("source-archive") => {
             run_source_archive(arguments.collect(), &ambient)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(value) if value == OsStr::new("release-inputs") => {
+            run_release_inputs(arguments.collect(), &ambient, &mut output)
         }
         Some(value) if value == OsStr::new("stage-target") => run_stage_target(
             arguments.collect(),
@@ -913,6 +917,26 @@ fn run_source_archive(arguments: Vec<OsString>, ambient: &Ambient) -> CommandRes
         }
     };
     xtask::source_archive(output, ambient.environment()?).map_err(Into::into)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_release_inputs(
+    arguments: Vec<OsString>,
+    ambient: &Ambient,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    let [directory] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    xtask::release_inputs(
+        Path::new(directory),
+        &release_environment(ambient),
+        ambient.environment()?,
+        output,
+    )
+    .map(|_| ())
+    .map_err(Into::into)
 }
 
 fn preflight_native_release(target: &str) -> Result<(), Box<dyn std::error::Error>> {

@@ -323,6 +323,19 @@ worktree is, the sealed route hands that identity to the in-image
 `stage-target` instead of linking a host-staged generation: the image builds
 the app itself, offline, so no host toolchain touches any part of the release.
 
+**Invariant —** Hosted release input production precedes every native build.
+`.github/workflows/release-inputs.yml` checks out one exact landed `main`
+commit, runs `spice dev xtask -- release-inputs OUT` on a GitHub-hosted Linux
+runner, and publishes `release-inputs-CHALLENGE`. That artifact contains the
+canonical `source.tar`, the one compiled app rack as `canvas.zip`, and
+`result.json`. The result binds their byte counts, SHA-256 checksums,
+domain-separated archive and canvas identities, source commit and recursive
+tree, app generation, proof-image identity, workflow and run, runner image,
+and toolchain. A separate job that runs no repository code signs all three
+files with GitHub OIDC provenance. Linux, Darwin, and Windows download and
+admit those exact files independently, so no workstation or native target
+creates release input bytes and the three native builds can run in parallel.
+
 **Invariant —** `stage-target x86_64-unknown-linux-musl --unsigned --hosted`
 stages Linux on one fresh GitHub-hosted `ubuntu-24.04` X64 machine from
 `dist/stage/source.tar`, never from the developer host. The client uploads the
