@@ -479,7 +479,18 @@ jobs:
           "$work/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$work/stage"
           "$work/xtask" verify-staged-darwin "$work/stage"
           codesign --verify --deep --strict --verbose=2 "$native"
-          spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
+          notarization_attempts=30
+          notarization_delay=10
+          for ((attempt = 1; attempt <= notarization_attempts; attempt++)); do
+            if spctl --assess --type open --context context:primary-signature --verbose=4 "$native"; then
+              break
+            fi
+            if ((attempt == notarization_attempts)); then
+              echo "notarization remained unavailable after ${notarization_attempts} attempts" >&2
+              exit 1
+            fi
+            sleep "$notarization_delay"
+          done
           python3 - \
             "$work/stage/result.json" \
             '${{ inputs.challenge }}' \
