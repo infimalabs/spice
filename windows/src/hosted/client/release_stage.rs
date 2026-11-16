@@ -50,6 +50,7 @@ pub fn windows_release_commands_into(
                 &policy.branch,
                 WORKFLOW_PATH,
                 &source.workflow_blob,
+                attach::RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))

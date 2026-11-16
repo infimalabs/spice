@@ -117,6 +117,7 @@ pub fn linux_hosted_stage(
                 &policy.branch,
                 WORKFLOW_PATH,
                 &source.workflow_blob,
+                super::attach::RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))
