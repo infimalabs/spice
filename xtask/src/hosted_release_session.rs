@@ -43,6 +43,14 @@ impl NativeTarget {
     }
 }
 
+/// Workflow selection for the next observation or dispatch of one target.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TargetWorkflow {
+    Source,
+    Current,
+    Exact(String),
+}
+
 /// Exclusive, atomically published session state for one provider preflight.
 pub(crate) struct ReleaseSession {
     path: PathBuf,
@@ -125,6 +133,11 @@ impl ReleaseSession {
         Ok(state.target(target).attachment())
     }
 
+    pub(crate) fn workflow(&self, target: NativeTarget) -> Result<TargetWorkflow, SessionError> {
+        let state = self.lock()?;
+        Ok(state.target(target).workflow())
+    }
+
     pub(crate) fn recorder(&self, target: NativeTarget) -> TargetRecorder {
         TargetRecorder {
             target,
@@ -141,12 +154,13 @@ impl ReleaseSession {
         &self,
         target: NativeTarget,
         terminal: bool,
+        schema: bool,
         detail: String,
     ) -> Result<(), SessionError> {
         if !self.lock()?.target(target).has_attempt() {
             return Ok(());
         }
-        self.update(target, |state| state.failed(terminal, detail))
+        self.update(target, |state| state.failed(terminal, schema, detail))
     }
 
     fn update(
@@ -260,17 +274,19 @@ impl SessionFile {
         target: NativeTarget,
         binding: &HostedRunBinding,
     ) -> Result<(), SessionError> {
-        let expected_workflow = target.workflow(&self.workflows);
-        if binding.workflow_blob != expected_workflow {
+        let source_workflow = target.workflow(&self.workflows);
+        let state = self.targets.get_mut(target);
+        if !binding.attached
+            && !state.accepts_fresh_workflow(source_workflow, &binding.workflow_blob)
+        {
             return Err(SessionError::Refused(format!(
-                "{} run {} uses workflow {}, not the session workflow {}",
+                "{} run {} uses workflow {}, which is not admissible after its previous attempt",
                 target.name(),
                 binding.run_id,
                 binding.workflow_blob,
-                expected_workflow
             )));
         }
-        self.targets.get_mut(target).record(binding)
+        state.record(binding)
     }
 }
 
@@ -311,11 +327,34 @@ impl TargetState {
         self.attempts
             .last()
             .and_then(|attempt| match attempt.outcome {
-                AttemptOutcome::Failed { .. } => None,
+                AttemptOutcome::Failed { .. } | AttemptOutcome::SchemaFailed { .. } => None,
                 AttemptOutcome::Running { .. } | AttemptOutcome::Succeeded => {
                     Some(Attach::Run(attempt.run_id))
                 }
             })
+    }
+
+    fn workflow(&self) -> TargetWorkflow {
+        match self.attempts.last() {
+            None
+            | Some(Attempt {
+                outcome: AttemptOutcome::Failed { .. },
+                ..
+            }) => TargetWorkflow::Source,
+            Some(Attempt {
+                outcome: AttemptOutcome::SchemaFailed { .. },
+                ..
+            }) => TargetWorkflow::Current,
+            Some(attempt) => TargetWorkflow::Exact(attempt.workflow_blob.clone()),
+        }
+    }
+
+    fn accepts_fresh_workflow(&self, source: &str, observed: &str) -> bool {
+        match self.workflow() {
+            TargetWorkflow::Source => observed == source,
+            TargetWorkflow::Current => true,
+            TargetWorkflow::Exact(_) => false,
+        }
     }
 
     fn has_attempt(&self) -> bool {
@@ -353,11 +392,12 @@ impl TargetState {
                 binding.run_id
             )));
         }
-        if self
-            .attempts
-            .last()
-            .is_some_and(|attempt| !matches!(attempt.outcome, AttemptOutcome::Failed { .. }))
-        {
+        if self.attempts.last().is_some_and(|attempt| {
+            !matches!(
+                attempt.outcome,
+                AttemptOutcome::Failed { .. } | AttemptOutcome::SchemaFailed { .. }
+            )
+        }) {
             return Err(SessionError::Refused(
                 "a healthy provider run is already recorded for this target".to_owned(),
             ));
@@ -377,12 +417,14 @@ impl TargetState {
         Ok(())
     }
 
-    fn failed(&mut self, terminal: bool, detail: String) -> Result<(), SessionError> {
+    fn failed(&mut self, terminal: bool, schema: bool, detail: String) -> Result<(), SessionError> {
         let attempt = self.current_mut()?;
         if !terminal && matches!(attempt.outcome, AttemptOutcome::Succeeded) {
             return Ok(());
         }
-        attempt.outcome = if terminal {
+        attempt.outcome = if schema {
+            AttemptOutcome::SchemaFailed { detail }
+        } else if terminal {
             AttemptOutcome::Failed { detail }
         } else {
             AttemptOutcome::Running {
@@ -416,6 +458,7 @@ enum AttemptOutcome {
     Running { last_error: Option<String> },
     Succeeded,
     Failed { detail: String },
+    SchemaFailed { detail: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -475,6 +518,10 @@ pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
         } | WindowsHostedError::Cancelled { run_id: Some(_) }
             | WindowsHostedError::ResultSchema(_)
     )
+}
+
+pub(crate) fn schema_provider_failure(error: &WindowsHostedError) -> bool {
+    matches!(error, WindowsHostedError::ResultSchema(_))
 }
 
 #[derive(Debug)]
@@ -576,7 +623,7 @@ mod tests {
         session
             .targets
             .linux
-            .failed(true, "provider failed".to_owned())
+            .failed(true, false, "provider failed".to_owned())
             .unwrap();
         session.targets.macos.succeeded().unwrap();
         session.targets.windows.succeeded().unwrap();
@@ -608,6 +655,7 @@ mod tests {
             .linux
             .failed(
                 terminal_provider_failure(&identity_refusal),
+                schema_provider_failure(&identity_refusal),
                 identity_refusal.to_string(),
             )
             .unwrap();
@@ -622,9 +670,31 @@ mod tests {
         session
             .targets
             .linux
-            .failed(terminal_provider_failure(&schema), schema.to_string())
+            .failed(
+                terminal_provider_failure(&schema),
+                schema_provider_failure(&schema),
+                schema.to_string(),
+            )
             .unwrap();
         assert_eq!(session.target(NativeTarget::Linux).attachment(), None);
+        assert_eq!(
+            session.target(NativeTarget::Linux).workflow(),
+            TargetWorkflow::Current
+        );
+        session
+            .record(NativeTarget::Linux, &binding(104, "linux-b", false))
+            .unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Linux).workflow(),
+            TargetWorkflow::Exact("linux-b".to_owned())
+        );
+        assert_eq!(
+            session.target(NativeTarget::Linux).attachment(),
+            Some(Attach::Run(104))
+        );
+        session
+            .record(NativeTarget::Linux, &binding(104, "linux-b", true))
+            .unwrap();
     }
 
     #[test]
