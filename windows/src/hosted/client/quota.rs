@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::{Cancellation, WindowsHostedError, cancel_run, command, successful_text};
+use super::{Cancellation, RunAuthority, WindowsHostedError, command, successful_text};
 
 /// The provider's quota window; no reset lies further ahead.
 const QUOTA_WINDOW_SECONDS: u64 = 3600;
@@ -58,11 +58,11 @@ fn reset_wait(reset: u64, now: u64) -> Duration {
     Duration::from_secs(reset.saturating_sub(now).min(QUOTA_WINDOW_SECONDS) + RESET_MARGIN_SECONDS)
 }
 
-/// Wait out a spent quota. An explicit cancellation still cancels the run.
+/// Wait out a spent quota. An explicit cancellation ends observation through
+/// [`super::ownership::interrupt`].
 pub(super) fn await_reset(
     root: &Path,
-    repository: &str,
-    run_id: u64,
+    authority: &RunAuthority,
     reset: u64,
     cancellation: &Cancellation,
 ) -> Result<(), WindowsHostedError> {
@@ -77,10 +77,7 @@ pub(super) fn await_reset(
     match receiver.recv_timeout(reset_wait(reset, now)) {
         Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
         Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-            cancel_run(root, repository, run_id)?;
-            Err(WindowsHostedError::Cancelled {
-                run_id: Some(run_id),
-            })
+            Err(super::ownership::interrupt(root, authority))
         }
     }
 }

@@ -125,14 +125,20 @@ pub(super) fn attach_run(
 }
 
 #[derive(Clone, Deserialize)]
-struct ProviderRun {
-    id: u64,
-    path: String,
-    event: String,
-    display_title: String,
-    head_branch: Option<String>,
-    head_sha: String,
-    status: Option<String>,
+pub(super) struct ProviderRun {
+    pub(super) id: u64,
+    pub(super) repository: RunRepository,
+    pub(super) path: String,
+    pub(super) event: String,
+    pub(super) display_title: String,
+    pub(super) head_branch: Option<String>,
+    pub(super) head_sha: String,
+    pub(super) status: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+pub(super) struct RunRepository {
+    pub(super) full_name: String,
 }
 
 #[derive(Deserialize)]
@@ -294,7 +300,7 @@ fn challenge_from_title<'a>(title: &'a str, prefix: &str) -> Option<&'a str> {
     .then_some(challenge)
 }
 
-fn workflow_blob(
+pub(super) fn workflow_blob(
     root: &Path,
     repository: &str,
     workflow: &str,
@@ -391,7 +397,7 @@ fn is_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHostedError> {
+pub(super) fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHostedError> {
     let response = successful_text(
         "provider run inspection",
         command(root, "gh", [OsString::from("api"), OsString::from(path)])?,
@@ -402,8 +408,8 @@ fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHoste
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, RUN_TITLE_PREFIX, admit_run,
-        challenge_from_title, select, unretired,
+        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, RUN_TITLE_PREFIX,
+        RunRepository, admit_run, challenge_from_title, select, unretired,
     };
     use crate::hosted::client::WindowsHostedError;
     use crate::hosted::client::transport::Transport;
@@ -415,6 +421,9 @@ mod tests {
     fn run(id: u64, status: &str) -> ProviderRun {
         ProviderRun {
             id,
+            repository: RunRepository {
+                full_name: "infimalabs/spice".to_owned(),
+            },
             path: WORKFLOW.to_owned(),
             event: "workflow_dispatch".to_owned(),
             display_title: format!("Hosted archive {CHALLENGE}"),

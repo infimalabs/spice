@@ -168,8 +168,9 @@ pub fn macos_hosted_stage(
         &cancellation,
         WORKFLOW_PATH,
         inputs,
-        |run_id| {
-            watch_run(run.root, run.repository, run_id, &cancellation)?;
+        |authority| {
+            watch_run(run.root, run.repository, authority, &cancellation)?;
+            let run_id = authority.run_id();
             let stage = download_artifact(&run, run_id, &format!("darwin-stage-{challenge}"))?;
             let result_path = stage.join(RESULT_PATH);
             let result: MacosResult =

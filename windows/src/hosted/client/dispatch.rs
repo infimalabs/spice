@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::{Cancellation, HostedRun, WindowsHostedError, cancel_run, command, successful};
+use super::{Cancellation, HostedRun, RunAuthority, WindowsHostedError, command, successful};
 
 /// Provider reads admitted before a dispatched run is considered unavailable.
 const DISPATCH_READ_ATTEMPTS: usize = 5;
@@ -40,9 +40,10 @@ fn bounded_read<T, E>(
 /// that never becomes readable remains intact with its archive transport.
 pub(super) fn await_readable(
     run: &HostedRun<'_>,
-    run_id: u64,
+    authority: &RunAuthority,
     cancellation: &Cancellation,
 ) -> Result<(), WindowsHostedError> {
+    let run_id = authority.run_id();
     let read = || {
         successful(
             "dispatched workflow visibility",
@@ -60,7 +61,7 @@ pub(super) fn await_readable(
     };
     match bounded_read(
         DISPATCH_READ_ATTEMPTS,
-        || wait_interval(run, run_id, cancellation),
+        || wait_interval(run, authority, cancellation),
         read,
     ) {
         Ok(()) => Ok(()),
@@ -76,7 +77,7 @@ pub(super) fn await_readable(
 
 fn wait_interval(
     run: &HostedRun<'_>,
-    run_id: u64,
+    authority: &RunAuthority,
     cancellation: &Cancellation,
 ) -> Result<(), WindowsHostedError> {
     let (events, receiver) = mpsc::channel();
@@ -86,10 +87,7 @@ fn wait_interval(
     match receiver.recv_timeout(DISPATCH_READ_INTERVAL) {
         Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
         Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => {
-            cancel_run(run.root, run.repository, run_id)?;
-            Err(WindowsHostedError::Cancelled {
-                run_id: Some(run_id),
-            })
+            Err(super::ownership::interrupt(run.root, authority))
         }
     }
 }

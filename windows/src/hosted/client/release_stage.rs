@@ -110,11 +110,11 @@ pub fn windows_release_commands_into(
                 "request": request,
             })
         }),
-        |run_id| {
+        |authority| {
             complete_dispatched_run(
                 &run,
                 &request,
-                run_id,
+                authority,
                 Some((&destination, None, Some(inputs))),
                 &cancellation,
             )
