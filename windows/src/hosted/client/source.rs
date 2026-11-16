@@ -60,9 +60,9 @@ pub(super) fn prepare(
             (commit, canonical_commit, archive_identity(&archive)?)
         }
         HostedSource::Archive(archive) => {
-            let identity = archive_identity(archive)?;
-            let (commit, canonical_commit) = archive_commit(root, scratch, archive, challenge)?;
-            (commit, canonical_commit, identity)
+            let source = archive_source(root, scratch, archive)?;
+            let commit = commit_tree(root, &source.tree, None, &archive_message(challenge))?;
+            (commit, source.canonical_commit, source.archive)
         }
     };
     let tree = tree_digest(root, &commit)?;
@@ -128,6 +128,53 @@ fn archive_identity(path: &Path) -> Result<Digest, WindowsHostedError> {
     dist::source_archive_identity(path).map_err(WindowsHostedError::ProviderResponse)
 }
 
+/// One release source archive's identities, its exact tree written to this
+/// repository's object store.
+pub(super) struct ArchiveSource {
+    /// The Git tree equal to the archive's tree, `dist/build.json` included.
+    pub(super) tree: String,
+    /// The canonical release commit the archive's record names.
+    pub(super) canonical_commit: String,
+    /// The identity of the archive's bytes.
+    pub(super) archive: Digest,
+}
+
+/// Bind an attached provider run's one-use `commit`, already proven to carry
+/// `source.tree`, to the archive it was built from.
+pub(super) fn attached(
+    root: &Path,
+    source: ArchiveSource,
+    commit: String,
+) -> Result<PreparedSource, WindowsHostedError> {
+    let tree = tree_digest(root, &source.tree)?;
+    Ok(PreparedSource {
+        commit,
+        canonical_commit: source.canonical_commit,
+        archive: source.archive,
+        tree,
+    })
+}
+
+const ARCHIVE_MESSAGE: &str = "spice hosted source archive ";
+/// Hex digits of one hosted challenge's 32 random bytes.
+const CHALLENGE_HEX_LENGTH: usize = 64;
+
+/// The message of the one-use archive commit for `challenge`.
+fn archive_message(challenge: &str) -> String {
+    format!("{ARCHIVE_MESSAGE}{challenge}\n")
+}
+
+/// The challenge a one-use archive commit's `message` records, if it is one.
+pub(super) fn archive_challenge(message: &str) -> Option<&str> {
+    let rest = message.strip_prefix(ARCHIVE_MESSAGE)?;
+    let challenge = rest.strip_suffix('\n').unwrap_or(rest);
+    (challenge.len() == CHALLENGE_HEX_LENGTH
+        && challenge
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then_some(challenge)
+}
+
 fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
     dist::source_identity(root)
         .map_err(WindowsHostedError::ProviderResponse)?
@@ -140,14 +187,14 @@ fn canonical_source_commit(root: &Path) -> Result<String, WindowsHostedError> {
         })
 }
 
-/// Commit the archive's exact tree, `dist/build.json` included, as one
-/// parentless transport commit and return its canonical source commit.
-fn archive_commit(
+/// Extract the archive and write its exact tree, `dist/build.json` included,
+/// to this repository's object store.
+pub(super) fn archive_source(
     root: &Path,
     scratch: &Path,
     archive: &Path,
-    challenge: &str,
-) -> Result<(String, String), WindowsHostedError> {
+) -> Result<ArchiveSource, WindowsHostedError> {
+    let identity = archive_identity(archive)?;
     let extracted = scratch.join("source");
     fs::create_dir(&extracted).map_err(|source| WindowsHostedError::Io {
         path: extracted.clone(),
@@ -201,13 +248,11 @@ fn archive_commit(
     )?;
     let tree = successful_text("archive tree object", git(vec!["write-tree".into()])?)?;
     let canonical_commit = canonical_source_commit(&worktree)?;
-    let commit = commit_tree(
-        root,
-        tree.trim(),
-        None,
-        &format!("spice hosted source archive {challenge}\n"),
-    )?;
-    Ok((commit, canonical_commit))
+    Ok(ArchiveSource {
+        tree: tree.trim().to_owned(),
+        canonical_commit,
+        archive: identity,
+    })
 }
 
 /// Commit `tree` with the hosted runner's fixed authorship.
