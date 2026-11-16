@@ -352,14 +352,16 @@ executable object as the artifact `canvas-DIGEST`, named by the payload's
 canvas digest; it expires after seven days. Before dispatch,
 hosted Darwin and Windows clients read the Linux payload staged in
 `dist/stage` from the same archive, find the newest unexpired artifact with
-that name, and bind its run id and digest into the request: `linux_run` and
-`canvas` inputs for `macos.yml`, a `canvas` pin in the Windows request. Each
-runner downloads that artifact beside its checkout and refuses a payload
-recording another canvas. Windows seals it read-only for the guest. The stage
-then adopts it through `SPICE_LINUX_STAGE`. The client publishes a returned
-payload only when its app generation and canvas equal the staged Linux
-payload's. No ref is pushed for the canvas. A missing Linux payload or an
-expired artifact refuses before dispatch.
+that name whose owner is a completed-success `linux.yml` run, and bind its run
+id and digest into the request: `linux_run` and `canvas` inputs for `macos.yml`,
+a `canvas` pin in the Windows request. An artifact from a failed, incomplete,
+or different workflow is never eligible. Each runner downloads the admitted
+artifact beside its checkout and refuses a payload recording another canvas.
+Windows seals it read-only for the guest. The stage then adopts it through
+`SPICE_LINUX_STAGE`. The client publishes a returned payload only when its app
+generation and canvas equal the staged Linux payload's. No ref is pushed for
+the canvas. A missing Linux payload or eligible unexpired artifact refuses
+before dispatch.
 
 **Invariant —** One retained hosted publication stages Linux first so its
 provider-built proof image supplies the exact `sha256:...` identity. Darwin and
