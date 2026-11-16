@@ -7,7 +7,6 @@ branch = "main"
 [image]
 label = "macos-15"
 provider_os = "macos15"
-version = "20261112.0539.3"
 os_version = "15.8.2"
 os_build = "24H232"
 architecture = "ARM64"

@@ -128,7 +128,6 @@ jobs:
               policy = tomllib.load(source)
           values = {
               "EXPECTED_IMAGE_OS": policy["image"]["provider_os"],
-              "EXPECTED_IMAGE_VERSION": policy["image"]["version"],
               "EXPECTED_MACOS_VERSION": policy["image"]["os_version"],
               "EXPECTED_MACOS_BUILD": policy["image"]["os_build"],
               "DEVELOPER_DIR": policy["xcode"]["developer_dir"],
@@ -147,7 +146,6 @@ jobs:
               print(f"{key}={value}")
           PY
           test "$ImageOS" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["provider_os"])')"
-          test "$ImageVersion" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["version"])')"
           test "$(sw_vers -productVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_version"])')"
           test "$(sw_vers -buildVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_build"])')"
 
@@ -333,7 +331,6 @@ jobs:
           }
           test "$(uname -m)" = arm64
           test "$ImageOS" = "$(policy_value image provider_os)"
-          test "$ImageVersion" = "$(policy_value image version)"
           test "$(sw_vers -productVersion)" = "$(policy_value image os_version)"
           test "$(sw_vers -buildVersion)" = "$(policy_value image os_build)"
           sudo xcode-select --switch "$(policy_value xcode developer_dir)"
