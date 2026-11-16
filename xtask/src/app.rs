@@ -358,6 +358,14 @@ fn admit_generation<'a>(archive: &'a [u8], expected: &Digest) -> Result<Rack<'a>
     Ok(rack)
 }
 
+/// Uncompressed bytes of the app files `app` carries.
+fn app_tree(app: &Rack<'_>) -> Result<u64, AppBuildError> {
+    spice::serve::canvas::gzip::beneath(app, APP_DIRECTORY)
+        .map(|entry| entry.map(|(_, stream)| u64::from(stream.size())))
+        .sum::<Result<u64, ::rack::Error>>()
+        .map_err(AppBuildError::Canvas)
+}
+
 /// The spice rack every appliance build links: the current staged generation's
 /// app archive, the tracked sources beside it, and the build record,
 /// assembled once and admitted as that generation.
@@ -421,14 +429,43 @@ impl StagedCanvas {
             &generation,
         ))?;
         let app = admit_generation(&staged, &generation)?;
-        let tree = spice::serve::canvas::gzip::beneath(&app, APP_DIRECTORY)
-            .map(|entry| entry.map(|(_, stream)| u64::from(stream.size())))
-            .sum::<Result<u64, ::rack::Error>>()
-            .map_err(AppBuildError::Canvas)?;
+        let tree = app_tree(&app)?;
         let bytes = rack::assemble(root, &app, build)?;
         admit_generation(&bytes, &generation)?;
         Ok(Self {
             canvas: dist::Canvas::new(generation, &bytes),
+            tree,
+            bytes,
+        })
+    }
+
+    /// Adopt `linked`, the rack another release target's executable links as
+    /// `generation`, without compiling the app: the app members it carries are
+    /// re-assembled with the tracked sources under `root` and `build`, and the
+    /// result must be byte-identical to `linked`.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a rack that does not admit as `generation`, an unreadable
+    /// tracked source, and a re-assembly that differs from `linked`.
+    pub(crate) fn adopt(
+        root: &Path,
+        linked: &[u8],
+        generation: &Digest,
+        build: &wire::manifest::BuildInfo,
+    ) -> Result<Self, AppBuildError> {
+        let app = admit_generation(linked, generation)?;
+        let tree = app_tree(&app)?;
+        let bytes = rack::assemble(root, &app, build)?;
+        if bytes != linked {
+            return Err(AppBuildError::GeneratedStage(format!(
+                "this source tree assembles generation {generation} into a rack other than the \
+                 adopted canvas {}",
+                Digest::compute(Domain::DistArtifact, linked)
+            )));
+        }
+        Ok(Self {
+            canvas: dist::Canvas::new(generation.clone(), &bytes),
             tree,
             bytes,
         })

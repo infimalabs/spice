@@ -102,6 +102,17 @@ is the app's only carrier.
 The app source identity spells each relative path as UTF-8 components joined by
 `/` and orders inputs by that spelling, independent of the host path separator.
 
+**Invariant —** The release app is compiled once, by the Linux target build.
+Compiled Wasm is not yet byte-identical across build hosts: remapped paths
+keep host separators, and Cargo's crate hashes take in host-built
+proc-macros. A local Darwin or Windows `stage-target` therefore runs no app
+compiler. It reads the Linux payload staged from the same archive, extracts
+the rack its executable links, and requires that rack's digest to equal the
+payload's recorded canvas. It then re-assembles the rack from that rack's app
+members and its own tracked sources, and links it only when the result is
+byte-identical. A missing Linux payload, one from another archive, or any
+mismatch refuses before the native build.
+
 **Invariant —** One release stages every target from one source archive.
 `spice dev xtask -- source-archive` is the one point staging reads Git: it
 requires a checkout exactly at HEAD, with no tracked change, no untracked path

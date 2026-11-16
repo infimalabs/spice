@@ -30,6 +30,7 @@ mod report;
 pub use report::TargetBuildError;
 pub(crate) use report::render_canvas;
 use report::{render_command_records, render_records};
+mod adopted;
 mod source;
 use source::{GuardedPublisher, SourceArchive, verify_checkout};
 
@@ -316,6 +317,19 @@ fn release_proof_image_at(workspace: &Path) -> Result<String, TargetBuildError> 
     Ok(container.image().to_owned())
 }
 
+/// Where one release stage's canvas comes from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppSource {
+    /// Compile the app from the stage's source tree.
+    Compile,
+    /// Link the generation already staged in the workspace, admitted only
+    /// when the workspace derives the same build record as the archive.
+    Workspace,
+    /// Link the canvas the staged Linux payload's executable links, built
+    /// from the same archive, so every target ships one app generation.
+    Linux,
+}
+
 /// Build and atomically stage one supported release target from the release's
 /// source archive.
 ///
@@ -328,15 +342,14 @@ fn release_proof_image_at(workspace: &Path) -> Result<String, TargetBuildError> 
 /// the archive identity the signed request bound. A `signing` pair gives the
 /// Darwin executable a notarized Developer ID signature before its bytes are
 /// digested; it is admitted against the keychain and notary service before
-/// the first build. With `staged_app`, the app compiler does not run: the
-/// target links the generation already staged in the workspace, admitted only
-/// when the workspace derives the same build record as the archive.
+/// the first build. Unless `app` is [`AppSource::Compile`], the app compiler
+/// does not run.
 pub fn stage_target(
     spelling: &str,
     environment: ReleaseEnvironment,
     signing: Option<&DarwinSigning>,
     proof_container: Option<&str>,
-    staged_app: bool,
+    app: AppSource,
     output: &mut impl Write,
 ) -> Result<TargetBuild, TargetBuildError> {
     let target = parse_target(spelling)?;
@@ -357,8 +370,9 @@ pub fn stage_target(
     };
     let version = spice::version::source_version(&root, dist::Build::Staged)
         .map_err(TargetBuildError::SourceVersion)?;
-    let canvas = staged_app
-        .then(|| {
+    let canvas = match app {
+        AppSource::Compile => None,
+        AppSource::Workspace => {
             let expected = dist::build_info(&root, dist::Build::Staged)
                 .map_err(TargetBuildError::SourceVersion)?;
             let staged = spice::version::build_info(&workspace, dist::Build::Staged)
@@ -368,10 +382,21 @@ pub fn stage_target(
                     "staged app build {staged:?} does not match release build {expected:?}"
                 )));
             }
-            crate::app::StagedCanvas::read(&workspace, &staged)
-                .map_err(TargetBuildError::Application)
-        })
-        .transpose()?;
+            Some(
+                crate::app::StagedCanvas::read(&workspace, &staged)
+                    .map_err(TargetBuildError::Application)?,
+            )
+        }
+        AppSource::Linux => {
+            let build = dist::build_info(&root, dist::Build::Staged)
+                .map_err(TargetBuildError::SourceVersion)?;
+            let linux = adopted::linux_canvas(&stage_root, &archive.digest)?;
+            Some(
+                crate::app::StagedCanvas::adopt(&root, &linux.bytes, &linux.generation, &build)
+                    .map_err(TargetBuildError::Application)?,
+            )
+        }
+    };
     let programs = Programs::discover(&root, &environment, target)?;
     let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
     match stage_with_roots(
