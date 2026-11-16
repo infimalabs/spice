@@ -37,7 +37,7 @@ fn bounded_read<T, E>(
 }
 
 /// Return only after the provider can answer for the dispatched run. A run
-/// that never becomes readable remains intact with its one-use source ref.
+/// that never becomes readable remains intact with its archive transport.
 pub(super) fn await_readable(
     run: &HostedRun<'_>,
     run_id: u64,
@@ -67,7 +67,7 @@ pub(super) fn await_readable(
         Err(BoundedReadError::Wait(error)) => Err(error),
         Err(BoundedReadError::Exhausted(reason)) => Err(WindowsHostedError::DispatchUnreadable {
             run_id,
-            source_ref: run.source_ref.to_owned(),
+            challenge: run.challenge.to_owned(),
             observations: DISPATCH_READ_ATTEMPTS,
             reason: Box::new(reason),
         }),

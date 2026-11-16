@@ -29,7 +29,7 @@ fn only_lost_observation_retains_provider_state() {
     };
     let unreadable = WindowsHostedError::DispatchUnreadable {
         run_id: 43,
-        source_ref: "hosted-challenge".to_owned(),
+        challenge: "hosted-challenge".to_owned(),
         observations: 5,
         reason: Box::new(WindowsHostedError::ProviderResponse("not found".to_owned())),
     };
