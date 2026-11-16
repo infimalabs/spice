@@ -11,53 +11,39 @@ repository installation must preserve state the operator already owns. Exact
 plans, durable receipts, convergence, and identity-aware reversal answer those
 boundaries.
 
-### External publication is a plan, not a verb
+### External publication is one convergent command
 
-**Invariant —** Every release verb with externally visible publication effects
-renders its complete ordered plan and performs none of those effects until
-execution supplies that plan's exact digest. An absent or moved digest refuses
-before effects; exact-plan execution is the only publication path. Local
-mutations remain governed by their own transactional contracts.
+**Invariant —** `spice dev xtask -- publish-hosted-release` is the only command
+with externally visible release effects. It derives one immutable publication
+plan from the current landed source and the three admitted native stages before
+the first tag or provider mutation. The plan is retained under the Git-common
+release-operation directory.
 
-**Invariant —** Plan identity covers the repository, action, version, source and
-release commits, target matrix, ordered operations, notes content, artifacts,
-proof receipts, sealed manifest, and captured preconditions. Step order is part
-of it, because the ordering is the safety property. The correctness operation
-means the complete canonical strict battery, never a mutable subset outside the
-plan.
+**Invariant —** Plan identity covers the source commit, product version,
+annotated tag, release title and notes, and every asset name, byte length, and
+SHA-256. Re-running against the same source must derive the same plan. Changed
+local bytes or an existing external object with another identity refuse rather
+than move.
 
-**Invariant —** Preconditions that can be evaluated without effect are evaluated
-while the plan is built, so a knowable failure never strands the operator after
-an effect.
+**Invariant —** Inspection and native staging are consequence-free for external
+release authority. They may create or resume provider build runs and local
+records, but cannot tag or publish a GitHub Release. The publication command
+crosses those boundaries only after all three native version smokes succeed and
+their exact staged bytes are admitted.
 
-**Invariant —** Inspection is free of consequence. Checking the gates, drafting
-the notes, and previewing the range never bump, commit, tag, push, or publish.
+**Invariant —** Resumption observes the annotated tag and GitHub Release
+directly. A matching object is already converged; an absent object is created;
+a partial release receives only missing planned assets. No resumption retags,
+reuploads a matching asset, changes release metadata, or tolerates an extra
+asset.
 
-**Invariant —** Release documents are complete only as files. Bare
-`spice release notes` prints a bounded summary, and `--output FILE` writes the
-complete document. A publish preview retains the complete plan under the Git
-common directory before it prints, names that file, and ends with the exact
-`--apply=KEY` command; that key is the only accepted authority.
+**Invariant —** Release documents remain inspectable local files. `spice
+release notes` writes the operator-facing history document, while the
+publication operation retains its exact plan, notes, assets, and canonical
+checksum document. Diagnostic proof and seal commands remain available, but
+their results never gate baseline publication.
 
-**Invariant —** One executor and one plan and receipt grammar serve preview,
-fresh execution, and every resumption. There is one release action and one
-ordered operation graph. Before the first effect, admission proves the
-converged prefix: each operation is met by its durable receipt or by
-authoritative external state. An exact visible package meets every operation
-through registry visibility, a tag at the release commit meets tagging, an
-exact GitHub Release with its three canonical executable assets meets provider
-publication, and an announcement at the release commit meets announcing. A
-receipt whose own registry, tag, provider-release, or announcement state is
-absent, external state naming another release, or a met operation after an
-unmet one refuses before any effect. A met operation is receipted as already
-converged without crossing its effect, so no resumption reruns the gate,
-republishes a visible package, retags, reuploads assets, or repeats an
-announcement. Every other operation records its exact prior state
-before crossing its effect boundary and a typed receipt after convergence. A
-journal written under another journal schema refuses before any effect,
-naming the release that last wrote it, and is never decoded for execution.
-
-### A versioned commit is sealed before publication
+### A versioned commit is staged before publication
 
 **Invariant —** Every landing is a version. A full semantic
 `dist/version/base` pins it; otherwise that file supplies the major,
@@ -76,17 +62,6 @@ Every other shape refuses. Release never edits version inputs,
 synthesizes a commit, or infers task ownership from the board, and a red
 candidate publishes nothing.
 
-**Invariant —** A release whose package is not yet visible executes the
-complete canonical strict battery over the exact source commit the plan names,
-and every arm must admit. This host-side battery is distinct from sealed target
-proof replay.
-
-**Invariant —** The artifact gate proves composition and use without rebuilding
-after authorization. The package materializes from sealed content-addressed
-objects and must equal the previewed package and tree identities. The
-compiled-host executable named by the sealed inventory must match the plan's
-artifact digest, and a plan-keyed executable copy of it must succeed at
-`--json version`.
 
 ### Proof is sealed per target and composed last
 
@@ -346,19 +321,19 @@ and `xtask/src/proof_image.rs`. A hit is admitted through `proof-image load`
 the preflight rebuilds the image. The preflight re-checks the cached trunk
 version on every run.
 
-**Invariant —** Hosted release staging starts with one successful
-`input.yml` preflight, then dispatches Linux, macOS, and Windows
-concurrently against that pinned run. `spice dev xtask -- stage-hosted-release
-INPUTS_RUN` owns one Git-common release-session record for that exact preflight.
-The record binds the source and release-input identities, all four workflow
-blobs, every native challenge and run, and its last admitted outcome. Repeating
-the command attaches to recorded healthy or successful runs and dispatches only
-a missing target or a target whose provider run ended in failure. It reports
-all three outcomes before failing, so one failed platform never hides or
-redispatches successful siblings. A changed bound identity refuses before a
-provider dispatch. Each platform remains independently dispatchable with
-`stage-target … --hosted --release-inputs INPUTS_RUN`, and may re-enter its own
-native run with `--attach RUN_ID`.
+**Invariant —** `spice dev xtask -- publish-hosted-release` is the sole
+publication command. It selects the current landed `main` commit, creates or
+resumes that commit's `input.yml` preflight, then creates or resumes Linux,
+macOS, and Windows concurrently against the pinned input run. Its Git-common
+records bind the source and input identities, all four workflow blobs, every
+native challenge and run, and each last admitted outcome. Repeating the command
+attaches to recorded healthy or successful runs and dispatches only a missing
+target or a target whose provider run ended in failure. It reports all three
+outcomes before failing, so one failed platform never hides or redispatches
+successful siblings. A changed bound identity refuses before a provider
+dispatch. `stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic;
+each platform is also independently dispatchable with `stage-target … --hosted
+--release-inputs INPUTS_RUN` and may re-enter its own run with `--attach RUN_ID`.
 
 The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
 workflow downloads the preflight artifacts, admits their signed source, app,
@@ -379,14 +354,11 @@ read-only for the isolated guest. No platform depends on another native run,
 discovers a Linux canvas, pushes a temporary source ref, or uses an alternate
 source route.
 
-The successful Linux stage immediately runs its staged executable's `spice
-proof --target x86_64-unknown-linux-musl` on the same hosted runner, while the
-exact image named by its payload still exists in that runner's Docker store.
-The result records the proof exit and log digest; GitHub OIDC attests the log
-and detached receipt with the staged files. The client admits those bytes and
-installs the receipt under the Git-common proof layout for the payload's source
-archive and target. No local image rebuild or registry digest substitutes for
-the provider's image ID. A failed stage or proof publishes no receipt.
+Each successful native stage executes its staged binary's supported version
+smoke before publishing it. The reported product version must equal the exact
+release-input version. The stage then records and signs its result and staged
+files. Proof and replay remain separate diagnostics; neither can suppress a
+native binary that passed its staging and version contract.
 
 `spice proof` and `spice proof replay` select the compiled Darwin or Linux
 target when no target is named. `--target TARGET` selects any canonical release
@@ -943,28 +915,32 @@ headings.
 ### The publication sequence
 
 **Invariant —** External release authority is fixed to the tracked `origin`
-repository: source `refs/heads/main`, package
-`refs/spice/packages/vVERSION`, tag `refs/tags/vVERSION`, GitHub Release
-`vVERSION`, and announcement `refs/spice/releases/vVERSION`. Runtime
-configuration cannot redirect a step.
+repository: source `refs/heads/main`, one annotated `refs/tags/vVERSION`, and
+one final GitHub Release `vVERSION`. Runtime configuration cannot redirect a
+step.
 
-**Invariant —** Publication never moves the source branch. The package ref
-converges first through a guarded no-effect rehearsal; the immutable tag,
-GitHub Release and its exact Darwin, Linux, and Windows executable assets, and
-announcement converge in that order only after bounded observation sees the
-exact package object. Asset names and content identities derive from the sealed
-three-target plan. Exhausting observation is a terminal refusal, not permission
-to advertise unobservable content.
+**Invariant —** Successful native staging is the publication boundary. Each
+provider has already run the final executable's native version smoke before its
+content-addressed stage is admitted. The publication plan then copies exactly
+those three staged executables, writes `SHA256SUMS` in target order, and binds
+the source commit, version, tag, notes, asset names, lengths, and SHA-256 values
+before the first external mutation. Proof, seal, package-registry, and
+attestation diagnostics are outside this baseline boundary and cannot withhold
+its usable assets.
 
-**Invariant —** A version names exactly one package object, release commit,
-GitHub Release title and notes, and canonical asset set. A package, tag, release
-asset, or announcement pointing elsewhere refuses rather than moving; matching
-external state is already converged and left untouched. An interrupted release
-is completed by re-running it from the first incomplete boundary, never
-unwound.
+**Invariant —** Publication never moves an external object. An absent annotated
+tag is created at the exact source commit; an existing tag must peel to that
+commit. An absent GitHub Release is created with the planned assets; an existing
+release may receive only missing planned names, while any changed metadata,
+changed digest, or extra asset refuses. Matching provider state is already
+converged. An interrupted command resumes from the first incomplete boundary.
 
-**Invariant —** An operator interruption terminates with a status distinct from a
-gate failure.
+**Invariant —** After provider convergence, the command downloads the complete
+release into a new empty directory, requires the exact planned asset set,
+recomputes every SHA-256, and requires the downloaded `SHA256SUMS` bytes to
+equal the admitted document. Because the downloaded executable bytes equal the
+same bytes whose Linux, macOS, and Windows native version smokes admitted, the
+fresh public assets retain those exact version reports.
 
 ### Installing into a repository the product does not own
 

@@ -1277,17 +1277,6 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "journal::thread"
     ),
     row!(
-        ["release", "publish"],
-        "release publish [--notes-file FILE] [--release-commit REV] [--version VERSION] \
-         [--apply=<digest>]",
-        Principal,
-        Command,
-        [ReleasePublished],
-        [Resident, OperatorCapability, DigestOnMutation],
-        Plan,
-        "dist::publish"
-    ),
-    row!(
         ["config"],
         "config [KEY [VALUE]] [--apply=<digest>]",
         Local,
