@@ -173,7 +173,7 @@ jobs:
           fi
           target=x86_64-unknown-linux-musl
           payload="dist/stage/targets/$target/payload.json"
-          read -r digest mode < <(jq -r --arg path spice \
+          read -r digest mode < <(jq -r --arg path bin/spice \
             '.inventory[] | select(.path == $path) | "\(.digest) \(.mode)"' "$payload")
           [[ -n "$digest" && -n "$mode" ]] \
             || { echo "staged Linux payload names no executable" >&2; exit 1; }
