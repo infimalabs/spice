@@ -470,6 +470,20 @@ impl StagedCanvas {
             bytes,
         })
     }
+    /// Admit provider-built rack bytes without host-dependent re-assembly.
+    ///
+    /// The provider preflight binds these exact bytes to the canonical source
+    /// archive. Native stages only admit the rack and its generation, then link
+    /// those bytes unchanged.
+    pub(crate) fn provided(linked: Vec<u8>, generation: &Digest) -> Result<Self, AppBuildError> {
+        let app = admit_generation(&linked, generation)?;
+        let tree = app_tree(&app)?;
+        Ok(Self {
+            canvas: dist::Canvas::new(generation.clone(), &linked),
+            tree,
+            bytes: linked,
+        })
+    }
 
     #[must_use]
     pub const fn canvas(&self) -> &dist::Canvas {

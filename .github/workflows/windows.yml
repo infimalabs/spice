@@ -25,11 +25,10 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 75
     steps:
-      - name: Admit request and direct source transport
+      - name: Admit request envelope
         id: request
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
           SPICE_HOSTED_CHALLENGE: ${{ inputs.challenge }}
           SPICE_HOSTED_REQUEST: ${{ inputs.request }}
         run: |
@@ -41,20 +40,63 @@ jobs:
           if ($request.workflow_ref -cne 'refs/heads/main' -or $env:GITHUB_REF -cne 'refs/heads/main') {
             throw "workflow ref drifted: $env:GITHUB_REF"
           }
+          "challenge=$($request.challenge)" >> $env:GITHUB_OUTPUT
+          if ($null -ne $request.release_inputs) {
+            "release_inputs_run=$($request.release_inputs.run_id)" >> $env:GITHUB_OUTPUT
+            "release_inputs_challenge=$($request.release_inputs.challenge)" >> $env:GITHUB_OUTPUT
+          } elseif ($null -ne $request.canvas) {
+            "canvas=$($request.canvas.digest)" >> $env:GITHUB_OUTPUT
+            "linux_run=$($request.canvas.run_id)" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Download canonical release inputs
+        if: steps.request.outputs.release_inputs_run != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-inputs-${{ steps.request.outputs.release_inputs_challenge }}
+          run-id: ${{ steps.request.outputs.release_inputs_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}\release-inputs-${{ steps.request.outputs.release_inputs_challenge }}
+
+      - name: Admit canonical source delivery
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $request = Get-Content -Raw -LiteralPath (Join-Path $env:RUNNER_TEMP 'request.json') | ConvertFrom-Json
           if ($request.source_commit -cnotmatch '^[0-9a-f]{40}$' -or
               $request.archive_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
-              $request.tree -cnotmatch '^[0-9a-f]{64}$' -or
-              [uint64]$request.transport_asset -eq 0) {
-            throw 'source transport request is malformed'
-          }
-          $headers = @{
-            Authorization = "Bearer $env:GH_TOKEN"
-            Accept = 'application/octet-stream'
-            'X-GitHub-Api-Version' = '2022-11-28'
+              $request.tree -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'source request is malformed'
           }
           $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
-          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($request.transport_asset)"
-          Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $archive
+          if ($null -ne $request.release_inputs) {
+            $root = Join-Path $env:RUNNER_TEMP "release-inputs-$($request.release_inputs.challenge)"
+            $result = Get-Content -Raw -LiteralPath (Join-Path $root 'result.json') | ConvertFrom-Json
+            if ([uint64]$result.run_id -ne [uint64]$request.release_inputs.run_id -or
+                $result.challenge -cne $request.release_inputs.challenge -or
+                $result.source_commit -cne $request.source_commit -or
+                $result.source -cne $request.source -or
+                $result.archive_sha256 -cne $request.archive_sha256 -or
+                $result.tree -cne $request.tree -or
+                $result.app -cne $request.release_inputs.app -or
+                $result.canvas -cne $request.release_inputs.canvas -or
+                $result.proof_identity -cne $request.release_inputs.proof_identity -or
+                $result.workflow_sha -cne $request.release_inputs.workflow_sha) {
+              throw 'release input result differs from request'
+            }
+            Copy-Item -LiteralPath (Join-Path $root 'source.tar') -Destination $archive
+          } else {
+            if ([uint64]$request.transport_asset -eq 0) { throw 'source transport request is malformed' }
+            $headers = @{
+              Authorization = "Bearer $env:GH_TOKEN"
+              Accept = 'application/octet-stream'
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($request.transport_asset)"
+            Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $archive
+          }
           $observed = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($observed -cne $request.archive_sha256) {
             throw "source archive drifted: expected $($request.archive_sha256), observed $observed"
@@ -72,11 +114,6 @@ jobs:
           git commit -q -m "canonical source $($request.source_commit)"
           $tree = python -c "import hashlib,subprocess; print(hashlib.sha256(subprocess.check_output(['git','ls-tree','-r','-z','--full-tree','HEAD'])).hexdigest())"
           if ($tree.Trim() -cne $request.tree) { throw "canonical source tree drifted: $tree" }
-          "challenge=$($request.challenge)" >> $env:GITHUB_OUTPUT
-          if ($null -ne $request.canvas) {
-            "canvas=$($request.canvas.digest)" >> $env:GITHUB_OUTPUT
-            "linux_run=$($request.canvas.run_id)" >> $env:GITHUB_OUTPUT
-          }
 
       - name: Download staged Linux canvas
         if: steps.request.outputs.canvas != ''
@@ -209,6 +246,7 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\linux-stage-*"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\release-inputs-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\source.tar"

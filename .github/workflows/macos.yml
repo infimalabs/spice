@@ -20,8 +20,16 @@ on:
         description: Raw SHA-256 of source.tar
         required: true
         type: string
-      transport_asset:
-        description: Immutable source.tar release-asset ID
+      release_inputs_run:
+        description: Provider run that produced the canonical release inputs
+        required: true
+        type: string
+      release_inputs_challenge:
+        description: Challenge naming the canonical release-input artifact
+        required: true
+        type: string
+      app:
+        description: Canonical app generation
         required: true
         type: string
       tree:
@@ -32,8 +40,8 @@ on:
         description: Exact admitted vendor-set proof image
         required: true
         type: string
-      linux_run:
-        description: Provider run whose canvas artifact carries the staged Linux canvas
+      canvas:
+        description: Digest of the provider-built canvas this stage links
         required: true
         type: string
       canvas:
@@ -49,30 +57,41 @@ jobs:
     timeout-minutes: 90
     permissions:
       actions: read
-      contents: write
     steps:
-      - name: Admit direct source transport
+      - name: Download canonical release inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-inputs-${{ inputs.release_inputs_challenge }}
+          run-id: ${{ inputs.release_inputs_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-inputs
+
+      - name: Admit canonical release inputs
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           SOURCE_COMMIT: ${{ inputs.source_commit }}
+          SOURCE: ${{ inputs.source }}
           ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
-          TRANSPORT_ASSET: ${{ inputs.transport_asset }}
+          INPUTS_RUN: ${{ inputs.release_inputs_run }}
+          INPUTS_CHALLENGE: ${{ inputs.release_inputs_challenge }}
+          APP: ${{ inputs.app }}
+          CANVAS: ${{ inputs.canvas }}
+          PROOF_IDENTITY: ${{ inputs.proof_container }}
           TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
-          case "$SOURCE_COMMIT" in *[!0-9a-f]*|'') exit 65 ;; esac
-          test "${#SOURCE_COMMIT}" -eq 40
-          case "$ARCHIVE_SHA256" in *[!0-9a-f]*|'') exit 65 ;; esac
-          test "${#ARCHIVE_SHA256}" -eq 64
-          case "$TRANSPORT_ASSET" in *[!0-9]*|'') exit 65 ;; esac
-          test "$TRANSPORT_ASSET" -gt 0
-          case "$TREE" in *[!0-9a-f]*|'') exit 65 ;; esac
-          test "${#TREE}" -eq 64
-          test "$GITHUB_REF" = refs/heads/main
-          archive="$RUNNER_TEMP/source.tar"
-          gh api -H "Accept: application/octet-stream" \
-            "repos/$GITHUB_REPOSITORY/releases/assets/$TRANSPORT_ASSET" > "$archive"
+          root="$RUNNER_TEMP/release-inputs"
+          result="$root/result.json"
+          test "$(jq -r .challenge "$result")" = "$INPUTS_CHALLENGE"
+          test "$(jq -r .run_id "$result")" = "$INPUTS_RUN"
+          test "$(jq -r .source_commit "$result")" = "$SOURCE_COMMIT"
+          test "$(jq -r .source "$result")" = "$SOURCE"
+          test "$(jq -r .archive_sha256 "$result")" = "$ARCHIVE_SHA256"
+          test "$(jq -r .tree "$result")" = "$TREE"
+          test "$(jq -r .app "$result")" = "$APP"
+          test "$(jq -r .canvas "$result")" = "$CANVAS"
+          test "$(jq -r .proof_identity "$result")" = "$PROOF_IDENTITY"
+          archive="$root/source.tar"
           test "$(shasum -a 256 "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
           tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
@@ -91,7 +110,6 @@ jobs:
           EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
           CHALLENGE: ${{ inputs.challenge }}
-          LINUX_RUN: ${{ inputs.linux_run }}
           CANVAS: ${{ inputs.canvas }}
         run: |
           set -euo pipefail
@@ -105,7 +123,6 @@ jobs:
           proof_digest=${PROOF_CONTAINER#sha256:}
           case "$proof_digest" in *[!0-9a-f]*|'') exit 65 ;; esac
           test "${#proof_digest}" -eq 64
-          case "$LINUX_RUN" in *[!0-9]*|''|0) exit 65 ;; esac
           case "$CANVAS" in *[!0-9a-f]*|'') exit 65 ;; esac
           test "${#CANVAS}" -eq 64
           test "$(uname -m)" = arm64
@@ -203,31 +220,6 @@ jobs:
           printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
           printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
 
-      - name: Download staged Linux canvas
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: canvas-${{ inputs.canvas }}
-          run-id: ${{ inputs.linux_run }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/linux-stage
-
-      - name: Admit staged Linux canvas
-        shell: bash
-        env:
-          CANVAS: ${{ inputs.canvas }}
-          EXPECTED_ARCHIVE: ${{ inputs.archive }}
-        run: |
-          set -euo pipefail
-          python3 - "$RUNNER_TEMP/linux-stage" "$CANVAS" "$EXPECTED_ARCHIVE" <<'PY'
-          import json, os, sys
-          root, canvas, archive = sys.argv[1:]
-          with open(os.path.join(root, "targets/x86_64-unknown-linux-musl/payload.json"), "rb") as source:
-              payload = json.load(source)
-          if payload["target"] != "x86_64-unknown-linux-musl" or payload["archive"] != archive:
-              raise SystemExit("staged Linux canvas answers another archive")
-          if payload["canvas"] != canvas:
-              raise SystemExit(f"staged Linux canvas drifted: {payload['canvas']} != {canvas}")
-          PY
 
       - name: Build and execute the sealed unsigned stage
         shell: bash
@@ -237,6 +229,8 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
           EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
+          RELEASE_CANVAS: ${{ runner.temp }}/release-inputs/canvas.zip
+          RELEASE_APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
           export PATH="$RUNNER_TEMP/bootstrap-target/release:$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
@@ -244,7 +238,8 @@ jobs:
           "$cargo" build --locked --release --package xtask
           "$cargo" build --locked --release --package spice --bin spice
           SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh
-          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" SPICE_LINUX_STAGE="$RUNNER_TEMP/linux-stage" \
+          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
+            SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
             "$RUNNER_TEMP/bootstrap-target/release/xtask" \
             stage-target aarch64-apple-darwin --unsigned --proof-container "$PROOF_CONTAINER"
 
@@ -483,19 +478,22 @@ jobs:
             '${{ inputs.source_commit }}' \
             '${{ inputs.source }}' \
             '${{ inputs.archive_sha256 }}' \
-            '${{ inputs.transport_asset }}' \
+            '${{ inputs.release_inputs_run }}' \
+            '${{ inputs.release_inputs_challenge }}' \
             '${{ inputs.tree }}' \
+            '${{ inputs.app }}' \
+            '${{ inputs.canvas }}' \
             "$GITHUB_RUN_ID" "$ImageOS" "$ImageVersion" "$(uname -m)" \
-            '${{ inputs.proof_container }}' '${{ inputs.linux_run }}' '${{ inputs.canvas }}' <<'PY'
+            '${{ inputs.proof_container }}' <<'PY'
           import json, sys
-          output, challenge, source_commit, source, archive_sha256, transport_asset, tree, run_id, image_os, image_version, architecture, proof_container, linux_run, canvas = sys.argv[1:]
+          output, challenge, source_commit, source, archive_sha256, release_inputs_run, release_inputs_challenge, tree, app, canvas, run_id, image_os, image_version, architecture, proof_container = sys.argv[1:]
           result = {
               "challenge": challenge, "source_commit": source_commit, "source": source,
-              "archive_sha256": archive_sha256, "transport_asset": int(transport_asset),
-              "tree": tree, "run_id": int(run_id), "image_os": image_os,
+              "archive_sha256": archive_sha256, "release_inputs_run": int(release_inputs_run),
+              "release_inputs_challenge": release_inputs_challenge, "tree": tree,
+              "app": app, "canvas": canvas, "run_id": int(run_id), "image_os": image_os,
               "image_version": image_version, "architecture": architecture,
-              "proof_container": proof_container, "linux_run": int(linux_run),
-              "canvas": canvas,
+              "proof_container": proof_container,
           }
           with open(output, "w", encoding="utf-8", newline="\n") as destination:
               json.dump(result, destination, sort_keys=True, separators=(",", ":"))

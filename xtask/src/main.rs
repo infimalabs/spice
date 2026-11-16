@@ -22,7 +22,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-pc-windows-msvc --unsigned [--proof-container IMAGE] [--app-only] --attach [RUN_ID]|stage-target x86_64-unknown-linux-musl --unsigned --hosted [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -109,6 +109,10 @@ fn main() -> ExitCode {
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("release-inputs") => {
             run_release_inputs(arguments.collect(), &ambient, &mut output)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(value) if value == OsStr::new("stage-hosted-release") => {
+            run_hosted_release(arguments.collect(), &mut output, &mut io::stderr().lock())
         }
         Some(value) if value == OsStr::new("stage-target") => run_stage_target(
             arguments.collect(),
@@ -414,6 +418,20 @@ fn run_verify_staged_darwin(arguments: Vec<OsString>) -> CommandResult {
     xtask::verify_staged_darwin(Path::new(stage)).map_err(Into::into)
 }
 
+fn run_hosted_release(
+    arguments: Vec<OsString>,
+    output: &mut impl io::Write,
+    error_output: &mut impl io::Write,
+) -> CommandResult {
+    let [run_id] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let attach =
+        xtask::Attach::run(run_id.to_str().ok_or_else(usage_error)?).ok_or_else(usage_error)?;
+    xtask::hosted_release_stage(attach, output, error_output).map_err(Into::into)
+}
+
 fn run_stage_target(
     arguments: Vec<OsString>,
     ambient: &Ambient,
@@ -427,6 +445,7 @@ fn run_stage_target(
         scope,
         route,
         attach,
+        release_inputs,
     }) = parse_stage_target(&arguments)
     else {
         eprintln!("{}", help());
@@ -437,25 +456,21 @@ fn run_stage_target(
     }
     let environment = release_environment(ambient);
     if target == "x86_64-pc-windows-msvc" && !environment.is_hosted_guest() {
-        let archive = Path::new("dist/stage").join(dist::SOURCE_ARCHIVE_FILE);
-        let proof_container = resolve_proof_container(proof_container)?;
-        return xtask::windows_hosted_stage(
-            &archive,
-            attach,
-            &proof_container,
-            scope == StageScope::AppOnly,
-            output,
-            error_output,
-        )
-        .and_then(|execution| {
-            (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
-                xtask::WindowsHostedError::ProviderResponse(format!(
-                    "hosted Windows staging exited {}",
-                    execution.exit_code()
-                ))
+        if scope != StageScope::Target {
+            eprintln!("{}", help());
+            return Err(usage_error().into());
+        }
+        let inputs = xtask::hosted_release_inputs(release_inputs.ok_or_else(usage_error)?)?;
+        return xtask::windows_hosted_stage(&inputs, attach, output, error_output)
+            .and_then(|execution| {
+                (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                    xtask::WindowsHostedError::ProviderResponse(format!(
+                        "hosted Windows staging exited {}",
+                        execution.exit_code()
+                    ))
+                })
             })
-        })
-        .map_err(Into::into);
+            .map_err(Into::into);
     }
     if scope == StageScope::AppOnly {
         let proof_container = resolve_proof_container(proof_container)?;
@@ -463,14 +478,10 @@ fn run_stage_target(
             .map_err(Into::into);
     }
     if route == StageRoute::Hosted {
-        let archive = Path::new("dist/stage").join(dist::SOURCE_ARCHIVE_FILE);
+        let inputs = xtask::hosted_release_inputs(release_inputs.ok_or_else(usage_error)?)?;
         return match target {
-            LINUX_TARGET => xtask::linux_hosted_stage(&archive, attach, output).map_err(Into::into),
-            DARWIN_TARGET => {
-                let proof_container = resolve_proof_container(proof_container)?;
-                xtask::macos_hosted_stage(&archive, attach, &proof_container, output)
-                    .map_err(Into::into)
-            }
+            LINUX_TARGET => xtask::linux_hosted_stage(&inputs, attach, output).map_err(Into::into),
+            DARWIN_TARGET => xtask::macos_hosted_stage(&inputs, attach, output).map_err(Into::into),
             _ => unreachable!("hosted route parser admits only hosted targets"),
         };
     }
@@ -493,6 +504,8 @@ fn run_stage_target(
     // hosted runner downloaded beside its checkout.
     let app = if scope == StageScope::StagedApp {
         xtask::AppOrigin::Workspace
+    } else if environment.release_canvas.is_some() {
+        xtask::AppOrigin::Provider
     } else if target == LINUX_TARGET {
         xtask::AppOrigin::Compile
     } else {
@@ -527,9 +540,13 @@ struct StageRequest<'a> {
     route: StageRoute,
     /// The provider run a hosted stage re-enters instead of dispatching.
     attach: Option<xtask::Attach>,
+    /// The provider preflight run whose canonical inputs this stage consumes.
+    release_inputs: Option<xtask::Attach>,
 }
 
-fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
+fn parse_provider_controls(
+    arguments: &[OsString],
+) -> Option<(Option<xtask::Attach>, Option<xtask::Attach>, &[OsString])> {
     let (attach, arguments) = match arguments {
         [rest @ .., flag] if flag == OsStr::new("--attach") => (Some(xtask::Attach::Sole), rest),
         [rest @ .., flag, run_id] if flag == OsStr::new("--attach") => {
@@ -537,11 +554,26 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         }
         _ => (None, arguments),
     };
-    let (route, arguments) = match arguments.split_last() {
+    let (release_inputs, arguments) = match arguments {
+        [rest @ .., flag, run_id] if flag == OsStr::new("--release-inputs") => {
+            (Some(xtask::Attach::run(run_id.to_str()?)?), rest)
+        }
+        _ => (None, arguments),
+    };
+    Some((attach, release_inputs, arguments))
+}
+
+fn parse_stage_route(arguments: &[OsString]) -> (StageRoute, &[OsString]) {
+    match arguments.split_last() {
         Some((flag, rest)) if flag == OsStr::new("--sealed") => (StageRoute::Sealed, rest),
         Some((flag, rest)) if flag == OsStr::new("--hosted") => (StageRoute::Hosted, rest),
         _ => (StageRoute::Default, arguments),
-    };
+    }
+}
+
+fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
+    let (attach, release_inputs, arguments) = parse_provider_controls(arguments)?;
+    let (route, arguments) = parse_stage_route(arguments);
     let (target, unsigned, proof_container, scope) = match arguments {
         [target] => (target, false, None, StageScope::Target),
         [target, flag] if flag == OsStr::new("--unsigned") => {
@@ -583,7 +615,10 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     }
     // Only a provider-hosted stage has a run to re-enter: an explicit hosted
     // route, or Windows, whose every non-guest stage is hosted.
-    if attach.is_some() && route != StageRoute::Hosted && target != WINDOWS_TARGET {
+    if (attach.is_some() || release_inputs.is_some())
+        && route != StageRoute::Hosted
+        && target != WINDOWS_TARGET
+    {
         return None;
     }
     Some(StageRequest {
@@ -593,6 +628,7 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         scope,
         route,
         attach,
+        release_inputs,
     })
 }
 
@@ -1014,6 +1050,8 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         stage_root: read("SPICE_HOSTED_STAGE"), // env-policy: allow
         source_archive: read("SPICE_SOURCE_ARCHIVE"), // env-policy: allow
         linux_stage: read("SPICE_LINUX_STAGE"), // env-policy: allow
+        release_canvas: read("SPICE_RELEASE_CANVAS"), // env-policy: allow
+        release_app: read("SPICE_RELEASE_APP"), // env-policy: allow
     }
 }
 

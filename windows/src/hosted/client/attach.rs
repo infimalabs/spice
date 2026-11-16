@@ -44,6 +44,84 @@ pub(super) struct Attached {
     pub(super) challenge: String,
     pub(super) transport: Transport,
 }
+/// One provider run proven to use the current admitted workflow.
+pub(super) struct AttachedRun {
+    pub(super) run_id: u64,
+    pub(super) challenge: String,
+}
+
+/// Admit an attached run whose inputs are provider artifacts rather than a
+/// retained source transport.
+pub(super) fn attach_run(
+    root: &Path,
+    repository: &str,
+    branch: &str,
+    workflow: &str,
+    expected_workflow_blob: &str,
+    attach: Attach,
+) -> Result<AttachedRun, WindowsHostedError> {
+    let candidates = match attach {
+        Attach::Run(run_id) => vec![api(
+            root,
+            format!("repos/{repository}/actions/runs/{run_id}"),
+        )?],
+        Attach::Sole => {
+            let file = workflow.rsplit('/').next().unwrap_or(workflow);
+            let runs: RunPage = api(
+                root,
+                format!(
+                    "repos/{repository}/actions/workflows/{file}/runs?event=workflow_dispatch&per_page=100"
+                ),
+            )?;
+            let artifacts: ArtifactPage = api(
+                root,
+                format!("repos/{repository}/actions/artifacts?per_page=100"),
+            )?;
+            unretired(runs.workflow_runs, &artifacts.artifacts, &[])
+        }
+    };
+    let mut admitted = Vec::new();
+    let mut refused = Vec::new();
+    for run in candidates {
+        let admission = admit_run(&run, workflow, branch).and_then(|challenge| {
+            let observed = workflow_blob(root, repository, workflow, &run.head_sha)
+                .map_err(|error| error.to_string())?;
+            if observed != expected_workflow_blob {
+                return Err("its workflow differs from the current source".to_owned());
+            }
+            Ok(AttachedRun {
+                run_id: run.id,
+                challenge,
+            })
+        });
+        match admission {
+            Ok(candidate) => admitted.push(candidate),
+            Err(reason) => refused.push(format!("run {}: {reason}", run.id)),
+        }
+    }
+    if admitted.len() == 1 {
+        return Ok(admitted.remove(0));
+    }
+    let detail = if refused.is_empty() {
+        String::new()
+    } else {
+        format!(": {}", refused.join("; "))
+    };
+    Err(WindowsHostedError::AttachRefused(match attach {
+        Attach::Run(run_id) => format!("provider run {run_id} is not adoptable{detail}"),
+        Attach::Sole if admitted.is_empty() => {
+            format!("no unfinished or retained run of {workflow} is adoptable{detail}")
+        }
+        Attach::Sole => format!(
+            "runs {} of {workflow} are adoptable; attach one by its run id",
+            admitted
+                .iter()
+                .map(|candidate| candidate.run_id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }))
+}
 
 #[derive(Clone, Deserialize)]
 struct ProviderRun {

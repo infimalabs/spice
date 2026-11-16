@@ -1,6 +1,7 @@
 //! Typed request, result, and admission contract for one disposable hosted Windows execution.
 
 pub mod client;
+pub mod release_inputs;
 
 use std::error::Error;
 use std::fmt;
@@ -16,7 +17,7 @@ pub use wire::manifest::{
 };
 
 /// The sole current hosted Windows execution protocol.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Provider spelling admitted by the current protocol.
 pub const GITHUB_PROVIDER: &str = "github-actions";
 /// Architecture spelling emitted by GitHub's Windows runner.
@@ -50,7 +51,10 @@ pub struct Request {
     pub source_commit: String,
     pub source: String,
     pub archive_sha256: String,
-    pub transport_asset: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_asset: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_inputs: Option<ReleaseInputsPin>,
     pub tree: String,
     pub image: ImagePin,
     pub toolchain: ToolchainPins,
@@ -74,6 +78,35 @@ impl CanvasPin {
     #[must_use]
     pub fn artifact(&self) -> String {
         format!("{CANVAS_ARTIFACT_PREFIX}{}", self.digest)
+    }
+}
+/// Provider-produced release inputs consumed unchanged by one native stage.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseInputsPin {
+    pub run_id: u64,
+    pub challenge: String,
+    pub app: Digest,
+    pub canvas: Digest,
+    pub proof_identity: String,
+    pub workflow_sha: String,
+}
+impl ReleaseInputsPin {
+    fn admit(&self) -> Result<(), AdmissionError> {
+        if self.run_id == 0 {
+            return Err(AdmissionError::Canvas);
+        }
+        require_hex(
+            "release input challenge",
+            &self.challenge,
+            DIGEST_HEX_LENGTH,
+        )?;
+        require_hex("release input workflow", &self.workflow_sha, 40)?;
+        let proof = self
+            .proof_identity
+            .strip_prefix("sha256:")
+            .ok_or(AdmissionError::Digest("release input proof identity"))?;
+        require_hex("release input proof identity", proof, DIGEST_HEX_LENGTH)
     }
 }
 
@@ -108,8 +141,10 @@ impl Request {
         if self.workflow_ref != "refs/heads/main" {
             return Err(AdmissionError::WorkflowRef(self.workflow_ref.clone()));
         }
-        if self.transport_asset == 0 {
-            return Err(AdmissionError::TransportAsset);
+        match (&self.release_inputs, self.transport_asset) {
+            (Some(inputs), None) => inputs.admit()?,
+            (None, Some(asset)) if asset != 0 => {}
+            _ => return Err(AdmissionError::TransportAsset),
         }
         Ok(())
     }
@@ -444,7 +479,8 @@ mod tests {
             source_commit: "0".repeat(40),
             source: "2".repeat(64),
             archive_sha256: "4".repeat(64),
-            transport_asset: 42,
+            transport_asset: Some(42),
+            release_inputs: None,
             tree: "3".repeat(64),
             image: ImagePin {
                 label: "windows-2025".to_owned(),

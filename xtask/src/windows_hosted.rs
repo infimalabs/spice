@@ -4,22 +4,74 @@ use std::io::Write;
 use std::path::Path;
 
 pub use windows_execution::hosted::client::{
-    Attach, HostedExecution, HostedSource, WindowsHostedError, windows_hosted,
+    Attach, HostedExecution, ReleaseInputs, WindowsHostedError, windows_hosted,
 };
+pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
+    windows_execution::hosted::client::release_inputs(Some(attach))
+}
+/// Dispatch all native release stages concurrently from one admitted provider
+/// preflight.
+pub fn hosted_release_stage(
+    inputs_run: Attach,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let inputs = hosted_release_inputs(inputs_run)?;
+    let (linux, macos, windows) = std::thread::scope(|scope| {
+        let linux = scope.spawn(|| {
+            let mut output = Vec::new();
+            linux_hosted_stage(&inputs, None, &mut output).map(|()| output)
+        });
+        let macos = scope.spawn(|| {
+            let mut output = Vec::new();
+            macos_hosted_stage(&inputs, None, &mut output).map(|()| output)
+        });
+        let windows = scope.spawn(|| {
+            let mut output = Vec::new();
+            let mut error = Vec::new();
+            windows_hosted_stage(&inputs, None, &mut output, &mut error)
+                .and_then(|execution| {
+                    (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                        WindowsHostedError::ProviderResponse(format!(
+                            "hosted Windows staging exited {}",
+                            execution.exit_code()
+                        ))
+                    })
+                })
+                .map(|()| (output, error))
+        });
+        (
+            linux.join().expect("Linux hosted stage panicked"),
+            macos.join().expect("macOS hosted stage panicked"),
+            windows.join().expect("Windows hosted stage panicked"),
+        )
+    });
+    output
+        .write_all(&linux?)
+        .map_err(WindowsHostedError::Output)?;
+    output
+        .write_all(&macos?)
+        .map_err(WindowsHostedError::Output)?;
+    let (windows_output, windows_error) = windows?;
+    output
+        .write_all(&windows_output)
+        .map_err(WindowsHostedError::Output)?;
+    error_output
+        .write_all(&windows_error)
+        .map_err(WindowsHostedError::Output)
+}
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine,
 /// or re-enter the provider run `attach` names, and publish its
 /// provider-attested files into `dist/stage`.
 pub fn macos_hosted_stage(
-    archive: &Path,
+    inputs: &ReleaseInputs,
     attach: Option<Attach>,
-    proof_container: &str,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let stage = windows_execution::hosted::client::macos_hosted_stage(
-        archive,
+        inputs,
         attach,
-        proof_container,
         Path::new("dist/stage"),
     )?;
     writeln!(
@@ -35,12 +87,12 @@ pub fn macos_hosted_stage(
 /// `attach` names, writing the retained stage log to `output` and publishing
 /// the staged files into `dist/stage` when it exits zero.
 pub fn linux_hosted_stage(
-    archive: &Path,
+    inputs: &ReleaseInputs,
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let stage = windows_execution::hosted::client::linux_hosted_stage(
-        archive,
+        inputs,
         attach,
         Path::new("dist/stage"),
     )?;
@@ -67,22 +119,15 @@ pub fn linux_hosted_stage(
 }
 
 /// Stage the Windows release target on one fresh provider-hosted machine from
-/// the release source archive at `archive`, or re-enter the provider run
-/// `attach` names.
-///
-/// With `app_only`, the guest builds only the release app through the same
-/// release executor and stops before the native build; no stage output is
-/// retrieved.
+/// the provider inputs, or re-enter the provider run `attach` names.
 pub fn windows_hosted_stage(
-    archive: &Path,
+    inputs: &ReleaseInputs,
     attach: Option<Attach>,
-    proof_container: &str,
-    app_only: bool,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
     windows_execution::hosted::client::require_public_attestation_repository()?;
-    let mut arguments = vec![
+    let arguments = vec![
         "run".to_owned(),
         "--locked".to_owned(),
         "-p".to_owned(),
@@ -92,21 +137,17 @@ pub fn windows_hosted_stage(
         "x86_64-pc-windows-msvc".to_owned(),
         "--unsigned".to_owned(),
         "--proof-container".to_owned(),
-        proof_container.to_owned(),
+        inputs.manifest().proof_identity.to_owned(),
     ];
-    if app_only {
-        arguments.push("--app-only".to_owned());
-    }
     let command = windows_execution::protocol::Command {
         program: "@cargo".to_owned(),
         arguments,
     };
-    let execution = windows_execution::hosted::client::windows_hosted_commands_into(
+    let execution = windows_execution::hosted::client::windows_release_commands_into(
         vec![command],
-        (!app_only).then_some(Path::new("dist/stage")),
-        HostedSource::Archive(archive),
+        Path::new("dist/stage"),
+        inputs,
         attach,
-        !app_only,
     )?;
     let first = &execution.outputs[0];
     output

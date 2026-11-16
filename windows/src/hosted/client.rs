@@ -28,16 +28,20 @@ use wire::{Digest, Domain};
 mod attach;
 mod canvas;
 mod dispatch;
+mod inputs;
 mod linux;
 mod macos;
 mod observation;
 mod quota;
+mod release_stage;
 mod source;
 mod transport;
 pub use attach::Attach;
+pub use inputs::{ReleaseInputs, release_inputs};
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
 use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
+pub use release_stage::windows_release_commands_into;
 use source::PreparedSource;
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -207,7 +211,8 @@ pub fn windows_hosted_commands_into(
         source_commit: bound.source.canonical_commit.clone(),
         source: bound.source.archive.to_string(),
         archive_sha256: bound.source.archive_sha256.clone(),
-        transport_asset: bound.transport.asset_id,
+        transport_asset: Some(bound.transport.asset_id),
+        release_inputs: None,
         tree: bound.source.tree.clone(),
         image: policy.image,
         toolchain: policy.toolchain,
@@ -240,7 +245,9 @@ pub fn windows_hosted_commands_into(
                 &run,
                 &request,
                 run_id,
-                destination.as_deref().map(|stage| (stage, canvas.as_ref())),
+                destination
+                    .as_deref()
+                    .map(|stage| (stage, canvas.as_ref(), None)),
                 &cancellation,
             )
         },
@@ -334,8 +341,8 @@ impl Bound {
             repository,
             branch,
             challenge: &self.challenge,
-            source: &self.source,
-            transport: self.transport,
+            workflow_blob: &self.source.workflow_blob,
+            transport: Some(self.transport),
         }
     }
 }
@@ -358,7 +365,7 @@ fn drive<T>(
     retire_transport(run, operation)
 }
 
-/// One hosted run and the exact source transport the provider builds.
+/// One hosted run and the exact provider state it binds.
 #[derive(Clone, Copy)]
 struct HostedRun<'a> {
     root: &'a Path,
@@ -366,11 +373,11 @@ struct HostedRun<'a> {
     repository: &'a str,
     branch: &'a str,
     challenge: &'a str,
-    source: &'a PreparedSource,
-    transport: transport::Transport,
+    workflow_blob: &'a str,
+    transport: Option<transport::Transport>,
 }
 
-/// Delete the source archive transport after `operation`, unless the client
+/// Delete an optional source transport after `operation`, unless the client
 /// lost observation of a run that may still need it for attachment.
 fn retire_transport<T>(
     run: &HostedRun<'_>,
@@ -379,7 +386,10 @@ fn retire_transport<T>(
     if operation.as_ref().is_err_and(retains_provider_state) {
         return operation;
     }
-    let cleanup = transport::delete(run.root, run.repository, run.transport.release_id);
+    let Some(transport) = run.transport else {
+        return operation;
+    };
+    let cleanup = transport::delete(run.root, run.repository, transport.release_id);
     match (operation, cleanup) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(error), Ok(())) => Err(error),
@@ -472,7 +482,11 @@ fn complete_dispatched_run(
     run: &HostedRun<'_>,
     request: &Request,
     run_id: u64,
-    destination: Option<(&Path, Option<&canvas::LinuxCanvas>)>,
+    destination: Option<(
+        &Path,
+        Option<&canvas::LinuxCanvas>,
+        Option<&super::release_inputs::ResultManifest>,
+    )>,
     cancellation: &Cancellation,
 ) -> Result<HostedExecution, WindowsHostedError> {
     watch_run(run.root, run.repository, run_id, cancellation)?;
@@ -510,7 +524,7 @@ fn complete_dispatched_run(
             })
         })
         .collect::<Result<Vec<_>, WindowsHostedError>>()?;
-    if let Some((destination, canvas)) = destination {
+    if let Some((destination, canvas, release_inputs)) = destination {
         if outputs
             .iter()
             .all(|output| matches!(output.completion, Completion::Exited { code: 0 }))
@@ -521,6 +535,7 @@ fn complete_dispatched_run(
                 destination,
                 &request.source,
                 canvas,
+                release_inputs,
             )?;
         }
     } else if !result.artifacts.is_empty() {
@@ -599,14 +614,14 @@ fn verify_attestation(
     workflow: &str,
     run_id: u64,
     path: &Path,
-) -> Result<(), WindowsHostedError> {
+) -> Result<String, WindowsHostedError> {
     let workflow_commit = attach::workflow_commit(
         run.root,
         run.repository,
         run.branch,
         workflow,
         run.challenge,
-        &run.source.workflow_blob,
+        run.workflow_blob,
         run_id,
     )?;
     let verification = command(
@@ -623,12 +638,13 @@ fn verify_attestation(
             OsString::from("--signer-digest"),
             OsString::from(&workflow_commit),
             OsString::from("--source-digest"),
-            OsString::from(workflow_commit),
+            OsString::from(&workflow_commit),
             OsString::from("--deny-self-hosted-runners"),
             OsString::from("--format=json"),
         ],
     )?;
-    successful("artifact attestation", verification).map(|_| ())
+    successful("artifact attestation", verification)?;
+    Ok(workflow_commit)
 }
 
 fn publish_artifacts(
@@ -637,6 +653,7 @@ fn publish_artifacts(
     destination: &Path,
     source_archive: &str,
     canvas: Option<&canvas::LinuxCanvas>,
+    release_inputs: Option<&super::release_inputs::ResultManifest>,
 ) -> Result<(), WindowsHostedError> {
     for artifact in artifacts {
         let path = source.join(&artifact.path);
@@ -654,7 +671,7 @@ fn publish_artifacts(
             )));
         }
         if artifact.path.ends_with("/payload.json") {
-            admit_payload_source(&path, source_archive, canvas)?;
+            admit_payload_source(&path, source_archive, canvas, release_inputs)?;
         }
     }
     let mut published = artifacts.iter().collect::<Vec<_>>();
@@ -686,6 +703,7 @@ fn admit_payload_source(
     path: &Path,
     source: &str,
     canvas: Option<&canvas::LinuxCanvas>,
+    release_inputs: Option<&super::release_inputs::ResultManifest>,
 ) -> Result<(), WindowsHostedError> {
     let bytes = fs::read(path).map_err(|source| WindowsHostedError::Io {
         path: path.to_path_buf(),
@@ -699,7 +717,17 @@ fn admit_payload_source(
             payload.archive
         )));
     }
-    canvas.map_or(Ok(()), |canvas| canvas::admit_payload(&payload, canvas))
+    if let Some(canvas) = canvas {
+        canvas::admit_payload(&payload, canvas)?;
+    }
+    if let Some(inputs) = release_inputs
+        && (payload.canvas != inputs.canvas || payload.app != inputs.app)
+    {
+        return Err(WindowsHostedError::ProviderResponse(
+            "hosted target payload links another provider canvas".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn digest_file(domain: Domain, path: &Path) -> Result<Digest, WindowsHostedError> {
@@ -1247,11 +1275,15 @@ struct Policy {
 
 impl Policy {
     fn admit(&self) -> Result<(), WindowsHostedError> {
-        if self.schema != 1
-            || self.provider != GITHUB_PROVIDER
-            || self.workflow != WORKFLOW_PATH
-            || self.branch != "main"
-        {
+        self.admit_route()?;
+        if self.workflow != WORKFLOW_PATH {
+            return Err(WindowsHostedError::PolicyIdentity);
+        }
+        Ok(())
+    }
+
+    fn admit_route(&self) -> Result<(), WindowsHostedError> {
+        if self.schema != 1 || self.provider != GITHUB_PROVIDER || self.branch != "main" {
             return Err(WindowsHostedError::PolicyIdentity);
         }
         Ok(())

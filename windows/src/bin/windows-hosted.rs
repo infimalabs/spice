@@ -5,6 +5,8 @@ fn main() -> std::process::ExitCode {
     eprintln!("spice hosted Windows runner requires x86-64 Windows");
     std::process::ExitCode::from(70)
 }
+#[cfg(windows)]
+mod canvas;
 
 #[cfg(windows)]
 mod windows {
@@ -230,11 +232,11 @@ mod windows {
             &request.challenge,
             account.sid(),
         )?;
-        if let Some(linux) = admitted_linux_stage(&temp, &request)? {
-            grant_ancestor_traversal(&linux, account.sid())?;
+        if let Some(canvas) = super::canvas::admitted_root(&temp, &request)? {
+            grant_ancestor_traversal(&canvas, account.sid())?;
             make_read_only(
-                "staged Linux canvas",
-                &linux,
+                "provider canvas",
+                &canvas,
                 &request.challenge,
                 account.sid(),
             )?;
@@ -338,12 +340,9 @@ mod windows {
         fs::read(workspace.join("Cargo.toml"))
             .map_err(|error| format!("sealed source manifest is unreadable: {error}"))?;
         verify_read_only("vendored dependencies", &vendor, &request.challenge)?;
-        let linux = request
-            .canvas
-            .as_ref()
-            .map(|_| linux_stage(&temp, &request));
-        if let Some(linux) = &linux {
-            verify_read_only("staged Linux canvas", linux, &request.challenge)?;
+        let canvas = super::canvas::root(&temp, &request);
+        if let Some(canvas) = &canvas {
+            verify_read_only("provider canvas", canvas, &request.challenge)?;
         }
         verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
         verify_writable("fresh target", &target, &request.challenge)?;
@@ -366,7 +365,7 @@ mod windows {
                     &target,
                     &system_root,
                     &stage,
-                    linux.as_deref(),
+                    canvas.as_deref(),
                     &request,
                 )
                 .map(|(completion, stdout, stderr)| CommandResult {
@@ -626,32 +625,6 @@ mod windows {
             digest.update(&buffer[..read]);
         }
         Ok(format!("{:x}", digest.finalize()))
-    }
-    /// Where the workflow downloads the staged Linux canvas a release
-    /// request names.
-    fn linux_stage(temp: &Path, request: &Request) -> PathBuf {
-        temp.join(format!("linux-stage-{}", request.challenge))
-    }
-
-    /// The downloaded Linux stage the request's canvas names, refused unless
-    /// its payload records exactly that canvas.
-    fn admitted_linux_stage(temp: &Path, request: &Request) -> Result<Option<PathBuf>, String> {
-        let Some(canvas) = &request.canvas else {
-            return Ok(None);
-        };
-        let stage = linux_stage(temp, request);
-        let path = stage.join("targets/x86_64-unknown-linux-musl/payload.json");
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("staged Linux payload is unreadable: {error}"))?;
-        let payload: wire::manifest::TargetPayload = wire::decode(&bytes)
-            .map_err(|error| format!("staged Linux payload does not decode: {error}"))?;
-        if payload.canvas != canvas.digest {
-            return Err(format!(
-                "staged Linux payload records canvas {}, not the requested {}",
-                payload.canvas, canvas.digest
-            ));
-        }
-        Ok(Some(stage))
     }
 
     fn tree_digest(git: &str, workspace: &Path) -> Result<String, String> {
@@ -1020,8 +993,14 @@ mod windows {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(linux) = linux {
-            command.env("SPICE_LINUX_STAGE", linux); // env-policy: allow
+        if let Some(canvas) = linux {
+            if let Some(inputs) = &request.release_inputs {
+                command
+                    .env("SPICE_RELEASE_CANVAS", canvas.join("canvas.zip")) // env-policy: allow
+                    .env("SPICE_RELEASE_APP", inputs.app.as_str()); // env-policy: allow
+            } else {
+                command.env("SPICE_LINUX_STAGE", canvas); // env-policy: allow
+            }
         }
         let mut child =
             sill::spawn_owned_command(&mut command, sill::ProcessGroup::New).map_err(|error| {
