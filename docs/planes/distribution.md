@@ -293,10 +293,13 @@ platform, and `org.spice.vendor-set` label, and carries that exact identity into
 the staged payload's `proof_container` pin. Every target shares that pin, so
 Darwin staging and the hosted Windows client resolve the same image on the
 host before building and hand it to a guest as `--proof-container`; staging
-any target needs the current vendor-set image loaded. A lockfile change
-requires only `spice dev xtask -- proof-image build`; no tracked file records
-the resulting image digest. A stale or absent image refuses before app or
-Rust compilation and names that build command.
+any target needs the current vendor-set image loaded. The repository build fixes
+`SOURCE_DATE_EPOCH` at the Unix epoch and asks the BuildKit Docker exporter to
+rewrite layer timestamps, so independent runners with the same pinned inputs
+produce the same image identity. A lockfile change requires only
+`spice dev xtask -- proof-image build`; no tracked file records the resulting
+image digest. A stale or absent image refuses before app or Rust compilation
+and names that build command.
 
 The admitted image uses the linker its root Cargo config pins, and
 `release:canvas-version` executes the built executable inside it. The host
