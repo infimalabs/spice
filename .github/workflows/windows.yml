@@ -102,7 +102,10 @@ jobs:
             throw "source archive drifted: expected $($request.archive_sha256), observed $observed"
           }
           Get-ChildItem -Force -LiteralPath $env:GITHUB_WORKSPACE | Remove-Item -Recurse -Force
-          & "$env:SystemRoot\System32\tar.exe" -xf $archive --strip-components=1 -C $env:GITHUB_WORKSPACE
+          # Extraction stamps sources with the current time rather than the
+          # commit time, so a restored bootstrap target never mistakes them for
+          # older than a previous commit's build.
+          & "$env:SystemRoot\System32\tar.exe" -xmf $archive --strip-components=1 -C $env:GITHUB_WORKSPACE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $record = Get-Content -Raw -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'dist\build.json') | ConvertFrom-Json
           if ($record.source.commit -cne $request.source_commit) { throw 'canonical source commit drifted' }
@@ -211,6 +214,14 @@ jobs:
             }
           }
 
+      - name: Restore derivable bootstrap environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}\bootstrap-cargo
+            ${{ runner.temp }}\bootstrap-target
+          key: windows-bootstrap-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/windows/hosted.toml') }}
+
       - name: Build repository-owned runner
         shell: pwsh
         env:
@@ -264,8 +275,6 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bootstrap-cargo"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bootstrap-target"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\linux-stage-*"

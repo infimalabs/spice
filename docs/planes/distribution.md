@@ -331,6 +331,21 @@ Linux, Darwin, and Windows download and admit those exact files independently,
 so no workstation or native target creates release input bytes and the three
 native builds can run in parallel.
 
+**Invariant —** Hosted caches hold only derivable bootstrap state and the
+proof-image archive, never release outputs or result evidence. Each workflow
+keeps its own `actions/cache` entry for the bootstrap `CARGO_HOME` and target,
+keyed by provider OS and architecture, plus `rust-toolchain.toml`,
+`Cargo.lock`, `.cargo/config.toml`, and that platform's tool pins (the
+preflight's trunk version, `dist/darwin/hosted.toml`, or
+`dist/windows/hosted.toml`). Native jobs extract `source.tar` with fresh
+modification times, so Cargo rebuilds every workspace crate on a restored
+target and reuses only registry dependencies. The preflight keys the
+proof-image archive by `dist/proof-image/`, `Cargo.lock`, `.cargo/config.toml`,
+and `xtask/src/proof_image.rs`. A hit is admitted through `proof-image load`
+(checksum sidecar, loaded image ID, vendor-set label), and if load refuses it,
+the preflight rebuilds the image. The preflight re-checks the cached trunk
+version on every run.
+
 **Invariant —** Hosted release staging starts with one successful
 `release-inputs.yml` preflight, then dispatches Linux, Darwin, and Windows
 concurrently against that pinned run. `spice dev xtask -- stage-hosted-release

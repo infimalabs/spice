@@ -90,7 +90,10 @@ jobs:
           archive="$root/source.tar"
           test "$(shasum -a 256 "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          # Extraction stamps sources with the current time rather than the
+          # commit time, so a restored bootstrap target never mistakes them for
+          # older than a previous commit's build.
+          tar -xmf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
           test "$(python3 -c 'import json; print(json.load(open("dist/build.json"))["source"]["commit"])')" = "$SOURCE_COMMIT"
           git init -q
           git config core.autocrlf false
@@ -217,6 +220,16 @@ jobs:
           printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
           printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
 
+      # Derivable bootstrap state only: registry sources and the release
+      # xtask/spice target. Cargo rebuilds every workspace crate from the
+      # freshly stamped canonical source; the sealed stage never reads it.
+      - name: Restore derivable bootstrap environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/bootstrap-cargo
+            ${{ runner.temp }}/bootstrap-target
+          key: macos-bootstrap-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml') }}
 
       - name: Build and execute the sealed unsigned stage
         shell: bash
@@ -291,7 +304,7 @@ jobs:
       - name: Tear down build roots
         if: always()
         shell: bash
-        run: rm -rf "$RUNNER_TEMP/bootstrap-cargo" "$RUNNER_TEMP/bootstrap-target" "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
+        run: rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
 
   sign:
     name: Sign and notarize exact native bytes

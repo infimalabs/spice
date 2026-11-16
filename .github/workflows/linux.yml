@@ -111,7 +111,10 @@ jobs:
           archive="$root/source.tar"
           test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-          tar -xf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          # Extraction stamps sources with the current time rather than the
+          # commit time, so a restored bootstrap target never mistakes them for
+          # older than a previous commit's build.
+          tar -xmf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
           test "$(jq -r '.source.commit' dist/build.json)" = "$SOURCE_COMMIT"
           git init -q
           git config core.autocrlf false
@@ -123,6 +126,14 @@ jobs:
 
       - name: Install exact Rust
         run: rustup toolchain install --no-self-update
+
+      - name: Restore derivable bootstrap environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/bootstrap-cargo
+            ${{ runner.temp }}/bootstrap-target
+          key: linux-bootstrap-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
 
       - name: Build repository-owned xtask
         env:

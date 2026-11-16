@@ -44,6 +44,18 @@ jobs:
           git merge-base --is-ancestor "$SOURCE_COMMIT" refs/remotes/origin/main
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
+      # Derivable bootstrap state only: the pinned app compiler, registry
+      # sources, and the debug xtask target. Every hit is re-admitted below by
+      # the exact trunk version and Cargo's own freshness checks; release
+      # outputs are never cached.
+      - name: Restore derivable bootstrap environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/bootstrap-cargo
+            ${{ runner.temp }}/bootstrap-target
+          key: release-inputs-bootstrap-${{ runner.os }}-${{ runner.arch }}-trunk-0.22.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+
       - name: Install exact Rust and app compiler
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
@@ -51,6 +63,7 @@ jobs:
           set -euo pipefail
           rustup toolchain install --no-self-update
           cargo install --locked trunk --version 0.22.1
+          test "$("$CARGO_HOME/bin/trunk" --version)" = "trunk 0.22.1"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
       - name: Build repository-owned producer
@@ -67,17 +80,36 @@ jobs:
           "$RUNNER_TEMP/bootstrap-target/debug/xtask" release-inputs \
             "$RUNNER_TEMP/release-inputs"
 
+      # The archive is keyed by every proof-image build input. A hit is loaded,
+      # which re-admits its checksum sidecar, the loaded image ID, and the
+      # vendor set of this Cargo.lock; a refused hit is discarded and rebuilt.
+      - name: Restore shared proof image archive
+        id: proof-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ${{ runner.temp }}/proof-image
+          key: proof-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dist/proof-image/**', 'Cargo.lock', '.cargo/config.toml', 'xtask/src/proof_image.rs') }}
+
       - name: Build shared proof image archive
         id: proof
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+          CACHE_HIT: ${{ steps.proof-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
-          mkdir "$RUNNER_TEMP/proof-image"
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
           archive="$RUNNER_TEMP/proof-image/proof-image.tar"
-          "$RUNNER_TEMP/bootstrap-target/debug/xtask" proof-image build "$archive" \
-            | tee "$RUNNER_TEMP/proof-image.out"
-          identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
+          identity=
+          if [[ "$CACHE_HIT" == true ]] \
+            && "$xtask" proof-image load "$archive" | tee "$RUNNER_TEMP/proof-image.out"; then
+            identity="$(sed -n 's/^loaded proof image //p' "$RUNNER_TEMP/proof-image.out")"
+            test "$identity" = "$(cat "$archive.identity")"
+          else
+            rm -rf "$RUNNER_TEMP/proof-image"
+            mkdir "$RUNNER_TEMP/proof-image"
+            "$xtask" proof-image build "$archive" | tee "$RUNNER_TEMP/proof-image.out"
+            identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
+          fi
           [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
           checksum="$(sha256sum "$archive" | cut -d' ' -f1)"
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
