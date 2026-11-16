@@ -385,7 +385,7 @@ fn complete_dispatched_run(
         source,
     })?;
     let result: ResultDocument =
-        serde_json::from_slice(&result_bytes).map_err(WindowsHostedError::Decode)?;
+        serde_json::from_slice(&result_bytes).map_err(WindowsHostedError::ResultSchema)?;
     let identity =
         admit_result(request, &result, &runner).map_err(WindowsHostedError::Admission)?;
     if identity.run_id != run_id {
@@ -1180,6 +1180,10 @@ pub enum WindowsHostedError {
     Admission(super::AdmissionError),
     Encode(serde_json::Error),
     Decode(serde_json::Error),
+    /// A finished run's attested result does not decode under this client's
+    /// schema: the run is authentic but was built by a different workflow
+    /// revision, so only a fresh dispatch can supply an admissible result.
+    ResultSchema(serde_json::Error),
     Random(String),
     Clock(String),
     Io {
@@ -1260,6 +1264,10 @@ impl fmt::Display for WindowsHostedError {
             Self::Admission(source) => source.fmt(formatter),
             Self::Encode(source) => write!(formatter, "hosted request does not encode: {source}"),
             Self::Decode(source) => write!(formatter, "hosted result does not decode: {source}"),
+            Self::ResultSchema(source) => write!(
+                formatter,
+                "attested hosted result does not decode under this client's schema: {source}"
+            ),
             Self::Random(detail) => {
                 write!(formatter, "fresh hosted challenge is unavailable: {detail}")
             }
@@ -1339,7 +1347,9 @@ impl Error for WindowsHostedError {
         match self {
             Self::Policy(source) => Some(source),
             Self::Admission(source) => Some(source),
-            Self::Encode(source) | Self::Decode(source) => Some(source),
+            Self::Encode(source) | Self::Decode(source) | Self::ResultSchema(source) => {
+                Some(source)
+            }
             Self::Io { source, .. }
             | Self::Launch { source, .. }
             | Self::Output(source)

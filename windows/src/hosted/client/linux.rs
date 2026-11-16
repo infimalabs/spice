@@ -192,7 +192,8 @@ fn complete_run(
         path: result_path.clone(),
         source,
     })?;
-    let result: LinuxResult = serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
+    let result: LinuxResult =
+        serde_json::from_slice(&bytes).map_err(WindowsHostedError::ResultSchema)?;
     admit_result(&result, challenge, source, manifest, run_id)?;
     let log_path = artifact.join("stage.log");
     let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
