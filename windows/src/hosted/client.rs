@@ -26,6 +26,7 @@ use serde::Deserialize;
 use wire::{Digest, Domain};
 
 mod attach;
+mod dispatch;
 mod linux;
 mod macos;
 mod observation;
@@ -34,10 +35,7 @@ mod source;
 pub use attach::Attach;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
-use observation::{
-    ObservationGap, Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, await_watch_interval,
-    observation_gap_action, resume_action,
-};
+use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
 use source::{delete_source, push_source};
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -284,7 +282,7 @@ fn drive<T>(
 ) -> Result<T, WindowsHostedError> {
     match attached {
         None => with_pushed_source(run, cancellation, || {
-            dispatch(run, workflow, inputs, complete)
+            dispatch(run, cancellation, workflow, inputs, complete)
         }),
         Some(run_id) => retire_source(run, settle(run, run_id, complete)),
     }
@@ -342,13 +340,17 @@ fn retire_source<T>(
 /// Whether a failure leaves its provider run, artifacts, and source ref in
 /// place for a later attachment.
 fn retains_provider_state(error: &WindowsHostedError) -> bool {
-    matches!(error, WindowsHostedError::Detached { .. })
+    matches!(
+        error,
+        WindowsHostedError::Detached { .. } | WindowsHostedError::DispatchUnreadable { .. }
+    )
 }
 
 /// Dispatch `workflow` at the run's source ref with `inputs` and settle the
 /// provider run it starts.
 fn dispatch<T>(
     run: &HostedRun<'_>,
+    cancellation: &Cancellation,
     workflow: &str,
     inputs: &serde_json::Value,
     complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
@@ -383,6 +385,7 @@ fn dispatch<T>(
         .ok_or_else(|| {
             WindowsHostedError::ProviderResponse(format!("dispatch returned no run URL: {url:?}"))
         })?;
+    dispatch::await_readable(run, run_id, cancellation)?;
     settle(run, run_id, complete)
 }
 
@@ -793,27 +796,26 @@ fn watch_run(
             Ok(state) => state,
             Err(error) => match quota::spent_until(root) {
                 Some(reset) => {
+                    eprintln!(
+                        "hosted provider run {run_id}: watcher exited with {code:?} and provider quota is spent; waiting for reset at {reset}"
+                    );
                     quota::await_reset(root, repository, run_id, reset, cancellation)?;
                     continue;
                 }
-                None => match observation_gap_action(resumes) {
-                    ObservationGap::Wait => {
-                        resumes += 1;
-                        await_watch_interval(root, repository, run_id, cancellation)?;
-                        continue;
-                    }
-                    ObservationGap::Detach => {
-                        return Err(detached(WindowsHostedError::ProviderResponse(format!(
-                            "provider observation failed {} times: {error}",
-                            WATCH_RESUMES + 1
-                        ))));
-                    }
-                },
+                None => return Err(detached(error)),
             },
         };
         let conclusion = state.conclusion.unwrap_or_default();
         match resume_action(&state.status, &conclusion, resumes) {
-            Resume::Watch => resumes += 1,
+            Resume::Watch => {
+                eprintln!(
+                    "hosted provider run {run_id}: watcher exited with {code:?} while provider status is {:?}; restarting watcher {}/{}",
+                    state.status,
+                    resumes + 1,
+                    WATCH_RESUMES
+                );
+                resumes += 1;
+            }
             Resume::Complete => return Ok(()),
             Resume::Failed => {
                 return Err(WindowsHostedError::Command {
@@ -1318,6 +1320,13 @@ pub enum WindowsHostedError {
         dispatched: u64,
         signed: u64,
     },
+    /// A dispatched run did not enter the provider's readable REST view.
+    DispatchUnreadable {
+        run_id: u64,
+        source_ref: String,
+        observations: usize,
+        reason: Box<WindowsHostedError>,
+    },
     Cancelled {
         run_id: Option<u64>,
     },
@@ -1394,6 +1403,15 @@ impl fmt::Display for WindowsHostedError {
                 formatter,
                 "signed provider run {signed} does not match dispatched run {dispatched}"
             ),
+            Self::DispatchUnreadable {
+                run_id,
+                source_ref,
+                observations,
+                reason,
+            } => write!(
+                formatter,
+                "dispatched hosted provider run {run_id} remained unreadable after {observations} bounded observations: {reason}; the run and retained source ref {source_ref:?} remain for --attach {run_id}"
+            ),
             Self::Cancelled {
                 run_id: Some(run_id),
             } => {
@@ -1436,7 +1454,7 @@ impl Error for WindowsHostedError {
             | Self::Launch { source, .. }
             | Self::Output(source)
             | Self::Signal(source) => Some(source),
-            Self::Detached { reason, .. } => Some(reason),
+            Self::Detached { reason, .. } | Self::DispatchUnreadable { reason, .. } => Some(reason),
             Self::OperationAndCleanup { operation, .. }
             | Self::RunOperationAndCleanup { operation, .. }
             | Self::ArtifactOperationAndCleanup { operation, .. } => Some(operation),
