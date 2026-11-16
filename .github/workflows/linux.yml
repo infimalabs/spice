@@ -124,8 +124,8 @@ jobs:
           retention-days: 1
 
       # The release's Darwin and Windows stages link this run's canvas instead
-      # of compiling their own app. The digest-named artifact outlives the
-      # run's retirement and expires with its retention.
+      # of compiling their own app. Like every run artifact, the digest-named
+      # canvas persists until its retention expires it.
       - name: Collect staged canvas
         id: canvas
         run: |

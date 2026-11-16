@@ -408,9 +408,9 @@ fn dispatch<T>(
     settle(run, run_id, complete)
 }
 
-/// Complete the provider run through `complete`, cancel it on any other
-/// failure, and delete its artifacts. A run the client lost observation of
-/// keeps all of that for a later attachment.
+/// Complete the provider run through `complete` and cancel it on any other
+/// failure. A run the client lost observation of is left running for a later
+/// attachment. Run artifacts are evidence; provider retention expires them.
 fn settle<T>(
     run: &HostedRun<'_>,
     run_id: u64,
@@ -419,22 +419,18 @@ fn settle<T>(
     let HostedRun {
         root, repository, ..
     } = *run;
-    let operation = match complete(run_id) {
-        Err(error) if retains_provider_state(&error) => return Err(error),
+    match complete(run_id) {
+        Err(error) if retains_provider_state(&error) => Err(error),
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
         // A spent quota fails every provider read without saying anything
         // about the run; keep it whole for a later attachment.
-        Err(error) if quota::spent_until(root).is_some() => {
-            return Err(WindowsHostedError::Detached {
-                run_id,
-                reason: Box::new(error),
-            });
-        }
+        Err(error) if quota::spent_until(root).is_some() => Err(WindowsHostedError::Detached {
+            run_id,
+            reason: Box::new(error),
+        }),
         Err(error) => finish_run_cleanup(Err(error), cancel_run(root, repository, run_id)),
         success => success,
-    };
-    let cleanup = delete_artifact(root, repository, run_id);
-    finish_artifact_cleanup(operation, cleanup)
+    }
 }
 
 fn complete_dispatched_run(
@@ -498,21 +494,6 @@ fn complete_dispatched_run(
         ));
     }
     Ok(HostedExecution { result, outputs })
-}
-
-fn finish_artifact_cleanup<T>(
-    operation: Result<T, WindowsHostedError>,
-    cleanup: Result<(), WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    match (operation, cleanup) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(cleanup)) => Err(cleanup),
-        (Err(operation), Err(cleanup)) => Err(WindowsHostedError::ArtifactOperationAndCleanup {
-            operation: Box::new(operation),
-            cleanup: Box::new(cleanup),
-        }),
-    }
 }
 
 fn finish_run_cleanup<T>(
@@ -684,66 +665,6 @@ fn admit_payload_source(
         )));
     }
     canvas.map_or(Ok(()), |canvas| canvas::admit_payload(&payload, canvas))
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum ArtifactCleanupAction {
-    Complete,
-    Delete(Vec<u64>),
-}
-
-/// Delete every artifact of a settled run except a staged canvas, which the
-/// release's other targets still download; its retention expires it.
-fn artifact_cleanup_action(inventory: &ArtifactInventory) -> ArtifactCleanupAction {
-    let retired = inventory
-        .artifacts
-        .iter()
-        .filter(|artifact| !artifact.name.starts_with(super::CANVAS_ARTIFACT_PREFIX))
-        .map(|artifact| artifact.id)
-        .collect::<Vec<_>>();
-    if retired.is_empty() {
-        ArtifactCleanupAction::Complete
-    } else {
-        ArtifactCleanupAction::Delete(retired)
-    }
-}
-
-fn delete_artifact(root: &Path, repository: &str, run_id: u64) -> Result<(), WindowsHostedError> {
-    let listed = command(
-        root,
-        "gh",
-        [
-            OsString::from("api"),
-            OsString::from(format!(
-                "repos/{repository}/actions/runs/{run_id}/artifacts"
-            )),
-        ],
-    )?;
-    let listed = successful_text("artifact inventory", listed)?;
-    let inventory: ArtifactInventory =
-        serde_json::from_str(&listed).map_err(WindowsHostedError::Decode)?;
-    let artifact_ids = match artifact_cleanup_action(&inventory) {
-        ArtifactCleanupAction::Complete => return Ok(()),
-        ArtifactCleanupAction::Delete(artifact_ids) => artifact_ids,
-    };
-    for artifact_id in artifact_ids {
-        successful(
-            "artifact deletion",
-            command(
-                root,
-                "gh",
-                [
-                    OsString::from("api"),
-                    OsString::from("--method"),
-                    OsString::from("DELETE"),
-                    OsString::from(format!(
-                        "repos/{repository}/actions/artifacts/{artifact_id}"
-                    )),
-                ],
-            )?,
-        )?;
-    }
-    Ok(())
 }
 
 fn digest_file(domain: Domain, path: &Path) -> Result<Digest, WindowsHostedError> {
@@ -1301,17 +1222,6 @@ impl Policy {
     }
 }
 
-#[derive(Deserialize)]
-struct ArtifactInventory {
-    artifacts: Vec<Artifact>,
-}
-
-#[derive(Deserialize)]
-struct Artifact {
-    id: u64,
-    name: String,
-}
-
 /// Why no provider-authenticated execution result could be returned.
 #[derive(Debug)]
 pub enum WindowsHostedError {
@@ -1370,10 +1280,6 @@ pub enum WindowsHostedError {
     Canvas(String),
     Output(io::Error),
     RunOperationAndCleanup {
-        operation: Box<WindowsHostedError>,
-        cleanup: Box<WindowsHostedError>,
-    },
-    ArtifactOperationAndCleanup {
         operation: Box<WindowsHostedError>,
         cleanup: Box<WindowsHostedError>,
     },
@@ -1464,10 +1370,6 @@ impl fmt::Display for WindowsHostedError {
                 formatter,
                 "hosted operation failed: {operation}; provider run cleanup also failed: {cleanup}"
             ),
-            Self::ArtifactOperationAndCleanup { operation, cleanup } => write!(
-                formatter,
-                "hosted operation failed: {operation}; result artifact retirement also failed: {cleanup}"
-            ),
             Self::OperationAndCleanup { operation, cleanup } => write!(
                 formatter,
                 "hosted operation failed: {operation}; source retirement also failed: {cleanup}"
@@ -1488,8 +1390,7 @@ impl Error for WindowsHostedError {
             | Self::Signal(source) => Some(source),
             Self::Detached { reason, .. } | Self::DispatchUnreadable { reason, .. } => Some(reason),
             Self::OperationAndCleanup { operation, .. }
-            | Self::RunOperationAndCleanup { operation, .. }
-            | Self::ArtifactOperationAndCleanup { operation, .. } => Some(operation),
+            | Self::RunOperationAndCleanup { operation, .. } => Some(operation),
             _ => None,
         }
     }

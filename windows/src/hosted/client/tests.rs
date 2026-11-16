@@ -1,8 +1,7 @@
 use super::{
-    Artifact, ArtifactCleanupAction, ArtifactInventory, Resume, WATCH_RESUMES, WatchAction,
-    WatchObservation, WindowsHostedError, admit_public_attestation_visibility,
-    artifact_cleanup_action, finish_artifact_cleanup, finish_run_cleanup, resume_action,
-    retains_provider_state, watch_action,
+    Resume, WATCH_RESUMES, WatchAction, WatchObservation, WindowsHostedError,
+    admit_public_attestation_visibility, finish_run_cleanup, resume_action, retains_provider_state,
+    watch_action,
 };
 
 #[test]
@@ -107,72 +106,7 @@ fn provider_watch_outcomes_remain_typed_without_cancellation() {
 }
 
 #[test]
-fn artifact_inventory_deletes_every_run_artifact_but_a_staged_canvas() {
-    let inventory = |artifacts: &[(u64, &str)]| ArtifactInventory {
-        artifacts: artifacts
-            .iter()
-            .map(|(id, name)| Artifact {
-                id: *id,
-                name: (*name).to_owned(),
-            })
-            .collect(),
-    };
-
-    assert_eq!(
-        artifact_cleanup_action(&inventory(&[])),
-        ArtifactCleanupAction::Complete
-    );
-    assert_eq!(
-        artifact_cleanup_action(&inventory(&[(42, "linux-result")])),
-        ArtifactCleanupAction::Delete(vec![42])
-    );
-    assert_eq!(
-        artifact_cleanup_action(&inventory(&[
-            (42, "linux-result"),
-            (43, "canvas-staged"),
-            (44, "windows-result"),
-        ])),
-        ArtifactCleanupAction::Delete(vec![42, 44])
-    );
-    assert_eq!(
-        artifact_cleanup_action(&inventory(&[(43, "canvas-staged")])),
-        ArtifactCleanupAction::Complete
-    );
-}
-
-#[test]
-fn artifact_cleanup_preserves_operation_and_cleanup_failures() {
-    let completed = finish_artifact_cleanup(Ok(7_u8), Ok(()));
-    assert_eq!(completed.expect("successful cleanup retains result"), 7);
-
-    let operation_failed = finish_artifact_cleanup::<()>(
-        Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
-        Ok(()),
-    );
-    assert!(matches!(
-        operation_failed,
-        Err(WindowsHostedError::Cancelled { run_id: Some(42) })
-    ));
-
-    let cleanup_failed = finish_artifact_cleanup(Ok(()), Err(WindowsHostedError::PolicyIdentity));
-    assert!(matches!(
-        cleanup_failed,
-        Err(WindowsHostedError::PolicyIdentity)
-    ));
-
-    let both_failed = finish_artifact_cleanup::<()>(
-        Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
-        Err(WindowsHostedError::PolicyIdentity),
-    );
-    assert!(matches!(
-        both_failed,
-        Err(WindowsHostedError::ArtifactOperationAndCleanup {
-            operation,
-            cleanup,
-        }) if matches!(*operation, WindowsHostedError::Cancelled { run_id: Some(42) })
-            && matches!(*cleanup, WindowsHostedError::PolicyIdentity)
-    ));
-
+fn run_cleanup_preserves_operation_and_cleanup_failures() {
     let run_and_cleanup_failed = finish_run_cleanup::<()>(
         Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
         Err(WindowsHostedError::PolicyIdentity),
