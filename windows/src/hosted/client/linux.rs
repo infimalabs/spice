@@ -15,8 +15,8 @@ use sha2::{Digest as _, Sha256};
 use wire::Domain;
 
 use super::{
-    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs, Scratch,
-    WindowsHostedError, challenge, command, digest_file, download_artifact, drive,
+    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs, RunAuthority,
+    Scratch, WindowsHostedError, challenge, command, digest_file, download_artifact, drive,
     publish_artifacts, require_public_attestation_repository, source, successful_text,
     verify_attestation, watch_run, workspace_root,
 };
@@ -164,7 +164,7 @@ pub fn linux_hosted_stage(
         &cancellation,
         WORKFLOW_PATH,
         inputs,
-        |run_id| complete_run(&completion, run_id),
+        |authority| complete_run(&completion, authority),
     )
 }
 
@@ -181,7 +181,7 @@ struct Completion<'a> {
 
 fn complete_run(
     completion: &Completion<'_>,
-    run_id: u64,
+    authority: &RunAuthority,
 ) -> Result<LinuxHostedStage, WindowsHostedError> {
     let Completion {
         run,
@@ -193,7 +193,8 @@ fn complete_run(
         source_archive,
         proof_receipt,
     } = completion;
-    watch_run(run.root, run.repository, run_id, cancellation)?;
+    watch_run(run.root, run.repository, authority, cancellation)?;
+    let run_id = authority.run_id();
     let artifact = download_artifact(run, run_id, &format!("linux-{challenge}"))?;
     let result_path = artifact.join("result.json");
     verify_attestation(run, WORKFLOW_PATH, run_id, &result_path)?;

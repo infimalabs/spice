@@ -90,8 +90,9 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
         &cancellation,
         release_inputs::WORKFLOW,
         inputs,
-        |run_id| {
-            watch_run(run.root, run.repository, run_id, &cancellation)?;
+        |authority| {
+            watch_run(run.root, run.repository, authority, &cancellation)?;
+            let run_id = authority.run_id();
             let artifact = download_artifact(
                 &run,
                 run_id,

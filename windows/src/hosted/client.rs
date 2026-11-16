@@ -32,6 +32,7 @@ mod inputs;
 mod linux;
 mod macos;
 mod observation;
+mod ownership;
 mod quota;
 mod release_stage;
 mod source;
@@ -41,6 +42,7 @@ pub use inputs::{ReleaseInputs, release_inputs};
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
 use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
+use ownership::RunAuthority;
 pub use release_stage::windows_release_commands_into;
 use source::PreparedSource;
 
@@ -240,11 +242,11 @@ pub fn windows_hosted_commands_into(
                 "request": request,
             })
         }),
-        |run_id| {
+        |authority| {
             complete_dispatched_run(
                 &run,
                 &request,
-                run_id,
+                authority,
                 destination
                     .as_deref()
                     .map(|stage| (stage, canvas.as_ref(), None)),
@@ -349,19 +351,20 @@ impl Bound {
 }
 
 /// Dispatch a fresh run of `workflow`, or re-enter the attached one; settle it
-/// through `complete` and retire its directly uploaded source archive.
+/// through `complete` and retire its directly uploaded source archive. Only a
+/// fresh dispatch grants authority to cancel the run.
 fn drive<T>(
     run: &HostedRun<'_>,
     attached: Option<u64>,
     cancellation: &Cancellation,
     workflow: &str,
     inputs: Result<serde_json::Value, WindowsHostedError>,
-    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
 ) -> Result<T, WindowsHostedError> {
     let operation = inputs.and_then(|inputs| match attached {
         None if cancellation.requested() => Err(WindowsHostedError::Cancelled { run_id: None }),
         None => dispatch(run, cancellation, workflow, &inputs, complete),
-        Some(run_id) => settle(run, run_id, complete),
+        Some(run_id) => settle(run, &RunAuthority::Observed { run_id }, complete),
     });
     retire_transport(run, operation)
 }
@@ -419,7 +422,7 @@ fn dispatch<T>(
     cancellation: &Cancellation,
     workflow: &str,
     inputs: &serde_json::Value,
-    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
 ) -> Result<T, WindowsHostedError> {
     let HostedRun {
         root,
@@ -451,31 +454,30 @@ fn dispatch<T>(
         .ok_or_else(|| {
             WindowsHostedError::ProviderResponse(format!("dispatch returned no run URL: {url:?}"))
         })?;
-    dispatch::await_readable(run, run_id, cancellation)?;
-    settle(run, run_id, complete)
+    let authority = RunAuthority::dispatched(run, workflow, run_id);
+    dispatch::await_readable(run, &authority, cancellation)?;
+    settle(run, &authority, complete)
 }
 
-/// Complete the provider run through `complete` and cancel it on any other
-/// failure. A run the client lost observation of is left running for a later
-/// attachment. Run artifacts are evidence; provider retention expires them.
+/// Complete the provider run through `complete`. On any other failure, cancel
+/// a run this client owns and the provider still shows as dispatched; leave
+/// any other run whole for a later attachment. Run artifacts are evidence;
+/// provider retention expires them.
 fn settle<T>(
     run: &HostedRun<'_>,
-    run_id: u64,
-    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+    authority: &RunAuthority,
+    complete: impl FnOnce(&RunAuthority) -> Result<T, WindowsHostedError>,
 ) -> Result<T, WindowsHostedError> {
-    let HostedRun {
-        root, repository, ..
-    } = *run;
-    match complete(run_id) {
+    match complete(authority) {
         Err(error) if retains_provider_state(&error) => Err(error),
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
         // A spent quota fails every provider read without saying anything
         // about the run; keep it whole for a later attachment.
-        Err(error) if quota::spent_until(root).is_some() => Err(WindowsHostedError::Detached {
-            run_id,
+        Err(error) if quota::spent_until(run.root).is_some() => Err(WindowsHostedError::Detached {
+            run_id: authority.run_id(),
             reason: Box::new(error),
         }),
-        Err(error) => finish_run_cleanup(Err(error), cancel_run(root, repository, run_id)),
+        Err(error) => ownership::abandon(run.root, authority, error),
         success => success,
     }
 }
@@ -483,7 +485,7 @@ fn settle<T>(
 fn complete_dispatched_run(
     run: &HostedRun<'_>,
     request: &Request,
-    run_id: u64,
+    authority: &RunAuthority,
     destination: Option<(
         &Path,
         Option<&canvas::LinuxCanvas>,
@@ -491,7 +493,8 @@ fn complete_dispatched_run(
     )>,
     cancellation: &Cancellation,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    watch_run(run.root, run.repository, run_id, cancellation)?;
+    watch_run(run.root, run.repository, authority, cancellation)?;
+    let run_id = authority.run_id();
     let (artifact_dir, runner_path, result_path) =
         download_attested_artifact(run, &request.challenge, run_id)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
@@ -784,16 +787,17 @@ struct RunState {
 fn watch_run(
     root: &Path,
     repository: &str,
-    run_id: u64,
+    authority: &RunAuthority,
     cancellation: &Cancellation,
 ) -> Result<(), WindowsHostedError> {
+    let run_id = authority.run_id();
     let detached = |reason| WindowsHostedError::Detached {
         run_id,
         reason: Box::new(reason),
     };
     let mut resumes = 0;
     loop {
-        let code = match watch_once(root, repository, run_id, cancellation)? {
+        let code = match watch_once(root, repository, authority, cancellation)? {
             WatchEnd::Succeeded => return Ok(()),
             WatchEnd::Exited(code) => code,
         };
@@ -804,7 +808,7 @@ fn watch_run(
                     eprintln!(
                         "hosted provider run {run_id}: watcher exited with {code:?} and provider quota is spent; waiting for reset at {reset}"
                     );
-                    quota::await_reset(root, repository, run_id, reset, cancellation)?;
+                    quota::await_reset(root, authority, reset, cancellation)?;
                     continue;
                 }
                 None => return Err(detached(error)),
@@ -861,14 +865,16 @@ fn run_state(root: &Path, repository: &str, run_id: u64) -> Result<RunState, Win
     serde_json::from_str(&state).map_err(WindowsHostedError::Decode)
 }
 
-/// Run one provider watcher until it exits or cancellation arrives; an
-/// explicit cancellation cancels the provider run.
+/// Run one provider watcher until it exits or cancellation arrives. An
+/// explicit cancellation ends observation through [`ownership::interrupt`]:
+/// only an owned run still exactly as dispatched is cancelled.
 fn watch_once(
     root: &Path,
     repository: &str,
-    run_id: u64,
+    authority: &RunAuthority,
     cancellation: &Cancellation,
 ) -> Result<WatchEnd, WindowsHostedError> {
+    let run_id = authority.run_id();
     let launch = |source| WindowsHostedError::Detached {
         run_id,
         reason: Box::new(WindowsHostedError::Launch {
@@ -910,7 +916,7 @@ fn watch_once(
             },
         };
         // Read after observing the watcher, so a signal racing its exit still
-        // cancels the run.
+        // ends observation through the run's authority.
         match watch_action(cancellation.requested(), observation) {
             WatchAction::Wait => match receiver.recv() {
                 Ok(WatchEvent::Exited) => {}
@@ -926,10 +932,7 @@ fn watch_once(
             WatchAction::Complete => return Ok(WatchEnd::Succeeded),
             WatchAction::Cancel => {
                 stop_watch(&mut child)?;
-                cancel_run(root, repository, run_id)?;
-                return Err(WindowsHostedError::Cancelled {
-                    run_id: Some(run_id),
-                });
+                return Err(ownership::interrupt(root, authority));
             }
             WatchAction::Failed(code) => return Ok(WatchEnd::Exited(code)),
         }
@@ -1335,6 +1338,11 @@ pub enum WindowsHostedError {
         run_id: u64,
         reason: Box<WindowsHostedError>,
     },
+    /// Observation of a run this client has no authority to cancel was
+    /// interrupted.
+    Interrupted,
+    /// An owned run no longer shows the bindings it was dispatched with.
+    OwnershipRefused(String),
     /// No provider run is adoptable for this stage's attachment.
     AttachRefused(String),
     /// A release stage cannot adopt, or returned other than, the staged
@@ -1423,6 +1431,10 @@ impl fmt::Display for WindowsHostedError {
                 formatter,
                 "lost observation of hosted provider run {run_id}: {reason}; the run, its artifacts, and its archive transport remain for --attach {run_id}"
             ),
+            Self::Interrupted => formatter.write_str("observation was interrupted"),
+            Self::OwnershipRefused(detail) => {
+                write!(formatter, "provider run cancellation refused: {detail}")
+            }
             Self::AttachRefused(detail) => {
                 write!(formatter, "hosted attachment refused: {detail}")
             }
