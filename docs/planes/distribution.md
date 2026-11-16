@@ -338,9 +338,13 @@ one failed platform never hides or redispatches successful siblings. A changed
 bound identity refuses before a provider dispatch: only a new dispatch requires
 `main` to carry the source's workflow blob, while an attached run is admitted
 against the blob its own workflow commit carries, so a later landing never
-strands a recorded session. The publication plan takes its version from the
-admitted archive's build record. `stage-hosted-release INPUTS_RUN` remains the
-staging-only diagnostic; each platform is also independently dispatchable with
+strands a recorded session. Once a target's result proves unadmittable, every
+later fresh dispatch of that target instead binds the blob `main` carries when
+it is requested, and re-entering that run admits the recorded blob; the signed
+source and input identities stay unchanged. The publication plan takes its
+version from the admitted archive's build record.
+`stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic; each
+platform is also independently dispatchable with
 `stage-target … --hosted --release-inputs INPUTS_RUN` and may re-enter its own
 run with `--attach RUN_ID`. An attached preflight's signed result names its own
 landed commit, and its workflow must equal the one that commit carries.
