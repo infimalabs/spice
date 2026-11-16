@@ -91,7 +91,6 @@ impl CommandKind {
         Self::TeamArrange,
         Self::LaneRecall,
         Self::ProofRecognize,
-        Self::ReleasePublish,
         Self::UpChange,
     ];
 
@@ -176,7 +175,6 @@ impl CommandKind {
             | Self::GlobalSettingsSet
             | Self::VendorCatalog
             | Self::ProofRecognize
-            | Self::ReleasePublish
             | Self::UpChange => self.runtime_spelling(),
             Self::PrincipalDirectoryRead
             | Self::PrincipalRead
@@ -327,7 +325,6 @@ impl CommandKind {
             Self::GlobalSettingsSet => "settings::set",
             Self::VendorCatalog => "vendor::catalog",
             Self::ProofRecognize => "proof::recognize",
-            Self::ReleasePublish => "release::publish",
             Self::UpChange => "up::change",
             _ => panic!("command spelling partition is closed"),
         }

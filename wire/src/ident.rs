@@ -130,8 +130,6 @@ pub enum Domain {
     DistReleasePackage,
     /// The exact deterministic archive uploaded as a release asset.
     DistReleaseAsset,
-    /// One operator-previewed publication of an exact sealed manifest.
-    DistReleasePlan,
     /// The ordered command inventory one sealed proof replay consumes.
     ProofBattery,
     /// The complete typed result of one sealed proof replay.
@@ -259,8 +257,7 @@ impl Domain {
             | Self::DistReleaseNotes
             | Self::DistReleaseNotesContent
             | Self::DistReleasePackage
-            | Self::DistReleaseAsset
-            | Self::DistReleasePlan => self.distribution_tag(),
+            | Self::DistReleaseAsset => self.distribution_tag(),
             Self::ProofBattery
             | Self::ProofReplay
             | Self::ProofReceipt
@@ -341,7 +338,6 @@ impl Domain {
             Self::DistReleaseNotesContent => "spice.dist.release-notes-content.v1",
             Self::DistReleasePackage => "spice.dist.release-package.v1",
             Self::DistReleaseAsset => "spice.dist.release-asset.v1",
-            Self::DistReleasePlan => "spice.dist.release-plan.v1",
             _ => panic!("digest-domain tag partition is closed"),
         }
     }

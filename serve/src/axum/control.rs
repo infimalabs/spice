@@ -96,7 +96,6 @@ pub(super) const fn class(kind: CommandKind) -> Class {
         | CommandKind::LaneJobStop
         | CommandKind::LaneRecall
         | CommandKind::ProofRecognize
-        | CommandKind::ReleasePublish
         | CommandKind::UpChange => Class::Ordinary,
     }
 }

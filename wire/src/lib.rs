@@ -76,7 +76,6 @@ mod quote;
 pub mod topic;
 pub use provenance::{TaskProvenance, TaskProvenanceError};
 pub use topic::{TaskTopic, Topic, TopicError, TopicInput, TopicTail, topic_label};
-pub mod release;
 mod reply;
 pub mod rooms;
 pub use rooms::{StatementItem, StatementItemPrefixError};

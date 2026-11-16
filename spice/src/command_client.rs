@@ -15,8 +15,8 @@ use tungstenite::http::header::ORIGIN;
 use tungstenite::{Bytes, Message, WebSocket};
 use wire::intent::{CommandAnswer, InboxAnswer};
 use wire::{
-    Actor, CanonicalUuid, Command, CommandKind, Digest, Disposition, Fault, FaultClass, Outcome,
-    Refusal, Reply, ReplyPosition, Response, Witness,
+    Actor, CanonicalUuid, Command, CommandKind, Disposition, Fault, FaultClass, Outcome, Refusal,
+    Reply, ReplyPosition, Response, Witness,
 };
 
 use crate::cli::{Contract, Guard, Principal, ReplyPositionLaw};
@@ -75,12 +75,6 @@ pub(crate) enum SelectedCommand<'a> {
         request: CanonicalUuid,
         answer: wire::Answer,
         expected: Vec<Witness>,
-    },
-    /// The operator recognizes one exact, already admitted release publication.
-    ReleasePublish {
-        release: &'a crate::release_command::AdmittedRelease,
-        key: &'a Digest,
-        state: crate::release_command::PublicationState,
     },
     /// Recognize one exact post-proof all-target manifest.
     ProofRecognize {

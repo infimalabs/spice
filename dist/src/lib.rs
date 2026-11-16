@@ -9,15 +9,11 @@ mod canvas;
 mod darwin_signing;
 mod notes;
 mod pins;
-mod release;
 mod source;
 mod stage;
 mod version;
 
-pub use authority::{
-    AuthorityError, GitCommand, GitMutation, RefState, ReleaseAuthority, ReleaseRefs,
-    current_authority,
-};
+pub use authority::AuthorityError;
 pub use canvas::{Canvas, CanvasError};
 pub use darwin_signing::{
     DarwinSigning, DarwinSigningError, DeveloperIdentity, NotaryProfile, ReleaseConfig,
@@ -27,11 +23,6 @@ pub use notes::{
     release_notes,
 };
 pub use pins::{PinError, PinName, RequiredPins};
-pub use release::{
-    AcceptedOperation, Convergence, EffectError, EffectPort, ExecuteError, Execution,
-    GithubReleaseAsset, OperationReceipt, OperationState, PlanError, PlanInput, ReleaseExecutor,
-    ReleaseJournal, gate_receipt, github_release_assets, plan_release, verify_plan,
-};
 pub use source::{
     SourceIdentity, build_info, build_record_bytes, head_build_info, source_archive_identity,
     source_counter_sum, source_identity, source_version,

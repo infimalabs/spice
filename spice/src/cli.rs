@@ -162,10 +162,7 @@ pub const fn answer_bound(kind: CommandKind) -> Duration {
     match kind {
         CommandKind::OutboxSubmit | CommandKind::OutboxRead => HELD_STATE_ANSWER,
         CommandKind::TaskDone => TASK_COMPLETION_ANSWER,
-        CommandKind::LaneSeat
-        | CommandKind::LaneState
-        | CommandKind::ReleasePublish
-        | CommandKind::UpChange => CONTENDED_ANSWER,
+        CommandKind::LaneSeat | CommandKind::LaneState | CommandKind::UpChange => CONTENDED_ANSWER,
         CommandKind::BoardRead
         | CommandKind::TaskDetail
         | CommandKind::TaskRelations
@@ -351,7 +348,6 @@ fn repository_landed(path: &[&str]) -> bool {
             | ["journal", "reindex"]
             | ["journal", "verify"]
             | ["thread"]
-            | ["release", "publish"]
             | ["restore", "verify"]
             | ["tape", "archive"]
     )

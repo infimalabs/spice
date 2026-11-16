@@ -505,18 +505,6 @@ pub struct Recognize {
     pub key: Digest,
 }
 
-/// Publish the sealed manifest and each target artifact digest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ReleasePublish {
-    /// Observation key that makes publication idempotent.
-    pub key: Digest,
-    /// Digest of the canonical target manifest.
-    pub manifest: Digest,
-    /// Digest of the exact curated release-note bytes in the approved plan.
-    pub notes: Digest,
-}
-
 /// Drive the resident to the requested lifecycle state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

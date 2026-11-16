@@ -15,7 +15,7 @@ use spice::resident_lock::{
     auth_token_is_valid, holder_record, launched_holder_record,
 };
 use tokio::sync::oneshot;
-use wire::intent::{CommandAnswer, Intent, RecognitionAnswer, ReleasePublish, StateAnswer};
+use wire::intent::{CommandAnswer, Intent, RecognitionAnswer, StateAnswer};
 use wire::{
     Actor, CanonicalUuid, Command, CommandKind, Fault, FaultClass, Instant, Outcome, Producer,
     Refusal, Reply, ReplyPosition, ResidencyHead, ResidentState, Seq, SeqRange, TrustHead,
