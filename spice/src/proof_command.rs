@@ -4,6 +4,8 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use clap::ArgMatches;
+
 use proof::{
     CheckStanding, ContainerError, EnvironmentError, EvidenceError, EvidencePublishError,
     InputError, NativeError, PayloadError, ProofError, RederiveError, ReplayError, ReplayFailure,
@@ -21,11 +23,12 @@ const KILL_HORIZON: Duration = Duration::from_secs(10);
 const TERMINATION_GRACE: Duration = Duration::from_secs(5);
 const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 
-/// Seal and atomically publish the detached proof for the compiled target.
+/// Seal and atomically publish the detached proof for the selected target.
 pub(crate) fn seal(
+    matches: &ArgMatches,
     configuration: Option<&spice::config::RepositoryCapture>,
 ) -> Outcome<ProofEvidence> {
-    let invocation = match Invocation::acquire(configuration) {
+    let invocation = match Invocation::acquire(matches, configuration) {
         Ok(invocation) => invocation,
         Err(failure) => return failure.outcome(),
     };
@@ -40,11 +43,12 @@ pub(crate) fn seal(
     }
 }
 
-/// Re-execute and verify the existing detached proof for the compiled target.
+/// Re-execute and verify the existing detached proof for the selected target.
 pub(crate) fn replay(
+    matches: &ArgMatches,
     configuration: Option<&spice::config::RepositoryCapture>,
 ) -> Outcome<ProofEvidence> {
-    let invocation = match Invocation::acquire(configuration) {
+    let invocation = match Invocation::acquire(matches, configuration) {
         Ok(invocation) => invocation,
         Err(failure) => return failure.outcome(),
     };
@@ -73,7 +77,10 @@ struct Invocation {
 }
 
 impl Invocation {
-    fn acquire(configuration: Option<&spice::config::RepositoryCapture>) -> Result<Self, Failure> {
+    fn acquire(
+        matches: &ArgMatches,
+        configuration: Option<&spice::config::RepositoryCapture>,
+    ) -> Result<Self, Failure> {
         let current = std::env::current_dir().map_err(|error| {
             Failure::fault(
                 FaultClass::Environment,
@@ -98,20 +105,45 @@ impl Invocation {
                     crate::StateFailure::Refusal(refusal) => Failure::Refusal(refusal),
                     crate::StateFailure::Fault(fault) => Failure::Fault(fault),
                 })?;
-        let target = proof::compiled_target().map_err(|error| {
-            Failure::refusal(
-                "proof::target-refused",
-                "one of the two compiled proof release targets",
-                error.to_string(),
-                "run the proof leaf from an aarch64 Apple Darwin or x86_64 musl build",
-            )
-        })?;
+        let target = selected_target(matches)?;
         let layout = proof::Layout::new(repository.worktree_root(), state.proof(), target);
         Ok(Self {
             layout,
             workspace: repository.worktree_root().to_path_buf(),
             config,
         })
+    }
+}
+
+fn selected_target(matches: &ArgMatches) -> Result<wire::manifest::ReleaseTarget, Failure> {
+    match matches.get_one::<String>("target").map(String::as_str) {
+        Some(target) => target_from_spelling(target).ok_or_else(|| {
+            Failure::refusal(
+                "proof::target-refused",
+                "one of the three release targets",
+                target,
+                "pass a canonical release target triple",
+            )
+        }),
+        None => proof::compiled_target().map_err(|error| {
+            Failure::refusal(
+                "proof::target-refused",
+                "one of the two compiled proof release targets",
+                error.to_string(),
+                "pass --target x86_64-pc-windows-msvc for the hosted Windows proof",
+            )
+        }),
+    }
+}
+
+fn target_from_spelling(spelling: &str) -> Option<wire::manifest::ReleaseTarget> {
+    use wire::manifest::ReleaseTarget;
+
+    match spelling {
+        "aarch64-apple-darwin" => Some(ReleaseTarget::Aarch64AppleDarwin),
+        "x86_64-unknown-linux-musl" => Some(ReleaseTarget::X86_64UnknownLinuxMusl),
+        "x86_64-pc-windows-msvc" => Some(ReleaseTarget::X86_64PcWindowsMsvc),
+        _ => None,
     }
 }
 
@@ -584,9 +616,19 @@ mod tests {
     use std::path::PathBuf;
 
     use proof::{EvidencePublishError, Input, InputError, PayloadError, ProofError, SealError};
+    use wire::manifest::ReleaseTarget;
     use wire::{FaultClass, Outcome};
 
-    use super::Failure;
+    use super::{Failure, target_from_spelling};
+
+    #[test]
+    fn explicit_target_selects_the_hosted_windows_proof() {
+        assert_eq!(
+            target_from_spelling("x86_64-pc-windows-msvc"),
+            Some(ReleaseTarget::X86_64PcWindowsMsvc)
+        );
+        assert_eq!(target_from_spelling("x86_64-pc-windows"), None);
+    }
 
     #[test]
     fn input_shape_refuses_while_io_and_encoding_defects_fault() {

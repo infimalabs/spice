@@ -169,6 +169,26 @@ pub(super) const PROOF_TOOLS: &[ExternalTool] = &[
         cancellation: ToolCancellation::Deadline,
         network: ToolNetwork::Denied,
     },
+    ExternalTool {
+        name: "git",
+        owner: "windows_execution::hosted::client",
+        mode: ToolMode::Launch,
+        requirement: ToolRequirement::Conditional,
+        source: ToolSource::BootstrapEnvironment,
+        bounds: ToolBounds::ProofLimits,
+        cancellation: ToolCancellation::Deadline,
+        network: ToolNetwork::Permitted,
+    },
+    ExternalTool {
+        name: "GitHub CLI",
+        owner: "windows_execution::hosted::client",
+        mode: ToolMode::Launch,
+        requirement: ToolRequirement::Conditional,
+        source: ToolSource::BootstrapEnvironment,
+        bounds: ToolBounds::ProofLimits,
+        cancellation: ToolCancellation::Deadline,
+        network: ToolNetwork::Permitted,
+    },
 ];
 
 #[cfg(test)]

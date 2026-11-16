@@ -275,22 +275,22 @@ pub(super) const CONTRACTS: &[Contract] = &[
     reference_transaction::CONTRACT,
     row!(
         ["proof"],
-        "proof",
+        "proof [--target TARGET]",
         Local,
         None,
         [],
-        [Daemonless, Offline, Toolful],
+        [Daemonless, Toolful],
         PROOF_TOOLS,
         Reply,
         "proof::seal"
     ),
     row!(
         ["proof", "replay"],
-        "proof replay",
+        "proof replay [--target TARGET]",
         Local,
         None,
         [],
-        [Daemonless, Offline, Toolful],
+        [Daemonless, Toolful],
         PROOF_TOOLS,
         Reply,
         "proof::replay"
