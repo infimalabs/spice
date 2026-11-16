@@ -342,6 +342,7 @@ impl Bound {
             branch,
             challenge: &self.challenge,
             workflow_blob: &self.source.workflow_blob,
+            run_title_prefix: attach::RUN_TITLE_PREFIX,
             transport: Some(self.transport),
         }
     }
@@ -374,6 +375,7 @@ struct HostedRun<'a> {
     branch: &'a str,
     challenge: &'a str,
     workflow_blob: &'a str,
+    run_title_prefix: &'a str,
     transport: Option<transport::Transport>,
 }
 
@@ -615,15 +617,7 @@ fn verify_attestation(
     run_id: u64,
     path: &Path,
 ) -> Result<String, WindowsHostedError> {
-    let workflow_commit = attach::workflow_commit(
-        run.root,
-        run.repository,
-        run.branch,
-        workflow,
-        run.challenge,
-        run.workflow_blob,
-        run_id,
-    )?;
+    let workflow_commit = attach::workflow_commit(run, workflow, run_id)?;
     let verification = command(
         run.root,
         "gh",

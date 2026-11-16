@@ -77,6 +77,7 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &workflow_blob,
+        run_title_prefix: release_inputs::RUN_TITLE_PREFIX,
         transport: None,
     };
     let inputs = Ok(serde_json::json!({

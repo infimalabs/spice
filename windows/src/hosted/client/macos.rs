@@ -147,6 +147,7 @@ pub fn macos_hosted_stage(
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &source.workflow_blob,
+        run_title_prefix: super::attach::RUN_TITLE_PREFIX,
         transport: None,
     };
     let inputs = Ok(serde_json::json!({
