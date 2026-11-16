@@ -160,10 +160,18 @@ fn relative_spelling(root: &Path, path: &Path) -> Result<String, AppBuildError> 
     let relative = path.strip_prefix(root).map_err(|_| {
         source_path_error(path, "escaped the worktree while sources were collected")
     })?;
-    relative
-        .to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| AppBuildError::NonUtf8(PathBuf::from(relative)))
+    let mut spelling = String::with_capacity(relative.as_os_str().len());
+    for component in relative.components() {
+        let component = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| AppBuildError::NonUtf8(PathBuf::from(relative)))?;
+        if !spelling.is_empty() {
+            spelling.push('/');
+        }
+        spelling.push_str(component);
+    }
+    Ok(spelling)
 }
 
 fn source_path_error(path: &Path, reason: &str) -> AppBuildError {
@@ -254,6 +262,23 @@ mod tests {
             // test is already carrying with one about its own cleanup.
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn host_path_separators_do_not_change_spelling_or_order() {
+        let root = Path::new("fixture");
+        let nested = root.join("app").join("src").join("nested").join("lib.rs");
+        let mut paths = vec![
+            "app/src/z.rs".to_owned(),
+            relative_spelling(root, &nested).expect("spell nested source path"),
+            "app/src/a.rs".to_owned(),
+        ];
+        paths.sort();
+
+        assert_eq!(
+            paths,
+            ["app/src/a.rs", "app/src/nested/lib.rs", "app/src/z.rs"]
+        );
     }
 
     #[test]

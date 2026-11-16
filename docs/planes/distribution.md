@@ -99,6 +99,8 @@ artifact inventory, and all three bind the source digest of the
 already-versioned release commit and the same archive. Every target binds the
 same G and rack digest. The inventory carries no app files: the executable
 is the app's only carrier.
+The app source identity spells each relative path as UTF-8 components joined by
+`/` and orders inputs by that spelling, independent of the host path separator.
 
 **Invariant —** One release stages every target from one source archive.
 `spice dev xtask -- source-archive` is the one point staging reads Git: it
