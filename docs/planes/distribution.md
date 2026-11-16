@@ -332,7 +332,10 @@ attaches to recorded healthy or successful runs and dispatches only a missing
 target or a target whose provider run ended in failure. It reports all three
 outcomes before failing, so one failed platform never hides or redispatches
 successful siblings. A changed bound identity refuses before a provider
-dispatch. `stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic;
+dispatch: only a new dispatch requires `main` to carry the source's workflow
+blob, while an attached run is admitted against the blob its own workflow
+commit carries, so a later landing never strands a recorded session.
+`stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic;
 each platform is also independently dispatchable with `stage-target … --hosted
 --release-inputs INPUTS_RUN` and may re-enter its own run with `--attach RUN_ID`.
 

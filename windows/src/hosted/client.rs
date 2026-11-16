@@ -300,9 +300,15 @@ impl Bound {
             workflow,
         } = provider;
         let source = source::prepare(root, scratch, workflow, selected)?;
-        attach::admit_branch_workflow(root, repository, branch, workflow, &source.workflow_blob)?;
         let (challenge, transport, attached) = match (selected, attach) {
             (_, None) => {
+                attach::admit_branch_workflow(
+                    root,
+                    repository,
+                    branch,
+                    workflow,
+                    &source.workflow_blob,
+                )?;
                 let challenge = challenge()?;
                 let transport = transport::create(root, repository, &challenge, &source)?;
                 if cancellation.requested() {
