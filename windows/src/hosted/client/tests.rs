@@ -1,8 +1,8 @@
 use super::{
-    Artifact, ArtifactCleanupAction, ArtifactInventory, ObservationGap, Resume, WATCH_RESUMES,
-    WatchAction, WatchObservation, WindowsHostedError, admit_public_attestation_visibility,
-    artifact_cleanup_action, finish_artifact_cleanup, finish_run_cleanup, observation_gap_action,
-    resume_action, retains_provider_state, watch_action,
+    Artifact, ArtifactCleanupAction, ArtifactInventory, Resume, WATCH_RESUMES, WatchAction,
+    WatchObservation, WindowsHostedError, admit_public_attestation_visibility,
+    artifact_cleanup_action, finish_artifact_cleanup, finish_run_cleanup, resume_action,
+    retains_provider_state, watch_action,
 };
 
 #[test]
@@ -23,24 +23,18 @@ fn watcher_exit_defers_to_the_provider_run_state() {
 }
 
 #[test]
-fn provider_observation_gaps_retry_only_inside_the_watcher_bound() {
-    assert_eq!(observation_gap_action(0), ObservationGap::Wait);
-    assert_eq!(
-        observation_gap_action(WATCH_RESUMES - 1),
-        ObservationGap::Wait
-    );
-    assert_eq!(
-        observation_gap_action(WATCH_RESUMES),
-        ObservationGap::Detach
-    );
-}
-
-#[test]
 fn only_lost_observation_retains_provider_state() {
     let detached = WindowsHostedError::Detached {
         run_id: 42,
         reason: Box::new(WindowsHostedError::ProviderResponse("offline".to_owned())),
     };
+    let unreadable = WindowsHostedError::DispatchUnreadable {
+        run_id: 43,
+        source_ref: "hosted-challenge".to_owned(),
+        observations: 5,
+        reason: Box::new(WindowsHostedError::ProviderResponse("not found".to_owned())),
+    };
+    assert!(retains_provider_state(&unreadable));
     assert!(retains_provider_state(&detached));
     for retired in [
         WindowsHostedError::Cancelled { run_id: Some(42) },
