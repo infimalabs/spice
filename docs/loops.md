@@ -16,9 +16,9 @@ Stored workflow status is one small machine:
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> pending: task&#58;&#58;added
+  [*] --> pending: task#58;#58;added
   pending --> completed: accepted final phase, close, or conclusion
-  pending --> deleted: task&#58;&#58;deleted
+  pending --> deleted: task#58;#58;deleted
   completed --> [*]
   deleted --> [*]
 ```
@@ -28,9 +28,9 @@ Claim disposition is a second, independent machine:
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> active: claim&#58;&#58;won
-  active --> freed: claim&#58;&#58;freed
-  active --> lapsed: claim&#58;&#58;lapsed
+  [*] --> active: claim#58;#58;won
+  active --> freed: claim#58;#58;freed
+  active --> lapsed: claim#58;#58;lapsed
   freed --> [*]
   lapsed --> [*]
 ```
