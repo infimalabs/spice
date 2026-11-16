@@ -24,8 +24,8 @@ use super::{
     GlobalSettingsSet, InboxAnswer, LaneAnswer, LaneChangeAnswer, LaneEffortRetune, LaneFastRetune,
     LaneJobAnswer, LaneJobRef, LaneJobsAnswer, LaneJobsRead, LaneRead, LaneRecall, LaneRenewal,
     LaneRenewalAnswer, LaneRetune, LaneSeat, LaneState, QuoteRead, RackAnswer, RackRead,
-    RecallAnswer, RecognitionAnswer, Recognize, ReleasePublish, RoomContribute,
-    RoomContributeAnswer, RoomContributionRead, RoomContributionReadAnswer, RoomConversationText,
+    RecallAnswer, RecognitionAnswer, Recognize, RoomContribute, RoomContributeAnswer,
+    RoomContributionRead, RoomContributionReadAnswer, RoomConversationText,
     RoomConversationTextAnswer, RoomLeave, RoomLeaveAnswer, RoomScore, RoomScoreAnswer,
     StateAnswer, SteerInbox, SteerLineAnswer, SteerLineControl, SteerSend, TaskAdd, TaskAnswer,
     TaskClose, TaskConclude, TaskDefer, TaskDelete, TaskDepends, TaskDetail, TaskDetailAnswer,
@@ -171,8 +171,6 @@ pub enum BodyShape {
     LaneRecall,
     /// [`Recognize`]
     Recognize,
-    /// [`ReleasePublish`]
-    ReleasePublish,
     /// [`UpChange`]
     UpChange,
     /// [`PrincipalDirectoryRead`]
@@ -548,7 +546,6 @@ impl CommandKind {
             | Self::GlobalSettingsSet
             | Self::VendorCatalog
             | Self::ProofRecognize
-            | Self::ReleasePublish
             | Self::UpChange => self.runtime_binding(),
         }
     }
@@ -676,7 +673,6 @@ impl CommandKind {
             Self::GlobalSettingsRead | Self::GlobalSettingsSet => self.settings_binding(),
             Self::VendorCatalog => Binding::of(B::VendorCatalog, A::VendorCatalog),
             Self::ProofRecognize => Binding::of(B::Recognize, A::Recognition),
-            Self::ReleasePublish => Binding::of(B::ReleasePublish, A::Recognition),
             Self::UpChange => Binding::of(B::UpChange, A::State),
             _ => panic!("command binding partition is closed"),
         }
@@ -822,8 +818,6 @@ pub enum Intent {
     LaneRecall(LaneRecall),
     /// [`BodyShape::Recognize`]
     Recognize(Recognize),
-    /// [`BodyShape::ReleasePublish`]
-    ReleasePublish(ReleasePublish),
     /// [`BodyShape::UpChange`]
     UpChange(UpChange),
     /// [`BodyShape::PrincipalDirectoryRead`]
@@ -917,7 +911,6 @@ impl Intent {
             | Self::GlobalSettingsSet(_)
             | Self::VendorCatalog(_)
             | Self::Recognize(_)
-            | Self::ReleasePublish(_)
             | Self::UpChange(_) => self.runtime_shape(),
         }
     }
@@ -1011,7 +1004,6 @@ impl Intent {
             Self::GlobalSettingsRead(_) | Self::GlobalSettingsSet(_) => self.settings_shape(),
             Self::VendorCatalog(_) => BodyShape::VendorCatalog,
             Self::Recognize(_) => BodyShape::Recognize,
-            Self::ReleasePublish(_) => BodyShape::ReleasePublish,
             Self::UpChange(_) => BodyShape::UpChange,
             _ => panic!("intent shape partition is closed"),
         }
@@ -1268,7 +1260,6 @@ impl BodyShape {
             | Self::PrincipalRoleRef
             | Self::PrincipalDeauthorize => return self.decode_principal_body(bytes),
             Self::Recognize => Intent::Recognize(crate::decode(bytes)?),
-            Self::ReleasePublish => Intent::ReleasePublish(crate::decode(bytes)?),
             Self::UpChange => Intent::UpChange(crate::decode(bytes)?),
             _ => unreachable!("runtime body partition is closed"),
         })

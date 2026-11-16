@@ -14,9 +14,9 @@ use wire::{CanonicalUuid, CommandKind, Outcome, Refusal, Reply, ReplyPosition};
 use super::lane_surface::RetuneSelection;
 use super::{
     CommandDispatch, CommandEffects, RuntimePaths, SurfaceConfig, consent_surface,
-    current_residency, dispatch_proof_recognize, dispatch_release_publish, dispatch_up_change,
-    lane_recovery, lane_surface, lifecycle, message_surface, policy_surface, principal_surface,
-    rack_surface, read_materializations::CurrentReads, settings_surface, steering, vendor_surface,
+    current_residency, dispatch_proof_recognize, dispatch_up_change, lane_recovery, lane_surface,
+    lifecycle, message_surface, policy_surface, principal_surface, rack_surface,
+    read_materializations::CurrentReads, settings_surface, steering, vendor_surface,
 };
 
 /// Invite a partner, notify the lane the invitation reached, then settle the
@@ -273,9 +273,6 @@ impl<'a> Surface<'a> {
             (CommandKind::UpChange, Intent::UpChange(change)) => ordinary(dispatch_up_change(
                 self.bus, self.paths, self.epoch, seats, command, change,
             )),
-            (CommandKind::ReleasePublish, Intent::ReleasePublish(publish)) => ordinary(
-                dispatch_release_publish(self.bus, self.paths, self.epoch, command, publish),
-            ),
             (CommandKind::ProofRecognize, Intent::Recognize(recognize)) => ordinary(
                 dispatch_proof_recognize(self.bus, self.paths, self.epoch, command, recognize),
             ),

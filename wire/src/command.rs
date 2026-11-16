@@ -196,8 +196,6 @@ pub enum CommandKind {
 
     /// Recognize a sealed proof bundle.
     ProofRecognize,
-    /// Publish the sealed manifest and each target artifact digest.
-    ReleasePublish,
 
     /// Drive the resident to the requested lifecycle state.
     UpChange,

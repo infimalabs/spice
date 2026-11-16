@@ -494,13 +494,6 @@ impl Law {
         optional: &[],
         authority: Authority::Connected,
     };
-    /// Publication also witnesses the sealed proof and canonical manifest
-    /// digest.
-    pub const PUBLISH: Self = Self {
-        required: &[WitnessKind::Observation, WitnessKind::Sealed],
-        optional: &[],
-        authority: Authority::Operator,
-    };
     /// Current lifecycle edge. The command envelope separately binds the
     /// resident epoch, so an operator lifecycle request does not fabricate a
     /// lane-and-occupant residency witness.
@@ -878,7 +871,6 @@ impl CommandKind {
             | Self::TeamArrange => Law::LANE,
             Self::LaneRecall => Law::LANE_RECALL,
             Self::ProofRecognize => Law::RECOGNIZE,
-            Self::ReleasePublish => Law::PUBLISH,
             Self::UpChange => Law::UP,
             _ => self.authority_law(),
         }

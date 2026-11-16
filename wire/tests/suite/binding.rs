@@ -263,14 +263,6 @@ const BODIES: &[(CommandKind, &str)] = &[
         CommandKind::ProofRecognize,
         r#"{ "key": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }"#,
     ),
-    (
-        CommandKind::ReleasePublish,
-        r#"{
-  "key": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-  "manifest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-  "notes": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-}"#,
-    ),
     (CommandKind::UpChange, r#"{ "state": "quiescing" }"#),
 ];
 

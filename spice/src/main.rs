@@ -140,12 +140,7 @@ mod read_page;
 #[cfg(not(target_arch = "wasm32"))]
 mod release_command;
 #[cfg(not(target_arch = "wasm32"))]
-#[cfg(not(target_arch = "wasm32"))]
-mod release_execution;
-#[cfg(not(target_arch = "wasm32"))]
 mod release_history;
-#[cfg(not(target_arch = "wasm32"))]
-mod release_package;
 #[cfg(not(target_arch = "wasm32"))]
 mod release_seal;
 mod render;
@@ -688,12 +683,6 @@ impl NativeInvocation<'_> {
                 form,
             ),
             ["lane", "purge"] => deliver(&lane_command::purge::run(ambient), form),
-            ["release", "publish"] => match release_command::run(leaf, contract, ambient) {
-                release_command::RunResult::Plan(outcome) => {
-                    deliver_with_reply_text(&outcome, form, release_command::PlanPreview::text)
-                }
-                release_command::RunResult::Published(outcome) => deliver(&outcome, form),
-            },
             ["release", "seal"] => deliver(&release_seal::run(contract, ambient), form),
             ["steer"] | ["steer", "cancel"] | ["steer", "resend"] | ["steer", "recover"] => {
                 deliver(&steering_command::run(leaf, contract, ambient), form)

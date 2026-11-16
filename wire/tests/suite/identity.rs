@@ -54,7 +54,7 @@ fn a_non_canonical_uuid_is_refused_by_the_decoder_too() {
 }
 
 /// Domains whose digests must remain isolated even for identical payloads.
-const DOMAINS: [Domain; 69] = [
+const DOMAINS: [Domain; 68] = [
     Domain::BoardDocument,
     Domain::BoardTaskIdentity,
     Domain::BoardBarrier,
@@ -74,7 +74,6 @@ const DOMAINS: [Domain; 69] = [
     Domain::DistReleaseNotes,
     Domain::DistReleaseNotesContent,
     Domain::DistReleasePackage,
-    Domain::DistReleasePlan,
     Domain::ProofBattery,
     Domain::ProofReplay,
     Domain::ProofReceipt,
@@ -172,7 +171,6 @@ fn a_domain_tag_is_frozen_and_distinct_from_every_other() {
             "spice.dist.release-notes.v1",
             "spice.dist.release-notes-content.v1",
             "spice.dist.release-package.v1",
-            "spice.dist.release-plan.v1",
             "spice.proof.battery.v1",
             "spice.proof.replay.v1",
             "spice.proof.receipt.v1",

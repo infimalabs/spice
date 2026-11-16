@@ -19,7 +19,6 @@ pub(crate) struct RuntimePaths {
     pub(crate) tape: PathBuf,
     pub(super) supervisors: PathBuf,
     pub(super) steering_media: PathBuf,
-    pub(super) releases: PathBuf,
     pub(super) stage: PathBuf,
 }
 
@@ -189,7 +188,6 @@ impl RuntimePaths {
             degraded: state.degraded().to_path_buf(),
             tape: state.lanes().to_path_buf(),
             supervisors: state.lanes().to_path_buf(),
-            releases: state.release_operations().to_path_buf(),
             steering_media: state.lanes().to_path_buf(),
             stage: repository.worktree_root().join("dist/stage"),
         })

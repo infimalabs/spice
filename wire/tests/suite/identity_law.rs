@@ -44,8 +44,7 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
-use wire::manifest::{ProductVersion, ReleaseTarget};
-use wire::release::ReleaseObservations;
+use wire::manifest::ReleaseTarget;
 use wire::{
     Accepted, Actor, AgentActivityKind, AgentMediaReference, AgentMessage, AgentProviderError,
     Answer, AnyFact, AutomaticSpeech, AutomaticSpeechKind, CanonicalUuid, ClaimDisposition,

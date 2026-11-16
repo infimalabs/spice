@@ -207,7 +207,6 @@ fn cover_restore_reply_frames() {
 
 fn cover_transport_reply_frames() {
     cover_release_note_frames();
-    cover_release_plan_observations();
     cover_proof_evidence_frames();
     law(
         "ReplyPosition",
@@ -274,33 +273,6 @@ fn cover_transport_reply_frames() {
                 id: uuid("018f82d4-6f59-7d06-92e3-bce9131163c3"),
                 epoch: uuid("018f82d4-6f59-7d06-92e3-bce9131163c3"),
                 outcome: Outcome::Fault(moved_epoch()),
-            },
-        ],
-    );
-}
-
-fn cover_release_plan_observations() {
-    let version = ProductVersion::parse("1.2.3").expect("release version");
-    let base = ReleaseObservations {
-        head: "1".repeat(40),
-        clean: true,
-        unrecorded_local_commits: 0,
-        source_version: version.clone(),
-        release_version: version,
-        credentials_valid: true,
-        package_ref: None,
-        tag_ref: None,
-        announcement_ref: None,
-    };
-    law(
-        "ReleaseObservations",
-        &[
-            base.clone(),
-            ReleaseObservations {
-                package_ref: Some("3".repeat(40)),
-                tag_ref: Some("4".repeat(40)),
-                announcement_ref: Some("5".repeat(40)),
-                ..base
             },
         ],
     );

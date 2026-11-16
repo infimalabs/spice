@@ -16,42 +16,12 @@ pub(crate) fn draft(
     root: &Path,
     reader: &journal::JournalReader,
     revision: Option<&str>,
-    requested_version: Option<&str>,
-) -> Result<ReleaseNotes, Error> {
-    draft_with_release(root, reader, revision, requested_version, None)
-}
-
-pub(crate) fn projected_draft(
-    root: &Path,
-    reader: &journal::JournalReader,
-    history_commit: &str,
-    requested_version: Option<&str>,
-    release_commit: &str,
-) -> Result<ReleaseNotes, Error> {
-    draft_with_release(
-        root,
-        reader,
-        Some(history_commit),
-        requested_version,
-        Some(release_commit),
-    )
-}
-
-fn draft_with_release(
-    root: &Path,
-    reader: &journal::JournalReader,
-    revision: Option<&str>,
-    requested_version: Option<&str>,
-    projected_release: Option<&str>,
 ) -> Result<ReleaseNotes, Error> {
     let history_commit = resolve_commit(root, revision.unwrap_or("HEAD"))?;
-    let release_commit = projected_release.unwrap_or(&history_commit).to_owned();
-    let release_version = match requested_version {
-        Some(version) => version.to_owned(),
-        None => spice::version::source_version(root, dist::Build::Staged)
-            .map_err(Error::Encoding)?
-            .to_string(),
-    };
+    let release_commit = history_commit.clone();
+    let release_version = spice::version::source_version(root, dist::Build::Staged)
+        .map_err(Error::Encoding)?
+        .to_string();
     let current_tag = format!("v{release_version}");
     let previous_tag = reachable_tags(root, &history_commit)?
         .into_iter()

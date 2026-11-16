@@ -271,7 +271,6 @@ fn runtime_paths(root: &Path) -> RuntimePaths {
         tape: root.join("lanes"),
         supervisors: root.join("lanes"),
         steering_media: root.join("lanes"),
-        releases: root.join("authority/releases"),
         stage: root.join("stage"),
     }
 }
