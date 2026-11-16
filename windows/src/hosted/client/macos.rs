@@ -18,6 +18,7 @@ const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
 const WORKFLOW_PATH: &str = ".github/workflows/macos.yml";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
+const RESULT_PATH: &str = "result.json";
 const PAYLOAD_LIMIT: u64 = 1024 * 1024;
 
 /// The provider-authenticated outcome of one hosted macOS stage.
@@ -26,6 +27,21 @@ pub struct MacosHostedStage {
     pub run_id: u64,
     pub runner_image: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MacosResult {
+    challenge: String,
+    source_commit: String,
+    source: String,
+    archive_sha256: String,
+    transport_asset: u64,
+    tree: String,
+    run_id: u64,
+    image_os: String,
+    image_version: String,
+    architecture: String,
+    proof_container: String,
+}
 
 #[derive(Deserialize)]
 struct Policy {
@@ -33,6 +49,7 @@ struct Policy {
     provider: String,
     repository: String,
     workflow: String,
+    branch: String,
     image: Image,
     toolchain: Toolchain,
 }
@@ -55,6 +72,7 @@ impl Policy {
         if self.schema != 1
             || self.provider != super::super::GITHUB_PROVIDER
             || self.workflow != WORKFLOW_PATH
+            || self.branch != "main"
         {
             return Err(WindowsHostedError::PolicyIdentity);
         }
@@ -82,34 +100,55 @@ pub fn macos_hosted_stage(
     let root = workspace_root()?;
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
+    let cancellation = Cancellation::install()?;
     let bound = Bound::new(
         &root,
         scratch.path(),
-        &policy.repository,
-        WORKFLOW_PATH,
+        super::ProviderRoute {
+            repository: &policy.repository,
+            branch: &policy.branch,
+            workflow: WORKFLOW_PATH,
+        },
         HostedSource::Archive(archive),
         attach,
+        &cancellation,
     )?;
     let challenge = &bound.challenge;
     let source = &bound.source;
     let source_archive = source.archive.to_string();
-    let cancellation = Cancellation::install()?;
-    let run = bound.run(&root, scratch.path(), &policy.repository);
-    let inputs = serde_json::json!({
+    let transport_asset = bound.transport.asset_id;
+    let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
+    let inputs = Ok(serde_json::json!({
         "challenge": challenge,
-        "source": source.commit,
-        "archive": source_archive,
+        "source_commit": source.canonical_commit,
+        "source": source_archive,
+        "archive_sha256": source.archive_sha256,
+        "transport_asset": bound.transport.asset_id,
+        "tree": source.tree,
         "proof_container": proof_container,
-    });
+    }));
     drive(
         &run,
         bound.attached,
         &cancellation,
         WORKFLOW_PATH,
-        &inputs,
+        inputs,
         |run_id| {
             watch_run(run.root, run.repository, run_id, &cancellation)?;
             let stage = download_artifact(&run, run_id, &format!("darwin-stage-{challenge}"))?;
+            let result_path = stage.join(RESULT_PATH);
+            let result: MacosResult =
+                serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
+                    .map_err(WindowsHostedError::Decode)?;
+            admit_result(
+                &result,
+                challenge,
+                source,
+                transport_asset,
+                run_id,
+                proof_container,
+                &policy.image,
+            )?;
             let artifacts = admit_stage(
                 &stage,
                 &source.canonical_commit,
@@ -117,8 +156,9 @@ pub fn macos_hosted_stage(
                 proof_container,
                 &policy.toolchain,
             )?;
+            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             for artifact in &artifacts {
-                verify_attestation(&run, WORKFLOW_PATH, &stage.join(&artifact.path))?;
+                verify_attestation(&run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
             }
             publish_artifacts(&stage, &artifacts, &destination, &source_archive)?;
             Ok(MacosHostedStage {
@@ -130,6 +170,31 @@ pub fn macos_hosted_stage(
             })
         },
     )
+}
+fn admit_result(
+    result: &MacosResult,
+    challenge: &str,
+    source: &super::source::PreparedSource,
+    transport_asset: u64,
+    run_id: u64,
+    proof_container: &str,
+    image: &Image,
+) -> Result<(), WindowsHostedError> {
+    if result.challenge != challenge
+        || result.source_commit != source.canonical_commit
+        || result.source != source.archive.to_string()
+        || result.archive_sha256 != source.archive_sha256
+        || result.transport_asset != transport_asset
+        || result.tree != source.tree
+        || result.run_id != run_id
+        || result.image_os != image.provider_os
+        || result.image_version != image.version
+        || result.architecture != "arm64"
+        || result.proof_container != proof_container
+    {
+        return Err(differs("signed request identity"));
+    }
+    Ok(())
 }
 
 fn admit_stage(
@@ -187,6 +252,7 @@ fn admit_stage(
 
     let expected = BTreeSet::from([
         PathBuf::from(PAYLOAD_PATH),
+        PathBuf::from(RESULT_PATH),
         relative(stage, &native_path)?,
         relative(stage, &symbol_path)?,
     ]);

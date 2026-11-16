@@ -31,6 +31,7 @@ mod macos;
 mod observation;
 mod quota;
 mod source;
+mod transport;
 pub use attach::Attach;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
@@ -38,10 +39,9 @@ use observation::{
     ObservationGap, Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, await_watch_interval,
     observation_gap_action, resume_action,
 };
-use source::{delete_source, push_source};
+use source::PreparedSource;
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
-const REMOTE: &str = "origin";
 const WORKFLOW_PATH: &str = ".github/workflows/windows.yml";
 
 /// Complete observed outcome of one provider-authenticated command.
@@ -105,8 +105,8 @@ pub fn windows_hosted_commands(
 pub enum HostedSource<'a> {
     /// The exact worktree as it stands, uncommitted changes included.
     Worktree,
-    /// The release source archive at this path: the one-use commit's tree is
-    /// the archive's tree, and the signed request binds the archive's identity.
+    /// The release source archive at this path. Its exact bytes are delivered
+    /// directly to the provider and the signed request binds every identity.
     Archive(&'a Path),
 }
 
@@ -169,21 +169,29 @@ pub fn windows_hosted_commands_into(
         }
     });
     let scratch = Scratch::new()?;
+    let cancellation = Cancellation::install()?;
     let bound = Bound::new(
         &root,
         scratch.path(),
-        &policy.repository,
-        WORKFLOW_PATH,
+        ProviderRoute {
+            repository: &policy.repository,
+            branch: &policy.branch,
+            workflow: WORKFLOW_PATH,
+        },
         source,
         attach,
+        &cancellation,
     )?;
     let request = Request {
         version: super::PROTOCOL_VERSION,
         challenge: bound.challenge.clone(),
         provider: policy.provider,
         repository: policy.repository.clone(),
-        source_ref: bound.source_ref.clone(),
+        workflow_ref: format!("refs/heads/{}", policy.branch),
+        source_commit: bound.source.canonical_commit.clone(),
         source: bound.source.archive.to_string(),
+        archive_sha256: bound.source.archive_sha256.clone(),
+        transport_asset: bound.transport.asset_id,
         tree: bound.source.tree.clone(),
         image: policy.image,
         toolchain: policy.toolchain,
@@ -193,17 +201,23 @@ pub fn windows_hosted_commands_into(
         },
         commands,
     };
-    request.admit().map_err(WindowsHostedError::Admission)?;
 
-    let cancellation = Cancellation::install()?;
-    let run = bound.run(&root, scratch.path(), &policy.repository);
-    let request_json = serde_json::to_string(&request).map_err(WindowsHostedError::Encode)?;
+    let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
+    let request_json = request
+        .admit()
+        .map_err(WindowsHostedError::Admission)
+        .and_then(|()| serde_json::to_string(&request).map_err(WindowsHostedError::Encode));
     drive(
         &run,
         bound.attached,
         &cancellation,
         WORKFLOW_PATH,
-        &serde_json::json!({ "request": request_json }),
+        request_json.map(|request| {
+            serde_json::json!({
+                "challenge": bound.challenge,
+                "request": request,
+            })
+        }),
         |run_id| {
             complete_dispatched_run(
                 &run,
@@ -216,36 +230,65 @@ pub fn windows_hosted_commands_into(
     )
 }
 
-/// One hosted stage's challenge and one-use source, and the provider run it
-/// re-enters when attached.
+#[derive(Clone, Copy)]
+struct ProviderRoute<'a> {
+    repository: &'a str,
+    branch: &'a str,
+    workflow: &'a str,
+}
+
+/// One hosted stage's challenge, canonical source archive, provider transport,
+/// and provider run when attached.
 struct Bound {
     challenge: String,
-    source_ref: String,
-    source: source::PreparedSource,
+    source: PreparedSource,
+    transport: transport::Transport,
     attached: Option<u64>,
 }
 
 impl Bound {
-    /// A fresh challenge and one-use commit for `source`, or the challenge
-    /// and commit of the provider run `attach` admits for it.
+    /// Prepare the canonical archive, upload a fresh immutable transport or
+    /// admit the retained transport and provider run named by `attach`.
     fn new(
         root: &Path,
         scratch: &Path,
-        repository: &str,
-        workflow: &str,
-        source: HostedSource<'_>,
+        provider: ProviderRoute<'_>,
+        selected: HostedSource<'_>,
         attach: Option<Attach>,
+        cancellation: &Cancellation,
     ) -> Result<Self, WindowsHostedError> {
-        let (challenge, source, attached) = match (source, attach) {
-            (source, None) => {
+        let ProviderRoute {
+            repository,
+            branch,
+            workflow,
+        } = provider;
+        let source = source::prepare(root, scratch, workflow, selected)?;
+        attach::admit_branch_workflow(root, repository, branch, workflow, &source.workflow_blob)?;
+        let (challenge, transport, attached) = match (selected, attach) {
+            (_, None) => {
                 let challenge = challenge()?;
-                let source = source::prepare(root, scratch, &challenge, source)?;
-                (challenge, source, None)
+                let transport = transport::create(root, repository, &challenge, &source)?;
+                if cancellation.requested() {
+                    let operation = WindowsHostedError::Cancelled { run_id: None };
+                    return Err(
+                        match transport::delete(root, repository, transport.release_id) {
+                            Ok(()) => operation,
+                            Err(cleanup) => WindowsHostedError::OperationAndCleanup {
+                                operation: Box::new(operation),
+                                cleanup: Box::new(cleanup),
+                            },
+                        },
+                    );
+                }
+                (challenge, transport, None)
             }
-            (HostedSource::Archive(archive), Some(attach)) => {
-                let attached =
-                    attach::attach(root, scratch, repository, workflow, archive, attach)?;
-                (attached.challenge, attached.source, Some(attached.run_id))
+            (HostedSource::Archive(_), Some(attach)) => {
+                let attached = attach::attach(root, repository, branch, workflow, &source, attach)?;
+                (
+                    attached.challenge,
+                    attached.transport,
+                    Some(attached.run_id),
+                )
             }
             (HostedSource::Worktree, Some(_)) => {
                 return Err(WindowsHostedError::AttachRefused(
@@ -254,80 +297,72 @@ impl Bound {
             }
         };
         Ok(Self {
-            source_ref: format!("hosted-{}", &challenge[..24]),
             challenge,
             source,
+            transport,
             attached,
         })
     }
 
-    fn run<'a>(&'a self, root: &'a Path, scratch: &'a Path, repository: &'a str) -> HostedRun<'a> {
+    fn run<'a>(
+        &'a self,
+        root: &'a Path,
+        scratch: &'a Path,
+        repository: &'a str,
+        branch: &'a str,
+    ) -> HostedRun<'a> {
         HostedRun {
             root,
             scratch,
             repository,
-            source_ref: &self.source_ref,
-            source_commit: &self.source.commit,
+            branch,
+            challenge: &self.challenge,
+            source: &self.source,
+            transport: self.transport,
         }
     }
 }
 
-/// Dispatch a fresh run of `workflow` with `inputs`, or re-enter the attached
-/// one; settle it through `complete` and retire its one-use source ref.
+/// Dispatch a fresh run of `workflow`, or re-enter the attached one; settle it
+/// through `complete` and retire its directly uploaded source archive.
 fn drive<T>(
     run: &HostedRun<'_>,
     attached: Option<u64>,
     cancellation: &Cancellation,
     workflow: &str,
-    inputs: &serde_json::Value,
+    inputs: Result<serde_json::Value, WindowsHostedError>,
     complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
 ) -> Result<T, WindowsHostedError> {
-    match attached {
-        None => with_pushed_source(run, cancellation, || {
-            dispatch(run, workflow, inputs, complete)
-        }),
-        Some(run_id) => retire_source(run, settle(run, run_id, complete)),
-    }
+    let operation = inputs.and_then(|inputs| match attached {
+        None if cancellation.requested() => Err(WindowsHostedError::Cancelled { run_id: None }),
+        None => dispatch(run, workflow, &inputs, complete),
+        Some(run_id) => settle(run, run_id, complete),
+    });
+    retire_transport(run, operation)
 }
 
-/// One hosted run: the workspace it is driven from and the pushed source
-/// revision the provider builds.
+/// One hosted run and the exact source transport the provider builds.
 #[derive(Clone, Copy)]
 struct HostedRun<'a> {
     root: &'a Path,
     scratch: &'a Path,
     repository: &'a str,
-    source_ref: &'a str,
-    source_commit: &'a str,
+    branch: &'a str,
+    challenge: &'a str,
+    source: &'a PreparedSource,
+    transport: transport::Transport,
 }
 
-/// Push the run's one-use source ref, run `operation` unless cancellation
-/// already arrived, and retire the ref.
-fn with_pushed_source<T>(
-    run: &HostedRun<'_>,
-    cancellation: &Cancellation,
-    operation: impl FnOnce() -> Result<T, WindowsHostedError>,
-) -> Result<T, WindowsHostedError> {
-    let operation = push_source(run.root, run.source_commit, run.source_ref).and_then(|()| {
-        if cancellation.requested() {
-            Err(WindowsHostedError::Cancelled { run_id: None })
-        } else {
-            operation()
-        }
-    });
-    retire_source(run, operation)
-}
-
-/// Delete the run's one-use source ref after `operation`, unless the client
-/// lost observation of a run that may still need it.
-fn retire_source<T>(
+/// Delete the source archive transport after `operation`, unless the client
+/// lost observation of a run that may still need it for attachment.
+fn retire_transport<T>(
     run: &HostedRun<'_>,
     operation: Result<T, WindowsHostedError>,
 ) -> Result<T, WindowsHostedError> {
     if operation.as_ref().is_err_and(retains_provider_state) {
         return operation;
     }
-    let cleanup = delete_source(run.root, run.source_ref);
+    let cleanup = transport::delete(run.root, run.repository, run.transport.release_id);
     match (operation, cleanup) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(error), Ok(())) => Err(error),
@@ -339,13 +374,13 @@ fn retire_source<T>(
     }
 }
 
-/// Whether a failure leaves its provider run, artifacts, and source ref in
-/// place for a later attachment.
+/// Whether a failure leaves its provider run, artifacts, and archive transport
+/// in place for a later attachment.
 fn retains_provider_state(error: &WindowsHostedError) -> bool {
     matches!(error, WindowsHostedError::Detached { .. })
 }
 
-/// Dispatch `workflow` at the run's source ref with `inputs` and settle the
+/// Dispatch `workflow` from the admitted canonical branch and settle the
 /// provider run it starts.
 fn dispatch<T>(
     run: &HostedRun<'_>,
@@ -356,7 +391,7 @@ fn dispatch<T>(
     let HostedRun {
         root,
         repository,
-        source_ref,
+        branch,
         ..
     } = *run;
     let dispatched = command_with_input(
@@ -369,7 +404,7 @@ fn dispatch<T>(
             OsString::from("--repo"),
             OsString::from(repository),
             OsString::from("--ref"),
-            OsString::from(source_ref),
+            OsString::from(branch),
             OsString::from("--json"),
         ],
         serde_json::to_vec(inputs).map_err(WindowsHostedError::Encode)?,
@@ -516,7 +551,7 @@ fn download_attested_artifact(
     let result_path = artifact_dir.join("result.json");
     let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
     for path in [&runner_path, &result_path] {
-        verify_attestation(run, WORKFLOW, path)?;
+        verify_attestation(run, WORKFLOW, run_id, path)?;
     }
     Ok((artifact_dir, runner_path, result_path))
 }
@@ -553,38 +588,38 @@ fn download_artifact(
     Ok(artifact_dir)
 }
 
-/// Require a GitHub Sigstore attestation over the file at `path` signed by
-/// `workflow` running at the run's one-use source commit and tag on a
-/// provider-hosted runner.
+/// Require a GitHub Sigstore attestation over `path` signed by the exact
+/// workflow commit independently admitted for this run on the policy branch.
 fn verify_attestation(
     run: &HostedRun<'_>,
     workflow: &str,
+    run_id: u64,
     path: &Path,
 ) -> Result<(), WindowsHostedError> {
-    let HostedRun {
-        root,
-        repository,
-        source_ref,
-        source_commit,
-        ..
-    } = *run;
+    let workflow_commit = attach::workflow_commit(
+        run.root,
+        run.repository,
+        run.branch,
+        workflow,
+        run.challenge,
+        &run.source.workflow_blob,
+        run_id,
+    )?;
     let verification = command(
-        root,
+        run.root,
         "gh",
         [
             OsString::from("attestation"),
             OsString::from("verify"),
             path.as_os_str().to_owned(),
             OsString::from("--repo"),
-            OsString::from(repository),
+            OsString::from(run.repository),
             OsString::from("--signer-workflow"),
-            OsString::from(format!("{repository}/{workflow}")),
+            OsString::from(format!("{}/{workflow}", run.repository)),
             OsString::from("--signer-digest"),
-            OsString::from(source_commit),
-            OsString::from("--source-ref"),
-            OsString::from(format!("refs/tags/{source_ref}")),
+            OsString::from(&workflow_commit),
             OsString::from("--source-digest"),
-            OsString::from(source_commit),
+            OsString::from(workflow_commit),
             OsString::from("--deny-self-hosted-runners"),
             OsString::from("--format=json"),
         ],
@@ -1255,6 +1290,7 @@ struct Policy {
     provider: String,
     repository: String,
     workflow: String,
+    branch: String,
     image: ImagePin,
     toolchain: ToolchainPins,
 }
@@ -1263,8 +1299,8 @@ impl Policy {
     fn admit(&self) -> Result<(), WindowsHostedError> {
         if self.schema != 1
             || self.provider != GITHUB_PROVIDER
-            || self.workflow != WORKFLOW
             || self.workflow != WORKFLOW_PATH
+            || self.branch != "main"
         {
             return Err(WindowsHostedError::PolicyIdentity);
         }
@@ -1404,7 +1440,7 @@ impl fmt::Display for WindowsHostedError {
             }
             Self::Detached { run_id, reason } => write!(
                 formatter,
-                "lost observation of hosted provider run {run_id}: {reason}; the run, its artifacts, and its source ref remain for --attach {run_id}"
+                "lost observation of hosted provider run {run_id}: {reason}; the run, its artifacts, and its archive transport remain for --attach {run_id}"
             ),
             Self::AttachRefused(detail) => {
                 write!(formatter, "hosted attachment refused: {detail}")

@@ -64,7 +64,7 @@ mod windows {
     impl GuestEnvironment {
         fn capture(request: &Request) -> Result<Self, String> {
             exact_env("GITHUB_REPOSITORY", &request.repository)?;
-            exact_env("GITHUB_REF", &format!("refs/tags/{}", request.source_ref))?;
+            exact_env("GITHUB_REF", &request.workflow_ref)?;
             exact_env("ImageOS", &request.image.provider_os)?;
             exact_env("ImageVersion", &request.image.version)?;
             exact_env("RUNNER_ARCH", X86_64_ARCHITECTURE)?;
@@ -164,20 +164,23 @@ mod windows {
             };
             return run_guest(request_path, result_path, guest_identity, guest_environment);
         }
-        let [_, request_path, result_path] = arguments.as_slice() else {
-            return Err("usage: windows-hosted REQUEST.json RESULT.json".to_owned());
+        let [_, request_path, result_path, source_archive] = arguments.as_slice() else {
+            return Err("usage: windows-hosted REQUEST.json RESULT.json SOURCE.tar".to_owned());
         };
-        run_parent(request_path, result_path)
+        run_parent(request_path, result_path, source_archive)
     }
 
     fn run_parent(
         request_path: &std::ffi::OsStr,
         result_path: &std::ffi::OsStr,
+        source_archive: &std::ffi::OsStr,
     ) -> Result<(), String> {
         let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
         admit_machine(&request)?;
         let guest_environment = GuestEnvironment::capture(&request)?;
+        let source_archive = Path::new(source_archive);
+        admit_source(&request, &guest_environment.workspace, source_archive)?;
         let encoded_guest_environment = guest_environment.encode()?;
 
         let workspace = guest_environment.workspace.clone();
@@ -302,6 +305,7 @@ mod windows {
             run_id,
             run_attempt,
         } = GuestEnvironment::decode(encoded_environment)?;
+        admit_workspace_source(&request, &workspace)?;
         eprintln!("[windows-hosted] guest environment admitted");
         let executable =
             env::current_exe().map_err(|error| format!("runner path is unavailable: {error}"))?;
@@ -360,6 +364,7 @@ mod windows {
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
+            request: request.clone(),
             identity: Identity {
                 provider: GITHUB_PROVIDER.to_owned(),
                 repository: request.repository.clone(),
@@ -556,6 +561,54 @@ mod windows {
             }
         }
         Ok(())
+    }
+
+    fn admit_source(request: &Request, workspace: &Path, archive: &Path) -> Result<(), String> {
+        let raw = raw_sha256(archive)?;
+        if raw != request.archive_sha256 {
+            return Err(format!(
+                "transported archive changed: expected {}, observed {raw}",
+                request.archive_sha256
+            ));
+        }
+        let archive_identity = dist::source_archive_identity(archive)?;
+        if archive_identity.to_string() != request.source {
+            return Err(format!(
+                "source archive identity changed: expected {}, observed {archive_identity}",
+                request.source
+            ));
+        }
+        admit_workspace_source(request, workspace)
+    }
+
+    fn admit_workspace_source(request: &Request, workspace: &Path) -> Result<(), String> {
+        let source = dist::source_identity(workspace)?
+            .ok_or_else(|| "selected source tree records no canonical commit".to_owned())?;
+        if source.commit() != request.source_commit {
+            return Err(format!(
+                "canonical source changed: expected {}, observed {}",
+                request.source_commit,
+                source.commit()
+            ));
+        }
+        Ok(())
+    }
+
+    fn raw_sha256(path: &Path) -> Result<String, String> {
+        let mut file =
+            File::open(path).map_err(|error| format!("cannot open {}: {error}", path.display()))?;
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+        }
+        Ok(format!("{:x}", digest.finalize()))
     }
 
     fn tree_digest(git: &str, workspace: &Path) -> Result<String, String> {

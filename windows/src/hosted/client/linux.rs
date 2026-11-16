@@ -40,6 +40,10 @@ struct LinuxResult {
     challenge: String,
     source: String,
     run_id: u64,
+    source_commit: String,
+    archive_sha256: String,
+    transport_asset: u64,
+    tree: String,
     image_os: String,
     image_version: String,
     architecture: String,
@@ -78,37 +82,50 @@ pub fn linux_hosted_stage(
     let root = workspace_root()?;
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
+    let cancellation = Cancellation::install()?;
     let bound = Bound::new(
         &root,
         scratch.path(),
-        &policy.repository,
-        WORKFLOW_PATH,
+        super::ProviderRoute {
+            repository: &policy.repository,
+            branch: &policy.branch,
+            workflow: WORKFLOW_PATH,
+        },
         HostedSource::Archive(archive),
         attach,
+        &cancellation,
     )?;
     let challenge = &bound.challenge;
-    let source_archive = bound.source.archive.to_string();
-    let cancellation = Cancellation::install()?;
-    let run = bound.run(&root, scratch.path(), &policy.repository);
-    let inputs = serde_json::json!({ "challenge": challenge, "source": source_archive });
+    let source = &bound.source;
+    let source_archive = source.archive.to_string();
+    let transport_asset = bound.transport.asset_id;
+    let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
+    let inputs = Ok(serde_json::json!({
+        "challenge": challenge,
+        "source_commit": source.canonical_commit,
+        "source": source_archive,
+        "archive_sha256": source.archive_sha256,
+        "transport_asset": bound.transport.asset_id,
+        "tree": source.tree,
+    }));
     drive(
         &run,
         bound.attached,
         &cancellation,
         WORKFLOW_PATH,
-        &inputs,
+        inputs,
         |run_id| {
             watch_run(run.root, run.repository, run_id, &cancellation)?;
             let artifact = download_artifact(&run, run_id, &format!("linux-{challenge}"))?;
             let result_path = artifact.join("result.json");
-            verify_attestation(&run, WORKFLOW_PATH, &result_path)?;
+            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
                 path: result_path.clone(),
                 source,
             })?;
             let result: LinuxResult =
                 serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
-            admit_result(&result, challenge, &source_archive, run_id)?;
+            admit_result(&result, challenge, source, transport_asset, run_id)?;
             let log_path = artifact.join("stage.log");
             let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
                 path: log_path.clone(),
@@ -136,10 +153,17 @@ pub fn linux_hosted_stage(
 fn admit_result(
     result: &LinuxResult,
     challenge: &str,
-    source: &str,
+    source: &super::source::PreparedSource,
+    transport_asset: u64,
     run_id: u64,
 ) -> Result<(), WindowsHostedError> {
-    if result.challenge != challenge || result.source != source {
+    if result.challenge != challenge
+        || result.source != source.archive.to_string()
+        || result.source_commit != source.canonical_commit
+        || result.archive_sha256 != source.archive_sha256
+        || result.transport_asset != transport_asset
+        || result.tree != source.tree
+    {
         return Err(WindowsHostedError::ProviderResponse(
             "hosted Linux result answers another request".to_owned(),
         ));

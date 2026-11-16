@@ -16,7 +16,7 @@ pub use wire::manifest::{
 };
 
 /// The sole current hosted Windows execution protocol.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 /// Provider spelling admitted by the current protocol.
 pub const GITHUB_PROVIDER: &str = "github-actions";
 /// Architecture spelling emitted by GitHub's Windows runner.
@@ -25,17 +25,15 @@ pub const X86_64_ARCHITECTURE: &str = "X64";
 pub const WORKFLOW: &str = ".github/workflows/windows.yml";
 
 const DIGEST_HEX_LENGTH: usize = 64;
-const SOURCE_REF_CHALLENGE_LENGTH: usize = 24;
 const MAX_COMMANDS: usize = 8;
 const MAX_ARTIFACTS: usize = 256;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 
 /// Complete client request signed into one provider run.
 ///
-/// `source` is the identity of the source archive the one-use commit at
-/// `source_ref` was built from; `tree` is the exact file listing of that
-/// commit, which the guest verifies against its checkout before it vouches
-/// for `source`.
+/// `source` is the canonical archive identity; `archive_sha256` is the raw
+/// transported `source.tar` digest; `source_commit` is the canonical commit
+/// recorded inside that archive; and `tree` is its exact file listing.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -43,8 +41,11 @@ pub struct Request {
     pub challenge: String,
     pub provider: String,
     pub repository: String,
-    pub source_ref: String,
+    pub workflow_ref: String,
+    pub source_commit: String,
     pub source: String,
+    pub archive_sha256: String,
+    pub transport_asset: u64,
     pub tree: String,
     pub image: ImagePin,
     pub toolchain: ToolchainPins,
@@ -55,6 +56,14 @@ pub struct Request {
 impl Request {
     /// Refuse malformed or unbounded input before any provider effect.
     pub fn admit(&self) -> Result<(), AdmissionError> {
+        self.admit_identity()?;
+        self.admit_image()?;
+        self.admit_limits()?;
+        self.admit_commands()?;
+        self.admit_toolchain()
+    }
+
+    fn admit_identity(&self) -> Result<(), AdmissionError> {
         if self.version != PROTOCOL_VERSION {
             return Err(AdmissionError::Protocol(self.version));
         }
@@ -62,7 +71,9 @@ impl Request {
             return Err(AdmissionError::Provider(self.provider.clone()));
         }
         require_hex("challenge", &self.challenge, DIGEST_HEX_LENGTH)?;
+        require_hex("source_commit", &self.source_commit, 40)?;
         require_hex("source", &self.source, DIGEST_HEX_LENGTH)?;
+        require_hex("archive_sha256", &self.archive_sha256, DIGEST_HEX_LENGTH)?;
         require_hex("tree", &self.tree, DIGEST_HEX_LENGTH)?;
         if self.repository.split('/').count() != 2
             || self.repository.starts_with('/')
@@ -70,10 +81,16 @@ impl Request {
         {
             return Err(AdmissionError::Repository(self.repository.clone()));
         }
-        let expected_ref = format!("hosted-{}", &self.challenge[..SOURCE_REF_CHALLENGE_LENGTH]);
-        if self.source_ref != expected_ref {
-            return Err(AdmissionError::SourceRef(self.source_ref.clone()));
+        if self.workflow_ref != "refs/heads/main" {
+            return Err(AdmissionError::WorkflowRef(self.workflow_ref.clone()));
         }
+        if self.transport_asset == 0 {
+            return Err(AdmissionError::TransportAsset);
+        }
+        Ok(())
+    }
+
+    fn admit_image(&self) -> Result<(), AdmissionError> {
         if self.image.architecture != X86_64_ARCHITECTURE {
             return Err(AdmissionError::Architecture(
                 self.image.architecture.clone(),
@@ -86,12 +103,20 @@ impl Request {
         {
             return Err(AdmissionError::Image);
         }
+        Ok(())
+    }
+
+    fn admit_limits(&self) -> Result<(), AdmissionError> {
         if self.limits.runtime_seconds == 0 || self.limits.runtime_seconds > MAX_RUNTIME_SECONDS {
             return Err(AdmissionError::Runtime(self.limits.runtime_seconds));
         }
         if self.limits.output_bytes == 0 || self.limits.output_bytes > MAX_OUTPUT_BYTES {
             return Err(AdmissionError::Output(self.limits.output_bytes));
         }
+        Ok(())
+    }
+
+    fn admit_commands(&self) -> Result<(), AdmissionError> {
         if self.commands.is_empty() || self.commands.len() > MAX_COMMANDS {
             return Err(AdmissionError::Commands);
         }
@@ -108,6 +133,10 @@ impl Request {
                 return Err(AdmissionError::Arguments);
             }
         }
+        Ok(())
+    }
+
+    fn admit_toolchain(&self) -> Result<(), AdmissionError> {
         for (name, value) in [
             ("rust", self.toolchain.rust.as_str()),
             ("cargo", self.toolchain.cargo.as_str()),
@@ -149,6 +178,7 @@ pub struct Artifact {
 pub struct ResultDocument {
     pub version: u16,
     pub challenge: String,
+    pub request: Request,
     pub identity: Identity,
     pub outputs: Vec<CommandResult>,
     pub artifacts: Vec<Artifact>,
@@ -179,6 +209,9 @@ pub fn admit_result(
     }
     if result.challenge != request.challenge {
         return Err(AdmissionError::Challenge);
+    }
+    if &result.request != request {
+        return Err(AdmissionError::Request);
     }
     let identity = &result.identity;
     if identity.provider != request.provider {
@@ -282,7 +315,8 @@ pub enum AdmissionError {
     Provider(String),
     Digest(&'static str),
     Repository(String),
-    SourceRef(String),
+    WorkflowRef(String),
+    TransportAsset,
     Architecture(String),
     Image,
     Runtime(u32),
@@ -292,6 +326,7 @@ pub enum AdmissionError {
     Arguments,
     Toolchain(&'static str),
     Challenge,
+    Request,
     Workload,
     RunIdentity,
     Source,
@@ -312,9 +347,10 @@ impl fmt::Display for AdmissionError {
             Self::Repository(repository) => {
                 write!(formatter, "invalid GitHub repository {repository:?}")
             }
-            Self::SourceRef(source_ref) => {
-                write!(formatter, "invalid hosted source ref {source_ref:?}")
+            Self::WorkflowRef(workflow_ref) => {
+                write!(formatter, "invalid hosted workflow ref {workflow_ref:?}")
             }
+            Self::TransportAsset => formatter.write_str("hosted transport asset is missing"),
             Self::Architecture(architecture) => write!(
                 formatter,
                 "unsupported hosted architecture {architecture:?}"
@@ -340,6 +376,7 @@ impl fmt::Display for AdmissionError {
             Self::Challenge => {
                 formatter.write_str("hosted result does not answer this fresh challenge")
             }
+            Self::Request => formatter.write_str("hosted result does not bind the exact request"),
             Self::Workload => {
                 formatter.write_str("hosted result names a foreign repository or workflow")
             }
@@ -370,8 +407,11 @@ mod tests {
             challenge: "1".repeat(64),
             provider: GITHUB_PROVIDER.to_owned(),
             repository: "infimalabs/spice".to_owned(),
-            source_ref: format!("hosted-{}", "1".repeat(24)),
+            workflow_ref: "refs/heads/main".to_owned(),
+            source_commit: "0".repeat(40),
             source: "2".repeat(64),
+            archive_sha256: "4".repeat(64),
+            transport_asset: 42,
             tree: "3".repeat(64),
             image: ImagePin {
                 label: "windows-2025".to_owned(),
@@ -413,6 +453,7 @@ mod tests {
         ResultDocument {
             version: PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
+            request: request.clone(),
             identity: Identity {
                 provider: request.provider.clone(),
                 repository: request.repository.clone(),
@@ -481,6 +522,16 @@ mod tests {
         assert_eq!(
             admit_result(&request, &replayed, &result(&request).identity.runner),
             Err(AdmissionError::Challenge)
+        );
+        let mut changed_request = result(&request);
+        changed_request.request.archive_sha256 = "5".repeat(64);
+        assert_eq!(
+            admit_result(
+                &request,
+                &changed_request,
+                &result(&request).identity.runner
+            ),
+            Err(AdmissionError::Request)
         );
 
         let mut foreign = result(&request);

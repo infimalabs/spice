@@ -1,15 +1,20 @@
 name: Windows execution
+run-name: Hosted archive ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
     inputs:
+      challenge:
+        description: Unique lowercase 64-hex execution challenge
+        required: true
+        type: string
       request:
         description: Canonical hosted-execution request JSON
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
   attestations: write
 
@@ -19,25 +24,53 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 75
     steps:
-      - name: Check out exact source ref
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          fetch-depth: 1
-
-      - name: Materialize request
+      - name: Admit request and direct source transport
         id: request
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
+          SPICE_HOSTED_CHALLENGE: ${{ inputs.challenge }}
           SPICE_HOSTED_REQUEST: ${{ inputs.request }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $requestPath = Join-Path $env:RUNNER_TEMP 'request.json'
-          [IO.File]::WriteAllText(
-            $requestPath,
-            $env:SPICE_HOSTED_REQUEST,
-            [Text.UTF8Encoding]::new($false)
-          )
+          [IO.File]::WriteAllText($requestPath, $env:SPICE_HOSTED_REQUEST, [Text.UTF8Encoding]::new($false))
           $request = Get-Content -Raw -LiteralPath $requestPath | ConvertFrom-Json
+          if ($request.challenge -cne $env:SPICE_HOSTED_CHALLENGE) { throw 'challenge input drifted' }
+          if ($request.workflow_ref -cne 'refs/heads/main' -or $env:GITHUB_REF -cne 'refs/heads/main') {
+            throw "workflow ref drifted: $env:GITHUB_REF"
+          }
+          if ($request.source_commit -cnotmatch '^[0-9a-f]{40}$' -or
+              $request.archive_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+              $request.tree -cnotmatch '^[0-9a-f]{64}$' -or
+              [uint64]$request.transport_asset -eq 0) {
+            throw 'source transport request is malformed'
+          }
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/octet-stream'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/assets/$($request.transport_asset)"
+          Invoke-WebRequest -Uri $uri -Headers $headers -OutFile $archive
+          $observed = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($observed -cne $request.archive_sha256) {
+            throw "source archive drifted: expected $($request.archive_sha256), observed $observed"
+          }
+          Get-ChildItem -Force -LiteralPath $env:GITHUB_WORKSPACE | Remove-Item -Recurse -Force
+          & "$env:SystemRoot\System32\tar.exe" -xf $archive --strip-components=1 -C $env:GITHUB_WORKSPACE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $record = Get-Content -Raw -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'dist\build.json') | ConvertFrom-Json
+          if ($record.source.commit -cne $request.source_commit) { throw 'canonical source commit drifted' }
+          git init -q
+          git config core.autocrlf false
+          git config user.name spice-hosted
+          git config user.email hosted@invalid
+          git add -A -f -- .
+          git commit -q -m "canonical source $($request.source_commit)"
+          $tree = python -c "import hashlib,subprocess; print(hashlib.sha256(subprocess.check_output(['git','ls-tree','-r','-z','--full-tree','HEAD'])).hexdigest())"
+          if ($tree.Trim() -cne $request.tree) { throw "canonical source tree drifted: $tree" }
           "challenge=$($request.challenge)" >> $env:GITHUB_OUTPUT
 
       - name: Install exact Rust and release tools
@@ -58,9 +91,7 @@ jobs:
             $archive = Join-Path $env:RUNNER_TEMP $Name
             Invoke-WebRequest -Uri $Uri -OutFile $archive
             $observed = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($observed -ne $Sha256) {
-              throw "$Name drifted: expected $Sha256, observed $observed"
-            }
+            if ($observed -ne $Sha256) { throw "$Name drifted: expected $Sha256, observed $observed" }
             return $archive
           }
 
@@ -79,9 +110,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $bindgenExtract | Out-Null
           & $tar -xzf $bindgenArchive -C $bindgenExtract
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item `
-            (Join-Path $bindgenExtract 'wasm-bindgen-0.2.126-x86_64-pc-windows-msvc\wasm-bindgen.exe') `
-            (Join-Path $tools 'wasm-bindgen.exe')
+          Copy-Item (Join-Path $bindgenExtract 'wasm-bindgen-0.2.126-x86_64-pc-windows-msvc\wasm-bindgen.exe') (Join-Path $tools 'wasm-bindgen.exe')
           Remove-Item -Recurse -Force -LiteralPath $bindgenExtract, $bindgenArchive
 
           $binaryenArchive = Get-CheckedArchive `
@@ -92,24 +121,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $binaryenExtract | Out-Null
           & $tar -xzf $binaryenArchive -C $binaryenExtract
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item `
-            (Join-Path $binaryenExtract 'binaryen-version_131\bin\wasm-opt.exe') `
-            (Join-Path $tools 'wasm-opt.exe')
+          Copy-Item (Join-Path $binaryenExtract 'binaryen-version_131\bin\wasm-opt.exe') (Join-Path $tools 'wasm-opt.exe')
           Remove-Item -Recurse -Force -LiteralPath $binaryenExtract, $binaryenArchive
 
           $admissions = @(
-            @{
-              Path = Join-Path $tools 'trunk.exe'
-              Expected = 'trunk 0.22.1'
-            }
-            @{
-              Path = Join-Path $tools 'wasm-bindgen.exe'
-              Expected = 'wasm-bindgen 0.2.126'
-            }
-            @{
-              Path = Join-Path $tools 'wasm-opt.exe'
-              Expected = 'wasm-opt version 131 (version_131)'
-            }
+            @{ Path = Join-Path $tools 'trunk.exe'; Expected = 'trunk 0.22.1' }
+            @{ Path = Join-Path $tools 'wasm-bindgen.exe'; Expected = 'wasm-bindgen 0.2.126' }
+            @{ Path = Join-Path $tools 'wasm-opt.exe'; Expected = 'wasm-opt version 131 (version_131)' }
           )
           foreach ($admission in $admissions) {
             $observed = (& $admission.Path --version | Out-String).Trim()
@@ -118,6 +136,7 @@ jobs:
               throw "$($admission.Path) drifted: expected $($admission.Expected), observed $observed"
             }
           }
+
       - name: Build repository-owned runner
         shell: pwsh
         env:
@@ -140,7 +159,8 @@ jobs:
           $runner = Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe'
           $request = Join-Path $env:RUNNER_TEMP 'request.json'
           $result = Join-Path $env:RUNNER_TEMP 'result.json'
-          & $runner $request $result
+          $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
+          & $runner $request $result $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Sign repository-owned runner
@@ -176,36 +196,4 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
-
-      - name: Retire one-use source ref
-        if: always()
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $sourceRef = $env:GITHUB_REF_NAME
-          if ($env:GITHUB_REF_TYPE -ne 'tag' -or -not $sourceRef.StartsWith('hosted-')) {
-            throw "refusing to retire non-hosted source ref $env:GITHUB_REF"
-          }
-          $headers = @{
-            Authorization = "Bearer $env:GH_TOKEN"
-            Accept = "application/vnd.github+json"
-            'X-GitHub-Api-Version' = "2022-11-28"
-          }
-          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/git/refs/tags/$sourceRef"
-          try {
-            Invoke-RestMethod -Method Delete -Uri $uri -Headers $headers -TimeoutSec 30 | Out-Null
-          } catch {
-            $deleteError = $_
-            $missing = $false
-            try {
-              Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30 | Out-Null
-            } catch {
-              if ([int]$_.Exception.Response.StatusCode -eq 404) {
-                $missing = $true
-              } else {
-                throw
-              }
-            }
-            if (-not $missing) { throw $deleteError }
-          }
+          Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\source.tar"
