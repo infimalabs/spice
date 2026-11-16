@@ -527,9 +527,12 @@ another workflow.
 The supported provider repository is `github.com/infimalabs/spice`.
 Authenticate the machine-local `gh` client. Its credential needs Actions
 read/write, Attestations read, Contents read, Metadata read, and Releases
-write for this repository. The workflow's short-lived `GITHUB_TOKEN` gets
-Contents read for the exact archive asset plus Attestations and OIDC
-identity-token write for signing. The client cancels the exact dispatched run
+write for this repository. GitHub withholds draft Release assets from a
+read-only workflow token, so only the Linux stage job, the macOS build job, and
+the Windows execution job receive Contents write; each downloads only the
+request's admitted asset ID, then verifies its bound SHA-256 before extraction.
+The signing jobs retain only Attestations and OIDC identity-token write. The
+client cancels the exact dispatched run
 on `SIGINT` or `SIGTERM`; its non-interactive provider subprocesses run in
 their own process group, so a terminal interrupt reaches only the client.
 After the provider returns an exact run identity, every failure first confirms

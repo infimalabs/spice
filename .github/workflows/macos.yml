@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       actions: read
-      contents: read
+      contents: write
     steps:
       - name: Admit direct source transport
         shell: bash
