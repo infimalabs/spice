@@ -28,6 +28,7 @@ use wire::{Digest, Domain};
 mod attach;
 mod linux;
 mod macos;
+mod quota;
 mod source;
 pub use attach::Attach;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
@@ -394,6 +395,14 @@ fn settle<T>(
     let operation = match complete(run_id) {
         Err(error) if retains_provider_state(&error) => return Err(error),
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
+        // A spent quota fails every provider read without saying anything
+        // about the run; keep it whole for a later attachment.
+        Err(error) if quota::spent_until(root).is_some() => {
+            return Err(WindowsHostedError::Detached {
+                run_id,
+                reason: Box::new(error),
+            });
+        }
         Err(error) => finish_run_cleanup(Err(error), cancel_run(root, repository, run_id)),
         success => success,
     };
@@ -746,6 +755,10 @@ fn watch_action(cancel_requested: bool, observation: WatchObservation) -> WatchA
 /// Watcher restarts admitted while the provider reports the run unfinished.
 const WATCH_RESUMES: u32 = 16;
 
+/// Seconds between watcher polls. Every poll spends shared provider API quota,
+/// and exhausting it ends every watcher on the account at once.
+const WATCH_INTERVAL_SECONDS: &str = "30";
+
 /// How one watcher ended without cancellation.
 enum WatchEnd {
     Succeeded,
@@ -778,8 +791,9 @@ struct RunState {
 }
 
 /// Observe the run to its end. A watcher exit is not the run's: the client
-/// asks the provider, restarts the watcher while the run is unfinished, and
-/// detaches without touching the run once it cannot observe it.
+/// asks the provider, restarts the watcher while the run is unfinished, waits
+/// out a spent provider quota, and detaches without touching the run once it
+/// cannot observe it otherwise.
 fn watch_run(
     root: &Path,
     repository: &str,
@@ -796,26 +810,16 @@ fn watch_run(
             WatchEnd::Succeeded => return Ok(()),
             WatchEnd::Exited(code) => code,
         };
-        let state = successful_text(
-            "workflow state",
-            command(
-                root,
-                "gh",
-                [
-                    OsString::from("run"),
-                    OsString::from("view"),
-                    OsString::from(run_id.to_string()),
-                    OsString::from("--repo"),
-                    OsString::from(repository),
-                    OsString::from("--json"),
-                    OsString::from("status,conclusion"),
-                ],
-            )
-            .map_err(detached)?,
-        )
-        .map_err(detached)?;
-        let state: RunState = serde_json::from_str(&state)
-            .map_err(|error| detached(WindowsHostedError::Decode(error)))?;
+        let state = match run_state(root, repository, run_id) {
+            Ok(state) => state,
+            Err(error) => match quota::spent_until(root) {
+                Some(reset) => {
+                    quota::await_reset(root, repository, run_id, reset, cancellation)?;
+                    continue;
+                }
+                None => return Err(detached(error)),
+            },
+        };
         let conclusion = state.conclusion.unwrap_or_default();
         match resume_action(&state.status, &conclusion, resumes) {
             Resume::Watch => resumes += 1,
@@ -837,6 +841,26 @@ fn watch_run(
             }
         }
     }
+}
+
+fn run_state(root: &Path, repository: &str, run_id: u64) -> Result<RunState, WindowsHostedError> {
+    let state = successful_text(
+        "workflow state",
+        command(
+            root,
+            "gh",
+            [
+                OsString::from("run"),
+                OsString::from("view"),
+                OsString::from(run_id.to_string()),
+                OsString::from("--repo"),
+                OsString::from(repository),
+                OsString::from("--json"),
+                OsString::from("status,conclusion"),
+            ],
+        )?,
+    )?;
+    serde_json::from_str(&state).map_err(WindowsHostedError::Decode)
 }
 
 /// Run one provider watcher until it exits or cancellation arrives; an
@@ -862,6 +886,8 @@ fn watch_once(
             OsString::from("--repo"),
             OsString::from(repository),
             OsString::from("--compact"),
+            OsString::from("--interval"),
+            OsString::from(WATCH_INTERVAL_SECONDS),
             OsString::from("--exit-status"),
         ])
         .stdout(Stdio::null())

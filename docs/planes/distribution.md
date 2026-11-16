@@ -508,12 +508,17 @@ verification refusal then retire any result artifact for that exact run. The
 one-use tag is retired whenever a push was attempted. Provider cleanup accepts
 only that tag and is the backstop when the client disappears before it can act.
 
-**Invariant —** Losing observation never ends a healthy run. When the
-provider watcher exits, the client asks the provider for the run's state and
-restarts the watcher while the run is unfinished. When the client cannot
-observe the run at all, it leaves the run, its artifacts, and its tag
-untouched and names the run id. Every hosted stage re-enters such a run
-without redispatch through `--attach RUN_ID`, or a bare `--attach`: the
+**Invariant —** Losing observation never ends a healthy run. The watcher
+refreshes every 30 seconds, so parallel target clients stay well inside the
+account's shared hourly REST quota for a full-length run. When the watcher
+exits, the client asks the provider for the run's state and restarts the
+watcher while the run is unfinished. When the quota is spent, the client waits
+for its announced reset; a completion step that fails while the quota is spent
+leaves the run whole instead of reporting it failed. When the client cannot
+observe the run otherwise, it leaves the run, its artifacts, and its tag
+untouched and names the run id. The client never deletes workflow runs. Every
+hosted stage re-enters such a run without redispatch through
+`--attach RUN_ID`, or a bare `--attach`: the
 Windows route and the `--hosted` Linux and Darwin routes accept it. No local
 record names a dispatched run. Attachment re-derives the archive's exact tree
 from `dist/stage/source.tar` and admits a run only if it is a
