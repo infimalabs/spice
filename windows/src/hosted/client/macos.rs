@@ -176,9 +176,10 @@ pub fn macos_hosted_stage_controlled(
             let run_id = authority.run_id();
             let stage = download_artifact(&run, run_id, &format!("macos-{challenge}"))?;
             let result_path = stage.join(RESULT_PATH);
+            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             let result: MacosResult =
                 serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
-                    .map_err(WindowsHostedError::Decode)?;
+                    .map_err(WindowsHostedError::ResultSchema)?;
             admit_result(
                 &result,
                 &ExpectedResult {
@@ -198,7 +199,6 @@ pub fn macos_hosted_stage_controlled(
                 &manifest.app,
                 &policy.toolchain,
             )?;
-            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             for artifact in &artifacts {
                 verify_attestation(&run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
             }

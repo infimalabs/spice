@@ -464,7 +464,8 @@ fn publish(path: &Path, state: &SessionFile) -> Result<(), SessionError> {
     staged.commit().map_err(SessionError::Atomic)
 }
 
-/// Whether this error proves the provider run itself reached failure.
+/// Whether this error proves the provider run itself reached failure, or that
+/// its finished result can never be admitted by this client.
 pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
     matches!(
         error,
@@ -472,6 +473,7 @@ pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
             operation: "workflow execution",
             ..
         } | WindowsHostedError::Cancelled { run_id: Some(_) }
+            | WindowsHostedError::ResultSchema(_)
     )
 }
 
@@ -588,6 +590,41 @@ mod tests {
             session.target(NativeTarget::Windows).attachment(),
             Some(Attach::Run(103))
         );
+    }
+
+    #[test]
+    fn only_an_unadmittable_result_schema_releases_a_succeeded_run() {
+        let workflows = workflows("a");
+        let mut session = SessionFile::new(41, workflows.clone(), identity("inputs"));
+        session
+            .record(NativeTarget::Linux, &binding(101, &workflows.linux, false))
+            .unwrap();
+        session.targets.linux.succeeded().unwrap();
+
+        let identity_refusal =
+            WindowsHostedError::ProviderResponse("hosted Linux result differs".to_owned());
+        session
+            .targets
+            .linux
+            .failed(
+                terminal_provider_failure(&identity_refusal),
+                identity_refusal.to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Linux).attachment(),
+            Some(Attach::Run(101))
+        );
+
+        let schema = WindowsHostedError::ResultSchema(
+            serde_json::from_str::<u8>("{}").expect_err("not a byte"),
+        );
+        session
+            .targets
+            .linux
+            .failed(terminal_provider_failure(&schema), schema.to_string())
+            .unwrap();
+        assert_eq!(session.target(NativeTarget::Linux).attachment(), None);
     }
 
     #[test]

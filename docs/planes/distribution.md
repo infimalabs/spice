@@ -331,9 +331,10 @@ the pinned request, the source and input identities, all four workflow blobs
 read from the admitted source archive, every native challenge and run, and each
 last admitted outcome. Repeating the command resumes the pinned request without
 consulting `main` until it publishes; it attaches to recorded healthy or
-successful runs and dispatches only a missing target or a target whose provider
-run ended in failure. It reports all three outcomes before failing, so one
-failed platform never hides or redispatches successful siblings. A changed
+successful runs and dispatches only a missing target, a target whose provider
+run ended in failure, or a target whose attested result does not decode under
+the current client's schema. It reports all three outcomes before failing, so
+one failed platform never hides or redispatches successful siblings. A changed
 bound identity refuses before a provider dispatch: only a new dispatch requires
 `main` to carry the source's workflow blob, while an attached run is admitted
 against the blob its own workflow commit carries, so a later landing never
