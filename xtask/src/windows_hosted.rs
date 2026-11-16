@@ -15,6 +15,11 @@ use windows_execution::hosted::client::{HostedRunControl, release_workflow_blobs
 pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
     windows_execution::hosted::client::release_inputs(Some(attach))
 }
+
+/// Dispatch one fresh provider preflight for the current landed source.
+pub fn hosted_release_inputs_fresh() -> Result<ReleaseInputs, WindowsHostedError> {
+    windows_execution::hosted::client::release_inputs(None)
+}
 /// Dispatch or resume all native release stages concurrently from one admitted
 /// provider preflight. Every run binding lands in the Git-common session before
 /// its watcher starts.
@@ -28,9 +33,19 @@ pub fn hosted_release_stage(
             "aggregate hosted release requires one exact preflight run".to_owned(),
         ));
     };
-    let workflows = release_workflow_blobs()?;
     let inputs = hosted_release_inputs(Attach::Run(inputs_run))?;
-    let session = ReleaseSession::open(inputs_run, workflows, &inputs)?;
+    hosted_release_stage_with_inputs(inputs_run, &inputs, output, error_output)
+}
+
+/// Create or resume all native stages from already admitted release inputs.
+pub fn hosted_release_stage_with_inputs(
+    inputs_run: u64,
+    inputs: &ReleaseInputs,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), HostedReleaseError> {
+    let workflows = release_workflow_blobs()?;
+    let session = ReleaseSession::open(inputs_run, workflows, inputs)?;
     writeln!(
         output,
         "hosted release session {}",
@@ -49,13 +64,13 @@ pub fn hosted_release_stage(
         let linux = scope.spawn(|| {
             let mut output = Vec::new();
             let control = HostedRunControl::resumable(&linux_recorder);
-            let result = linux_hosted_stage_controlled(&inputs, linux_attach, control, &mut output);
+            let result = linux_hosted_stage_controlled(inputs, linux_attach, control, &mut output);
             PlatformOutcome::new(NativeTarget::Linux, output, Vec::new(), result)
         });
         let macos = scope.spawn(|| {
             let mut output = Vec::new();
             let control = HostedRunControl::resumable(&macos_recorder);
-            let result = macos_hosted_stage_controlled(&inputs, macos_attach, control, &mut output);
+            let result = macos_hosted_stage_controlled(inputs, macos_attach, control, &mut output);
             PlatformOutcome::new(NativeTarget::Macos, output, Vec::new(), result)
         });
         let windows = scope.spawn(|| {
@@ -63,7 +78,7 @@ pub fn hosted_release_stage(
             let mut error = Vec::new();
             let control = HostedRunControl::resumable(&windows_recorder);
             let result = windows_hosted_stage_controlled(
-                &inputs,
+                inputs,
                 windows_attach,
                 control,
                 &mut output,

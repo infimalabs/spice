@@ -10,6 +10,7 @@ mod app_demo;
 mod build_cache;
 mod develop;
 mod gate_command;
+mod hosted_release_publish;
 mod hosted_release_session;
 mod linux_sealed;
 mod native_link;
@@ -49,6 +50,7 @@ pub use verify_error::{GateArmError, VerifyError};
 // off the wasm target; the workspace wasm check compiles this crate too.
 #[cfg(not(target_arch = "wasm32"))]
 pub use develop::refresh_install;
+pub use hosted_release_publish::{PublishError, publish_hosted_release};
 pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
@@ -74,8 +76,9 @@ pub use source_archive::source_archive;
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
     Attach, HostedExecution, HostedReleaseError, ReleaseInputs, WindowsHostedError,
-    hosted_release_inputs, hosted_release_stage, linux_hosted_stage, macos_hosted_stage,
-    windows_hosted, windows_hosted_stage,
+    hosted_release_inputs, hosted_release_inputs_fresh, hosted_release_stage,
+    hosted_release_stage_with_inputs, linux_hosted_stage, macos_hosted_stage, windows_hosted,
+    windows_hosted_stage,
 };
 pub use windows_msvc::{WindowsMsvcError, windows_msvc};
 

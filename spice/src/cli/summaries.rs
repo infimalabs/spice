@@ -210,10 +210,9 @@ const SUMMARIES: &[(&str, &str)] = &[
     ),
     (
         "release",
-        "Write release notes, then seal and publish release packages",
+        "Write release notes and compose diagnostic proof manifests",
     ),
     ("release notes", "Write release notes for a release commit"),
-    ("release publish", "Preview or publish a sealed release"),
     (
         "release seal",
         "Compose the release manifest after proof and record it",
