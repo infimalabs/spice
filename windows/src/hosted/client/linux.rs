@@ -6,9 +6,8 @@
 //! client admits that signed result, retains the stage's output, and publishes
 //! only staged files the result inventories.
 
-use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -16,17 +15,15 @@ use wire::Domain;
 
 use super::{
     Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs, RunAuthority,
-    Scratch, WindowsHostedError, challenge, command, digest_file, download_artifact, drive,
-    publish_artifacts, require_public_attestation_repository, source, successful_text,
-    verify_attestation, watch_run, workspace_root,
+    Scratch, WindowsHostedError, challenge, digest_file, download_artifact, drive,
+    publish_artifacts, require_public_attestation_repository, source, verify_attestation,
+    watch_run, workspace_root,
 };
 
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
 const RUN_TITLE_PREFIX: &str = "Linux staging ";
 const IMAGE_OS: &str = "ubuntu24";
 const ARCHITECTURE: &str = "X64";
-const TARGET: &str = "x86_64-unknown-linux-musl";
-const PROOF_RECEIPT: &str = "receipt.json";
 
 /// The signed outcome of one hosted Linux stage.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -135,7 +132,6 @@ pub fn linux_hosted_stage_controlled(
     };
     let manifest = release_inputs.manifest();
     let source_archive = source.archive.to_string();
-    let proof_receipt = proof_receipt_path(&root, &source_archive)?;
     let run = HostedRun {
         root: &root,
         scratch: scratch.path(),
@@ -166,7 +162,6 @@ pub fn linux_hosted_stage_controlled(
         manifest,
         destination: &destination,
         source_archive: &source_archive,
-        proof_receipt: &proof_receipt,
     };
     drive(
         &run,
@@ -187,7 +182,6 @@ struct Completion<'a> {
     manifest: &'a crate::hosted::release_inputs::ResultManifest,
     destination: &'a Path,
     source_archive: &'a str,
-    proof_receipt: &'a Path,
 }
 
 fn complete_run(
@@ -202,7 +196,6 @@ fn complete_run(
         manifest,
         destination,
         source_archive,
-        proof_receipt,
     } = completion;
     watch_run(run.root, run.repository, authority, cancellation)?;
     let run_id = authority.run_id();
@@ -236,9 +229,8 @@ fn complete_run(
     }
     let proof = artifact.join("proof");
     let proof_artifacts = admit_inventory(&proof, &result.proof_artifacts)?;
-    admit_proof_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
+    admit_smoke_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
     if result.exit_code == 0 {
-        verify_attestation(run, WORKFLOW_PATH, run_id, &proof.join(PROOF_RECEIPT))?;
         publish_artifacts(
             &stage,
             &artifacts,
@@ -246,16 +238,6 @@ fn complete_run(
             source_archive,
             None,
             Some(manifest),
-        )?;
-        publish_artifacts(
-            &proof,
-            &proof_artifacts,
-            proof_receipt
-                .parent()
-                .expect("proof receipt path has a parent"),
-            source_archive,
-            None,
-            None,
         )?;
     }
     Ok(LinuxHostedStage {
@@ -389,46 +371,18 @@ fn collect_files(
     Ok(())
 }
 
-fn admit_proof_result(
+fn admit_smoke_result(
     stage_exit: i32,
-    proof_exit: i32,
-    artifacts: &[crate::hosted::Artifact],
+    smoke_exit: i32,
+    proof_artifacts: &[crate::hosted::Artifact],
 ) -> Result<(), WindowsHostedError> {
-    if stage_exit == 0
-        && (proof_exit != 0 || artifacts.len() != 1 || artifacts[0].path != PROOF_RECEIPT)
-    {
-        return Err(differs("proof receipt"));
+    if !proof_artifacts.is_empty() {
+        return Err(differs("unexpected proof artifact"));
     }
-    if stage_exit != 0 && !artifacts.is_empty() {
-        return Err(differs("failed stage proof receipt"));
+    if stage_exit == 0 && smoke_exit != 0 {
+        return Err(differs("native version smoke"));
     }
     Ok(())
-}
-
-fn proof_receipt_path(root: &Path, source: &str) -> Result<PathBuf, WindowsHostedError> {
-    let common = successful_text(
-        "Git common directory lookup",
-        command(
-            root,
-            "git",
-            [
-                OsString::from("rev-parse"),
-                OsString::from("--path-format=absolute"),
-                OsString::from("--git-common-dir"),
-            ],
-        )?,
-    )?;
-    let common = PathBuf::from(common.trim());
-    if !common.is_absolute() {
-        return Err(WindowsHostedError::ProviderResponse(
-            "Git returned a relative common directory".to_owned(),
-        ));
-    }
-    Ok(common
-        .join(".spice/cache/proof")
-        .join(source)
-        .join(TARGET)
-        .join(PROOF_RECEIPT))
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -449,7 +403,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{LinuxArtifact, admit_inventory, admit_proof_result, sha256};
+    use super::{LinuxArtifact, admit_inventory, admit_smoke_result, sha256};
 
     struct Stage(PathBuf);
 
@@ -503,16 +457,15 @@ mod tests {
     }
 
     #[test]
-    fn only_a_successful_proof_of_a_successful_stage_has_a_receipt() {
+    fn native_smoke_admits_no_proof_artifact() {
         let receipt = crate::hosted::Artifact {
             path: "receipt.json".to_owned(),
             bytes: 1,
             digest: wire::Digest::compute(wire::Domain::DistArtifact, b"x"),
         };
-        assert!(admit_proof_result(0, 0, std::slice::from_ref(&receipt)).is_ok());
-        assert!(admit_proof_result(0, 1, std::slice::from_ref(&receipt)).is_err());
-        assert!(admit_proof_result(0, 0, &[]).is_err());
-        assert!(admit_proof_result(1, 125, std::slice::from_ref(&receipt)).is_err());
-        assert!(admit_proof_result(1, 125, &[]).is_ok());
+        assert!(admit_smoke_result(0, 0, &[]).is_ok());
+        assert!(admit_smoke_result(0, 1, &[]).is_err());
+        assert!(admit_smoke_result(0, 0, &[receipt]).is_err());
+        assert!(admit_smoke_result(1, 125, &[]).is_ok());
     }
 }
