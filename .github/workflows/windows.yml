@@ -1,4 +1,4 @@
-name: Windows execution
+name: Windows staging
 run-name: Hosted archive ${{ inputs.challenge }}
 
 on:
