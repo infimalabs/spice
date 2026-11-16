@@ -57,6 +57,7 @@ use source::PreparedSource;
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
 const WORKFLOW_PATH: &str = ".github/workflows/windows.yml";
+const RUN_TITLE_PREFIX: &str = "Windows staging ";
 
 /// Complete observed outcome of one provider-authenticated command.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,7 +355,7 @@ impl Bound {
             branch,
             challenge: &self.challenge,
             workflow_blob: &self.source.workflow_blob,
-            run_title_prefix: attach::RUN_TITLE_PREFIX,
+            run_title_prefix: RUN_TITLE_PREFIX,
             transport: Some(self.transport),
         }
     }

@@ -1,5 +1,5 @@
 name: Linux staging
-run-name: Hosted archive ${{ inputs.challenge }}
+run-name: Linux staging ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
@@ -49,19 +49,19 @@ permissions: {}
 
 jobs:
   stage:
-    name: Sealed x86_64-unknown-linux-musl stage
+    name: Stage Linux
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
       actions: read
     steps:
-      - name: Download canonical release inputs
+      - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-inputs-${{ inputs.release_inputs_challenge }}
+          name: input-${{ inputs.release_inputs_challenge }}
           run-id: ${{ inputs.release_inputs_run }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/release-inputs
+          path: ${{ runner.temp }}/input
 
       - name: Download shared proof image archive
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -97,7 +97,7 @@ jobs:
           [[ "$TREE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$GITHUB_REF" == refs/heads/main ]]
           [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$ImageOS" == ubuntu24 && "$RUNNER_ARCH" == X64 ]]
-          root="$RUNNER_TEMP/release-inputs"
+          root="$RUNNER_TEMP/input"
           result="$root/result.json"
           test "$(jq -r .challenge "$result")" = "$INPUTS_CHALLENGE"
           test "$(jq -r .run_id "$result")" = "$INPUTS_RUN"
@@ -148,7 +148,7 @@ jobs:
           EXPECTED_PROOF_IDENTITY: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
-          result="$RUNNER_TEMP/release-inputs/result.json"
+          result="$RUNNER_TEMP/input/result.json"
           archive="$RUNNER_TEMP/proof-image/proof-image.tar"
           checksum="$(jq -r .proof_archive_sha256 "$result")"
           test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$checksum"
@@ -162,7 +162,7 @@ jobs:
       - name: Stage in the sealed image
         env:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
-          SPICE_RELEASE_CANVAS: ${{ runner.temp }}/release-inputs/canvas.zip
+          SPICE_RELEASE_CANVAS: ${{ runner.temp }}/input/canvas.zip
           SPICE_RELEASE_APP: ${{ inputs.app }}
         run: |
           set -uo pipefail
@@ -269,7 +269,7 @@ jobs:
 
 
   attest:
-    name: Sign result with GitHub OIDC identity
+    name: Attest Linux
     needs: stage
     runs-on: ubuntu-24.04
     timeout-minutes: 10

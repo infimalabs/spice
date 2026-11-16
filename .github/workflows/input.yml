@@ -1,5 +1,5 @@
 name: Input staging
-run-name: Release inputs ${{ inputs.challenge }}
+run-name: Input staging ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
@@ -16,8 +16,8 @@ on:
 permissions: {}
 
 jobs:
-  produce:
-    name: Build canonical archive and canvas
+  stage:
+    name: Stage input
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -54,7 +54,7 @@ jobs:
           path: |
             ${{ runner.temp }}/bootstrap-cargo
             ${{ runner.temp }}/bootstrap-target
-          key: release-inputs-bootstrap-${{ runner.os }}-${{ runner.arch }}-trunk-0.22.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+          key: input-bootstrap-${{ runner.os }}-${{ runner.arch }}-trunk-0.22.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
 
       - name: Install exact Rust and app compiler
         env:
@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/bootstrap-target/debug/xtask" release-inputs \
-            "$RUNNER_TEMP/release-inputs"
+            "$RUNNER_TEMP/input"
 
       # The archive is keyed by every proof-image build input. A hit is loaded,
       # which re-admits its checksum sidecar, the loaded image ID, and the
@@ -123,7 +123,7 @@ jobs:
           PROOF_ARCHIVE_SHA256: ${{ steps.proof.outputs.archive_sha256 }}
         run: |
           set -euo pipefail
-          root="$RUNNER_TEMP/release-inputs"
+          root="$RUNNER_TEMP/input"
           archive_tree="$RUNNER_TEMP/archive-tree"
           mkdir "$archive_tree"
           tar -xf "$root/source.tar" -C "$archive_tree"
@@ -138,7 +138,7 @@ jobs:
             --arg tree "$tree" \
             --arg proof_identity "$PROOF_IDENTITY" \
             --arg proof_archive_sha256 "$PROOF_ARCHIVE_SHA256" \
-            --arg workflow ".github/workflows/release-inputs.yml" \
+            --arg workflow ".github/workflows/input.yml" \
             --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
             --argjson run_id "$GITHUB_RUN_ID" \
@@ -167,11 +167,11 @@ jobs:
       - name: Publish canonical release inputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-inputs-${{ inputs.challenge }}
+          name: input-${{ inputs.challenge }}
           path: |
-            ${{ runner.temp }}/release-inputs/source.tar
-            ${{ runner.temp }}/release-inputs/canvas.zip
-            ${{ runner.temp }}/release-inputs/result.json
+            ${{ runner.temp }}/input/source.tar
+            ${{ runner.temp }}/input/canvas.zip
+            ${{ runner.temp }}/input/result.json
           if-no-files-found: error
           retention-days: 7
 
@@ -187,8 +187,8 @@ jobs:
           retention-days: 7
 
   attest:
-    name: Sign canonical release inputs
-    needs: produce
+    name: Attest input
+    needs: stage
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -196,16 +196,16 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      - name: Download canonical release inputs
+      - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-inputs-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/release-inputs
+          name: input-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/input
 
       - name: Attest archive, canvas, and producer result
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
           subject-path: |
-            ${{ runner.temp }}/release-inputs/source.tar
-            ${{ runner.temp }}/release-inputs/canvas.zip
-            ${{ runner.temp }}/release-inputs/result.json
+            ${{ runner.temp }}/input/source.tar
+            ${{ runner.temp }}/input/canvas.zip
+            ${{ runner.temp }}/input/result.json

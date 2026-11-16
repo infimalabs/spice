@@ -16,6 +16,7 @@ use super::{
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/macos.yml";
+const RUN_TITLE_PREFIX: &str = "macOS staging ";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
 const RESULT_PATH: &str = "result.json";
@@ -146,7 +147,7 @@ pub fn macos_hosted_stage_controlled(
                 &policy.branch,
                 WORKFLOW_PATH,
                 &source.workflow_blob,
-                super::attach::RUN_TITLE_PREFIX,
+                RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))
@@ -161,7 +162,7 @@ pub fn macos_hosted_stage_controlled(
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &source.workflow_blob,
-        run_title_prefix: super::attach::RUN_TITLE_PREFIX,
+        run_title_prefix: RUN_TITLE_PREFIX,
         transport: None,
     };
     let inputs = Ok(serde_json::json!({
@@ -186,7 +187,7 @@ pub fn macos_hosted_stage_controlled(
         |authority| {
             watch_run(run.root, run.repository, authority, &cancellation)?;
             let run_id = authority.run_id();
-            let stage = download_artifact(&run, run_id, &format!("darwin-stage-{challenge}"))?;
+            let stage = download_artifact(&run, run_id, &format!("macos-{challenge}"))?;
             let result_path = stage.join(RESULT_PATH);
             let result: MacosResult =
                 serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)

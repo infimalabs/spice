@@ -1,5 +1,5 @@
 name: Windows staging
-run-name: Hosted archive ${{ inputs.challenge }}
+run-name: Windows staging ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
@@ -20,8 +20,8 @@ permissions:
   attestations: write
 
 jobs:
-  execute:
-    name: Disposable x86-64 Windows execution
+  stage:
+    name: Stage Windows
     runs-on: windows-2025
     timeout-minutes: 75
     steps:
@@ -49,14 +49,14 @@ jobs:
             "linux_run=$($request.canvas.run_id)" >> $env:GITHUB_OUTPUT
           }
 
-      - name: Download canonical release inputs
+      - name: Download input
         if: steps.request.outputs.release_inputs_run != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-inputs-${{ steps.request.outputs.release_inputs_challenge }}
+          name: input-${{ steps.request.outputs.release_inputs_challenge }}
           run-id: ${{ steps.request.outputs.release_inputs_run }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}\release-inputs-${{ steps.request.outputs.release_inputs_challenge }}
+          path: ${{ runner.temp }}\input-${{ steps.request.outputs.release_inputs_challenge }}
 
       - name: Admit canonical source delivery
         shell: pwsh
@@ -72,7 +72,7 @@ jobs:
           }
           $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
           if ($null -ne $request.release_inputs) {
-            $root = Join-Path $env:RUNNER_TEMP "release-inputs-$($request.release_inputs.challenge)"
+            $root = Join-Path $env:RUNNER_TEMP "input-$($request.release_inputs.challenge)"
             $result = Get-Content -Raw -LiteralPath (Join-Path $root 'result.json') | ConvertFrom-Json
             if ([uint64]$result.run_id -ne [uint64]$request.release_inputs.run_id -or
                 $result.challenge -cne $request.release_inputs.challenge -or
@@ -278,7 +278,7 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\linux-stage-*"
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\release-inputs-*"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\input-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\source.tar"

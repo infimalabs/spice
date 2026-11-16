@@ -199,20 +199,21 @@ pub(super) fn attach(
     let mut admitted = Vec::new();
     let mut refused = Vec::new();
     for run in candidates {
-        let admission = admit_run(&run, workflow, branch, RUN_TITLE_PREFIX).and_then(|challenge| {
-            let workflow_blob = workflow_blob(root, repository, workflow, &run.head_sha)
-                .map_err(|error| error.to_string())?;
-            if workflow_blob != source.workflow_blob {
-                return Err("its workflow differs from the current source archive".to_owned());
-            }
-            let transport = transport::find(root, repository, &challenge, source)
-                .map_err(|error| error.to_string())?;
-            Ok(Candidate {
-                run_id: run.id,
-                challenge,
-                transport,
-            })
-        });
+        let admission =
+            admit_run(&run, workflow, branch, super::RUN_TITLE_PREFIX).and_then(|challenge| {
+                let workflow_blob = workflow_blob(root, repository, workflow, &run.head_sha)
+                    .map_err(|error| error.to_string())?;
+                if workflow_blob != source.workflow_blob {
+                    return Err("its workflow differs from the current source archive".to_owned());
+                }
+                let transport = transport::find(root, repository, &challenge, source)
+                    .map_err(|error| error.to_string())?;
+                Ok(Candidate {
+                    run_id: run.id,
+                    challenge,
+                    transport,
+                })
+            });
         match admission {
             Ok(candidate) => admitted.push(candidate),
             Err(reason) => refused.push(format!("run {}: {reason}", run.id)),
@@ -254,7 +255,7 @@ fn unretired(
         .filter(|run| {
             run.status.as_deref() != Some("completed")
                 || owners.contains(&run.id)
-                || challenge_from_title(&run.display_title, RUN_TITLE_PREFIX).is_some_and(
+                || challenge_from_title(&run.display_title, super::RUN_TITLE_PREFIX).is_some_and(
                     |challenge| transports.contains(transport::release_name(challenge).as_str()),
                 )
         })
@@ -289,7 +290,6 @@ fn admit_run(
         .ok_or_else(|| "its run title records no challenge".to_owned())
 }
 
-pub(super) const RUN_TITLE_PREFIX: &str = "Hosted archive ";
 const CHALLENGE_HEX_LENGTH: usize = 64;
 fn challenge_from_title<'a>(title: &'a str, prefix: &str) -> Option<&'a str> {
     let challenge = title.strip_prefix(prefix)?;
@@ -408,13 +408,14 @@ pub(super) fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, W
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, RUN_TITLE_PREFIX,
-        RunRepository, admit_run, challenge_from_title, select, unretired,
+        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderRun, RunRepository, admit_run,
+        challenge_from_title, select, unretired,
     };
     use crate::hosted::client::WindowsHostedError;
     use crate::hosted::client::transport::Transport;
 
     const WORKFLOW: &str = ".github/workflows/linux.yml";
+    const RUN_TITLE_PREFIX: &str = "Linux staging ";
     const BRANCH: &str = "main";
     const CHALLENGE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -426,7 +427,7 @@ mod tests {
             },
             path: WORKFLOW.to_owned(),
             event: "workflow_dispatch".to_owned(),
-            display_title: format!("Hosted archive {CHALLENGE}"),
+            display_title: format!("{RUN_TITLE_PREFIX}{CHALLENGE}"),
             head_branch: Some(BRANCH.to_owned()),
             head_sha: "a".repeat(40),
             status: Some(status.to_owned()),
@@ -471,7 +472,7 @@ mod tests {
             ..run(1, "in_progress")
         };
         let other_title = ProviderRun {
-            display_title: "Hosted archive not-a-challenge".to_owned(),
+            display_title: format!("{RUN_TITLE_PREFIX}not-a-challenge"),
             ..run(1, "in_progress")
         };
         for unrelated in [other_workflow, pushed, other_branch, other_title] {
@@ -479,10 +480,6 @@ mod tests {
         }
         assert_eq!(
             challenge_from_title(&format!("{RUN_TITLE_PREFIX}{CHALLENGE}"), RUN_TITLE_PREFIX),
-            Some(CHALLENGE)
-        );
-        assert_eq!(
-            challenge_from_title(&format!("Release inputs {CHALLENGE}"), "Release inputs "),
             Some(CHALLENGE)
         );
     }

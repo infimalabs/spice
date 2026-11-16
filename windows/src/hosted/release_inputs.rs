@@ -9,11 +9,11 @@ use wire::Digest;
 const DIGEST_HEX_LENGTH: usize = 64;
 const COMMIT_HEX_LENGTH: usize = 40;
 /// Provider workflow that produces canonical release inputs.
-pub const WORKFLOW: &str = ".github/workflows/release-inputs.yml";
+pub const WORKFLOW: &str = ".github/workflows/input.yml";
 /// Artifact prefix used by the provider workflow.
-pub const ARTIFACT_PREFIX: &str = "release-inputs-";
+pub const ARTIFACT_PREFIX: &str = "input-";
 /// Prefix of the provider run title carrying the release-input challenge.
-pub const RUN_TITLE_PREFIX: &str = "Release inputs ";
+pub const RUN_TITLE_PREFIX: &str = "Input staging ";
 
 /// Provider-produced canonical archive and app canvas identities.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

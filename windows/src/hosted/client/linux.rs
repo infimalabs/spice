@@ -22,6 +22,7 @@ use super::{
 };
 
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
+const RUN_TITLE_PREFIX: &str = "Linux staging ";
 const IMAGE_OS: &str = "ubuntu24";
 const ARCHITECTURE: &str = "X64";
 const TARGET: &str = "x86_64-unknown-linux-musl";
@@ -126,7 +127,7 @@ pub fn linux_hosted_stage_controlled(
                 &policy.branch,
                 WORKFLOW_PATH,
                 &source.workflow_blob,
-                super::attach::RUN_TITLE_PREFIX,
+                RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))
@@ -142,7 +143,7 @@ pub fn linux_hosted_stage_controlled(
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &source.workflow_blob,
-        run_title_prefix: super::attach::RUN_TITLE_PREFIX,
+        run_title_prefix: RUN_TITLE_PREFIX,
         transport: None,
     };
     let inputs = Ok(serde_json::json!({
