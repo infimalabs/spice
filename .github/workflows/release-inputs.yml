@@ -1,0 +1,155 @@
+name: Release inputs
+run-name: Release inputs ${{ inputs.challenge }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      challenge:
+        description: Unique lowercase 64-hex release-input challenge
+        required: true
+        type: string
+      source_commit:
+        description: Exact landed main commit to archive and compile
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  produce:
+    name: Build canonical archive and canvas
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact landed source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Admit request and landed commit
+        env:
+          CHALLENGE: ${{ inputs.challenge }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$CHALLENGE" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" refs/remotes/origin/main
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Install exact Rust and app compiler
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+        run: |
+          set -euo pipefail
+          rustup toolchain install --no-self-update
+          cargo install --locked trunk --version 0.22.1
+
+      - name: Build repository-owned producer
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
+        run: cargo build --locked --package xtask
+
+      - name: Build canonical source archive and app canvas
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/bootstrap-target/debug/xtask" release-inputs \
+            "$RUNNER_TEMP/release-inputs"
+
+      - name: Resolve shared proof identity
+        id: proof
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/proof-image.tar"
+          "$RUNNER_TEMP/bootstrap-target/debug/xtask" proof-image build "$archive" \
+            | tee "$RUNNER_TEMP/proof-image.out"
+          identity="$(sed -n 's/^proof image //p' "$RUNNER_TEMP/proof-image.out")"
+          [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          rm -f "$archive" "$archive.sha256" "$archive.identity"
+
+      - name: Record immutable producer result
+        env:
+          CHALLENGE: ${{ inputs.challenge }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          PROOF_IDENTITY: ${{ steps.proof.outputs.identity }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/release-inputs"
+          tree="$(git ls-tree -r -z --full-tree "$SOURCE_COMMIT" | sha256sum | cut -d' ' -f1)"
+          jq \
+            --arg challenge "$CHALLENGE" \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg tree "$tree" \
+            --arg proof_identity "$PROOF_IDENTITY" \
+            --arg workflow ".github/workflows/release-inputs.yml" \
+            --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg image_os "$ImageOS" \
+            --arg image_version "$ImageVersion" \
+            --arg architecture "$RUNNER_ARCH" \
+            --arg rustc "$(rustc --version)" \
+            --arg cargo "$(cargo --version)" \
+            --arg trunk "$(trunk --version)" \
+            '. + {
+              challenge: $challenge,
+              source_commit: $source_commit,
+              tree: $tree,
+              proof_identity: $proof_identity,
+              workflow: $workflow,
+              workflow_ref: $workflow_ref,
+              workflow_sha: $workflow_sha,
+              run_id: $run_id,
+              runner: {image_os: $image_os, image_version: $image_version, architecture: $architecture},
+              toolchain: {rustc: $rustc, cargo: $cargo, trunk: $trunk}
+            }' "$root/producer.json" > "$root/result.json"
+          test "$(jq -r .source_commit "$root/result.json")" = "$SOURCE_COMMIT"
+          rm "$root/producer.json"
+
+      - name: Publish canonical release inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-inputs-${{ inputs.challenge }}
+          path: |
+            ${{ runner.temp }}/release-inputs/source.tar
+            ${{ runner.temp }}/release-inputs/canvas.zip
+            ${{ runner.temp }}/release-inputs/result.json
+          if-no-files-found: error
+          retention-days: 7
+
+  attest:
+    name: Sign canonical release inputs
+    needs: produce
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Download canonical release inputs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-inputs-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/release-inputs
+
+      - name: Attest archive, canvas, and producer result
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release-inputs/source.tar
+            ${{ runner.temp }}/release-inputs/canvas.zip
+            ${{ runner.temp }}/release-inputs/result.json

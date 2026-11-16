@@ -15,6 +15,8 @@ mod native_link;
 mod proof_image;
 mod release;
 #[cfg(not(target_arch = "wasm32"))]
+mod release_inputs;
+#[cfg(not(target_arch = "wasm32"))]
 mod seal_darwin;
 #[cfg(not(target_arch = "wasm32"))]
 mod share_darwin;
@@ -51,6 +53,11 @@ pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
     AppOrigin, CommandRecord, MacSymbols, ReleaseEnvironment, TargetBuild, TargetBuildError,
     build_windows_appliance, release_proof_image, stage_target, stage_target_app,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use release_inputs::{
+    CANVAS_ARCHIVE, RELEASE_INPUTS_MANIFEST, ReleaseInputArtifact, ReleaseInputsManifest,
+    SOURCE_ARCHIVE, release_inputs,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use seal_darwin::{PlacedExecutable, SealDarwinError, place_executable, seal_runner};

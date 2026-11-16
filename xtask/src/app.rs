@@ -482,6 +482,12 @@ impl StagedCanvas {
         self.tree
     }
 
+    /// Exact rack bytes every native target links.
+    #[must_use]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     /// Write the stable object carrying this archive for `target` and `profile`
     /// under `build_root`, and answer its Cargo and persisted-link paths.
     ///
