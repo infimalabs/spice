@@ -44,20 +44,23 @@ pub(super) struct Attached {
     pub(super) challenge: String,
     pub(super) transport: Transport,
 }
-/// One provider run proven to use the current admitted workflow.
+/// One provider run admitted under its own workflow blob.
 pub(super) struct AttachedRun {
     pub(super) run_id: u64,
     pub(super) challenge: String,
+    pub(super) workflow_blob: String,
 }
 
 /// Admit an attached run whose inputs are provider artifacts rather than a
-/// retained source transport.
+/// retained source transport. `expected_workflow_blob` pins the run's workflow;
+/// without it the run's own blob is adopted for the caller to bind to the
+/// source the run's signed result names.
 pub(super) fn attach_run(
     root: &Path,
     repository: &str,
     branch: &str,
     workflow: &str,
-    expected_workflow_blob: &str,
+    expected_workflow_blob: Option<&str>,
     run_title_prefix: &str,
     attach: Attach,
 ) -> Result<AttachedRun, WindowsHostedError> {
@@ -87,12 +90,13 @@ pub(super) fn attach_run(
         let admission = admit_run(&run, workflow, branch, run_title_prefix).and_then(|challenge| {
             let observed = workflow_blob(root, repository, workflow, &run.head_sha)
                 .map_err(|error| error.to_string())?;
-            if observed != expected_workflow_blob {
+            if expected_workflow_blob.is_some_and(|expected| observed != expected) {
                 return Err("its workflow differs from the current source".to_owned());
             }
             Ok(AttachedRun {
                 run_id: run.id,
                 challenge,
+                workflow_blob: observed,
             })
         });
         match admission {
@@ -335,6 +339,21 @@ pub(super) fn admit_branch_workflow(
     Ok(())
 }
 
+/// The commit the configured provider branch names now: the one read of a
+/// moving `main` a release request makes.
+pub(super) fn branch_commit(
+    root: &Path,
+    repository: &str,
+    branch: &str,
+) -> Result<String, WindowsHostedError> {
+    #[derive(Deserialize)]
+    struct Commit {
+        sha: String,
+    }
+    let commit: Commit = api(root, format!("repos/{repository}/commits/{branch}"))?;
+    Ok(commit.sha)
+}
+
 /// Select a fresh challenge for a new dispatch, admitting the branch workflow
 /// at that moment, or re-enter the run `attach` names against its own workflow.
 pub(super) fn dispatch_or_attach(
@@ -355,7 +374,7 @@ pub(super) fn dispatch_or_attach(
         repository,
         branch,
         workflow,
-        workflow_blob,
+        Some(workflow_blob),
         run_title_prefix,
         attach,
     )?;

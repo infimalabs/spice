@@ -76,9 +76,8 @@ pub use source_archive::source_archive;
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
     Attach, HostedExecution, HostedReleaseError, ReleaseInputs, WindowsHostedError,
-    hosted_release_inputs, hosted_release_inputs_fresh, hosted_release_stage,
-    hosted_release_stage_with_inputs, linux_hosted_stage, macos_hosted_stage, windows_hosted,
-    windows_hosted_stage,
+    hosted_release_inputs, hosted_release_stage, hosted_release_stage_with_inputs,
+    linux_hosted_stage, macos_hosted_stage, windows_hosted, windows_hosted_stage,
 };
 pub use windows_msvc::{WindowsMsvcError, windows_msvc};
 

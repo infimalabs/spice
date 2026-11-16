@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{WORKFLOW_PATH, WindowsHostedError, linux, macos, source, workspace_root};
-
 /// One provider run durably bound before its watcher starts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HostedRunBinding {
@@ -54,19 +52,4 @@ pub struct ReleaseWorkflowBlobs {
     pub linux: String,
     pub macos: String,
     pub windows: String,
-}
-
-/// Resolve every hosted release workflow from the same canonical source.
-///
-/// This performs only local Git reads, so callers can refuse a changed session
-/// before any provider mutation.
-pub fn release_workflow_blobs() -> Result<ReleaseWorkflowBlobs, WindowsHostedError> {
-    let root = workspace_root()?;
-    let resolve = |workflow: &str| source::workflow_blob(&root, &root.join(workflow));
-    Ok(ReleaseWorkflowBlobs {
-        release_inputs: resolve(crate::hosted::release_inputs::WORKFLOW)?,
-        linux: resolve(linux::WORKFLOW_PATH)?,
-        macos: resolve(macos::WORKFLOW_PATH)?,
-        windows: resolve(WORKFLOW_PATH)?,
-    })
 }
