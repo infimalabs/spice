@@ -324,7 +324,7 @@ fn run_seal_darwin(
         release_environment(ambient),
         signing.as_ref(),
         None,
-        xtask::AppSource::Compile,
+        xtask::AppOrigin::Compile,
         output,
     )?;
     if let Some(directory) = destination {
@@ -488,11 +488,11 @@ fn run_stage_target(
     // staged from the same archive. A hosted runner, handed only the archive
     // identity, still compiles its own.
     let app = if scope == StageScope::StagedApp {
-        xtask::AppSource::Workspace
+        xtask::AppOrigin::Workspace
     } else if target != LINUX_TARGET && environment.source_archive.is_none() {
-        xtask::AppSource::Linux
+        xtask::AppOrigin::Linux
     } else {
-        xtask::AppSource::Compile
+        xtask::AppOrigin::Compile
     };
     preflight_native_release(target).and_then(|()| {
         xtask::stage_target(
