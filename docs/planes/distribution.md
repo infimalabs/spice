@@ -514,11 +514,15 @@ only that tag and is the backstop when the client disappears before it can act.
 refreshes every 30 seconds, so parallel target clients stay well inside the
 account's shared hourly REST quota for a full-length run. When the watcher
 exits, the client asks the provider for the run's state and restarts the
-watcher while the run is unfinished. When the quota is spent, the client waits
-for its announced reset; a completion step that fails while the quota is spent
-leaves the run whole instead of reporting it failed. When the client cannot
-observe the run otherwise, it leaves the run, its artifacts, and its tag
-untouched and names the run id. The client never deletes workflow runs. Every
+watcher while the run is unfinished. A newly dispatched run can remain absent
+from the provider's REST view briefly; that observation gap waits one watcher
+interval and retries within the same bounded restart count. Persistent
+observation failure detaches only after that bound. When the quota is spent,
+the client waits for its announced reset; a completion step that fails while
+the quota is spent leaves the run whole instead of reporting it failed. When
+the client cannot observe the run otherwise, it leaves the run, its artifacts,
+and its tag untouched and names the run id. The client never deletes workflow
+runs. Every
 hosted stage re-enters such a run without redispatch through
 `--attach RUN_ID`, or a bare `--attach`: the
 Windows route and the `--hosted` Linux and Darwin routes accept it. No local
