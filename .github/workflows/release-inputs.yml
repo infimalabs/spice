@@ -89,7 +89,14 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/release-inputs"
-          tree="$(git ls-tree -r -z --full-tree "$SOURCE_COMMIT" | sha256sum | cut -d' ' -f1)"
+          archive_tree="$RUNNER_TEMP/archive-tree"
+          mkdir "$archive_tree"
+          tar -xf "$root/source.tar" -C "$archive_tree"
+          git -C "$archive_tree/spice" init -q
+          git -C "$archive_tree/spice" config core.autocrlf false
+          git -C "$archive_tree/spice" add -A -f -- .
+          tree_id="$(git -C "$archive_tree/spice" write-tree)"
+          tree="$(git -C "$archive_tree/spice" ls-tree -r -z --full-tree "$tree_id" | sha256sum | cut -d' ' -f1)"
           jq \
             --arg challenge "$CHALLENGE" \
             --arg source_commit "$SOURCE_COMMIT" \
