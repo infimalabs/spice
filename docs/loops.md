@@ -159,10 +159,11 @@ flowchart LR
 - Unowned-path/loose-commit refusals name both recovery forms. Planning and
   Design claims refuse implementation adoption before quarantine or claim.
 - Every phase transition is a journal fact on the board, even one that
-  changes no tree. A landing commit's subject scope is the root of the task
-  topic, while its sorted trailers carry `Task-Phase`, `Task-Stamp`, and
-  `Task-Topic`; first-parent history records mutating landings, not every
-  transition.
+  changes no tree. A mutating landing commit's subject scope is the root of the
+  task topic, its sole body paragraph is the exact admitted task pitch, and its
+  sorted trailers carry `Task-Phase`, `Task-Stamp`, and `Task-Topic`. Missing or
+  malformed pitch data refuses the landing; first-parent history records
+  mutating landings, not every transition.
 - Work controls project current tasks into durable `#/work...` links over Chat;
   the [task overview](../app/OVERVIEW.md#task-overview) owns their grammar.
   Topic-wide, task, relationship, and composed selections stay browser-local.

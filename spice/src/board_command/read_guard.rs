@@ -486,6 +486,7 @@ pub(super) fn publish_task_boundary(
     let metadata = spice::task_git::Metadata {
         label: entry.handle().as_str(),
         title: &entry.statement().title,
+        pitch: &entry.statement().pitch,
         topic: entry.topic().map_or("", wire::Topic::as_str),
         phase: entry.workflow().phase.as_str(),
         actor: &actor,
