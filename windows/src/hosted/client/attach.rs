@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 
 use super::source::PreparedSource;
 use super::transport::{self, Transport};
-use super::{HostedRun, WindowsHostedError, command, successful_text};
+use super::{HostedRun, WindowsHostedError, challenge, command, successful_text};
 
 /// Which provider run a hosted stage re-enters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -333,6 +333,33 @@ pub(super) fn admit_branch_workflow(
         )));
     }
     Ok(())
+}
+
+/// Select a fresh challenge for a new dispatch, admitting the branch workflow
+/// at that moment, or re-enter the run `attach` names against its own workflow.
+pub(super) fn dispatch_or_attach(
+    root: &Path,
+    repository: &str,
+    branch: &str,
+    workflow: &str,
+    workflow_blob: &str,
+    run_title_prefix: &str,
+    attach: Option<Attach>,
+) -> Result<(String, Option<u64>), WindowsHostedError> {
+    let Some(attach) = attach else {
+        admit_branch_workflow(root, repository, branch, workflow, workflow_blob)?;
+        return Ok((challenge()?, None));
+    };
+    let attached = attach_run(
+        root,
+        repository,
+        branch,
+        workflow,
+        workflow_blob,
+        run_title_prefix,
+        attach,
+    )?;
+    Ok((attached.challenge, Some(attached.run_id)))
 }
 
 /// Admit one run's workflow identity before trusting its attestations.

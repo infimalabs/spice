@@ -10,8 +10,8 @@ use wire::{Digest, Domain};
 
 use super::{
     Attach, Cancellation, HostedRun, HostedSource, ReleaseInputs, Scratch, WindowsHostedError,
-    challenge, download_artifact, drive, publish_artifacts, require_public_attestation_repository,
-    source, verify_attestation, watch_run, workspace_root,
+    download_artifact, drive, publish_artifacts, require_public_attestation_repository, source,
+    verify_attestation, watch_run, workspace_root,
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
@@ -131,28 +131,15 @@ pub fn macos_hosted_stage_controlled(
         WORKFLOW_PATH,
         HostedSource::Archive(release_inputs.source()),
     )?;
-    super::attach::admit_branch_workflow(
+    let (challenge, attached) = super::attach::dispatch_or_attach(
         &root,
         &policy.repository,
         &policy.branch,
         WORKFLOW_PATH,
         &source.workflow_blob,
+        RUN_TITLE_PREFIX,
+        attach,
     )?;
-    let (challenge, attached) = match attach {
-        None => (challenge()?, None),
-        Some(attach) => {
-            let attached = super::attach::attach_run(
-                &root,
-                &policy.repository,
-                &policy.branch,
-                WORKFLOW_PATH,
-                &source.workflow_blob,
-                RUN_TITLE_PREFIX,
-                attach,
-            )?;
-            (attached.challenge, Some(attached.run_id))
-        }
-    };
     let manifest = release_inputs.manifest();
     let source_archive = source.archive.to_string();
     let run = HostedRun {

@@ -7,8 +7,8 @@ use wire::{Digest, Domain};
 
 use super::{
     Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, Scratch, WindowsHostedError,
-    challenge, digest_file, download_artifact, drive, require_public_attestation_repository,
-    source, verify_attestation, watch_run, workspace_root,
+    digest_file, download_artifact, drive, require_public_attestation_repository, source,
+    verify_attestation, watch_run, workspace_root,
 };
 use crate::hosted::release_inputs::{self, ResultManifest};
 
@@ -48,28 +48,15 @@ pub fn release_inputs(attach: Option<Attach>) -> Result<ReleaseInputs, WindowsHo
     let source_commit = source::canonical_source_commit(&root)?;
     let workflow_path = root.join(release_inputs::WORKFLOW);
     let workflow_blob = source::workflow_blob(&root, &workflow_path)?;
-    super::attach::admit_branch_workflow(
+    let (challenge, attached) = super::attach::dispatch_or_attach(
         &root,
         &policy.repository,
         &policy.branch,
         release_inputs::WORKFLOW,
         &workflow_blob,
+        release_inputs::RUN_TITLE_PREFIX,
+        attach,
     )?;
-    let (challenge, attached) = match attach {
-        None => (challenge()?, None),
-        Some(attach) => {
-            let attached = super::attach::attach_run(
-                &root,
-                &policy.repository,
-                &policy.branch,
-                release_inputs::WORKFLOW,
-                &workflow_blob,
-                release_inputs::RUN_TITLE_PREFIX,
-                attach,
-            )?;
-            (attached.challenge, Some(attached.run_id))
-        }
-    };
     let run = HostedRun {
         root: &root,
         scratch: scratch.path(),

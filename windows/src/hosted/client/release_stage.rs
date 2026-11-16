@@ -7,7 +7,7 @@ use crate::protocol::{Command as HostedCommand, Limits, MAX_OUTPUT_BYTES, MAX_RU
 
 use super::{
     Attach, Cancellation, HostedExecution, HostedRun, HostedSource, POLICY, Policy,
-    RUN_TITLE_PREFIX, ReleaseInputs, Scratch, WORKFLOW_PATH, WindowsHostedError, attach, challenge,
+    RUN_TITLE_PREFIX, ReleaseInputs, Scratch, WORKFLOW_PATH, WindowsHostedError, attach,
     complete_dispatched_run, drive, source, workspace_root,
 };
 
@@ -51,28 +51,15 @@ pub fn windows_release_commands_into_controlled(
         WORKFLOW_PATH,
         HostedSource::Archive(release_inputs.source()),
     )?;
-    attach::admit_branch_workflow(
+    let (challenge, attached) = attach::dispatch_or_attach(
         &root,
         &policy.repository,
         &policy.branch,
         WORKFLOW_PATH,
         &source.workflow_blob,
+        RUN_TITLE_PREFIX,
+        attach,
     )?;
-    let (challenge, attached) = match attach {
-        None => (challenge()?, None),
-        Some(attach) => {
-            let attached = attach::attach_run(
-                &root,
-                &policy.repository,
-                &policy.branch,
-                WORKFLOW_PATH,
-                &source.workflow_blob,
-                RUN_TITLE_PREFIX,
-                attach,
-            )?;
-            (attached.challenge, Some(attached.run_id))
-        }
-    };
     let inputs = release_inputs.manifest();
     let request = Request {
         version: crate::hosted::PROTOCOL_VERSION,
