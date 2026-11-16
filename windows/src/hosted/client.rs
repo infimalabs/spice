@@ -28,11 +28,16 @@ use wire::{Digest, Domain};
 mod attach;
 mod linux;
 mod macos;
+mod observation;
 mod quota;
 mod source;
 pub use attach::Attach;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
+use observation::{
+    ObservationGap, Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, await_watch_interval,
+    observation_gap_action, resume_action,
+};
 use source::{delete_source, push_source};
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
@@ -752,36 +757,10 @@ fn watch_action(cancel_requested: bool, observation: WatchObservation) -> WatchA
     }
 }
 
-/// Watcher restarts admitted while the provider reports the run unfinished.
-const WATCH_RESUMES: u32 = 16;
-
-/// Seconds between watcher polls. Every poll spends shared provider API quota,
-/// and exhausting it ends every watcher on the account at once.
-const WATCH_INTERVAL_SECONDS: &str = "30";
-
 /// How one watcher ended without cancellation.
 enum WatchEnd {
     Succeeded,
     Exited(Option<i32>),
-}
-
-/// What the provider's run state asks of a client whose watcher exited
-/// unsuccessfully.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Resume {
-    Watch,
-    Complete,
-    Failed,
-    Detach,
-}
-
-fn resume_action(status: &str, conclusion: &str, resumes: u32) -> Resume {
-    match (status, conclusion) {
-        ("completed", "success") => Resume::Complete,
-        ("completed", _) => Resume::Failed,
-        _ if resumes < WATCH_RESUMES => Resume::Watch,
-        _ => Resume::Detach,
-    }
 }
 
 #[derive(Deserialize)]
@@ -817,7 +796,19 @@ fn watch_run(
                     quota::await_reset(root, repository, run_id, reset, cancellation)?;
                     continue;
                 }
-                None => return Err(detached(error)),
+                None => match observation_gap_action(resumes) {
+                    ObservationGap::Wait => {
+                        resumes += 1;
+                        await_watch_interval(root, repository, run_id, cancellation)?;
+                        continue;
+                    }
+                    ObservationGap::Detach => {
+                        return Err(detached(WindowsHostedError::ProviderResponse(format!(
+                            "provider observation failed {} times: {error}",
+                            WATCH_RESUMES + 1
+                        ))));
+                    }
+                },
             },
         };
         let conclusion = state.conclusion.unwrap_or_default();
@@ -887,7 +878,7 @@ fn watch_once(
             OsString::from(repository),
             OsString::from("--compact"),
             OsString::from("--interval"),
-            OsString::from(WATCH_INTERVAL_SECONDS),
+            OsString::from(WATCH_INTERVAL_SECONDS.to_string()),
             OsString::from("--exit-status"),
         ])
         .stdout(Stdio::null())
