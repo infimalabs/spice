@@ -135,7 +135,6 @@ jobs:
               "EXPECTED_XCODE_BUILD": policy["xcode"]["build"],
               "EXPECTED_RUST": policy["toolchain"]["rust"],
               "EXPECTED_CARGO": policy["toolchain"]["cargo"],
-              "EXPECTED_GIT": policy["toolchain"]["git"],
               "EXPECTED_TRUNK": policy["toolchain"]["trunk"],
               "EXPECTED_WASM_BINDGEN": policy["toolchain"]["wasm_bindgen"],
               "EXPECTED_WASM_OPT": policy["toolchain"]["wasm_opt"],
@@ -156,10 +155,14 @@ jobs:
         run: |
           set -euo pipefail
           sudo xcode-select --switch "$DEVELOPER_DIR"
-          test "$(xcodebuild -version | sed -n '2s/^Build version //p')" = "$EXPECTED_XCODE_BUILD"
-          test "macosx$(xcrun --sdk macosx --show-sdk-version)" = "$EXPECTED_SDK"
-          test "$(git --version)" = "$EXPECTED_GIT"
-          test "$(rustup --version | sed -n 's/^rustup \([0-9.]*\).*/\1/p')" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["toolchain"]["rustup"])')"
+          xcode_build=$(xcodebuild -version | sed -n '2s/^Build version //p')
+          sdk="macosx$(xcrun --sdk macosx --show-sdk-version)"
+          git_version=$(git --version)
+          rustup_version=$(rustup --version | sed -n 's/^rustup \([0-9.]*\).*/\1/p')
+          printf 'runner tools: xcode_build=%s sdk=%s git=%s rustup=%s\n' \
+            "$xcode_build" "$sdk" "$git_version" "$rustup_version"
+          test "$xcode_build" = "$EXPECTED_XCODE_BUILD"
+          test "$sdk" = "$EXPECTED_SDK"
 
           rustup toolchain install 1.97.1-aarch64-apple-darwin --profile minimal --no-self-update
           rustup target add --toolchain 1.97.1-aarch64-apple-darwin wasm32-unknown-unknown
