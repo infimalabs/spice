@@ -9,7 +9,6 @@
 //! rebuilds its request from that challenge and admits the signed result as
 //! a fresh dispatch would.
 
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -24,7 +23,7 @@ use super::{WindowsHostedError, command, successful_text};
 pub enum Attach {
     /// Exactly this run of the stage's workflow.
     Run(u64),
-    /// The one unretired run of the stage's workflow that builds the current
+    /// The one unfinished run of the stage's workflow that builds the current
     /// source archive; a bare `--attach` names it.
     Sole,
 }
@@ -63,23 +62,6 @@ struct RunPage {
 }
 
 #[derive(Deserialize)]
-struct ArtifactPage {
-    artifacts: Vec<ProviderArtifact>,
-}
-
-#[derive(Deserialize)]
-struct ProviderArtifact {
-    name: String,
-    expired: bool,
-    workflow_run: Option<ArtifactRun>,
-}
-
-#[derive(Deserialize)]
-struct ArtifactRun {
-    id: u64,
-}
-
-#[derive(Deserialize)]
 struct ProviderCommit {
     tree: ProviderTree,
     parents: Vec<IgnoredAny>,
@@ -96,7 +78,7 @@ struct ProviderTree {
 /// # Errors
 ///
 /// Refuses a run of another repository, workflow, or event, one whose one-use
-/// source is not the archive's exact tree, no unretired matching run, or
+/// source is not the archive's exact tree, no unfinished matching run, or
 /// several; returns provider and archive failures.
 pub(super) fn attach(
     root: &Path,
@@ -120,11 +102,7 @@ pub(super) fn attach(
                     "repos/{repository}/actions/workflows/{file}/runs?event=workflow_dispatch&per_page=100"
                 ),
             )?;
-            let artifacts: ArtifactPage = api(
-                root,
-                format!("repos/{repository}/actions/artifacts?per_page=100"),
-            )?;
-            unretired(runs.workflow_runs, &artifacts.artifacts)
+            unfinished(runs.workflow_runs)
         }
     };
     let mut admitted = Vec::new();
@@ -164,22 +142,11 @@ struct Candidate {
     challenge: String,
 }
 
-/// Runs that still hold provider state: unfinished, or owning an unexpired
-/// artifact. A completed run without artifacts was already retired; a staged
-/// canvas outlives its retired Linux run for the release's other targets.
-fn unretired(runs: Vec<ProviderRun>, artifacts: &[ProviderArtifact]) -> Vec<ProviderRun> {
-    let owners = artifacts
-        .iter()
-        .filter(|artifact| {
-            !artifact.expired
-                && !artifact
-                    .name
-                    .starts_with(super::super::CANVAS_ARTIFACT_PREFIX)
-        })
-        .filter_map(|artifact| artifact.workflow_run.as_ref().map(|run| run.id))
-        .collect::<BTreeSet<_>>();
+/// Runs the provider has not finished. A settled run keeps its artifacts as
+/// evidence, so only its explicit id re-enters it.
+fn unfinished(runs: Vec<ProviderRun>) -> Vec<ProviderRun> {
     runs.into_iter()
-        .filter(|run| run.status.as_deref() != Some("completed") || owners.contains(&run.id))
+        .filter(|run| run.status.as_deref() != Some("completed"))
         .collect()
 }
 
@@ -228,7 +195,7 @@ fn select(
     Err(WindowsHostedError::AttachRefused(match attach {
         Attach::Run(run_id) => format!("provider run {run_id} is not adoptable{detail}"),
         Attach::Sole if admitted.is_empty() => {
-            format!("no unretired run of {workflow} builds the current source archive{detail}")
+            format!("no unfinished run of {workflow} builds the current source archive{detail}")
         }
         Attach::Sole => format!(
             "runs {} of {workflow} all build the current source archive; attach one by its run id",
@@ -256,8 +223,7 @@ fn api<T: DeserializeOwned>(root: &Path, path: String) -> Result<T, WindowsHoste
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtifactRun, Attach, Candidate, ProviderArtifact, ProviderCommit, ProviderRun,
-        ProviderTree, admit_run, select, unretired,
+        Attach, Candidate, ProviderCommit, ProviderRun, ProviderTree, admit_run, select, unfinished,
     };
     use crate::hosted::client::WindowsHostedError;
 
@@ -345,29 +311,13 @@ mod tests {
     }
 
     #[test]
-    fn sole_considers_only_runs_still_holding_provider_state() {
-        let artifact = |name: &str, expired, id| ProviderArtifact {
-            name: name.to_owned(),
-            expired,
-            workflow_run: Some(ArtifactRun { id }),
-        };
-        let artifacts = [
-            artifact("linux-result", false, 2),
-            artifact("linux-result", true, 3),
-            artifact("canvas-staged", false, 5),
-        ];
-        let runs = vec![
-            run(1, "in_progress"),
-            run(2, "completed"),
-            run(3, "completed"),
-            run(4, "queued"),
-            run(5, "completed"),
-        ];
-        let ids = unretired(runs, &artifacts)
+    fn sole_considers_only_unfinished_runs() {
+        let runs = vec![run(1, "in_progress"), run(2, "completed"), run(3, "queued")];
+        let ids = unfinished(runs)
             .iter()
             .map(|run| run.id)
             .collect::<Vec<_>>();
-        assert_eq!(ids, [1, 2, 4]);
+        assert_eq!(ids, [1, 3]);
     }
 
     #[test]

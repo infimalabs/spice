@@ -1,9 +1,9 @@
 //! The staged Linux canvas a hosted Darwin or Windows release stage links.
 //!
-//! The Linux release stage alone compiles the app. Its hosted run keeps a
-//! `canvas-DIGEST` artifact holding the Linux payload and executable after
-//! the rest of the run retires; a later stage binds that run and digest into
-//! its request, and its runner links exactly those bytes.
+//! The Linux release stage alone compiles the app. Its hosted run uploads a
+//! `canvas-DIGEST` artifact holding the Linux payload and executable, kept
+//! until its retention expires it; a later stage binds that run and digest
+//! into its request, and its runner links exactly those bytes.
 
 use std::ffi::OsString;
 use std::fs;

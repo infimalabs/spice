@@ -265,9 +265,9 @@ source archive's parentless one-use commit and passes both the delivered
 archive identity and the exact proof-container identity. The provider client
 admits the final payload, executable, dSYM, file set, and Darwin bindings;
 verifies GitHub provenance for every published file against that commit and
-one-use ref; then publishes the payload last under `dist/stage`. Intermediate
-workflow artifacts are one-run transports and are all deleted after the
-client retains the admitted stage.
+one-use ref; then publishes the payload last under `dist/stage`. Workflow
+artifacts are the run's evidence: the client never deletes them, and provider
+retention expires them.
 
 The local signer is named by two machine-local Git-common keys,
 `release.darwin.identity` (a `Developer ID Application` keychain identity) and
@@ -345,13 +345,11 @@ It then requires the downloaded log and staged tree to match the signed
 digests and inventory exactly, and writes the log. Only after a zero exit, and
 with every target payload recording the requested archive, does it publish the
 stage into `dist/stage`, payload pointer last. It cancels the run on
-interrupt and deletes the tag and the run's artifacts afterward, except the
-staged canvas below.
+interrupt and deletes the tag afterward.
 
 **Invariant —** A successful hosted Linux run also uploads its payload and
 executable object as the artifact `canvas-DIGEST`, named by the payload's
-canvas digest. Run retirement keeps that artifact, and it expires after seven
-days. A bare `--attach` does not count it as provider state. Before dispatch,
+canvas digest; it expires after seven days. Before dispatch,
 hosted Darwin and Windows clients read the Linux payload staged in
 `dist/stage` from the same archive, find the newest unexpired artifact with
 that name, and bind its run id and digest into the request: `linux_run` and
@@ -461,9 +459,9 @@ OIDC authority re-admits their canonical encodings, sizes, digests, dSYM
 executable binding, and linked canvas and verifies the strict code signature.
 The next job runs no repository code; it only downloads those exact files and
 gives them GitHub OIDC build provenance. Intermediate unsigned, policy,
-finalizer, and signed-native transports expire after one day and the provider
-client deletes all run artifacts after retaining the admitted stage. A
-one-use `hosted-*` source tag is retired on every terminal outcome.
+finalizer, and signed-native transports expire after one day; the client
+deletes none of them. A one-use `hosted-*` source tag is retired on every
+terminal outcome.
 
 
 ### Ephemeral native Windows execution
@@ -516,8 +514,7 @@ request binds the identity of the archive those bytes came from and a
 cross-platform SHA-256 identity of the commit's recursive Git listing, which
 the guest verifies against its checkout before vouching for the archive, and
 the client pushes only a temporary `refs/tags/hosted-*` ref. It never
-pushes or moves a branch. It deletes that ref and the result artifact after
-the run.
+pushes or moves a branch. It deletes that ref after the run.
 
 GitHub registers `workflow_dispatch` only from the default branch. The
 repository command therefore becomes live only after
@@ -536,10 +533,12 @@ OIDC identity-token write. The client cancels the exact dispatched run on
 `SIGINT` or `SIGTERM`; its non-interactive provider subprocesses run in their
 own process group, so a terminal interrupt reaches only the client. After the
 provider returns an exact run identity, every failure first confirms that run
-is terminal, cancelling it if necessary; success, failure, cancellation, and
-verification refusal then retire any result artifact for that exact run. The
-one-use tag is retired whenever a push was attempted. Provider cleanup accepts
-only that tag and is the backstop when the client disappears before it can act.
+is terminal, cancelling it if necessary. The client deletes no workflow run
+or artifact; each artifact persists until its upload's `retention-days` or the
+repository's retention setting expires it, and GitHub removes runs after the
+repository retention period. The one-use tag is retired whenever a push was
+attempted. Provider cleanup accepts only that tag and is the backstop when the
+client disappears before it can act.
 
 **Invariant —** Losing observation never ends a healthy run. After dispatch,
 the client waits a short bounded interval and requires the provider's REST API
@@ -552,8 +551,8 @@ reports the exit and provider state, then restarts the watcher while the run is
 unfinished. When the quota is spent, the client reports the reset boundary and
 waits for it; a completion step that fails while the quota is spent leaves the
 run whole instead of reporting it failed. When the client cannot observe the
-run otherwise, it leaves the run, its artifacts, and its tag untouched and
-names the run id. The client never deletes workflow runs. Every
+run otherwise, it leaves the run and its tag untouched and names the run id.
+Every
 hosted stage re-enters such a run without redispatch through
 `--attach RUN_ID`, or a bare `--attach`: the
 Windows route and the `--hosted` Linux and Darwin routes accept it. No local
@@ -561,12 +560,11 @@ record names a dispatched run. Attachment re-derives the archive's exact tree
 from `dist/stage/source.tar` and admits a run only if it is a
 `workflow_dispatch` run of the stage's workflow in the configured repository,
 built from a parentless one-use commit carrying that tree, at the tag named by
-the challenge the commit records. A bare `--attach` considers only runs that
-still hold provider state, meaning unfinished or owning an unexpired artifact,
-and refuses unless exactly one matches. The stage then rebuilds its request from
-that challenge and admits, publishes, and retires exactly as a fresh dispatch
-does; an explicit cancellation of an attached run still cancels it and
-removes its artifacts and tag.
+the challenge the commit records. A bare `--attach` considers only unfinished
+runs and refuses unless exactly one matches; a settled run is re-entered by its
+explicit run id. The stage then rebuilds its request from that challenge and
+admits, publishes, and retires exactly as a fresh dispatch does; an explicit
+cancellation of an attached run still cancels it and retires its tag.
 
 Tokens, mutable endpoints, and provider account configuration are never tracked
 policy. Rotate or revoke GitHub credentials in the provider, then run
