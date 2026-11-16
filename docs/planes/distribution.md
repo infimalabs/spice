@@ -369,13 +369,22 @@ payloads must record it byte-identically. Hosted Linux refuses an explicit
 image because the sealed provider job owns that build, while hosted Darwin and
 Windows refuse publication without the selected identity.
 
+The successful Linux stage immediately runs its staged executable's `spice
+proof --target x86_64-unknown-linux-musl` on the same hosted runner, while the
+exact image named by its payload still exists in that runner's Docker store.
+The result records the proof exit and log digest; GitHub OIDC attests the log
+and detached receipt with the staged files. The client admits those bytes and
+installs the receipt under the Git-common proof layout for the payload's source
+archive and target. No local image rebuild or registry digest substitutes for
+the provider's image ID. A failed stage or proof publishes no receipt.
+
 `spice proof` and `spice proof replay` select the compiled Darwin or Linux
 target when no target is named. `--target TARGET` selects any canonical release
-target explicitly: Darwin uses the sealed native runner, Linux uses the admitted
-OCI proof image, and Windows uses its attested hosted battery. The Windows route
-carries Git and GitHub CLI network effects in the proof command contract; the
-battery commands themselves remain bounded by the proof limits and execute
-only in the fresh hosted Windows environment.
+target explicitly: Darwin uses the sealed native runner, hosted Linux uses its
+admitted detached receipt, and Windows uses its attested hosted battery. The
+Windows route carries Git and GitHub CLI network effects in the proof command
+contract; the battery commands themselves remain bounded by the proof limits
+and execute only in the fresh hosted Windows environment.
 
 **Invariant —** A native Darwin proof runner is sealed for exactly one
 worktree: `dist/proof-runner/build.sh` bakes that worktree's HEAD commit and

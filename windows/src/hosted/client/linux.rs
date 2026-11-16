@@ -6,8 +6,9 @@
 //! client admits that signed result, retains the stage's output, and publishes
 //! only staged files the result inventories.
 
+use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -15,13 +16,16 @@ use wire::Domain;
 
 use super::{
     Attach, Bound, Cancellation, HostedSource, POLICY, Policy, Scratch, WindowsHostedError,
-    digest_file, download_artifact, drive, publish_artifacts,
-    require_public_attestation_repository, verify_attestation, watch_run, workspace_root,
+    command, digest_file, download_artifact, drive, publish_artifacts,
+    require_public_attestation_repository, successful_text, verify_attestation, watch_run,
+    workspace_root,
 };
 
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
 const IMAGE_OS: &str = "ubuntu24";
 const ARCHITECTURE: &str = "X64";
+const TARGET: &str = "x86_64-unknown-linux-musl";
+const PROOF_RECEIPT: &str = "receipt.json";
 
 /// The signed outcome of one hosted Linux stage.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,6 +34,8 @@ pub struct LinuxHostedStage {
     pub exit_code: i32,
     pub proof_image: String,
     pub runner_image: String,
+    pub proof_exit_code: i32,
+    pub proof_log: Vec<u8>,
     pub log: Vec<u8>,
 }
 
@@ -50,7 +56,10 @@ struct LinuxResult {
     proof_image: String,
     exit_code: i32,
     log_sha256: String,
+    proof_exit_code: i32,
+    proof_log_sha256: String,
     artifacts: Vec<LinuxArtifact>,
+    proof_artifacts: Vec<LinuxArtifact>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +107,7 @@ pub fn linux_hosted_stage(
     let challenge = &bound.challenge;
     let source = &bound.source;
     let source_archive = source.archive.to_string();
+    let proof_receipt = proof_receipt_path(&root, &source_archive)?;
     let transport_asset = bound.transport.asset_id;
     let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
     let inputs = Ok(serde_json::json!({
@@ -136,13 +146,37 @@ pub fn linux_hosted_stage(
             }
             let stage = artifact.join("stage");
             let artifacts = admit_inventory(&stage, &result.artifacts)?;
+            let proof_log_path = artifact.join("proof.log");
+            verify_attestation(&run, WORKFLOW_PATH, run_id, &proof_log_path)?;
+            let proof_log = fs::read(&proof_log_path).map_err(|source| WindowsHostedError::Io {
+                path: proof_log_path.clone(),
+                source,
+            })?;
+            if sha256(&proof_log) != result.proof_log_sha256 {
+                return Err(differs("proof.log"));
+            }
+            let proof = artifact.join("proof");
+            let proof_artifacts = admit_inventory(&proof, &result.proof_artifacts)?;
+            admit_proof_result(result.exit_code, result.proof_exit_code, &proof_artifacts)?;
             if result.exit_code == 0 {
+                verify_attestation(&run, WORKFLOW_PATH, run_id, &proof.join(PROOF_RECEIPT))?;
                 publish_artifacts(&stage, &artifacts, &destination, &source_archive, None)?;
+                publish_artifacts(
+                    &proof,
+                    &proof_artifacts,
+                    proof_receipt
+                        .parent()
+                        .expect("proof receipt path has a parent"),
+                    &source_archive,
+                    None,
+                )?;
             }
             Ok(LinuxHostedStage {
                 run_id,
                 exit_code: result.exit_code,
                 proof_image: result.proof_image,
+                proof_exit_code: result.proof_exit_code,
+                proof_log,
                 runner_image: format!("{} {}", result.image_os, result.image_version),
                 log,
             })
@@ -266,6 +300,48 @@ fn collect_files(
     Ok(())
 }
 
+fn admit_proof_result(
+    stage_exit: i32,
+    proof_exit: i32,
+    artifacts: &[crate::hosted::Artifact],
+) -> Result<(), WindowsHostedError> {
+    if stage_exit == 0
+        && (proof_exit != 0 || artifacts.len() != 1 || artifacts[0].path != PROOF_RECEIPT)
+    {
+        return Err(differs("proof receipt"));
+    }
+    if stage_exit != 0 && !artifacts.is_empty() {
+        return Err(differs("failed stage proof receipt"));
+    }
+    Ok(())
+}
+
+fn proof_receipt_path(root: &Path, source: &str) -> Result<PathBuf, WindowsHostedError> {
+    let common = successful_text(
+        "Git common directory lookup",
+        command(
+            root,
+            "git",
+            [
+                OsString::from("rev-parse"),
+                OsString::from("--path-format=absolute"),
+                OsString::from("--git-common-dir"),
+            ],
+        )?,
+    )?;
+    let common = PathBuf::from(common.trim());
+    if !common.is_absolute() {
+        return Err(WindowsHostedError::ProviderResponse(
+            "Git returned a relative common directory".to_owned(),
+        ));
+    }
+    Ok(common
+        .join(".spice/cache/proof")
+        .join(source)
+        .join(TARGET)
+        .join(PROOF_RECEIPT))
+}
+
 fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -284,7 +360,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{LinuxArtifact, admit_inventory, sha256};
+    use super::{LinuxArtifact, admit_inventory, admit_proof_result, sha256};
 
     struct Stage(PathBuf);
 
@@ -335,5 +411,19 @@ mod tests {
         let missing = Stage::new("missing");
         let inventory = [listed(payload, b"{}"), listed("objects/absent", b"x")];
         assert!(admit_inventory(&missing.0, &inventory).is_err());
+    }
+
+    #[test]
+    fn only_a_successful_proof_of_a_successful_stage_has_a_receipt() {
+        let receipt = crate::hosted::Artifact {
+            path: "receipt.json".to_owned(),
+            bytes: 1,
+            digest: wire::Digest::compute(wire::Domain::DistArtifact, b"x"),
+        };
+        assert!(admit_proof_result(0, 0, std::slice::from_ref(&receipt)).is_ok());
+        assert!(admit_proof_result(0, 1, std::slice::from_ref(&receipt)).is_err());
+        assert!(admit_proof_result(0, 0, &[]).is_err());
+        assert!(admit_proof_result(1, 125, std::slice::from_ref(&receipt)).is_err());
+        assert!(admit_proof_result(1, 125, &[]).is_ok());
     }
 }
