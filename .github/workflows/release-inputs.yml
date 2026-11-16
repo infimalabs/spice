@@ -1,4 +1,4 @@
-name: Release inputs
+name: Input staging
 run-name: Release inputs ${{ inputs.challenge }}
 
 on:
