@@ -181,8 +181,10 @@ jobs:
             || { echo "staged Linux payload names no executable" >&2; exit 1; }
           object="$(printf '%s-%04o' "$digest" "$mode")"
           executable="dist/stage/objects/$object"
+          set +e
           "$executable" proof --target "$target" 2>&1 | tee "$RUNNER_TEMP/proof.log"
           code="${PIPESTATUS[0]}"
+          set -e
           echo "$code" > "$RUNNER_TEMP/proof.exit"
           if [[ "$code" == 0 ]]; then
             common="$(git rev-parse --git-common-dir)"
