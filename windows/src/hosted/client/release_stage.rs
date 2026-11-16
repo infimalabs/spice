@@ -6,9 +6,9 @@ use crate::hosted::{ReleaseInputsPin, Request};
 use crate::protocol::{Command as HostedCommand, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS};
 
 use super::{
-    Attach, Cancellation, HostedExecution, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs,
-    Scratch, WORKFLOW_PATH, WindowsHostedError, attach, challenge, complete_dispatched_run, drive,
-    source, workspace_root,
+    Attach, Cancellation, HostedExecution, HostedRun, HostedSource, POLICY, Policy,
+    RUN_TITLE_PREFIX, ReleaseInputs, Scratch, WORKFLOW_PATH, WindowsHostedError, attach, challenge,
+    complete_dispatched_run, drive, source, workspace_root,
 };
 
 /// Dispatch a Windows native stage against one provider-produced release-input set.
@@ -67,7 +67,7 @@ pub fn windows_release_commands_into_controlled(
                 &policy.branch,
                 WORKFLOW_PATH,
                 &source.workflow_blob,
-                attach::RUN_TITLE_PREFIX,
+                RUN_TITLE_PREFIX,
                 attach,
             )?;
             (attached.challenge, Some(attached.run_id))
@@ -109,7 +109,7 @@ pub fn windows_release_commands_into_controlled(
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &source.workflow_blob,
-        run_title_prefix: attach::RUN_TITLE_PREFIX,
+        run_title_prefix: RUN_TITLE_PREFIX,
         transport: None,
     };
     let request_json = request

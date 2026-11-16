@@ -207,7 +207,7 @@ mod tests {
     use crate::hosted::client::{HostedRun, WindowsHostedError};
 
     const REPOSITORY: &str = "infimalabs/spice";
-    const WORKFLOW: &str = ".github/workflows/release-inputs.yml";
+    const WORKFLOW: &str = ".github/workflows/input.yml";
     const BLOB: &str = "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
     const CHALLENGE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const RUN_ID: u64 = 43_813_614_482;
@@ -220,7 +220,7 @@ mod tests {
             branch: "main",
             challenge: CHALLENGE,
             workflow_blob: BLOB,
-            run_title_prefix: "Release inputs ",
+            run_title_prefix: "Input staging ",
             transport: None,
         };
         RunAuthority::dispatched(&run, WORKFLOW, RUN_ID)
@@ -234,7 +234,7 @@ mod tests {
             },
             path: WORKFLOW.to_owned(),
             event: "workflow_dispatch".to_owned(),
-            display_title: format!("Release inputs {CHALLENGE}"),
+            display_title: format!("Input staging {CHALLENGE}"),
             head_branch: Some("main".to_owned()),
             head_sha: "a".repeat(40),
             status: Some(status.to_owned()),
@@ -302,11 +302,11 @@ mod tests {
                 ..provider("in_progress")
             },
             ProviderRun {
-                display_title: format!("Hosted archive {CHALLENGE}"),
+                display_title: format!("Linux staging {CHALLENGE}"),
                 ..provider("in_progress")
             },
             ProviderRun {
-                display_title: format!("Release inputs {}", "f".repeat(64)),
+                display_title: format!("Input staging {}", "f".repeat(64)),
                 ..provider("in_progress")
             },
             ProviderRun {

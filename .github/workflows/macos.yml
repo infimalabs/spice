@@ -1,5 +1,5 @@
 name: macOS staging
-run-name: Hosted archive ${{ inputs.challenge }}
+run-name: macOS staging ${{ inputs.challenge }}
 
 on:
   workflow_dispatch:
@@ -47,20 +47,20 @@ on:
 
 jobs:
 
-  build:
-    name: Build sealed unsigned arm64 payload
+  stage:
+    name: Stage macOS
     runs-on: macos-15
     timeout-minutes: 90
     permissions:
       actions: read
     steps:
-      - name: Download canonical release inputs
+      - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-inputs-${{ inputs.release_inputs_challenge }}
+          name: input-${{ inputs.release_inputs_challenge }}
           run-id: ${{ inputs.release_inputs_run }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/release-inputs
+          path: ${{ runner.temp }}/input
 
       - name: Admit canonical release inputs
         shell: bash
@@ -76,7 +76,7 @@ jobs:
           TREE: ${{ inputs.tree }}
         run: |
           set -euo pipefail
-          root="$RUNNER_TEMP/release-inputs"
+          root="$RUNNER_TEMP/input"
           result="$root/result.json"
           test "$(jq -r .challenge "$result")" = "$INPUTS_CHALLENGE"
           test "$(jq -r .run_id "$result")" = "$INPUTS_RUN"
@@ -239,7 +239,7 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
           EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
-          RELEASE_CANVAS: ${{ runner.temp }}/release-inputs/canvas.zip
+          RELEASE_CANVAS: ${{ runner.temp }}/input/canvas.zip
           RELEASE_APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
@@ -279,7 +279,7 @@ jobs:
       - name: Upload unsigned stage transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: darwin-unsigned-${{ inputs.challenge }}
+          name: macos-unsigned-${{ inputs.challenge }}
           path: ${{ runner.temp }}/unsigned-stage.tar.gz
           if-no-files-found: error
           retention-days: 1
@@ -287,7 +287,7 @@ jobs:
       - name: Upload admitted host policy
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: darwin-policy-${{ inputs.challenge }}
+          name: macos-policy-${{ inputs.challenge }}
           path: ${{ runner.temp }}/hosted.toml
           if-no-files-found: error
           retention-days: 1
@@ -295,7 +295,7 @@ jobs:
       - name: Upload credential-free finalizer
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: darwin-finalizer-${{ inputs.challenge }}
+          name: macos-finalizer-${{ inputs.challenge }}
           path: ${{ runner.temp }}/finalizer.tar.gz
           if-no-files-found: error
           retention-days: 1
@@ -306,8 +306,8 @@ jobs:
         run: rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
 
   sign:
-    name: Sign and notarize exact native bytes
-    needs: build
+    name: Sign macOS
+    needs: stage
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
@@ -317,13 +317,13 @@ jobs:
       - name: Download unsigned stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-unsigned-${{ inputs.challenge }}
+          name: macos-unsigned-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
       - name: Download admitted host policy
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-policy-${{ inputs.challenge }}
+          name: macos-policy-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
       - name: Admit signing host and prepare exact input
@@ -426,7 +426,7 @@ jobs:
       - name: Upload signed native bytes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: darwin-native-${{ inputs.challenge }}
+          name: macos-native-${{ inputs.challenge }}
           path: ${{ runner.temp }}/sign/native
           if-no-files-found: error
           retention-days: 1
@@ -439,7 +439,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/signing.keychain-db" "$RUNNER_TEMP/native.zip" "$RUNNER_TEMP/notary.json" "$RUNNER_TEMP/sign"
 
   finalize:
-    name: Rebind and verify signed stage
+    name: Finalize macOS
     needs: sign
     runs-on: macos-15
     timeout-minutes: 15
@@ -450,19 +450,19 @@ jobs:
       - name: Download unsigned stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-unsigned-${{ inputs.challenge }}
+          name: macos-unsigned-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
       - name: Download signed native bytes
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-native-${{ inputs.challenge }}
+          name: macos-native-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport/native
 
       - name: Download credential-free finalizer
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-finalizer-${{ inputs.challenge }}
+          name: macos-finalizer-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
       - name: Rebind and verify exact signed stage
@@ -511,13 +511,13 @@ jobs:
       - name: Upload exact signed stage
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: darwin-stage-${{ inputs.challenge }}
+          name: macos-${{ inputs.challenge }}
           path: ${{ runner.temp }}/finalize/stage
           if-no-files-found: error
           retention-days: 1
 
   attest:
-    name: Attest exact signed stage
+    name: Attest macOS
     needs: finalize
     runs-on: macos-15
     timeout-minutes: 15
@@ -529,7 +529,7 @@ jobs:
       - name: Download exact signed stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: darwin-stage-${{ inputs.challenge }}
+          name: macos-${{ inputs.challenge }}
           path: ${{ runner.temp }}/stage
 
       - name: Attest payload and exact inventoried objects

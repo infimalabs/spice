@@ -103,10 +103,10 @@ The app source identity spells each relative path as UTF-8 components joined by
 `/` and orders inputs by that spelling, independent of the host path separator.
 
 **Invariant —** The provider preflight compiles the release app exactly once.
-`.github/workflows/release-inputs.yml` checks out one exact landed `main` SHA,
+`.github/workflows/input.yml` checks out one exact landed `main` SHA,
 creates the canonical `source.tar`, compiles the app, assembles its admitted
 rack as `canvas.zip`, and publishes both with `result.json` as
-`release-inputs-CHALLENGE`. GitHub OIDC attests all three files. The signed
+`input-CHALLENGE`. GitHub OIDC attests all three files. The signed
 result binds the source commit and tree, archive and canvas identities, app
 generation, proof identity, toolchains, request, workflow, and run.
 
@@ -315,9 +315,9 @@ worktree is, the sealed route hands that identity to the in-image
 the app itself, offline, so no host toolchain touches any part of the release.
 
 **Invariant —** Hosted release input production precedes every native build.
-`.github/workflows/release-inputs.yml` checks out one exact landed `main`
+`.github/workflows/input.yml` checks out one exact landed `main`
 commit, runs `spice dev xtask -- release-inputs OUT` on a GitHub-hosted Linux
-runner, and publishes `release-inputs-CHALLENGE`. That artifact contains the
+runner, and publishes `input-CHALLENGE`. That artifact contains the
 canonical `source.tar`, the one compiled app rack as `canvas.zip`, and
 `result.json`. The result binds their byte counts, SHA-256 checksums,
 domain-separated archive and canvas identities, source commit and recursive
@@ -347,7 +347,7 @@ the preflight rebuilds the image. The preflight re-checks the cached trunk
 version on every run.
 
 **Invariant —** Hosted release staging starts with one successful
-`release-inputs.yml` preflight, then dispatches Linux, Darwin, and Windows
+`input.yml` preflight, then dispatches Linux, macOS, and Windows
 concurrently against that pinned run. `spice dev xtask -- stage-hosted-release
 INPUTS_RUN` owns one Git-common release-session record for that exact preflight.
 The record binds the source and release-input identities, all four workflow
@@ -448,7 +448,7 @@ so an interrupted publication leaves the prior file or none.
 GitHub image, macOS build, Xcode SDK, Rust toolchain, downloaded tool digests,
 and proof-container identity admitted by `dist/darwin/hosted.toml`. The client
 uploads the canonical source archive unchanged as a challenge-bound immutable
-asset. The build job verifies its raw digest, canonical archive identity,
+asset. The stage job verifies its raw digest, canonical archive identity,
 source commit, tree, and admitted workflow before the sealed native proof
 runner builds an unsigned `aarch64-apple-darwin` stage with networking denied.
 The workflow refuses image, source, archive, SDK, tool, or stage drift before
@@ -485,7 +485,7 @@ retention expires them; after a terminal outcome the client deletes only the
 challenge-bound archive transport.
 
 
-### Ephemeral native Windows execution
+### Ephemeral native Windows staging
 
 Windows source lives in the single `windows-execution` Cargo package under
 `windows/`. Its neutral `protocol` module owns the command, result, capture, and
@@ -547,8 +547,8 @@ The supported provider repository is `github.com/infimalabs/spice`.
 Authenticate the machine-local `gh` client. Its credential needs Actions
 read/write, Attestations read, Contents read, Metadata read, and Releases
 write for this repository. GitHub withholds draft Release assets from a
-read-only workflow token, so only the Linux stage job, the macOS build job, and
-the Windows execution job receive Contents write; each downloads only the
+read-only workflow token, so only the Linux, macOS, and Windows stage jobs
+receive Contents write; each downloads only the
 request's admitted asset ID, then verifies its bound SHA-256 before extraction.
 The signing jobs retain only Attestations and OIDC identity-token write. The
 client cancels the exact dispatched run

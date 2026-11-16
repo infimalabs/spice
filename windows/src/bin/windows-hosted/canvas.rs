@@ -33,7 +33,7 @@ fn release_inputs(temp: &Path, request: &Request) -> Option<PathBuf> {
     request
         .release_inputs
         .as_ref()
-        .map(|inputs| temp.join(format!("release-inputs-{}", inputs.challenge)))
+        .map(|inputs| temp.join(format!("input-{}", inputs.challenge)))
 }
 
 pub(super) fn root(temp: &Path, request: &Request) -> Option<PathBuf> {
