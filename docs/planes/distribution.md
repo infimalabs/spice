@@ -113,9 +113,11 @@ published. The hosted Windows route commits the archive's exact tree,
 `dist/build.json` included, as a parentless one-use commit; the signed request
 and result bind the archive identity, which the guest hands to its own
 `stage-target`, and the client refuses a returned payload recording any other
-archive. The tracked attributes keep both canonical `dist/version` inputs
-LF-only when the one-use source commit is checked out on Windows; compile-time
-inclusion preserves the canonical bytes their consumers require. The release
+archive. Tracked attributes classify binary paths without conversion and force
+every text checkout to LF on every host. The explicit release-version and
+installed-skill declarations remain as release-critical local contracts, while
+the repository-wide rule makes the parentless source commit's app inputs
+byte-identical on Windows, Linux, and macOS. The release
 names the archive identity once; manifest publication refuses targets staged
 from two archives, and `spice release` refuses a sealed manifest whose archive
 is not the one at the stage root.
