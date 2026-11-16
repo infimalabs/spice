@@ -337,6 +337,13 @@ payloads must record it byte-identically. Hosted Linux refuses an explicit
 image because the sealed provider job owns that build, while hosted Darwin and
 Windows refuse publication without the selected identity.
 
+`spice proof` and `spice proof replay` select the compiled Darwin or Linux
+target when no target is named. The Windows receipt has no local execution
+route: `--target x86_64-pc-windows-msvc` selects its attested hosted battery
+explicitly. That route carries Git and GitHub CLI network effects in the proof
+command contract; the battery commands themselves remain bounded by the proof
+limits and execute only in the fresh hosted Windows environment.
+
 **Invariant —** A native Darwin proof runner is sealed for exactly one
 worktree: `dist/proof-runner/build.sh` bakes that worktree's HEAD commit and
 vendor tree into the runner and binds it through `proof.runner`, which admits

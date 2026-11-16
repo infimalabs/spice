@@ -341,8 +341,8 @@ fn main() {
         ["watch"] => run_watch(leaf, form),
         #[cfg(not(target_arch = "wasm32"))]
         ["retro"] => retro_command::run(leaf, form),
-        ["proof"] => deliver(&proof_command::seal(configuration), form),
-        ["proof", "replay"] => deliver(&proof_command::replay(configuration), form),
+        ["proof"] => deliver(&proof_command::seal(leaf, configuration), form),
+        ["proof", "replay"] => deliver(&proof_command::replay(leaf, configuration), form),
         _ => {}
     }
 
