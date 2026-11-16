@@ -25,9 +25,12 @@ use crate::protocol::{
 use serde::Deserialize;
 use wire::{Digest, Domain};
 
+mod attach;
 mod linux;
 mod macos;
+mod quota;
 mod source;
+pub use attach::Attach;
 pub use linux::{LinuxHostedStage, linux_hosted_stage};
 pub use macos::{MacosHostedStage, macos_hosted_stage};
 use source::{delete_source, push_source};
@@ -89,7 +92,7 @@ pub fn windows_hosted(
 pub fn windows_hosted_commands(
     commands: Vec<HostedCommand>,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    windows_hosted_commands_into(commands, None, HostedSource::Worktree)
+    windows_hosted_commands_into(commands, None, HostedSource::Worktree, None)
 }
 
 /// Which source tree one hosted run builds.
@@ -142,11 +145,13 @@ fn admit_public_attestation_visibility(
     }
 }
 
-/// Dispatch a hosted batch and publish its signed artifact files when requested.
+/// Dispatch a hosted batch, or re-enter the provider run `attach` names, and
+/// publish its signed artifact files when requested.
 pub fn windows_hosted_commands_into(
     commands: Vec<HostedCommand>,
     destination: Option<&Path>,
     source: HostedSource<'_>,
+    attach: Option<Attach>,
 ) -> Result<HostedExecution, WindowsHostedError> {
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
     policy.admit()?;
@@ -159,17 +164,22 @@ pub fn windows_hosted_commands_into(
         }
     });
     let scratch = Scratch::new()?;
-    let challenge = challenge()?;
-    let source_ref = format!("hosted-{}", &challenge[..24]);
-    let source = source::prepare(&root, scratch.path(), &challenge, source)?;
+    let bound = Bound::new(
+        &root,
+        scratch.path(),
+        &policy.repository,
+        WORKFLOW_PATH,
+        source,
+        attach,
+    )?;
     let request = Request {
         version: super::PROTOCOL_VERSION,
-        challenge,
+        challenge: bound.challenge.clone(),
         provider: policy.provider,
         repository: policy.repository.clone(),
-        source_ref: source_ref.clone(),
-        source: source.archive.to_string(),
-        tree: source.tree,
+        source_ref: bound.source_ref.clone(),
+        source: bound.source.archive.to_string(),
+        tree: bound.source.tree.clone(),
         image: policy.image,
         toolchain: policy.toolchain,
         limits: Limits {
@@ -181,30 +191,98 @@ pub fn windows_hosted_commands_into(
     request.admit().map_err(WindowsHostedError::Admission)?;
 
     let cancellation = Cancellation::install()?;
-    let run = HostedRun {
-        root: &root,
-        scratch: scratch.path(),
-        repository: &policy.repository,
-        source_ref: &source_ref,
-        source_commit: &source.commit,
-    };
+    let run = bound.run(&root, scratch.path(), &policy.repository);
     let request_json = serde_json::to_string(&request).map_err(WindowsHostedError::Encode)?;
-    with_pushed_source(&run, &cancellation, || {
-        dispatch(
-            &run,
-            WORKFLOW_PATH,
-            &serde_json::json!({ "request": request_json }),
-            |run_id| {
-                complete_dispatched_run(
-                    &run,
-                    &request,
-                    run_id,
-                    destination.as_deref(),
-                    &cancellation,
-                )
-            },
-        )
-    })
+    drive(
+        &run,
+        bound.attached,
+        &cancellation,
+        WORKFLOW_PATH,
+        &serde_json::json!({ "request": request_json }),
+        |run_id| {
+            complete_dispatched_run(
+                &run,
+                &request,
+                run_id,
+                destination.as_deref(),
+                &cancellation,
+            )
+        },
+    )
+}
+
+/// One hosted stage's challenge and one-use source, and the provider run it
+/// re-enters when attached.
+struct Bound {
+    challenge: String,
+    source_ref: String,
+    source: source::PreparedSource,
+    attached: Option<u64>,
+}
+
+impl Bound {
+    /// A fresh challenge and one-use commit for `source`, or the challenge
+    /// and commit of the provider run `attach` admits for it.
+    fn new(
+        root: &Path,
+        scratch: &Path,
+        repository: &str,
+        workflow: &str,
+        source: HostedSource<'_>,
+        attach: Option<Attach>,
+    ) -> Result<Self, WindowsHostedError> {
+        let (challenge, source, attached) = match (source, attach) {
+            (source, None) => {
+                let challenge = challenge()?;
+                let source = source::prepare(root, scratch, &challenge, source)?;
+                (challenge, source, None)
+            }
+            (HostedSource::Archive(archive), Some(attach)) => {
+                let attached =
+                    attach::attach(root, scratch, repository, workflow, archive, attach)?;
+                (attached.challenge, attached.source, Some(attached.run_id))
+            }
+            (HostedSource::Worktree, Some(_)) => {
+                return Err(WindowsHostedError::AttachRefused(
+                    "a worktree snapshot run cannot be re-entered".to_owned(),
+                ));
+            }
+        };
+        Ok(Self {
+            source_ref: format!("hosted-{}", &challenge[..24]),
+            challenge,
+            source,
+            attached,
+        })
+    }
+
+    fn run<'a>(&'a self, root: &'a Path, scratch: &'a Path, repository: &'a str) -> HostedRun<'a> {
+        HostedRun {
+            root,
+            scratch,
+            repository,
+            source_ref: &self.source_ref,
+            source_commit: &self.source.commit,
+        }
+    }
+}
+
+/// Dispatch a fresh run of `workflow` with `inputs`, or re-enter the attached
+/// one; settle it through `complete` and retire its one-use source ref.
+fn drive<T>(
+    run: &HostedRun<'_>,
+    attached: Option<u64>,
+    cancellation: &Cancellation,
+    workflow: &str,
+    inputs: &serde_json::Value,
+    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+) -> Result<T, WindowsHostedError> {
+    match attached {
+        None => with_pushed_source(run, cancellation, || {
+            dispatch(run, workflow, inputs, complete)
+        }),
+        Some(run_id) => retire_source(run, settle(run, run_id, complete)),
+    }
 }
 
 /// One hosted run: the workspace it is driven from and the pushed source
@@ -219,7 +297,7 @@ struct HostedRun<'a> {
 }
 
 /// Push the run's one-use source ref, run `operation` unless cancellation
-/// already arrived, and delete the ref whatever happened.
+/// already arrived, and retire the ref.
 fn with_pushed_source<T>(
     run: &HostedRun<'_>,
     cancellation: &Cancellation,
@@ -232,6 +310,18 @@ fn with_pushed_source<T>(
             operation()
         }
     });
+    retire_source(run, operation)
+}
+
+/// Delete the run's one-use source ref after `operation`, unless the client
+/// lost observation of a run that may still need it.
+fn retire_source<T>(
+    run: &HostedRun<'_>,
+    operation: Result<T, WindowsHostedError>,
+) -> Result<T, WindowsHostedError> {
+    if operation.as_ref().is_err_and(retains_provider_state) {
+        return operation;
+    }
     let cleanup = delete_source(run.root, run.source_ref);
     match (operation, cleanup) {
         (Ok(value), Ok(())) => Ok(value),
@@ -244,9 +334,14 @@ fn with_pushed_source<T>(
     }
 }
 
-/// Dispatch `workflow` at the run's source ref with `inputs`, complete the
-/// provider run through `complete`, cancel it on any other failure, and
-/// delete its artifact.
+/// Whether a failure leaves its provider run, artifacts, and source ref in
+/// place for a later attachment.
+fn retains_provider_state(error: &WindowsHostedError) -> bool {
+    matches!(error, WindowsHostedError::Detached { .. })
+}
+
+/// Dispatch `workflow` at the run's source ref with `inputs` and settle the
+/// provider run it starts.
 fn dispatch<T>(
     run: &HostedRun<'_>,
     workflow: &str,
@@ -283,10 +378,31 @@ fn dispatch<T>(
         .ok_or_else(|| {
             WindowsHostedError::ProviderResponse(format!("dispatch returned no run URL: {url:?}"))
         })?;
+    settle(run, run_id, complete)
+}
 
-    let operation = complete(run_id);
-    let operation = match operation {
+/// Complete the provider run through `complete`, cancel it on any other
+/// failure, and delete its artifacts. A run the client lost observation of
+/// keeps all of that for a later attachment.
+fn settle<T>(
+    run: &HostedRun<'_>,
+    run_id: u64,
+    complete: impl FnOnce(u64) -> Result<T, WindowsHostedError>,
+) -> Result<T, WindowsHostedError> {
+    let HostedRun {
+        root, repository, ..
+    } = *run;
+    let operation = match complete(run_id) {
+        Err(error) if retains_provider_state(&error) => return Err(error),
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
+        // A spent quota fails every provider read without saying anything
+        // about the run; keep it whole for a later attachment.
+        Err(error) if quota::spent_until(root).is_some() => {
+            return Err(WindowsHostedError::Detached {
+                run_id,
+                reason: Box::new(error),
+            });
+        }
         Err(error) => finish_run_cleanup(Err(error), cancel_run(root, repository, run_id)),
         success => success,
     };
@@ -636,15 +752,131 @@ fn watch_action(cancel_requested: bool, observation: WatchObservation) -> WatchA
     }
 }
 
+/// Watcher restarts admitted while the provider reports the run unfinished.
+const WATCH_RESUMES: u32 = 16;
+
+/// Seconds between watcher polls. Every poll spends shared provider API quota,
+/// and exhausting it ends every watcher on the account at once.
+const WATCH_INTERVAL_SECONDS: &str = "30";
+
+/// How one watcher ended without cancellation.
+enum WatchEnd {
+    Succeeded,
+    Exited(Option<i32>),
+}
+
+/// What the provider's run state asks of a client whose watcher exited
+/// unsuccessfully.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Resume {
+    Watch,
+    Complete,
+    Failed,
+    Detach,
+}
+
+fn resume_action(status: &str, conclusion: &str, resumes: u32) -> Resume {
+    match (status, conclusion) {
+        ("completed", "success") => Resume::Complete,
+        ("completed", _) => Resume::Failed,
+        _ if resumes < WATCH_RESUMES => Resume::Watch,
+        _ => Resume::Detach,
+    }
+}
+
+#[derive(Deserialize)]
+struct RunState {
+    status: String,
+    conclusion: Option<String>,
+}
+
+/// Observe the run to its end. A watcher exit is not the run's: the client
+/// asks the provider, restarts the watcher while the run is unfinished, waits
+/// out a spent provider quota, and detaches without touching the run once it
+/// cannot observe it otherwise.
 fn watch_run(
     root: &Path,
     repository: &str,
     run_id: u64,
     cancellation: &Cancellation,
 ) -> Result<(), WindowsHostedError> {
-    let launch = |source| WindowsHostedError::Launch {
-        program: "gh".to_owned(),
-        source,
+    let detached = |reason| WindowsHostedError::Detached {
+        run_id,
+        reason: Box::new(reason),
+    };
+    let mut resumes = 0;
+    loop {
+        let code = match watch_once(root, repository, run_id, cancellation)? {
+            WatchEnd::Succeeded => return Ok(()),
+            WatchEnd::Exited(code) => code,
+        };
+        let state = match run_state(root, repository, run_id) {
+            Ok(state) => state,
+            Err(error) => match quota::spent_until(root) {
+                Some(reset) => {
+                    quota::await_reset(root, repository, run_id, reset, cancellation)?;
+                    continue;
+                }
+                None => return Err(detached(error)),
+            },
+        };
+        let conclusion = state.conclusion.unwrap_or_default();
+        match resume_action(&state.status, &conclusion, resumes) {
+            Resume::Watch => resumes += 1,
+            Resume::Complete => return Ok(()),
+            Resume::Failed => {
+                return Err(WindowsHostedError::Command {
+                    operation: "workflow execution",
+                    code,
+                    stdout: String::new(),
+                    stderr: format!("provider run concluded {conclusion:?}"),
+                });
+            }
+            Resume::Detach => {
+                return Err(detached(WindowsHostedError::ProviderResponse(format!(
+                    "its watcher exited {} times while the run stayed {}",
+                    WATCH_RESUMES + 1,
+                    state.status
+                ))));
+            }
+        }
+    }
+}
+
+fn run_state(root: &Path, repository: &str, run_id: u64) -> Result<RunState, WindowsHostedError> {
+    let state = successful_text(
+        "workflow state",
+        command(
+            root,
+            "gh",
+            [
+                OsString::from("run"),
+                OsString::from("view"),
+                OsString::from(run_id.to_string()),
+                OsString::from("--repo"),
+                OsString::from(repository),
+                OsString::from("--json"),
+                OsString::from("status,conclusion"),
+            ],
+        )?,
+    )?;
+    serde_json::from_str(&state).map_err(WindowsHostedError::Decode)
+}
+
+/// Run one provider watcher until it exits or cancellation arrives; an
+/// explicit cancellation cancels the provider run.
+fn watch_once(
+    root: &Path,
+    repository: &str,
+    run_id: u64,
+    cancellation: &Cancellation,
+) -> Result<WatchEnd, WindowsHostedError> {
+    let launch = |source| WindowsHostedError::Detached {
+        run_id,
+        reason: Box::new(WindowsHostedError::Launch {
+            program: "gh".to_owned(),
+            source,
+        }),
     };
     let mut child = provider_command(root, "gh")
         .args([
@@ -654,6 +886,8 @@ fn watch_run(
             OsString::from("--repo"),
             OsString::from(repository),
             OsString::from("--compact"),
+            OsString::from("--interval"),
+            OsString::from(WATCH_INTERVAL_SECONDS),
             OsString::from("--exit-status"),
         ])
         .stdout(Stdio::null())
@@ -691,7 +925,7 @@ fn watch_run(
                     )));
                 }
             },
-            WatchAction::Complete => return Ok(()),
+            WatchAction::Complete => return Ok(WatchEnd::Succeeded),
             WatchAction::Cancel => {
                 stop_watch(&mut child)?;
                 cancel_run(root, repository, run_id)?;
@@ -699,14 +933,7 @@ fn watch_run(
                     run_id: Some(run_id),
                 });
             }
-            WatchAction::Failed(code) => {
-                return Err(WindowsHostedError::Command {
-                    operation: "workflow execution",
-                    code,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                });
-            }
+            WatchAction::Failed(code) => return Ok(WatchEnd::Exited(code)),
         }
     }
 }
@@ -1103,6 +1330,13 @@ pub enum WindowsHostedError {
     Cancelled {
         run_id: Option<u64>,
     },
+    /// The client lost observation of a provider run it left untouched.
+    Detached {
+        run_id: u64,
+        reason: Box<WindowsHostedError>,
+    },
+    /// No provider run is adoptable for this stage's attachment.
+    AttachRefused(String),
     Output(io::Error),
     RunOperationAndCleanup {
         operation: Box<WindowsHostedError>,
@@ -1177,6 +1411,13 @@ impl fmt::Display for WindowsHostedError {
             Self::Cancelled { run_id: None } => {
                 formatter.write_str("hosted execution was cancelled before provider dispatch")
             }
+            Self::Detached { run_id, reason } => write!(
+                formatter,
+                "lost observation of hosted provider run {run_id}: {reason}; the run, its artifacts, and its source ref remain for --attach {run_id}"
+            ),
+            Self::AttachRefused(detail) => {
+                write!(formatter, "hosted attachment refused: {detail}")
+            }
             Self::Output(source) => write!(formatter, "hosted output failed: {source}"),
             Self::RunOperationAndCleanup { operation, cleanup } => write!(
                 formatter,
@@ -1204,6 +1445,7 @@ impl Error for WindowsHostedError {
             | Self::Launch { source, .. }
             | Self::Output(source)
             | Self::Signal(source) => Some(source),
+            Self::Detached { reason, .. } => Some(reason),
             Self::OperationAndCleanup { operation, .. }
             | Self::RunOperationAndCleanup { operation, .. }
             | Self::ArtifactOperationAndCleanup { operation, .. } => Some(operation),
@@ -1213,135 +1455,4 @@ impl Error for WindowsHostedError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        Artifact, ArtifactCleanupAction, ArtifactInventory, WatchAction, WatchObservation,
-        WindowsHostedError, admit_public_attestation_visibility, artifact_cleanup_action,
-        finish_artifact_cleanup, finish_run_cleanup, watch_action,
-    };
-
-    #[test]
-    fn release_attestation_requires_public_repository_visibility() {
-        assert!(admit_public_attestation_visibility("owner/repo", "public").is_ok());
-        assert!(matches!(
-            admit_public_attestation_visibility("owner/repo", "private"),
-            Err(WindowsHostedError::PublicAttestationRequired {
-                repository,
-                visibility,
-            }) if repository == "owner/repo" && visibility == "private"
-        ));
-    }
-
-    #[test]
-    fn cancellation_preempts_every_provider_watch_observation() {
-        for observation in [
-            WatchObservation::Running,
-            WatchObservation::Exited {
-                success: true,
-                code: Some(0),
-            },
-            WatchObservation::Exited {
-                success: false,
-                code: Some(1),
-            },
-        ] {
-            assert_eq!(watch_action(true, observation), WatchAction::Cancel);
-        }
-    }
-
-    #[test]
-    fn provider_watch_outcomes_remain_typed_without_cancellation() {
-        assert_eq!(
-            watch_action(false, WatchObservation::Running),
-            WatchAction::Wait
-        );
-        assert_eq!(
-            watch_action(
-                false,
-                WatchObservation::Exited {
-                    success: true,
-                    code: Some(0),
-                }
-            ),
-            WatchAction::Complete
-        );
-        assert_eq!(
-            watch_action(
-                false,
-                WatchObservation::Exited {
-                    success: false,
-                    code: Some(23),
-                }
-            ),
-            WatchAction::Failed(Some(23))
-        );
-    }
-
-    #[test]
-    fn artifact_inventory_deletes_every_run_artifact() {
-        let inventory = |ids: &[u64]| ArtifactInventory {
-            artifacts: ids.iter().map(|id| Artifact { id: *id }).collect(),
-        };
-
-        assert_eq!(
-            artifact_cleanup_action(&inventory(&[])),
-            ArtifactCleanupAction::Complete
-        );
-        assert_eq!(
-            artifact_cleanup_action(&inventory(&[42])),
-            ArtifactCleanupAction::Delete(vec![42])
-        );
-        assert_eq!(
-            artifact_cleanup_action(&inventory(&[42, 43])),
-            ArtifactCleanupAction::Delete(vec![42, 43])
-        );
-    }
-
-    #[test]
-    fn artifact_cleanup_preserves_operation_and_cleanup_failures() {
-        let completed = finish_artifact_cleanup(Ok(7_u8), Ok(()));
-        assert_eq!(completed.expect("successful cleanup retains result"), 7);
-
-        let operation_failed = finish_artifact_cleanup::<()>(
-            Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
-            Ok(()),
-        );
-        assert!(matches!(
-            operation_failed,
-            Err(WindowsHostedError::Cancelled { run_id: Some(42) })
-        ));
-
-        let cleanup_failed =
-            finish_artifact_cleanup(Ok(()), Err(WindowsHostedError::PolicyIdentity));
-        assert!(matches!(
-            cleanup_failed,
-            Err(WindowsHostedError::PolicyIdentity)
-        ));
-
-        let both_failed = finish_artifact_cleanup::<()>(
-            Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
-            Err(WindowsHostedError::PolicyIdentity),
-        );
-        assert!(matches!(
-            both_failed,
-            Err(WindowsHostedError::ArtifactOperationAndCleanup {
-                operation,
-                cleanup,
-            }) if matches!(*operation, WindowsHostedError::Cancelled { run_id: Some(42) })
-                && matches!(*cleanup, WindowsHostedError::PolicyIdentity)
-        ));
-
-        let run_and_cleanup_failed = finish_run_cleanup::<()>(
-            Err(WindowsHostedError::Cancelled { run_id: Some(42) }),
-            Err(WindowsHostedError::PolicyIdentity),
-        );
-        assert!(matches!(
-            run_and_cleanup_failed,
-            Err(WindowsHostedError::RunOperationAndCleanup {
-                operation,
-                cleanup,
-            }) if matches!(*operation, WindowsHostedError::Cancelled { run_id: Some(42) })
-                && matches!(*cleanup, WindowsHostedError::PolicyIdentity)
-        ));
-    }
-}
+mod tests;

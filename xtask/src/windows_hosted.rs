@@ -4,18 +4,21 @@ use std::io::Write;
 use std::path::Path;
 
 pub use windows_execution::hosted::client::{
-    HostedExecution, HostedSource, WindowsHostedError, windows_hosted,
+    Attach, HostedExecution, HostedSource, WindowsHostedError, windows_hosted,
 };
 
-/// Stage the signed macOS release target on one fresh provider-hosted machine
-/// and publish its provider-attested files into `dist/stage`.
+/// Stage the signed macOS release target on one fresh provider-hosted machine,
+/// or re-enter the provider run `attach` names, and publish its
+/// provider-attested files into `dist/stage`.
 pub fn macos_hosted_stage(
     archive: &Path,
+    attach: Option<Attach>,
     proof_container: &str,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let stage = windows_execution::hosted::client::macos_hosted_stage(
         archive,
+        attach,
         proof_container,
         Path::new("dist/stage"),
     )?;
@@ -28,15 +31,19 @@ pub fn macos_hosted_stage(
 }
 
 /// Stage the Linux release target on one fresh provider-hosted machine from
-/// the release source archive at `archive`, writing the retained stage log to
-/// `output` and publishing the staged files into `dist/stage` when it exits
-/// zero.
+/// the release source archive at `archive`, or re-enter the provider run
+/// `attach` names, writing the retained stage log to `output` and publishing
+/// the staged files into `dist/stage` when it exits zero.
 pub fn linux_hosted_stage(
     archive: &Path,
+    attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    let stage =
-        windows_execution::hosted::client::linux_hosted_stage(archive, Path::new("dist/stage"))?;
+    let stage = windows_execution::hosted::client::linux_hosted_stage(
+        archive,
+        attach,
+        Path::new("dist/stage"),
+    )?;
     output
         .write_all(&stage.log)
         .map_err(WindowsHostedError::Output)?;
@@ -57,13 +64,15 @@ pub fn linux_hosted_stage(
 }
 
 /// Stage the Windows release target on one fresh provider-hosted machine from
-/// the release source archive at `archive`.
+/// the release source archive at `archive`, or re-enter the provider run
+/// `attach` names.
 ///
 /// With `app_only`, the guest builds only the release app through the same
 /// release executor and stops before the native build; no stage output is
 /// retrieved.
 pub fn windows_hosted_stage(
     archive: &Path,
+    attach: Option<Attach>,
     proof_container: &str,
     app_only: bool,
     output: &mut impl Write,
@@ -93,6 +102,7 @@ pub fn windows_hosted_stage(
         vec![command],
         (!app_only).then_some(Path::new("dist/stage")),
         HostedSource::Archive(archive),
+        attach,
     )?;
     let first = &execution.outputs[0];
     output

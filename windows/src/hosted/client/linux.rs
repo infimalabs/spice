@@ -14,10 +14,9 @@ use sha2::{Digest as _, Sha256};
 use wire::Domain;
 
 use super::{
-    Cancellation, HostedRun, HostedSource, POLICY, Policy, Scratch, WindowsHostedError, challenge,
-    digest_file, dispatch, download_artifact, publish_artifacts,
-    require_public_attestation_repository, source, verify_attestation, watch_run,
-    with_pushed_source, workspace_root,
+    Attach, Bound, Cancellation, HostedSource, POLICY, Policy, Scratch, WindowsHostedError,
+    digest_file, download_artifact, drive, publish_artifacts,
+    require_public_attestation_repository, verify_attestation, watch_run, workspace_root,
 };
 
 const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
@@ -59,15 +58,18 @@ struct LinuxArtifact {
 }
 
 /// Stage the Linux release target on one fresh provider-hosted machine from
-/// the source archive at `archive`, publishing its staged files below
-/// `destination` when the stage exits zero.
+/// the source archive at `archive`, or re-enter the provider run `attach`
+/// names for it, publishing its staged files below `destination` when the
+/// stage exits zero.
 ///
 /// # Errors
 ///
-/// Returns provider, attestation, admission, and publication failures. A
-/// stage that ran and failed is an `Ok` outcome carrying its exit and log.
+/// Returns provider, attestation, attachment, admission, and publication
+/// failures. A stage that ran and failed is an `Ok` outcome carrying its exit
+/// and log.
 pub fn linux_hosted_stage(
     archive: &Path,
+    attach: Option<Attach>,
     destination: &Path,
 ) -> Result<LinuxHostedStage, WindowsHostedError> {
     require_public_attestation_repository()?;
@@ -76,26 +78,26 @@ pub fn linux_hosted_stage(
     let root = workspace_root()?;
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
-    let challenge = challenge()?;
-    let source_ref = format!("hosted-{}", &challenge[..24]);
-    let source = source::prepare(
+    let bound = Bound::new(
         &root,
         scratch.path(),
-        &challenge,
+        &policy.repository,
+        WORKFLOW_PATH,
         HostedSource::Archive(archive),
+        attach,
     )?;
-    let source_archive = source.archive.to_string();
+    let challenge = &bound.challenge;
+    let source_archive = bound.source.archive.to_string();
     let cancellation = Cancellation::install()?;
-    let run = HostedRun {
-        root: &root,
-        scratch: scratch.path(),
-        repository: &policy.repository,
-        source_ref: &source_ref,
-        source_commit: &source.commit,
-    };
+    let run = bound.run(&root, scratch.path(), &policy.repository);
     let inputs = serde_json::json!({ "challenge": challenge, "source": source_archive });
-    with_pushed_source(&run, &cancellation, || {
-        dispatch(&run, WORKFLOW_PATH, &inputs, |run_id| {
+    drive(
+        &run,
+        bound.attached,
+        &cancellation,
+        WORKFLOW_PATH,
+        &inputs,
+        |run_id| {
             watch_run(run.root, run.repository, run_id, &cancellation)?;
             let artifact = download_artifact(&run, run_id, &format!("linux-{challenge}"))?;
             let result_path = artifact.join("result.json");
@@ -106,7 +108,7 @@ pub fn linux_hosted_stage(
             })?;
             let result: LinuxResult =
                 serde_json::from_slice(&bytes).map_err(WindowsHostedError::Decode)?;
-            admit_result(&result, &challenge, &source_archive, run_id)?;
+            admit_result(&result, challenge, &source_archive, run_id)?;
             let log_path = artifact.join("stage.log");
             let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
                 path: log_path.clone(),
@@ -127,8 +129,8 @@ pub fn linux_hosted_stage(
                 runner_image: format!("{} {}", result.image_os, result.image_version),
                 log,
             })
-        })
-    })
+        },
+    )
 }
 
 fn admit_result(

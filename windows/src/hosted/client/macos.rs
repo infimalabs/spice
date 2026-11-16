@@ -9,9 +9,9 @@ use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use super::{
-    Cancellation, HostedRun, HostedSource, Scratch, WindowsHostedError, challenge, dispatch,
-    download_artifact, publish_artifacts, require_public_attestation_repository, source,
-    verify_attestation, watch_run, with_pushed_source, workspace_root,
+    Attach, Bound, Cancellation, HostedSource, Scratch, WindowsHostedError, download_artifact,
+    drive, publish_artifacts, require_public_attestation_repository, verify_attestation, watch_run,
+    workspace_root,
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
@@ -63,13 +63,16 @@ impl Policy {
 }
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine
-/// from `archive`, publishing the admitted stage below `destination`.
+/// from `archive`, or re-enter the provider run `attach` names for it,
+/// publishing the admitted stage below `destination`.
 ///
 /// # Errors
 ///
-/// Returns provider, attestation, stage-admission, and publication failures.
+/// Returns provider, attestation, attachment, stage-admission, and
+/// publication failures.
 pub fn macos_hosted_stage(
     archive: &Path,
+    attach: Option<Attach>,
     proof_container: &str,
     destination: &Path,
 ) -> Result<MacosHostedStage, WindowsHostedError> {
@@ -79,31 +82,32 @@ pub fn macos_hosted_stage(
     let root = workspace_root()?;
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
-    let challenge = challenge()?;
-    let source_ref = format!("hosted-{}", &challenge[..24]);
-    let source = source::prepare(
+    let bound = Bound::new(
         &root,
         scratch.path(),
-        &challenge,
+        &policy.repository,
+        WORKFLOW_PATH,
         HostedSource::Archive(archive),
+        attach,
     )?;
+    let challenge = &bound.challenge;
+    let source = &bound.source;
     let source_archive = source.archive.to_string();
     let cancellation = Cancellation::install()?;
-    let run = HostedRun {
-        root: &root,
-        scratch: scratch.path(),
-        repository: &policy.repository,
-        source_ref: &source_ref,
-        source_commit: &source.commit,
-    };
+    let run = bound.run(&root, scratch.path(), &policy.repository);
     let inputs = serde_json::json!({
         "challenge": challenge,
         "source": source.commit,
         "archive": source_archive,
         "proof_container": proof_container,
     });
-    with_pushed_source(&run, &cancellation, || {
-        dispatch(&run, WORKFLOW_PATH, &inputs, |run_id| {
+    drive(
+        &run,
+        bound.attached,
+        &cancellation,
+        WORKFLOW_PATH,
+        &inputs,
+        |run_id| {
             watch_run(run.root, run.repository, run_id, &cancellation)?;
             let stage = download_artifact(&run, run_id, &format!("darwin-stage-{challenge}"))?;
             let artifacts = admit_stage(
@@ -124,8 +128,8 @@ pub fn macos_hosted_stage(
                     policy.image.provider_os, policy.image.version, policy.image.architecture
                 ),
             })
-        })
-    })
+        },
+    )
 }
 
 fn admit_stage(
