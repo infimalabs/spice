@@ -20,6 +20,22 @@ const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
 /// archive whose exact tree is the workspace.
 const SOURCE_ARCHIVE: &str = "SPICE_SOURCE_ARCHIVE"; // env-policy: allow
 
+/// The environment names that hand `stage-target` the provider-built canvas
+/// every native release target links unchanged, and its app generation.
+const RELEASE_CANVAS: &str = "SPICE_RELEASE_CANVAS"; // env-policy: allow
+const RELEASE_APP: &str = "SPICE_RELEASE_APP"; // env-policy: allow
+
+/// Where the provider-built canvas is mounted read-only inside the image.
+const CANVAS_MOUNT: &str = "/release-inputs/canvas.zip";
+
+/// The provider-built canvas a delivered stage links, and the app generation
+/// it carries.
+#[derive(Clone, Copy, Debug)]
+pub struct ProviderCanvas<'a> {
+    pub path: &'a Path,
+    pub app: &'a str,
+}
+
 /// One completed staging run: the in-image command's exit and both streams.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReleaseStage {
@@ -43,19 +59,21 @@ impl Container {
     ///
     /// Without `delivered`, the app generation is read from the workspace as
     /// already staged, never compiled here. With `delivered`, the workspace is
-    /// the exact tree of that source archive identity: the image builds the
-    /// app itself, offline, into its own scratch, so no host toolchain
-    /// touches any part of the release.
+    /// the exact tree of that source archive identity. A `canvas` is mounted
+    /// read-only and linked unchanged; without one the image builds the app
+    /// itself, offline, into its own scratch, so no host toolchain touches any
+    /// part of the release.
     ///
     /// # Errors
     ///
-    /// Refuses a Git common directory or stage directory the OCI mount grammar
-    /// cannot represent, and returns runtime launch, wait, and capture failures
-    /// or a run the deadline or a cancellation ended.
+    /// Refuses a Git common directory, stage directory, or canvas path the OCI
+    /// mount grammar cannot represent, and returns runtime launch, wait, and
+    /// capture failures or a run the deadline or a cancellation ended.
     pub fn stage_release(
         &self,
         git_common: &Path,
         delivered: Option<&str>,
+        canvas: Option<ProviderCanvas<'_>>,
     ) -> Result<ReleaseStage, ContainerError> {
         let stage = self.workspace.join(STAGE);
         fs::create_dir_all(&stage).map_err(|source| ContainerError::InspectWorkspace {
@@ -118,6 +136,20 @@ impl Container {
         ]);
         if let Some(delivered) = delivered {
             runtime_arguments.extend(["--env".to_owned(), format!("{SOURCE_ARCHIVE}={delivered}")]);
+        }
+        if let Some(canvas) = canvas {
+            let path = representable(canvas.path)?;
+            runtime_arguments.extend([
+                "--mount".to_owned(),
+                format!(
+                    "type=bind,source={},destination={CANVAS_MOUNT},readonly",
+                    path.display()
+                ),
+                "--env".to_owned(),
+                format!("{RELEASE_CANVAS}={CANVAS_MOUNT}"),
+                "--env".to_owned(),
+                format!("{RELEASE_APP}={}", canvas.app),
+            ]);
         }
         runtime_arguments.extend([
             self.image.to_string(),
