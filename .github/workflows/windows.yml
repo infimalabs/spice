@@ -111,6 +111,29 @@ jobs:
           git config user.name spice-hosted
           git config user.email hosted@invalid
           git add -A -f -- .
+          @'
+          from pathlib import PurePosixPath
+          import subprocess
+          import sys
+          import tarfile
+
+          executable = []
+          with tarfile.open(sys.argv[1], "r:") as source:
+              for member in source:
+                  path = PurePosixPath(member.name)
+                  if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0] != "spice":
+                      raise SystemExit(f"invalid source archive path: {member.name}")
+                  if member.isfile() and member.mode & 0o111:
+                      relative = PurePosixPath(*path.parts[1:])
+                      if not relative.parts:
+                          raise SystemExit(f"invalid executable source path: {member.name}")
+                      executable.append(relative.as_posix())
+          if executable:
+              subprocess.run(
+                  ["git", "update-index", "--chmod=+x", "--", *executable],
+                  check=True,
+              )
+          '@ | python - $archive
           git commit -q -m "canonical source $($request.source_commit)"
           $tree = python -c "import hashlib,subprocess; print(hashlib.sha256(subprocess.check_output(['git','ls-tree','-r','-z','--full-tree','HEAD'])).hexdigest())"
           if ($tree.Trim() -cne $request.tree) { throw "canonical source tree drifted: $tree" }
