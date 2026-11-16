@@ -15,7 +15,7 @@ use serde::de::DeserializeOwned;
 
 use super::source::PreparedSource;
 use super::transport::{self, Transport};
-use super::{WindowsHostedError, command, successful_text};
+use super::{HostedRun, WindowsHostedError, command, successful_text};
 
 /// Which provider run a hosted stage re-enters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,29 +331,30 @@ pub(super) fn admit_branch_workflow(
 
 /// Admit one run's workflow identity before trusting its attestations.
 pub(super) fn workflow_commit(
-    root: &Path,
-    repository: &str,
-    branch: &str,
+    run: &HostedRun<'_>,
     workflow: &str,
-    challenge: &str,
-    expected_blob: &str,
     run_id: u64,
 ) -> Result<String, WindowsHostedError> {
-    let run: ProviderRun = api(root, format!("repos/{repository}/actions/runs/{run_id}"))?;
-    let observed = admit_run(&run, workflow, branch, RUN_TITLE_PREFIX)
+    let provider: ProviderRun = api(
+        run.root,
+        format!("repos/{}/actions/runs/{run_id}", run.repository),
+    )?;
+    let observed = admit_run(&provider, workflow, run.branch, run.run_title_prefix)
         .map_err(WindowsHostedError::ProviderResponse)?;
-    if observed != challenge {
+    if observed != run.challenge {
         return Err(WindowsHostedError::ProviderResponse(format!(
-            "provider run {run_id} records challenge {observed}, not {challenge}"
+            "provider run {run_id} records challenge {observed}, not {}",
+            run.challenge
         )));
     }
-    let blob = workflow_blob(root, repository, workflow, &run.head_sha)?;
-    if blob != expected_blob {
+    let blob = workflow_blob(run.root, run.repository, workflow, &provider.head_sha)?;
+    if blob != run.workflow_blob {
         return Err(WindowsHostedError::ProviderResponse(format!(
-            "provider run {run_id} used workflow blob {blob}, not {expected_blob}"
+            "provider run {run_id} used workflow blob {blob}, not {}",
+            run.workflow_blob
         )));
     }
-    Ok(run.head_sha)
+    Ok(provider.head_sha)
 }
 
 fn select(
@@ -475,6 +476,26 @@ mod tests {
             challenge_from_title(&format!("Release inputs {CHALLENGE}"), "Release inputs "),
             Some(CHALLENGE)
         );
+    }
+    #[test]
+    fn workflow_title_prefix_is_admitted_at_the_run_identity_boundary() {
+        let release_workflow = crate::hosted::release_inputs::WORKFLOW;
+        let release_prefix = crate::hosted::release_inputs::RUN_TITLE_PREFIX;
+        let release = ProviderRun {
+            path: release_workflow.to_owned(),
+            display_title: format!("{release_prefix}{CHALLENGE}"),
+            ..run(1, "completed")
+        };
+        assert_eq!(
+            admit_run(&release, release_workflow, BRANCH, release_prefix).as_deref(),
+            Ok(CHALLENGE)
+        );
+        assert!(admit_run(&release, release_workflow, BRANCH, RUN_TITLE_PREFIX).is_err());
+        let cross_workflow = ProviderRun {
+            path: WORKFLOW.to_owned(),
+            ..release
+        };
+        assert!(admit_run(&cross_workflow, release_workflow, BRANCH, release_prefix).is_err());
     }
 
     #[test]

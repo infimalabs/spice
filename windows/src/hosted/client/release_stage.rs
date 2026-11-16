@@ -92,6 +92,7 @@ pub fn windows_release_commands_into(
         branch: &policy.branch,
         challenge: &challenge,
         workflow_blob: &source.workflow_blob,
+        run_title_prefix: attach::RUN_TITLE_PREFIX,
         transport: None,
     };
     let request_json = request
