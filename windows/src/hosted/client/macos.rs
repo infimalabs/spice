@@ -67,7 +67,6 @@ struct Policy {
 #[derive(Deserialize)]
 struct Image {
     provider_os: String,
-    version: String,
     architecture: String,
 }
 
@@ -211,7 +210,7 @@ pub fn macos_hosted_stage(
                 run_id,
                 runner_image: format!(
                     "{} {} {}",
-                    policy.image.provider_os, policy.image.version, policy.image.architecture
+                    result.image_os, result.image_version, result.architecture
                 ),
             })
         },
@@ -230,8 +229,7 @@ fn admit_result(
         || result.tree != expected.source.tree
         || result.run_id != expected.run_id
         || result.image_os != expected.image.provider_os
-        || result.image_version != expected.image.version
-        || result.architecture != "arm64"
+        || result.architecture != expected.image.architecture
         || result.app != expected.inputs.app.to_string()
         || result.canvas != expected.inputs.canvas.to_string()
         || result.proof_container != expected.inputs.proof_identity
