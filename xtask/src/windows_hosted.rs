@@ -1,64 +1,131 @@
-//! GitHub-hosted disposable Windows execution over a canonical source archive.
+//! GitHub-hosted disposable native release execution with durable resume.
 
+use std::error::Error;
+use std::fmt;
 use std::io::Write;
 use std::path::Path;
 
+use crate::hosted_release_session::{
+    NativeTarget, ReleaseSession, SessionError, terminal_provider_failure,
+};
 pub use windows_execution::hosted::client::{
     Attach, HostedExecution, ReleaseInputs, WindowsHostedError, windows_hosted,
 };
+use windows_execution::hosted::client::{HostedRunControl, release_workflow_blobs};
 pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
     windows_execution::hosted::client::release_inputs(Some(attach))
 }
-/// Dispatch all native release stages concurrently from one admitted provider
-/// preflight.
+/// Dispatch or resume all native release stages concurrently from one admitted
+/// provider preflight. Every run binding lands in the Git-common session before
+/// its watcher starts.
 pub fn hosted_release_stage(
     inputs_run: Attach,
     output: &mut impl Write,
     error_output: &mut impl Write,
-) -> Result<(), WindowsHostedError> {
-    let inputs = hosted_release_inputs(inputs_run)?;
-    let (linux, macos, windows) = std::thread::scope(|scope| {
+) -> Result<(), HostedReleaseError> {
+    let Attach::Run(inputs_run) = inputs_run else {
+        return Err(HostedReleaseError::Refused(
+            "aggregate hosted release requires one exact preflight run".to_owned(),
+        ));
+    };
+    let workflows = release_workflow_blobs()?;
+    let inputs = hosted_release_inputs(Attach::Run(inputs_run))?;
+    let session = ReleaseSession::open(inputs_run, workflows, &inputs)?;
+    writeln!(
+        output,
+        "hosted release session {}",
+        session.path().display()
+    )
+    .map_err(WindowsHostedError::Output)?;
+
+    let linux_attach = session.attachment(NativeTarget::Linux)?;
+    let macos_attach = session.attachment(NativeTarget::Macos)?;
+    let windows_attach = session.attachment(NativeTarget::Windows)?;
+    let linux_recorder = session.recorder(NativeTarget::Linux);
+    let macos_recorder = session.recorder(NativeTarget::Macos);
+    let windows_recorder = session.recorder(NativeTarget::Windows);
+
+    let outcomes = std::thread::scope(|scope| {
         let linux = scope.spawn(|| {
             let mut output = Vec::new();
-            linux_hosted_stage(&inputs, None, &mut output).map(|()| output)
+            let control = HostedRunControl::resumable(&linux_recorder);
+            let result = linux_hosted_stage_controlled(&inputs, linux_attach, control, &mut output);
+            PlatformOutcome::new(NativeTarget::Linux, output, Vec::new(), result)
         });
         let macos = scope.spawn(|| {
             let mut output = Vec::new();
-            macos_hosted_stage(&inputs, None, &mut output).map(|()| output)
+            let control = HostedRunControl::resumable(&macos_recorder);
+            let result = macos_hosted_stage_controlled(&inputs, macos_attach, control, &mut output);
+            PlatformOutcome::new(NativeTarget::Macos, output, Vec::new(), result)
         });
         let windows = scope.spawn(|| {
             let mut output = Vec::new();
             let mut error = Vec::new();
-            windows_hosted_stage(&inputs, None, &mut output, &mut error)
-                .and_then(|execution| {
-                    (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
-                        WindowsHostedError::ProviderResponse(format!(
-                            "hosted Windows staging exited {}",
-                            execution.exit_code()
-                        ))
-                    })
+            let control = HostedRunControl::resumable(&windows_recorder);
+            let result = windows_hosted_stage_controlled(
+                &inputs,
+                windows_attach,
+                control,
+                &mut output,
+                &mut error,
+            )
+            .and_then(|execution| {
+                (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                    WindowsHostedError::ProviderResponse(format!(
+                        "hosted Windows staging exited {}",
+                        execution.exit_code()
+                    ))
                 })
-                .map(|()| (output, error))
+            });
+            PlatformOutcome::new(NativeTarget::Windows, output, error, result)
         });
-        (
+        [
             linux.join().expect("Linux hosted stage panicked"),
             macos.join().expect("macOS hosted stage panicked"),
             windows.join().expect("Windows hosted stage panicked"),
-        )
+        ]
     });
-    output
-        .write_all(&linux?)
-        .map_err(WindowsHostedError::Output)?;
-    output
-        .write_all(&macos?)
-        .map_err(WindowsHostedError::Output)?;
-    let (windows_output, windows_error) = windows?;
-    output
-        .write_all(&windows_output)
-        .map_err(WindowsHostedError::Output)?;
-    error_output
-        .write_all(&windows_error)
-        .map_err(WindowsHostedError::Output)
+
+    let mut failures = Vec::new();
+    for outcome in outcomes {
+        output
+            .write_all(&outcome.output)
+            .map_err(WindowsHostedError::Output)?;
+        error_output
+            .write_all(&outcome.error_output)
+            .map_err(WindowsHostedError::Output)?;
+        match outcome.result {
+            Ok(()) => {
+                if let Err(error) = session.succeeded(outcome.target) {
+                    failures.push(format!("{} session record: {error}", outcome.target.name()));
+                }
+                writeln!(output, "hosted {} stage succeeded", outcome.target.name())
+                    .map_err(WindowsHostedError::Output)?;
+            }
+            Err(error) => {
+                let detail = error.to_string();
+                if let Err(error) = session.failed(
+                    outcome.target,
+                    terminal_provider_failure(&error) || detail.contains(" staging exited "),
+                    detail.clone(),
+                ) {
+                    failures.push(format!("{} session record: {error}", outcome.target.name()));
+                }
+                writeln!(
+                    error_output,
+                    "hosted {} stage failed: {detail}",
+                    outcome.target.name()
+                )
+                .map_err(WindowsHostedError::Output)?;
+                failures.push(format!("{}: {detail}", outcome.target.name()));
+            }
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(HostedReleaseError::Platform(failures))
+    }
 }
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine,
@@ -69,10 +136,20 @@ pub fn macos_hosted_stage(
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    let stage = windows_execution::hosted::client::macos_hosted_stage(
+    macos_hosted_stage_controlled(inputs, attach, HostedRunControl::default(), output)
+}
+
+fn macos_hosted_stage_controlled(
+    inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    control: HostedRunControl<'_>,
+    output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let stage = windows_execution::hosted::client::macos_hosted_stage_controlled(
         inputs,
         attach,
         Path::new("dist/stage"),
+        control,
     )?;
     writeln!(
         output,
@@ -91,10 +168,20 @@ pub fn linux_hosted_stage(
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    let stage = windows_execution::hosted::client::linux_hosted_stage(
+    linux_hosted_stage_controlled(inputs, attach, HostedRunControl::default(), output)
+}
+
+fn linux_hosted_stage_controlled(
+    inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    control: HostedRunControl<'_>,
+    output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let stage = windows_execution::hosted::client::linux_hosted_stage_controlled(
         inputs,
         attach,
         Path::new("dist/stage"),
+        control,
     )?;
     output
         .write_all(&stage.log)
@@ -126,6 +213,22 @@ pub fn windows_hosted_stage(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
+    windows_hosted_stage_controlled(
+        inputs,
+        attach,
+        HostedRunControl::default(),
+        output,
+        error_output,
+    )
+}
+
+fn windows_hosted_stage_controlled(
+    inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    control: HostedRunControl<'_>,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<HostedExecution, WindowsHostedError> {
     windows_execution::hosted::client::require_public_attestation_repository()?;
     let arguments = vec![
         "run".to_owned(),
@@ -143,11 +246,12 @@ pub fn windows_hosted_stage(
         program: "@cargo".to_owned(),
         arguments,
     };
-    let execution = windows_execution::hosted::client::windows_release_commands_into(
+    let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
         vec![command],
         Path::new("dist/stage"),
         inputs,
         attach,
+        control,
     )?;
     let first = &execution.outputs[0];
     output
@@ -157,4 +261,65 @@ pub fn windows_hosted_stage(
         .write_all(&first.stderr)
         .map_err(WindowsHostedError::Output)?;
     Ok(execution)
+}
+
+struct PlatformOutcome {
+    target: NativeTarget,
+    output: Vec<u8>,
+    error_output: Vec<u8>,
+    result: Result<(), WindowsHostedError>,
+}
+
+impl PlatformOutcome {
+    fn new(
+        target: NativeTarget,
+        output: Vec<u8>,
+        error_output: Vec<u8>,
+        result: Result<(), WindowsHostedError>,
+    ) -> Self {
+        Self {
+            target,
+            output,
+            error_output,
+            result,
+        }
+    }
+}
+
+/// Aggregate hosted release session failure.
+#[derive(Debug)]
+pub enum HostedReleaseError {
+    Hosted(WindowsHostedError),
+    Session(String),
+    Refused(String),
+    Platform(Vec<String>),
+}
+
+impl fmt::Display for HostedReleaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hosted(source) => source.fmt(formatter),
+            Self::Session(detail) => formatter.write_str(detail),
+            Self::Refused(detail) => formatter.write_str(detail),
+            Self::Platform(failures) => write!(
+                formatter,
+                "hosted release stages failed: {}",
+                failures.join("; ")
+            ),
+        }
+    }
+}
+
+impl Error for HostedReleaseError {}
+
+impl From<WindowsHostedError> for HostedReleaseError {
+    fn from(source: WindowsHostedError) -> Self {
+        Self::Hosted(source)
+    }
+}
+
+impl From<SessionError> for HostedReleaseError {
+    fn from(source: SessionError) -> Self {
+        Self::Session(source.to_string())
+    }
 }

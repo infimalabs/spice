@@ -349,9 +349,16 @@ version on every run.
 **Invariant —** Hosted release staging starts with one successful
 `release-inputs.yml` preflight, then dispatches Linux, Darwin, and Windows
 concurrently against that pinned run. `spice dev xtask -- stage-hosted-release
-INPUTS_RUN` performs that fan-out. Each platform remains independently
-dispatchable with `stage-target … --hosted --release-inputs INPUTS_RUN`, and
-may re-enter its own native run with `--attach RUN_ID`.
+INPUTS_RUN` owns one Git-common release-session record for that exact preflight.
+The record binds the source and release-input identities, all four workflow
+blobs, every native challenge and run, and its last admitted outcome. Repeating
+the command attaches to recorded healthy or successful runs and dispatches only
+a missing target or a target whose provider run ended in failure. It reports
+all three outcomes before failing, so one failed platform never hides or
+redispatches successful siblings. A changed bound identity refuses before a
+provider dispatch. Each platform remains independently dispatchable with
+`stage-target … --hosted --release-inputs INPUTS_RUN`, and may re-enter its own
+native run with `--attach RUN_ID`.
 
 The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
 workflow downloads the preflight artifacts, admits their signed source, app,

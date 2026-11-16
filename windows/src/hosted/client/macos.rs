@@ -15,7 +15,7 @@ use super::{
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
-const WORKFLOW_PATH: &str = ".github/workflows/macos.yml";
+pub(super) const WORKFLOW_PATH: &str = ".github/workflows/macos.yml";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
 const RESULT_PATH: &str = "result.json";
@@ -77,6 +77,12 @@ struct Toolchain {
 }
 
 impl Policy {
+    fn load() -> Result<Self, WindowsHostedError> {
+        let policy: Self = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
+        policy.admit()?;
+        Ok(policy)
+    }
+
     fn admit(&self) -> Result<(), WindowsHostedError> {
         if self.schema != 1
             || self.provider != super::super::GITHUB_PROVIDER
@@ -92,19 +98,28 @@ impl Policy {
 /// Stage the signed macOS release target on one fresh provider-hosted machine
 /// from `archive`, or re-enter the provider run `attach` names for it,
 /// publishing the admitted stage below `destination`.
-///
-/// # Errors
-///
-/// Returns provider, attestation, attachment, stage-admission, and
-/// publication failures.
 pub fn macos_hosted_stage(
     release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
     destination: &Path,
 ) -> Result<MacosHostedStage, WindowsHostedError> {
+    macos_hosted_stage_controlled(
+        release_inputs,
+        attach,
+        destination,
+        super::HostedRunControl::default(),
+    )
+}
+
+/// Stage macOS while recording the exact provider run for aggregate resume.
+pub fn macos_hosted_stage_controlled(
+    release_inputs: &ReleaseInputs,
+    attach: Option<Attach>,
+    destination: &Path,
+    control: super::HostedRunControl<'_>,
+) -> Result<MacosHostedStage, WindowsHostedError> {
     require_public_attestation_repository()?;
-    let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
-    policy.admit()?;
+    let policy = Policy::load()?;
     let root = workspace_root()?;
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
@@ -167,6 +182,7 @@ pub fn macos_hosted_stage(
         &cancellation,
         WORKFLOW_PATH,
         inputs,
+        control,
         |authority| {
             watch_run(run.root, run.repository, authority, &cancellation)?;
             let run_id = authority.run_id();
