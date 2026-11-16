@@ -79,6 +79,35 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/stage.log"
           echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/stage.exit"
 
+      - name: Prove staged Linux payload in its exact image
+        env:
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -uo pipefail
+          : > "$RUNNER_TEMP/proof.log"
+          if [[ "$(cat "$RUNNER_TEMP/stage.exit")" != 0 ]]; then
+            echo 125 > "$RUNNER_TEMP/proof.exit"
+            exit 0
+          fi
+          target=x86_64-unknown-linux-musl
+          payload="dist/stage/targets/$target/payload.json"
+          read -r digest mode < <(jq -r --arg path spice \
+            '.inventory[] | select(.path == $path) | "\(.digest) \(.mode)"' "$payload")
+          [[ -n "$digest" && -n "$mode" ]] \
+            || { echo "staged Linux payload names no executable" >&2; exit 1; }
+          object="$(printf '%s-%04o' "$digest" "$mode")"
+          executable="dist/stage/objects/$object"
+          "$executable" proof --target "$target" 2>&1 | tee "$RUNNER_TEMP/proof.log"
+          code="${PIPESTATUS[0]}"
+          echo "$code" > "$RUNNER_TEMP/proof.exit"
+          if [[ "$code" == 0 ]]; then
+            common="$(git rev-parse --git-common-dir)"
+            receipt="$common/.spice/cache/proof/$SOURCE/$target/receipt.json"
+            [[ -f "$receipt" ]] || { echo "successful proof published no receipt" >&2; exit 1; }
+            mkdir -p "$RUNNER_TEMP/proof"
+            cp "$receipt" "$RUNNER_TEMP/proof/receipt.json"
+          fi
+
       - name: Record signed result
         env:
           CHALLENGE: ${{ inputs.challenge }}
@@ -87,18 +116,27 @@ jobs:
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/linux-$CHALLENGE"
-          mkdir -p "$out/stage"
+          mkdir -p "$out/stage" "$out/proof"
           cp "$RUNNER_TEMP/stage.log" "$out/stage.log"
+          cp "$RUNNER_TEMP/proof.log" "$out/proof.log"
           if [[ -d dist/stage ]]; then
             cp -R dist/stage/. "$out/stage/"
             rm -f "$out/stage/source.tar"
           fi
-          (cd "$out/stage" && find . -type f -printf '%P\t%s\n' | sort) \
-            | while IFS=$'\t' read -r path bytes; do
-                sha="$(sha256sum "$out/stage/$path" | cut -d' ' -f1)"
-                jq -n --arg path "$path" --argjson bytes "$bytes" --arg sha256 "$sha" \
-                  '{path: $path, bytes: $bytes, sha256: $sha256}'
-              done | jq -s . > "$RUNNER_TEMP/artifacts.json"
+          if [[ -d "$RUNNER_TEMP/proof" ]]; then
+            cp -R "$RUNNER_TEMP/proof/." "$out/proof/"
+          fi
+          inventory() {
+            local directory="$1"
+            (cd "$directory" && find . -type f -printf '%P\t%s\n' | sort) \
+              | while IFS=$'\t' read -r path bytes; do
+                  sha="$(sha256sum "$directory/$path" | cut -d' ' -f1)"
+                  jq -n --arg path "$path" --argjson bytes "$bytes" --arg sha256 "$sha" \
+                    '{path: $path, bytes: $bytes, sha256: $sha256}'
+                done | jq -s .
+          }
+          inventory "$out/stage" > "$RUNNER_TEMP/artifacts.json"
+          inventory "$out/proof" > "$RUNNER_TEMP/proof-artifacts.json"
           jq -n \
             --arg challenge "$CHALLENGE" \
             --arg source "$SOURCE" \
@@ -109,11 +147,16 @@ jobs:
             --arg proof_image "$PROOF_IMAGE" \
             --argjson exit_code "$(cat "$RUNNER_TEMP/stage.exit")" \
             --arg log_sha256 "$(sha256sum "$out/stage.log" | cut -d' ' -f1)" \
+            --argjson proof_exit_code "$(cat "$RUNNER_TEMP/proof.exit")" \
+            --arg proof_log_sha256 "$(sha256sum "$out/proof.log" | cut -d' ' -f1)" \
             --slurpfile artifacts "$RUNNER_TEMP/artifacts.json" \
+            --slurpfile proof_artifacts "$RUNNER_TEMP/proof-artifacts.json" \
             '{challenge: $challenge, source: $source, run_id: $run_id, image_os: $image_os,
               image_version: $image_version, architecture: $architecture,
               proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
-              artifacts: $artifacts[0]}' > "$out/result.json"
+              proof_exit_code: $proof_exit_code, proof_log_sha256: $proof_log_sha256,
+              artifacts: $artifacts[0], proof_artifacts: $proof_artifacts[0]}' \
+            > "$out/result.json"
 
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -167,11 +210,13 @@ jobs:
           name: linux-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
 
-      - name: Sign result and staged files
+      - name: Sign result, proof, and staged files
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
           subject-path: |
             ${{ runner.temp }}/result/result.json
+            ${{ runner.temp }}/result/proof.log
+            ${{ runner.temp }}/result/proof/**
             ${{ runner.temp }}/result/stage/**
 
   retire:
