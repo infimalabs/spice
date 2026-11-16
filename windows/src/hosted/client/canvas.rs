@@ -14,7 +14,7 @@ use serde::Deserialize;
 use wire::Digest;
 use wire::manifest::{ReleaseTarget, TargetPayload};
 
-use super::{WindowsHostedError, command, successful_text};
+use super::{WindowsHostedError, command, linux, successful_text};
 use crate::hosted::{CANVAS_ARTIFACT_PREFIX, CanvasPin};
 
 const LINUX_TARGET: ReleaseTarget = ReleaseTarget::X86_64UnknownLinuxMusl;
@@ -43,6 +43,13 @@ struct ProviderArtifact {
 #[derive(Deserialize)]
 struct ArtifactRun {
     id: u64,
+}
+
+#[derive(Clone, Deserialize)]
+struct ProviderRun {
+    path: String,
+    status: String,
+    conclusion: Option<String>,
 }
 
 /// The canvas of the Linux payload staged below `stage` from
@@ -95,10 +102,15 @@ pub(super) fn locate(
             ],
         )?,
     )?;
-    let page: ArtifactPage = serde_json::from_str(&listed).map_err(WindowsHostedError::Decode)?;
-    let run_id = carrier(&page.artifacts).ok_or_else(|| {
+    let mut page: ArtifactPage =
+        serde_json::from_str(&listed).map_err(WindowsHostedError::Decode)?;
+    let run_id = carrier(&mut page.artifacts, |run_id| {
+        provider_run(root, repository, run_id)
+    })?
+    .ok_or_else(|| {
         WindowsHostedError::Canvas(format!(
-            "no unexpired provider artifact {name} carries the staged {LINUX_TARGET} canvas; stage it hosted again"
+            "no completed-success {} run carries unexpired provider artifact {name}; stage it hosted again",
+            linux::WORKFLOW_PATH
         ))
     })?;
     Ok(LinuxCanvas {
@@ -110,15 +122,46 @@ pub(super) fn locate(
     })
 }
 
-/// The run owning the newest unexpired artifact; every copy holds the same
-/// digest-named bytes, which the runner verifies.
-fn carrier(artifacts: &[ProviderArtifact]) -> Option<u64> {
-    artifacts
-        .iter()
-        .filter(|artifact| !artifact.expired)
-        .filter_map(|artifact| Some((artifact.id, artifact.workflow_run.as_ref()?.id)))
-        .max()
-        .map(|(_, run_id)| run_id)
+/// The newest unexpired artifact owned by a completed-success Linux staging
+/// run. A failed or unattested run is never a canvas provenance boundary.
+fn carrier<E>(
+    artifacts: &mut [ProviderArtifact],
+    mut provider_run: impl FnMut(u64) -> Result<ProviderRun, E>,
+) -> Result<Option<u64>, E> {
+    artifacts.sort_unstable_by_key(|artifact| std::cmp::Reverse(artifact.id));
+    for artifact in artifacts.iter().filter(|artifact| !artifact.expired) {
+        let Some(owner) = &artifact.workflow_run else {
+            continue;
+        };
+        let run_id = owner.id;
+        let run = provider_run(run_id)?;
+        if run.path == linux::WORKFLOW_PATH
+            && run.status == "completed"
+            && run.conclusion.as_deref() == Some("success")
+        {
+            return Ok(Some(run_id));
+        }
+    }
+    Ok(None)
+}
+
+fn provider_run(
+    root: &Path,
+    repository: &str,
+    run_id: u64,
+) -> Result<ProviderRun, WindowsHostedError> {
+    let observed = successful_text(
+        "canvas provider run lookup",
+        command(
+            root,
+            "gh",
+            [
+                OsString::from("api"),
+                OsString::from(format!("repos/{repository}/actions/runs/{run_id}")),
+            ],
+        )?,
+    )?;
+    serde_json::from_str(&observed).map_err(WindowsHostedError::Decode)
 }
 
 /// Require a returned target payload to link exactly the adopted canvas.
@@ -145,7 +188,9 @@ impl LinuxCanvas {
 
 #[cfg(test)]
 mod tests {
-    use super::{ArtifactRun, CanvasPin, LinuxCanvas, ProviderArtifact, carrier};
+    use super::{
+        ArtifactRun, CanvasPin, LinuxCanvas, ProviderArtifact, ProviderRun, carrier, linux,
+    };
     use wire::{Digest, Domain};
 
     fn artifact(id: u64, expired: bool, run: Option<u64>) -> ProviderArtifact {
@@ -157,18 +202,54 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_unexpired_artifact_names_the_carrying_run() {
-        assert_eq!(carrier(&[]), None);
-        assert_eq!(carrier(&[artifact(9, true, Some(90))]), None);
-        assert_eq!(carrier(&[artifact(9, false, None)]), None);
-        assert_eq!(
-            carrier(&[
-                artifact(7, false, Some(70)),
-                artifact(9, true, Some(90)),
-                artifact(8, false, Some(80)),
-            ]),
-            Some(80)
-        );
+    fn the_newest_successful_linux_run_carries_the_canvas() {
+        let runs = [
+            (
+                70,
+                ProviderRun {
+                    path: linux::WORKFLOW_PATH.to_owned(),
+                    status: "completed".to_owned(),
+                    conclusion: Some("success".to_owned()),
+                },
+            ),
+            (
+                80,
+                ProviderRun {
+                    path: linux::WORKFLOW_PATH.to_owned(),
+                    status: "completed".to_owned(),
+                    conclusion: Some("failure".to_owned()),
+                },
+            ),
+            (
+                90,
+                ProviderRun {
+                    path: ".github/workflows/windows.yml".to_owned(),
+                    status: "completed".to_owned(),
+                    conclusion: Some("success".to_owned()),
+                },
+            ),
+        ];
+        let lookup = |id| {
+            Ok::<_, ()>(
+                runs.iter()
+                    .find(|(run_id, _)| *run_id == id)
+                    .expect("provider run exists")
+                    .1
+                    .to_owned(),
+            )
+        };
+
+        assert_eq!(carrier(&mut [], lookup), Ok(None));
+        let mut expired = [artifact(9, true, Some(70))];
+        assert_eq!(carrier(&mut expired, lookup), Ok(None));
+        let mut unowned = [artifact(9, false, None)];
+        assert_eq!(carrier(&mut unowned, lookup), Ok(None));
+        let mut candidates = [
+            artifact(7, false, Some(70)),
+            artifact(9, false, Some(90)),
+            artifact(8, false, Some(80)),
+        ];
+        assert_eq!(carrier(&mut candidates, lookup), Ok(Some(70)));
     }
 
     #[test]

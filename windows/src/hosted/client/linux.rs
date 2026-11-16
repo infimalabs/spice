@@ -19,7 +19,7 @@ use super::{
     require_public_attestation_repository, verify_attestation, watch_run, workspace_root,
 };
 
-const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
+pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
 const IMAGE_OS: &str = "ubuntu24";
 const ARCHITECTURE: &str = "X64";
 
