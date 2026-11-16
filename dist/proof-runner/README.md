@@ -10,6 +10,11 @@ Git, and `sandbox-exec`). Run it from the repository root:
 dist/proof-runner/build.sh
 ```
 
+An optional first argument names the Cargo target directory both runner builds
+share; it defaults to the worktree's `target/`. The hosted macOS job passes its
+bootstrap target so the runner reuses the release dependency graph already
+built for `xtask` and `spice`.
+
 It requires native arm64 macOS, a tracked tree at `HEAD`, and no non-ignored
 untracked files outside release output. It writes the runner, its vendored
 closure, and a readable copy of the pins under `target/proof-native-darwin/`,
