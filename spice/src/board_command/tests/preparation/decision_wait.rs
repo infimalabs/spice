@@ -81,7 +81,7 @@ fn a_named_claim_forces_a_gathering_design_but_not_a_held_one() {
             awaiting
         );
     }
-    assert!(awaiting.contains("spice design decide"), "{awaiting}");
+    assert!(awaiting.contains("spice task decide"), "{awaiting}");
 
     // Selecting the output leaves the Design waiting through retained
     // preparation state, so no named claim opens another pass until the work

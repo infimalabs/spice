@@ -93,7 +93,6 @@ pub(super) fn kind_for(path: &[&str]) -> Option<CommandKind> {
         ["room", "leave"] => CommandKind::RoomLeave,
         ["room", "contribute"] => CommandKind::RoomContribute,
         ["room", "ack" | "nak" | "fin"] => CommandKind::SteerLineControl,
-        ["design", "decide"] => CommandKind::PreparationDecide,
         ["principal", verb @ ..] => return principal_kind_for(verb),
         ["task", verb] => return task_kind_for(verb),
         ["taste", "add"] | ["taste", "drop"] => CommandKind::TaskAdd,
@@ -105,8 +104,9 @@ pub(super) fn kind_for(path: &[&str]) -> Option<CommandKind> {
 
 fn task_kind_for(verb: &str) -> Option<CommandKind> {
     Some(match verb {
-        "list" | "status" | "show" => CommandKind::BoardRead,
+        "authority" | "list" | "status" | "show" => CommandKind::BoardRead,
         "adopt" => CommandKind::OutputAdopt,
+        "decide" => CommandKind::PreparationDecide,
         "next" | "recover" | "capture" => CommandKind::ClaimWin,
         "add" | "plan" | "design" => CommandKind::TaskAdd,
         "oops" => CommandKind::TaskOopsAdd,

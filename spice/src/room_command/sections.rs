@@ -106,7 +106,7 @@ pub(super) fn decisions(
         rows: VecDeque::with_capacity(page.rows.len()),
         older: page
             .continuation
-            .map(|_| format!("spice design show {room}")),
+            .map(|_| format!("spice task authority {room}")),
     };
     for envelope in page.rows {
         let decided = envelope.fact.read::<PreparationDecided>().ok_or_else(|| {

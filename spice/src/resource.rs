@@ -77,7 +77,7 @@ spice://task/HANDLE/artifacts  task artifact list HANDLE [?limit=N&max-bytes=N&a
 spice://task/HANDLE/artifact/ARTIFACT  task artifact show HANDLE ARTIFACT [?offset=N&bytes=N]
 spice://task/HANDLE/room  room history HANDLE [?contributions&limit=N&max-bytes=N&after=PUBLICATION]; contributions pages only typed contributions; every page groups its contributions by kind; reading joins and acknowledges nothing
 spice://task/HANDLE/room/awareness  room awareness HANDLE [?limit=N&max-bytes=N&after=POSITION]; lanes told about this Design, matched terms, and bounded advisory maturity; reading changes nothing
-spice://task/HANDLE/design  design show HANDLE [?limit=N&max-bytes=N&after=POSITION]; reading changes nothing
+spice://task/HANDLE/design  task authority HANDLE [?limit=N&max-bytes=N&after=POSITION]; reading changes nothing
 spice://room/inbox  room inbox; this lane's unread room activity, one bounded page from its delivery cursor; reading changes nothing
 spice://inbox  inbox [?limit=N&max-bytes=N&max-text=N&after=ID]; reading acknowledges nothing
 spice://outbox  write text you author between tool calls, ordinary or SYN/ACK/FIN/NAK packets, with no preparation read: a provider may fold mid-turn text into reasoning, while a final message arrives intact and is never copied here; the host preserves its tape source and exact occupant; identical complete bytes within that occupant reuse one submission and its decided outcomes; write receipts report reused: false for fresh admission, true for reuse
@@ -348,7 +348,7 @@ const SERVED: &[&[&str]] = &[
     &["room", "history"],
     &["room", "inbox"],
     &["room", "awareness"],
-    &["design", "show"],
+    &["task", "authority"],
     &["board", "graph"],
     &["doc", "ledger"],
     &["inbox"],
@@ -457,7 +457,7 @@ impl Shape {
             }
             Self::Room { handle } => words(&["room", "history", handle.as_str()]),
             Self::RoomAwareness { handle } => words(&["room", "awareness", handle.as_str()]),
-            Self::Design { handle } => words(&["design", "show", handle.as_str()]),
+            Self::Design { handle } => words(&["task", "authority", handle.as_str()]),
             Self::Inbox => words(&["inbox"]),
             Self::RoomInbox => words(&["room", "inbox"]),
             Self::Lanes => words(&["lane", "list"]),
@@ -598,7 +598,7 @@ impl Shape {
                 },
                 rest,
             ),
-            ["design", "show", task, rest @ ..] => (
+            ["task", "authority", task, rest @ ..] => (
                 Self::Design {
                     handle: handle(task)?,
                 },
@@ -1211,7 +1211,7 @@ impl Seat {
                 rendered(&outcome, render::render_display(&outcome, Form::Text))?
             }
             ["room", ..] => room_document(repository, leaf, contract, self.lane)?,
-            ["design", "show"] => {
+            ["task", "authority"] => {
                 let outcome = crate::design_command::run_at(repository, leaf, contract);
                 rendered(&outcome, render::render_display(&outcome, Form::Text))?
             }
@@ -1300,7 +1300,7 @@ fn rendered<B>(
 pub(crate) const SEAT_GUIDE: &str = "\
 <system-notice>
 # spice:// reads
-This seat serves `spice://` through `read`: `spice://` is the index naming every resource and the CLI read it answers (board, tasks, task detail, ledger, artifacts, room history, room inbox and results, Design pass authority, dependency graph, inbox, lanes, session briefing, turns, sweep, and context).
+This seat serves `spice://` through `read`: `spice://` is the index naming every resource and the CLI read it answers (board, tasks, task detail, ledger, artifacts, room history, room inbox and results, retained task authority, dependency graph, inbox, lanes, session briefing, turns, sweep, and context).
 - A collection ends with `resources:`, the URLs of what it contains.
 - Query parameters are the read's own flags; a withheld page ends with `continue:` and the URL that resumes it; a trailing `:N-M` selects lines.
 - Reading changes nothing: it acknowledges no steering, claims nothing, and may repeat freely.

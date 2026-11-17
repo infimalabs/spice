@@ -1,4 +1,4 @@
-//! `spice design show HANDLE`: retained Design pass authority by controller.
+//! `spice task authority HANDLE`: retained Design pass authority by controller.
 
 use std::fmt;
 

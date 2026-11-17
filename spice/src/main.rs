@@ -498,7 +498,7 @@ impl NativeInvocation<'_> {
             ["room", "awareness"] => {
                 deliver_display(&room_command::awareness::run(leaf, contract), form)
             }
-            ["design", "show"] => deliver_display(&design_command::run(leaf, contract), form),
+            ["task", "authority"] => deliver_display(&design_command::run(leaf, contract), form),
             _ => unreachable!("retained read dispatch requires a retained read contract"),
         }
     }
@@ -548,7 +548,7 @@ impl NativeInvocation<'_> {
             ["room", "history"]
             | ["room", "inbox"]
             | ["room", "awareness"]
-            | ["design", "show"] => {
+            | ["task", "authority"] => {
                 self.dispatch_retained_read(contract);
             }
             ["backup"] => deliver(&journal_command::backup(leaf), form),
@@ -639,7 +639,7 @@ impl NativeInvocation<'_> {
             | ["principal", "profile"]
             | ["principal", "role", "grant" | "revoke"]
             | ["principal", "deauthorize"]
-            | ["design", "decide"]
+            | ["task", "decide"]
             | ["task", "adopt"]
             | ["doc", "ledger"]
             | ["sweep"] => {

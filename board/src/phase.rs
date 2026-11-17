@@ -310,7 +310,7 @@ pub fn released_reminder(entry: &Entry) -> String {
             Some(wire::rooms::DesignPassEnd::Completed) => format!(
                 "your earlier pass of {task} completed; this pass answers the operator's \
                  decision and the input recorded since, read through \
-                 `spice design show {task}`, and ends with `spice task done`"
+                 `spice task authority {task}`, and ends with `spice task done`"
             ),
             Some(wire::rooms::DesignPassEnd::Abandoned) | None => format!(
                 "your earlier pass of {task} ended before its round completed; finish this pass \
