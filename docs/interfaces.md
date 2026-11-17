@@ -50,7 +50,7 @@ commands mean; this section fixes their operand bodies and bounds.
 
 ### Design command bodies
 
-`design decide` takes one canonical JSON object. Unknown fields refuse,
+`task decide` takes one canonical JSON object. Unknown fields refuse,
 nothing is lenient, and a malformed body refuses with
 `preparation::argument-invalid`, giving the parse detail and a complete body
 that command accepts. `task adopt` takes two task handles.
@@ -59,7 +59,7 @@ that command accepts. `task adopt` takes two task handles.
   (`dVzdhh8Nx` for `REPOSIT-dVzdhh8Nx`): exactly nine characters. Decision
   identities are native base-52 sequences (`"1"`, `"2"`, …), new within their
   controller. A source is `{"kind": "journal", "fact": POSITION}` (a position
-  `design show` prints), `{"kind": "contribution", "room": STAMP,
+  `task authority` prints), `{"kind": "contribution", "room": STAMP,
   "publication": STAMP}` (the `source` a `room contribute` answer prints,
   pasted unchanged), `{"kind": "artifact", "digest": HEX}`, or a transcript
   hunk.

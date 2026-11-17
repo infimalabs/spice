@@ -44,9 +44,9 @@ pub(super) fn add_controller(
 
 fn preparation_page(root: &FixtureRoot, words: &[&str]) -> serde_json::Value {
     let matches = crate::cli::command()
-        .try_get_matches_from(["spice", "design", "show"].iter().chain(words))
-        .expect("design read parses");
-    let contract = crate::cli::selected_contract(&matches).expect("design read is registered");
+        .try_get_matches_from(["spice", "task", "authority"].iter().chain(words))
+        .expect("task authority read parses");
+    let contract = crate::cli::selected_contract(&matches).expect("task authority is registered");
     let journal = journal::JournalReader::open(root.as_ref().join("authority.sqlite3"))
         .expect("fixture journal opens to read");
     let outcome = crate::design_command::answer(

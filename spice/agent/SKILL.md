@@ -92,7 +92,7 @@ this occupant reuse one submission; successors are separate.
 - Plan/Design purpose survives phases; done cannot replace review. Ambient
   creation under a held Plan/Design binds a controlled Draft unless another
   `--origin`; `--preparation` binds explicitly. Controlled Drafts stay
-  editable, unclaimed and non-runnable until `design decide` or the Plan's
+  editable, unclaimed and non-runnable until `task decide` or the Plan's
   positive completion releases them; a decision pins the revisions it read,
   so a later edit refuses it as stale. An unspecified completion contract
   permits work, not successful completion: add own AC, link pending activated
@@ -103,7 +103,7 @@ this occupant reuse one submission; successors are separate.
   changes flow. A pass investigates and charges every Design question; each
   participant ends it with `task done`, reasoning in the room and
   validation. The operator then decides its acceptance-bearing outputs built
-  under the claim with `design decide`; rejection closes the output and its
+  under the claim with `task decide`; rejection closes the output and its
   controlled subtree. Only the operator concludes a Design; stop means checkpoint/free.
 - Work incrementally; commit only under the matching claim. Never pull/push or
   alter harness attribution. Release unfinished work via `task free` or

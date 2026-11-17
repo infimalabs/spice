@@ -144,7 +144,7 @@ execution-authorization records in immutable journal order. Each record
 preserves its basis, source link, every output verdict
 and comment, the overall comment, and accepted outputs; review evidence and
 execution authorization remain distinct. The same authority is available through
-bounded `spice design show HANDLE` and `spice://task/HANDLE/design` pages.
+bounded `spice task authority HANDLE` and `spice://task/HANDLE/design` pages.
 Reading or opening these records joins, acknowledges, and changes nothing.
 
 ## Stopping a held Design

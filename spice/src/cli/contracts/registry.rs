@@ -472,8 +472,8 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "room::awareness"
     ),
     row!(
-        ["design", "show"],
-        "design show HANDLE [--limit N] [--max-bytes N] [--after POSITION]",
+        ["task", "authority"],
+        "task authority HANDLE [--limit N] [--max-bytes N] [--after POSITION]",
         PrincipalOrLane,
         Read,
         [],
@@ -482,8 +482,8 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "design::show"
     ),
     operator!(
-        ["design", "decide"],
-        "design decide DECISION_JSON",
+        ["task", "decide"],
+        "task decide DECISION_JSON",
         Command,
         [PreparationDecided, ExecutionAuthorized, TaskConcluded],
         Reply,

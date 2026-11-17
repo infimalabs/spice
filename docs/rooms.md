@@ -318,7 +318,7 @@ owns each rule summarized here.
      completes the pass; freeing or lapsing instead abandons it, and the
      cycle shows that the last pass ended without a decision owed.
   3. **Awaiting decision**: the operator decides the completed pass from the
-     Design's controlled work with `design decide`. It accepts or rejects each
+     Design's controlled work with `task decide`. It accepts or rejects each
      offered output, releasing the accepted and closing the rejected; with no
      offered output it concludes or collapses the Design. Returning the pass
      or rejecting an output is counted input: with no output accepted, the
@@ -334,14 +334,14 @@ owns each rule summarized here.
   [stays open until the operator settles it](invariants/identity.md#work-a-design-stays-open-until-the-operator-concludes-it):
   ordinary lane `task done` cannot close it; only non-final shared arrivals
   use that command. The operator concludes or collapses an outputless pass
-  through `design decide`; that decision stages the guarded
+  through `task decide`; that decision stages the guarded
   `task conclude --done` or `--collapse` authority without fabricating an
   output. Direct `task conclude` is the normal terminal act; `spice task close
   HANDLE --validation TEXT [--force-claimed]` and `task delete` are explicit
   emergency settlements and close gated outputs too.
 
   The offered work is every pending, acceptance-bearing Draft the Design
-  controls. `design decide` records the basis it read: the Design statement
+  controls. `task decide` records the basis it read: the Design statement
   head, the room head, and every offered output's identity, statement head,
   workflow head and exact execution prerequisites. It refuses
   `preparation::statement-moved`, `preparation::room-moved` or
@@ -362,7 +362,7 @@ owns each rule summarized here.
   appear in offered order, labeled with their output's stable task stamp,
   including items whose verdict is still undecided. Selecting Return records
   no item verdict and releases no output. The complete feedback reads back in
-  `design show`, room history, and the next holder's return input.
+  `task authority`, room history, and the next holder's return input.
 
   Parent conclusion, collapse, close or deletion closes its remaining controlled
   Draft subtree, except branches still gated by another open controller.
@@ -412,7 +412,7 @@ owns each rule summarized here.
   edited; its statement text can. The operator may collapse the Design; the
   next report then opens a new generation.
 
-Every read — `spice room history|inbox|awareness`, `spice design show`, and
+Every read — `spice room history|inbox|awareness`, `spice task authority`, and
 their `spice://` resources — joins, acknowledges, delivers, settles, and wakes
 nothing.
 

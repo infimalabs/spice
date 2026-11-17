@@ -69,12 +69,6 @@ const SUMMARIES: &[(&str, &str)] = &[
         "demo",
         "Serve the installed appliance from an isolated demo repository",
     ),
-    ("design", "Decide and read Design passes"),
-    (
-        "design decide",
-        "Record the operator's decision on a completed Design pass",
-    ),
-    ("design show", "Page one task's Design pass authority"),
     (
         "dev",
         "Run repository Cargo and xtask commands with the admitted Cargo home",
@@ -306,6 +300,7 @@ const SUMMARIES: &[(&str, &str)] = &[
         "Remove one artifact from an unsettled task",
     ),
     ("task artifact show", "Read part of one task artifact"),
+    ("task authority", "Page one task's retained authority"),
     (
         "task capture",
         "Claim a task, adopting loose commits and dirty work",
@@ -314,6 +309,10 @@ const SUMMARIES: &[(&str, &str)] = &[
     (
         "task conclude",
         "Conclude an open, unheld Design done or collapsed",
+    ),
+    (
+        "task decide",
+        "Record the operator's decision on a completed Design pass",
     ),
     ("task defer", "Defer a task until a time"),
     ("task delete", "Withdraw a task with a recorded reason"),

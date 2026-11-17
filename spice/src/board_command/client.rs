@@ -97,9 +97,7 @@ fn dispatch_client(
     match contract.path {
         ["doc", "ledger"] => client_ledger(repository, contract, matches),
         ["sweep"] => run_sweep(repository, contract, matches),
-        ["design", "decide"] => {
-            preparation::client_preparation_decide(repository, contract, matches)
-        }
+        ["task", "decide"] => preparation::client_preparation_decide(repository, contract, matches),
         ["task", "adopt"] => preparation::client_output_adopt(repository, contract, matches),
         ["task", "list"] => client_list(repository, matches),
         ["task", "status"] => client_status(repository),

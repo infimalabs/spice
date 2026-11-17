@@ -1,7 +1,7 @@
 //! A Design's recorded decisions and the operator's decision surface for its
 //! completed pass, read from the Design's controlled work. Resolutions,
 //! conclusions, collapses, and returns are previewed before one atomic
-//! `design decide`.
+//! `task decide`.
 
 use std::borrow::Cow;
 use std::rc::Rc;

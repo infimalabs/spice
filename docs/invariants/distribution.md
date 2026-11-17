@@ -4,8 +4,8 @@
 
 ## Distribution
 
-The contracts live at [publication authorization](../planes/distribution.md#external-publication-is-a-plan-not-a-verb),
-[versioned source](../planes/distribution.md#a-versioned-commit-is-sealed-before-publication),
+The contracts live at [publication authorization](../planes/distribution.md#external-publication-is-one-convergent-command),
+[versioned source](../planes/distribution.md#a-versioned-commit-is-staged-before-publication),
 [target proof](../planes/distribution.md#proof-is-sealed-per-target-and-composed-last),
 [release notes](../planes/distribution.md#notes-are-read-out-of-durable-landing-authority),
 [publication convergence](../planes/distribution.md#the-publication-sequence),

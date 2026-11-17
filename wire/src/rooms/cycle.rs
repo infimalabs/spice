@@ -134,7 +134,7 @@ impl DesignCycle {
                 || format!("the operator decides the completed pass of {design}"),
                 |pass| {
                     format!(
-                        "the operator decides pass {} of {design} with `spice design decide \
+                        "the operator decides pass {} of {design} with `spice task decide \
                          DECISION_JSON`",
                         SequenceCode::new(pass.get())
                     )
