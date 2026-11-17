@@ -56,6 +56,32 @@ fn structure(decision: &Decision) -> &Structure {
 }
 
 #[test]
+fn session_control_markers_cannot_override_the_statement_subject() {
+    for marker in ["SYN", "ACK", "NAK", "FIN"] {
+        let nodes = || {
+            vec![
+                node(1, "/briefing/encode", "encode bitmap image pixels"),
+                node(
+                    2,
+                    "/briefing/transcribe",
+                    &format!("transcribe blind reader accuracy {marker}"),
+                ),
+            ]
+        };
+        let plain = Scored::new(nodes(), &statement("encode bitmap image pixels"));
+        let noisy = Scored::new(
+            nodes(),
+            &statement(&format!(
+                "encode bitmap image pixels {}",
+                format!("{marker} ").repeat(64)
+            )),
+        );
+        assert_eq!(picked(&plain.pick(&all()).unwrap()), 1);
+        assert_eq!(picked(&noisy.pick(&all()).unwrap()), 1, "{marker}");
+    }
+}
+
+#[test]
 fn descent_follows_unique_improvement_and_stops_at_the_deepest_explained_parent() {
     let scored = Scored::new(
         vec![
