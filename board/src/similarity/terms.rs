@@ -40,8 +40,12 @@ pub(super) fn terms(text: &str) -> impl Iterator<Item = String> + '_ {
             }
             super::normalize(run)
         })
-        // Every admitted spelling, including folded longer words, uses this authority.
-        .filter(|word| !super::STOP.contains(&word.as_str()))
+        // Every admitted spelling, including folded longer words, uses this
+        // authority. Session-control markers do not describe a task's subject.
+        .filter(|word| {
+            !super::STOP.contains(&word.as_str())
+                && !matches!(word.as_str(), "syn" | "ack" | "nak" | "fin")
+        })
 }
 
 fn canonical_jargon(run: &str) -> Option<String> {
@@ -88,6 +92,24 @@ fn option_prefix(prefix: &str, suffix: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::similarity::{MAX_TERM_CHARS, TermCounts};
+
+    #[test]
+    fn session_control_markers_do_not_become_topical_evidence() {
+        let subject = "Cargo dependency cache CSS CLI iOS";
+        assert_eq!(
+            TermCounts::from_texts([
+                subject,
+                "SYN ACK NAK FIN syn ack nak fin SYNs ACKs NAKs FINs SYN-ACK/NAK",
+            ])
+            .0,
+            TermCounts::from_texts([subject]).0,
+        );
+        let meaningful = TermCounts::from_texts(["synapse acknowledgment finance final"]);
+        assert_eq!(
+            meaningful.0.into_keys().collect::<Vec<_>>(),
+            ["acknowledgment", "final", "finance", "synapse"]
+        );
+    }
 
     #[test]
     fn technical_jargon_keeps_case_evidence_until_admission() {
