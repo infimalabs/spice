@@ -329,12 +329,18 @@ that commit's `input.yml` preflight, then creates or resumes Linux, macOS, and
 Windows concurrently against the pinned input run. Its Git-common records bind
 the pinned request, the source and input identities, all four workflow blobs
 read from the admitted source archive, every native challenge and run, and each
-last admitted outcome. Repeating the command resumes the pinned request without
-consulting `main` until it publishes; it attaches to recorded healthy or
-successful runs and dispatches only a missing target, a target whose provider
-run ended in failure, or a target whose attested result does not decode under
-the current client's schema. It reports all three outcomes before failing, so
-one failed platform never hides or redispatches successful siblings. A changed
+last admitted outcome. While a request is pending, a bare invocation or one
+naming another commit refuses before any provider call and names the pinned
+commit and its recorded input run. `publish-hosted-release COMMIT` naming the
+pinned commit resumes it without consulting `main` until it publishes; it
+attaches to recorded healthy or successful runs and dispatches only a missing
+target, a target whose provider run ended in failure, or a target whose
+attested result does not decode under the current client's schema. It reports
+all three outcomes before failing, so one failed platform never hides or
+redispatches successful siblings. `publish-hosted-release --abandon COMMIT`
+drops a pin naming exactly that commit, with its recorded preflight, only while
+no publication plan exists; once the plan is admitted, before the first tag or
+release mutation, the request converges only by resumption. A changed
 bound identity refuses before a provider dispatch: only a new dispatch requires
 `main` to carry the source's workflow blob, while an attached run is admitted
 against the blob its own workflow commit carries, so a later landing never
