@@ -250,7 +250,7 @@ pub fn answer(prose: &str, token: &str, standing: &impl Standing) -> Option<Rang
         let payload_free = match marker {
             Marker::Ack => ack_reaction(Some(before)),
             Marker::Fin => before.trim().is_empty(),
-            Marker::Nak => false,
+            Marker::Nak | Marker::Rst => false,
         };
         if payload_free {
             end = blank;

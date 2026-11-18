@@ -332,7 +332,7 @@ const fn unanswered(disposition: crate::Disposition) -> &'static str {
         crate::Disposition::DeadLettered => {
             "parked undelivered because its lane could not start; body retained for the operator"
         }
-        crate::Disposition::Canceled => "withdrawn by the operator",
+        crate::Disposition::Canceled => "canceled by its sender or the operator; body retained",
         crate::Disposition::Acked => "acknowledged outside its line",
         crate::Disposition::Declined => "declined outside its line",
     }

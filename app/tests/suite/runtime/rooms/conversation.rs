@@ -437,6 +437,7 @@ fn recursive_principal_input_shares_its_root_line_state() {
             &wire::body::SteerCanceled {
                 key: "dPrincipalBody".to_owned(),
                 recipient: wire::Actor::Principal(uuid(PRINCIPAL)),
+                reason: None,
             },
         ),
     );

@@ -457,32 +457,15 @@ pub(in crate::resident) fn cancel(
         Ok(at) => at,
         Err(outcome) => return outcome,
     };
-    let (origin, cause) = (directive.body().origin.clone(), directive.body().created);
-    let mut proposal =
-        JournalWrite::new(command.actor().clone(), origin, at, Producer::CommandDoor);
-    proposal.guard(live_guard(cancel.directive, directive.position()));
-    let canceled = wire::body::SteerCanceled {
-        key: directive.body().key.clone(),
-        recipient: directive.body().recipient.clone(),
-    };
-    let pending = match proposal.fact(canceled.clone(), FactCause::Existing(cause)) {
-        Ok(pending) => pending,
-        Err(error) => return store_fault("steer::fact-invalid", &error.to_string()),
-    };
-    if let Err(outcome) =
-        UnansweredEnds::default().stage(bus, &mut proposal, directive.body(), pending)
-    {
+    let mut proposal = JournalWrite::new(
+        command.actor().clone(),
+        directive.body().origin.clone(),
+        at,
+        Producer::CommandDoor,
+    );
+    if let Err(outcome) = stage_cancel(bus, &mut proposal, &directive, None, at) {
         return outcome;
     }
-    let next = match steer::Ledger::transition_head(
-        directive.body(),
-        steer::Steering::Canceled(&canceled),
-        at,
-    ) {
-        Ok(next) => next,
-        Err(error) => return store_fault("steer::index-invalid", &error.to_string()),
-    };
-    proposal.steering_head(pending, move |_| next);
     let answer = DirectiveAnswer {
         directive: cancel.directive,
         recipient: directive.body().recipient.clone(),
@@ -503,6 +486,32 @@ pub(in crate::resident) fn cancel(
         }
         outcome => outcome,
     }
+}
+
+/// Stage one guarded cancellation of a live directive: its canceled fact,
+/// the unanswered end of any line it opened, and its retired head.
+pub(super) fn stage_cancel(
+    bus: &Bus,
+    proposal: &mut JournalWrite,
+    directive: &journal::JournalHead<wire::SteeringHead>,
+    reason: Option<String>,
+    at: Instant,
+) -> Result<PendingFact, Outcome<CommandAnswer>> {
+    let body = directive.body();
+    proposal.guard(live_guard(body.directive, directive.position()));
+    let canceled = wire::body::SteerCanceled {
+        key: body.key.clone(),
+        recipient: body.recipient.clone(),
+        reason,
+    };
+    let pending = proposal
+        .fact(canceled.clone(), FactCause::Existing(body.created))
+        .map_err(|error| store_fault("steer::fact-invalid", &error.to_string()))?;
+    UnansweredEnds::default().stage(bus, proposal, body, pending)?;
+    let next = steer::Ledger::transition_head(body, steer::Steering::Canceled(&canceled), at)
+        .map_err(|error| store_fault("steer::index-invalid", &error.to_string()))?;
+    proposal.steering_head(pending, move |_| next);
+    Ok(pending)
 }
 
 pub(in crate::resident) fn resend(

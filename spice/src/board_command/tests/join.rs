@@ -508,6 +508,7 @@ fn retire_invitation(bus: &Bus, key: &str, disposition: Disposition) {
             let canceled = body::SteerCanceled {
                 key: key.to_owned(),
                 recipient: head.body().recipient.clone(),
+                reason: None,
             };
             let next = steer::Ledger::transition_head(
                 head.body(),

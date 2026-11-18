@@ -606,6 +606,7 @@ fn cancel_operator_direction_write(bus: &Bus) -> JournalWrite {
             body::SteerCanceled {
                 key: observed.body().key.clone(),
                 recipient: observed.body().recipient.clone(),
+                reason: None,
             },
             FactCause::Existing(observed.position()),
         )

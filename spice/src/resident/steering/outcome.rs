@@ -1,36 +1,37 @@
-//! Telling a peer message's sender the outcomes that reach it as no body.
+//! Telling each end of a peer message the outcomes that reach it as no body.
 //!
 //! A sender assumes success and hears failures. A reply with text reaches it
 //! as its own directive, but some outcomes carry no text: a message that
 //! lapses unanswered, and a FIN or NAK whose line control committed while no
 //! reply text reached the sender, because the control carried none or its
-//! body was refused. Each committed outcome of that kind is told once, as a
-//! private background notice that wakes nobody and asks no answer. The
-//! notice is only attempted: it goes to the sending lane's seated occupant
-//! while that lane still holds the context that authored the message, and a
-//! vacant lane or a fresh session hears nothing.
+//! body was refused. Its recipient, likewise, hears when the sender cancels
+//! the message with RST. Each committed outcome of that kind is told once, as
+//! a private background notice that wakes nobody and asks no answer. The
+//! notice is only attempted: it goes to the told lane's seated occupant while
+//! that lane still holds the context the message lived in, and a vacant lane
+//! or a fresh session hears nothing.
 
 use std::io;
 
 use super::*;
 
-/// What became of one peer message whose sender no reply text reached.
+/// What became of one peer message, for the end of its line no text reached.
 #[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::resident) struct LineOutcomeNotice {
-    /// The sending lane's occupant this notice is for.
+    /// The told lane's occupant this notice is for.
     pub(in crate::resident) occupant: CanonicalUuid,
     /// The peer message the outcome settled.
     pub(in crate::resident) input: CanonicalUuid,
-    /// Address of the lane the message went to, when one was ever proved.
-    pub(in crate::resident) recipient: Option<String>,
+    /// Address of the line's other lane, when one was ever proved.
+    pub(in crate::resident) peer: Option<String>,
     /// The message's first line, bounded.
     pub(in crate::resident) excerpt: String,
     pub(in crate::resident) outcome: LineOutcome,
 }
 
-/// How one peer message ended without reply text reaching its sender.
-#[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+/// How one peer message ended without text reaching the told lane.
+#[derive(Clone, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(in crate::resident) enum LineOutcome {
     /// No ACK, FIN or NAK came before it expired, this many whole minutes
@@ -40,14 +41,17 @@ pub(in crate::resident) enum LineOutcome {
     Final,
     /// NAK declined it.
     Declined,
+    /// Its sender canceled it with RST, saying why when it did; told to its
+    /// recipient.
+    Canceled { reason: Option<String> },
 }
 
 impl LineOutcomeNotice {
-    /// The notice its sender hears.
+    /// The notice its told lane hears.
     pub(in crate::resident) fn text(&self) -> String {
-        let to = self.recipient.as_deref().unwrap_or("its recipient");
+        let to = self.peer.as_deref().unwrap_or("its recipient");
         let excerpt = &self.excerpt;
-        let outcome = match self.outcome {
+        let outcome = match &self.outcome {
             LineOutcome::Lapsed { minutes } => format!(
                 "Your peer message to {to} (\"{excerpt}\") lapsed unanswered {minutes} minutes \
                  after you sent it: no ACK, FIN or NAK came, and nothing was resent. What it said \
@@ -61,6 +65,16 @@ impl LineOutcomeNotice {
                 "{to} declined your peer message (\"{excerpt}\") with NAK, and no reason reached \
                  you. Its line is closed."
             ),
+            LineOutcome::Canceled { reason } => {
+                let from = self.peer.as_deref().unwrap_or("its sender");
+                let reason = reason
+                    .as_deref()
+                    .map_or_else(String::new, |reason| format!(" Its reason: {reason}"));
+                format!(
+                    "{from} canceled its peer message to you (\"{excerpt}\") with RST, so no \
+                     answer is owed; work already done on it is not undone.{reason}"
+                )
+            }
         };
         format!(
             "<system-notice>\n{outcome} This is a private notice; no acknowledgment key or \
@@ -104,9 +118,9 @@ pub(in crate::resident) fn tell_line_outcomes(
     }
 }
 
-/// The sending lane and notice for each textless outcome recorded from
-/// `first` through `last` whose sender `seated` names an occupant that still
-/// holds the authoring context.
+/// The told lane and notice for each textless outcome recorded from `first`
+/// through `last` whose told lane `seated` names an occupant that still holds
+/// the message's context: its sender, or for an RST its recipient.
 pub(in crate::resident) fn line_outcomes(
     bus: &Bus,
     first: Seq,
@@ -122,6 +136,7 @@ pub(in crate::resident) fn line_outcomes(
                     &[
                         wire::FactKind::SteerLapsed,
                         wire::FactKind::SteerLineTransition,
+                        wire::FactKind::SteerCanceled,
                     ],
                     after,
                     Some(last),
@@ -139,6 +154,15 @@ pub(in crate::resident) fn line_outcomes(
                                 .duration_since(message.published.get());
                             let minutes = u64::try_from(lived.as_secs() / 60).unwrap_or(0);
                             ended.push((head.into_body(), LineOutcome::Lapsed { minutes }));
+                        }
+                    } else if let Some(canceled) = envelope.fact.read::<wire::body::SteerCanceled>()
+                    {
+                        if let Some(head) = read.steering_key(&canceled.key)?
+                            && head.body().recipient == canceled.recipient
+                            && head.body().sender == envelope.actor
+                        {
+                            let reason = canceled.reason;
+                            ended.push((head.into_body(), LineOutcome::Canceled { reason }));
                         }
                     } else if let Some(transition) =
                         envelope.fact.read::<wire::body::SteerLineTransition>()
@@ -171,20 +195,27 @@ pub(in crate::resident) fn line_outcomes(
     Ok(ended
         .into_iter()
         .filter_map(|(message, outcome)| {
-            let sender = message.sender.lane().filter(|_| !is_invitation(&message))?;
+            let canceled = matches!(outcome, LineOutcome::Canceled { .. });
+            let sender = message.sender.lane()?;
+            let recipient = message.recipient.lane();
+            let (told, peer) = if canceled {
+                (recipient?, Some(sender))
+            } else if is_invitation(&message) {
+                return None;
+            } else {
+                (sender, recipient)
+            };
             let retained = facts
-                .latest_fresh_lane_generation(sender)
+                .latest_fresh_lane_generation(told)
                 .is_none_or(|fresh| fresh <= message.created);
-            let occupant = seated(sender).filter(|_| retained)?;
+            let occupant = seated(told).filter(|_| retained)?;
             let excerpt = message.text.lines().find(|line| !line.trim().is_empty());
             Some((
-                sender,
+                told,
                 LineOutcomeNotice {
                     occupant,
                     input: message.directive,
-                    recipient: message
-                        .recipient
-                        .lane()
+                    peer: peer
                         .and_then(|lane| facts.lane_code(lane))
                         .map(|code| code.to_string()),
                     excerpt: message::bounded(excerpt.unwrap_or_default().trim()),

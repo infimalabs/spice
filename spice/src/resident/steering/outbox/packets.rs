@@ -130,6 +130,13 @@ pub(super) fn settle(
                     },
                 );
             }
+            if let ScanOutcome::Retired {
+                marker: steer::Marker::Rst,
+                ..
+            } = recognition.outcome
+            {
+                return settle_cancel(bus, epoch, submission, judgment, key, text, effects);
+            }
             let token = key.to_owned();
             let head = bus
                 .read(move |read| read.steering_key(&token))
@@ -212,9 +219,84 @@ pub(super) fn settle(
     }
 }
 
+/// Cancel one live directive this lane sent, under its RST packet's judgment.
+/// The header's body, when it has one, is the retained reason. A directive
+/// another lane sent, or one already retired, is refused and left alone.
+fn settle_cancel(
+    bus: &Bus,
+    epoch: CanonicalUuid,
+    submission: &OutboxSubmission,
+    judgment: Judgment,
+    key: &str,
+    text: &str,
+    effects: &mut CommandEffects,
+) -> Result<(), Outcome<CommandAnswer>> {
+    let lane = submission.body.lane;
+    let token = key.to_owned();
+    let head = bus
+        .read(move |read| read.steering_key(&token))
+        .map_err(|error| store_fault("outbox::key-unreadable", &error.to_string()))?;
+    let refused = match &head {
+        Some(head) if head.body().sender != wire::Actor::Lane(lane) => Some(format!(
+            "{key} names a directive another sender sent; RST cancels only this lane's own sends"
+        )),
+        Some(head) if head.body().disposition != Disposition::Live => Some(format!(
+            "{key} is already {} and can no longer be canceled",
+            head.body().disposition.as_str()
+        )),
+        Some(_) => None,
+        None => Some(format!("{key} names no directive")),
+    };
+    let (Some(head), None) = (head, refused.clone()) else {
+        return record(
+            bus,
+            epoch,
+            submission,
+            judgment,
+            data::PacketOutcome::Refused {
+                reason: "steer::rst-unavailable".to_owned(),
+                detail: refused.unwrap_or_default(),
+            },
+        );
+    };
+    let reason = steer::answer(text, key, &Syntax).map(|range| text[range].to_owned());
+    let at = current_instant()?;
+    let mut proposal = JournalWrite::new(
+        Actor::Lane(lane),
+        head.body().origin.clone(),
+        at,
+        Producer::CommandDoor,
+    );
+    let canceled = transitions::stage_cancel(bus, &mut proposal, &head, reason, at)?;
+    judgment.append(
+        &mut proposal,
+        data::PacketOutcome::Acknowledged {
+            key: key.to_owned(),
+            disposition: Disposition::Canceled,
+            body: None,
+            line: None,
+        },
+        FactCause::Pending(canceled),
+    )?;
+    match commit(bus, proposal).map_err(typed_outcome) {
+        Ok(_) => {
+            if let Some(recipient) = head.body().recipient.lane() {
+                effects.notify_inbox(recipient);
+            }
+            Ok(())
+        }
+        // The directive moved after it was read: judge it again as it stands.
+        Err(Outcome::Refusal(refusal)) if [LIVE_MOVED, LINE_CLOSED].contains(&refusal.reason()) => {
+            settle_cancel(bus, epoch, submission, judgment, key, text, effects)
+        }
+        Err(outcome) => Err(outcome),
+    }
+}
+
 /// The judgment for a key granting neither live receipt nor prior peer-line
 /// authority. An owned invitation that already lapsed or was canceled expired;
-/// other unavailable keys were simply missed.
+/// another owned directive that was canceled says so; other unavailable keys
+/// were simply missed.
 fn unanswerable(
     head: Option<&journal::JournalHead<wire::SteeringHead>>,
     lane: CanonicalUuid,
@@ -234,6 +316,17 @@ fn unanswerable(
                 detail: format!(
                     "{key} names an invitation that expired; {}",
                     crate::board_command::INVITE_EXPIRED_GUIDANCE
+                ),
+            }
+        }
+        Some(body)
+            if body.recipient == wire::Actor::Lane(lane)
+                && body.disposition == Disposition::Canceled =>
+        {
+            data::PacketOutcome::Refused {
+                reason: "steer::canceled".to_owned(),
+                detail: format!(
+                    "{key} was canceled by its sender or the operator; no answer is owed"
                 ),
             }
         }

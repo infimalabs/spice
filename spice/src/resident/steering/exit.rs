@@ -297,7 +297,7 @@ pub(super) fn dispose_recognized(
         }
     };
     let clause = recognition.answer.as_ref();
-    admit_receipt(head.body(), lane, &key)?;
+    admit_receipt(head.body(), lane, marker, &key)?;
     let disposition = if disposition == Disposition::Acked && is_invitation(head.body()) {
         let body = body_fate(head.body(), clause, false);
         let mut settle = |write: &mut JournalWrite, accepted: PendingFact| match judgment {
@@ -393,12 +393,22 @@ pub(super) fn dispose_recognized(
     })
 }
 
-/// Admit exact prior peer receipts without reopening typed domain actions.
+/// Admit exact prior peer receipts without reopening typed domain actions;
+/// RST names only this lane's own sends, so it answers no received key.
 fn admit_receipt(
     head: &wire::SteeringHead,
     lane: CanonicalUuid,
+    marker: steer::Marker,
     key: &steer::Key,
 ) -> Result<(), Outcome<CommandAnswer>> {
+    if marker == steer::Marker::Rst {
+        return Err(refusal(
+            "steer::rst-received",
+            Some("ACK, FIN or NAK".to_owned()),
+            Some(key.to_string()),
+            "RST cancels only this lane's own sends; answer a received key with ACK, FIN or NAK",
+        ));
+    }
     if head.recipient == wire::Actor::Lane(lane)
         && (head.disposition == Disposition::Live || prior_peer_receipt(head))
     {

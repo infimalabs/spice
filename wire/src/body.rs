@@ -816,13 +816,22 @@ pub struct SteerLapsed {
     pub expires: Instant,
 }
 
-/// The operator withdrew a live directive without an agent disposition.
+/// A live directive was canceled without an agent disposition: by the
+/// operator, or by its own sender lane with `RST`. The envelope actor names
+/// which.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SteerCanceled {
-    /// Withdrawn directive key.
+    /// Canceled directive key.
     pub key: String,
     /// Actor the directive addressed.
     pub recipient: Actor,
+    /// Why its canceler withdrew it, when it said.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub reason: Option<String>,
 }
 
 mod interaction;

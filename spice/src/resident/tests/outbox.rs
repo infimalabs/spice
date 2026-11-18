@@ -704,7 +704,7 @@ fn a_late_ack_of_a_retired_invitation_learns_it_expired() {
         [
             "task::invite-expired",
             "task::invite-expired",
-            "steer::ack-missed"
+            "steer::canceled"
         ]
     );
     assert_eq!(
@@ -714,6 +714,88 @@ fn a_late_ack_of_a_retired_invitation_learns_it_expired() {
             wire::Disposition::Canceled,
             wire::Disposition::Canceled
         ]
+    );
+    lanes.finish();
+}
+
+/// RST cancels each live send its own lane made and keeps its reason for the
+/// recipient's one notice. Every other key it names is refused alone, and the
+/// recipient's late answer learns the send was canceled.
+#[test]
+fn rst_cancels_only_its_own_live_sends_and_tells_the_recipient_why() {
+    let lanes = Lanes::new("outbox-rst");
+    lanes.declare(SENDER);
+    lanes.declare(FIRST);
+    let first = lanes.address(FIRST);
+    let said = |lane, text: String| receipt(submit(&lanes, lane, &captured(&lanes, lane, &text)));
+    said(SENDER, format!("SYN {first}: wrong question"));
+    let wrong = pending_key(&lanes, FIRST);
+    said(SENDER, format!("SYN {first}: settled question"));
+    let settled = lanes
+        .pending(FIRST)
+        .into_iter()
+        .map(|input| input.key)
+        .find(|key| *key != wrong)
+        .expect("the second input is pending");
+    said(FIRST, format!("ACK {settled}"));
+    let foreign = lanes.direct(FIRST, 40, "operator direction");
+    let before = lanes.cursor();
+
+    let result = said(
+        SENDER,
+        format!("RST {wrong} {settled} {foreign}: I asked the wrong lane."),
+    );
+    let [canceled, retired, unsent] = <[_; 3]>::try_from(result.decided)
+        .unwrap_or_else(|decided| panic!("each key is judged alone: {decided:?}"))
+        .map(|decided| decided.outcome);
+    assert_eq!(
+        canceled,
+        PacketOutcome::Acknowledged {
+            key: wrong.clone(),
+            disposition: wire::Disposition::Canceled,
+            body: None,
+            line: None,
+        }
+    );
+    for refused in [retired, unsent] {
+        assert!(
+            matches!(&refused, PacketOutcome::Refused { reason, .. }
+                if reason == "steer::rst-unavailable"),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(
+        [&wrong, &settled, &foreign].map(|key| steering_head(&lanes, key).disposition),
+        [
+            wire::Disposition::Canceled,
+            wire::Disposition::Acked,
+            wire::Disposition::Live
+        ]
+    );
+
+    let told = steering::line_outcomes(
+        &lanes.bus,
+        wire::Seq::new(before + 1).expect("a later position is positive"),
+        wire::Seq::new(lanes.cursor()).expect("the journal has facts"),
+        |lane| (lane == test_uuid(FIRST)).then_some(test_uuid(FIRST + 1)),
+    )
+    .expect("outcomes read");
+    let [(lane, notice)] = <[_; 1]>::try_from(told)
+        .unwrap_or_else(|told| panic!("only the recipient is told: {told:?}"));
+    assert_eq!(lane, test_uuid(FIRST));
+    assert_eq!(notice.peer, Some(lanes.address(SENDER).to_string()));
+    assert_eq!(
+        notice.outcome,
+        steering::LineOutcome::Canceled {
+            reason: Some("I asked the wrong lane.".to_owned())
+        }
+    );
+
+    let late = said(FIRST, format!("ACK {wrong}: here is my answer"));
+    assert!(
+        matches!(&late.decided[0].outcome, PacketOutcome::Refused { reason, .. }
+            if reason == "steer::canceled"),
+        "{late:?}"
     );
     lanes.finish();
 }
