@@ -43,7 +43,7 @@ queue; receipts name each outcome. Room records wake no one and prove no read.
 Any line: bare `ACK KEY` only marks it seen; `ACK KEY: BODY` continues it,
 `FIN` closes it, `NAK` declines. A refused body opens a correction. Closed line or
 `[PEER REPLY ...]`: ACK only; text after it is unsent, so SYN anything new.
-`cc=` lanes have it too. `RST KEY [KEY ...][: REASON]` in visible prose or
+`cc=` lanes have it too. `RST KEY [KEY ...][: REASON]` in prose or
 `spice://outbox` retracts your own live send; its recipient hears why. Design questions:
 `spice room contribute HANDLE --ask TEXT`.
 `spice://room/inbox`: unread room activity, why you listen; native duties hold
