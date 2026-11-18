@@ -40,6 +40,19 @@ struct ApiReleaseView {
     assets: Vec<AssetView>,
 }
 
+impl From<ApiReleaseView> for ReleaseView {
+    fn from(view: ApiReleaseView) -> Self {
+        Self {
+            tag_name: view.tag_name,
+            name: view.name.unwrap_or_default(),
+            body: view.body.unwrap_or_default(),
+            is_draft: view.draft,
+            is_prerelease: view.prerelease,
+            assets: view.assets,
+        }
+    }
+}
+
 pub(super) fn publish_and_verify(
     root: &Path,
     operation: &Path,
@@ -158,28 +171,10 @@ fn converge_release(
         path: notes.clone(),
         source,
     })?;
-    let observed = release_view(root, &plan.tag)?;
-    let admission = match observed {
-        None => {
-            gh(
-                root,
-                &[
-                    "release",
-                    "create",
-                    &plan.tag,
-                    "--verify-tag",
-                    "--draft",
-                    "--title",
-                    &plan.tag,
-                    "--notes-file",
-                    notes.to_string_lossy().as_ref(),
-                ],
-            )?;
-            let view = release_view(root, &plan.tag)?.ok_or_else(|| {
-                PublishError::Refused("draft GitHub Release remained absent".into())
-            })?;
-            admit_release(view, plan)?
-        }
+    let admission = match release_view(root, &plan.tag)? {
+        // The releases list is eventually consistent, so a release this call
+        // just created is admitted from the provider's own creation record.
+        None => admit_release(create_draft(root, &notes, plan)?, plan)?,
         Some(view) => admit_release(view, plan)?,
     };
     if !admission.missing.is_empty() {
@@ -209,6 +204,37 @@ fn converge_release(
             "GitHub Release remained draft or incomplete after publication".into(),
         ))
     }
+}
+
+/// Create the draft for the already converged remote tag and return the
+/// provider's record of that exact release.
+fn create_draft(
+    root: &Path,
+    notes: &Path,
+    plan: &PublicationPlan,
+) -> Result<ReleaseView, PublishError> {
+    let created = gh(
+        root,
+        &[
+            "api",
+            "--method",
+            "POST",
+            "repos/{owner}/{repo}/releases",
+            "-f",
+            &format!("tag_name={}", plan.tag),
+            "-f",
+            &format!("name={}", plan.tag),
+            "-F",
+            &format!("body=@{}", notes.display()),
+            "-F",
+            "draft=true",
+            "-F",
+            "prerelease=false",
+        ],
+    )?;
+    serde_json::from_str::<ApiReleaseView>(&created)
+        .map(ReleaseView::from)
+        .map_err(PublishError::Decode)
 }
 
 fn admit_release(
@@ -285,14 +311,7 @@ fn select_release(
             "multiple GitHub Releases name tag {tag}"
         )));
     }
-    Ok(Some(ReleaseView {
-        tag_name: view.tag_name,
-        name: view.name.unwrap_or_default(),
-        body: view.body.unwrap_or_default(),
-        is_draft: view.draft,
-        is_prerelease: view.prerelease,
-        assets: view.assets,
-    }))
+    Ok(Some(view.into()))
 }
 
 fn verify_fresh_download(
@@ -554,6 +573,33 @@ mod tests {
                 vec![vec![api_view(&plan, false), api_view(&plan, true)]],
                 &plan.tag
             ),
+            Err(PublishError::Refused(_))
+        ));
+    }
+
+    #[test]
+    fn a_created_draft_is_admitted_from_its_creation_record() {
+        let plan = plan();
+        let created = serde_json::json!({
+            "id": 1,
+            "tag_name": plan.tag,
+            "target_commitish": "main",
+            "name": plan.tag,
+            "body": plan.notes,
+            "draft": true,
+            "prerelease": false,
+            "assets": [],
+        });
+        let view = serde_json::from_value::<ApiReleaseView>(created.clone()).expect("record");
+        let admitted = admit_release(view.into(), &plan).expect("created draft");
+        assert!(admitted.is_draft);
+        assert_eq!(admitted.missing, plan.assets);
+
+        let mut untitled = created;
+        untitled["name"] = serde_json::Value::Null;
+        let untitled = serde_json::from_value::<ApiReleaseView>(untitled).expect("untitled");
+        assert!(matches!(
+            admit_release(untitled.into(), &plan),
             Err(PublishError::Refused(_))
         ));
     }
