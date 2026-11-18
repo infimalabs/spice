@@ -14,6 +14,15 @@ fn fixture(name: &str) -> PathBuf {
     root
 }
 
+fn write_renderer_sources(root: &Path) {
+    let renderer = root.join(renderer::DIRECTORY);
+    fs::create_dir_all(&renderer).expect("create renderer source fixture");
+    fs::write(renderer.join("renderer-000.html"), "renderer document")
+        .expect("write renderer document fixture");
+    fs::write(renderer.join("renderer-000.mjs"), "renderer module")
+        .expect("write renderer module fixture");
+}
+
 fn fixture_source() -> Digest {
     Digest::compute(Domain::DistInventory, b"fixture app sources")
 }
@@ -122,6 +131,7 @@ fn write_raw_generation(stage: &Path, label: &str, source_identity: &Digest, val
 }
 
 fn publish_fixture(root: &Path, label: &str) {
+    write_renderer_sources(root);
     let sources = fixture_source();
     app_at(
         root,
@@ -262,6 +272,7 @@ fn concurrent_worktrees_use_distinct_children_of_one_outer_target() {
 #[test]
 fn foreign_wasm_with_right_css_cannot_publish() {
     let root = fixture("foreign-wasm");
+    write_renderer_sources(&root);
     let expected = fixture_source();
     let foreign = Digest::compute(Domain::DistInventory, b"peer worktree sources");
 
@@ -291,14 +302,45 @@ fn foreign_wasm_with_right_css_cannot_publish() {
 }
 
 #[test]
+fn missing_renderer_sources_cannot_publish() {
+    let root = fixture("worktree-app-missing-renderer");
+    let sources = fixture_source();
+
+    let error = app_at(
+        &root,
+        &sources,
+        &mut Vec::new(),
+        |stage, _| {
+            write_raw_generation(stage, "missing-renderer", &sources, true);
+            Ok(())
+        },
+        || Ok(()),
+    )
+    .expect_err("a generation without its renderer sources must not publish");
+
+    assert!(
+        error.to_string().contains(renderer::DIRECTORY),
+        "the refusal did not name the missing renderer sources: {error}"
+    );
+    assert!(
+        !root.join(spice::serve::APP_STAGE).exists(),
+        "a generation without renderer sources became current"
+    );
+    fs::remove_dir_all(root).expect("remove missing-renderer fixture");
+}
+
+#[test]
 fn finalization_produces_the_closed_worktree_stage_inventory() {
     let root = fixture("worktree-app-finalize");
+    write_renderer_sources(&root);
+    let stage = root.join("stage");
     let sources = fixture_source();
-    write_raw_generation(&root, "first", &sources, true);
+    write_raw_generation(&stage, "first", &sources, true);
+    renderer::stage(&root, &stage).expect("renderer sources stage");
 
-    let identity = finalize_stage(&root, &sources).expect("generated stage finalizes");
+    let identity = finalize_stage(&stage, &sources).expect("generated stage finalizes");
 
-    let mut names = fs::read_dir(&root)
+    let mut names = fs::read_dir(&stage)
         .expect("read stage")
         .map(|entry| entry.expect("read entry").file_name())
         .collect::<Vec<_>>();
@@ -313,6 +355,8 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
             "composer.css",
             "lane_mosaic.css",
             "mosaic.css",
+            "renderer-000.html",
+            "renderer-000.mjs",
             "responsive.css",
             "spice_sidebar.css",
             "style.css",
@@ -322,11 +366,12 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
         ]
         .map(std::ffi::OsString::from)
     );
-    let shell = fs::read_to_string(root.join("app.html")).expect("read shell");
+    let shell = fs::read_to_string(stage.join("app.html")).expect("read shell");
     assert!(
         shell.contains(&format!("data-app-generation=\"{identity}\"")),
         "the shell does not name its loaded generation: {shell}"
     );
+    assert!(shell.contains(wire::manifest::renderer::ATTRIBUTE));
     assert!(!shell.contains(APP_GENERATION_PLACEHOLDER));
     for asset in spice::serve::APP
         .assets()
@@ -518,6 +563,18 @@ fn the_same_generation_tracked_sources_and_build_assemble_one_rack() {
             .map(|entry| u64::from(entry.expect("app member is one stream").1.size()))
             .sum::<u64>()
     );
+    for (file, expected) in [
+        ("renderer-000.html", b"renderer document".as_slice()),
+        ("renderer-000.mjs", b"renderer module".as_slice()),
+    ] {
+        let path = format!("{APP_DIRECTORY}/{file}");
+        let inflated = spice::serve::canvas::gzip::get(&assembled, &path)
+            .expect("renderer asset is one stream")
+            .expect("renderer asset is in the assembled release rack")
+            .inflate()
+            .expect("renderer asset inflates");
+        assert_eq!(&*inflated, expected, "{path}");
+    }
 
     fs::write(roots[0].join("docs/notes.xyz"), b"untyped").expect("write untyped source");
     assert!(matches!(
@@ -620,6 +677,7 @@ fn concurrent_stagings_of_the_same_sources_publish_one_generation() {
     const STAGERS: usize = 4;
     for round in 0..8 {
         let root = fixture(&format!("worktree-app-concurrent-{round}"));
+        write_renderer_sources(&root);
         let sources = fixture_source();
         let built = std::sync::Barrier::new(STAGERS);
         let published = std::thread::scope(|scope| {
@@ -705,6 +763,7 @@ fn a_failed_finalization_preserves_the_prior_pointer_or_first_build_absence() {
     );
 
     let fresh = fixture("worktree-app-first-failure");
+    write_renderer_sources(&fresh);
     app_at(
         &fresh,
         &sources,

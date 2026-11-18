@@ -1,4 +1,4 @@
-//! Publish optional, source-owned renderer files into the ordinary app generation.
+//! Publish required, source-owned renderer files into the ordinary app generation.
 
 use std::fs;
 use std::path::Path;
@@ -12,16 +12,10 @@ pub(super) const DIRECTORY: &str = "app/renderer";
 
 pub(super) fn stage(root: &Path, stage: &Path) -> Result<(), AppBuildError> {
     let directory = root.join(DIRECTORY);
-    let entries = match fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(AppBuildError::Io {
-                path: directory,
-                source,
-            });
-        }
-    };
+    let entries = fs::read_dir(&directory).map_err(|source| AppBuildError::Io {
+        path: directory.clone(),
+        source,
+    })?;
     let mut members = Vec::new();
     let mut total = 0_u64;
     for entry in entries {
