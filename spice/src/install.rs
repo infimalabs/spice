@@ -74,8 +74,9 @@ pub use symbols::SymbolProvenance;
 
 // Both versions are selected at compile time from `dist/version/counters`, the
 // one place the receipt schema is bumped; the product version's minor sums
-// every record in that registry. A receipt numbered above this build refuses
-// as `InstallError::ForeignRecord`; unapply it with the appliance that owns it
+// every record in that registry. Registered retained schemas cross forward
+// during refresh. A receipt numbered above this build refuses as
+// `InstallError::ForeignRecord`; unapply it with the appliance that owns it
 // before installing this one.
 const VERSION_COUNTERS: &str = ::std::include_str!("../../dist/version/counters");
 const PLAN_VERSION: u16 = wire::counter::registry_counter_u16(VERSION_COUNTERS, "install");
@@ -277,6 +278,26 @@ impl InstallPlan {
     ) -> Result<(), InstallError> {
         self.repository.validate(repository)?;
         validate_install_record_binding(repository, &self.record)?;
+        self.validate_asset_bindings(repository, settled)
+    }
+
+    /// Validate the public schema-one receipt at the same absolute location
+    /// under its former state-root-relative binding.
+    fn validate_schema_one_repository_binding(
+        &self,
+        repository: &Repository,
+        settled: bool,
+    ) -> Result<(), InstallError> {
+        self.repository.validate(repository)?;
+        validate_record_binding(&repository.state_root(), &self.record, RECORD_PATH)?;
+        self.validate_asset_bindings(repository, settled)
+    }
+
+    fn validate_asset_bindings(
+        &self,
+        repository: &Repository,
+        settled: bool,
+    ) -> Result<(), InstallError> {
         for operation in &self.operations {
             validate_operation_binding(
                 repository,

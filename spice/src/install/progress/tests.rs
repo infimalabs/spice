@@ -508,6 +508,49 @@ fn write_foreign_version(repository: &Repository, version: u16) -> Vec<u8> {
     bytes
 }
 
+fn write_schema_one(repository: &Repository) -> Vec<u8> {
+    install_without_binary(repository);
+    let LoadedRecord { mut record, .. } = read_record(repository)
+        .expect("receipt reads")
+        .expect("receipt exists");
+    record.version = 1;
+    record.plan.version = 1;
+    record.plan.record =
+        bind_destination(&repository.state_root(), RECORD_PATH).expect("schema-one receipt binds");
+    record.plan_digest = record.plan.digest().expect("schema-one plan digests");
+    let bytes = wire::encode(&record).expect("schema-one record encodes");
+    fs::write(
+        record_path(repository).expect("record path resolves"),
+        &bytes,
+    )
+    .expect("schema-one receipt publishes");
+    bytes
+}
+
+/// The public predecessor's settled receipt crosses forward before planning;
+/// apply then runs only the canonical current-schema refresh and its reversal
+/// remains executable.
+#[test]
+fn a_schema_one_receipt_rolls_forward_through_current_apply() {
+    let (_scratch, repository) = repository("schema-one-forward");
+    write_schema_one(&repository);
+
+    let prepared = prepare(&repository, None, None).expect("schema-one receipt prepares");
+    assert_eq!(prepared.plan().version(), RECORD_VERSION);
+    let receipt =
+        apply_prepared_record(&repository, None, prepared).expect("forward refresh applies");
+    assert_eq!(receipt.status(), InstallStatus::Complete);
+
+    let LoadedRecord { record, .. } = read_record(&repository)
+        .expect("migrated receipt reads")
+        .expect("migrated receipt exists");
+    assert_eq!(record.version, RECORD_VERSION);
+    assert_eq!(record.plan.version(), RECORD_VERSION);
+
+    let reversed = unapply_record(&repository).expect("migrated receipt reverses");
+    assert_eq!(reversed.status(), InstallStatus::Uninstalled);
+}
+
 fn assert_foreign<T>(result: Result<T, InstallError>, version: u16, label: &str) {
     match result {
         Err(InstallError::ForeignRecord { version: named, .. }) => {
@@ -518,11 +561,11 @@ fn assert_foreign<T>(result: Result<T, InstallError>, version: u16, label: &str)
     }
 }
 
-/// A receipt of any other schema, older or newer, belongs to the appliance
-/// that wrote it: every direction refuses it by version and leaves it intact.
+/// An unsupported older schema and any future schema belong to another
+/// appliance: every direction refuses them by version and leaves them intact.
 #[test]
-fn a_receipt_of_another_schema_refuses_every_install_direction() {
-    for version in [RECORD_VERSION - 1, RECORD_VERSION + 1] {
+fn an_unsupported_receipt_schema_refuses_every_install_direction() {
+    for version in [0, RECORD_VERSION + 1] {
         let label = format!("foreign-{version}");
         let (_scratch, repository) = repository(&label);
         let bytes = write_foreign_version(&repository, version);

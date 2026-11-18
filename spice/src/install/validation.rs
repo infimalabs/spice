@@ -4,19 +4,22 @@ pub(super) fn validate_plan(
     plan: &InstallPlan,
     content: GeneratedContentAuthority,
 ) -> Result<(), InstallError> {
-    validate_plan_version(plan)?;
-    validate_operation_inventory(plan, content)?;
-    validate_plan_destinations(plan, content)
+    validate_plan_at_version(plan, content, PLAN_VERSION)
 }
 
-fn validate_plan_version(plan: &InstallPlan) -> Result<(), InstallError> {
-    if plan.version != PLAN_VERSION {
+pub(super) fn validate_plan_at_version(
+    plan: &InstallPlan,
+    content: GeneratedContentAuthority,
+    version: u16,
+) -> Result<(), InstallError> {
+    if plan.version != version {
         return Err(InstallError::InvalidRecord(format!(
-            "install plan version {} is not {PLAN_VERSION}",
+            "install plan version {} is not {version}",
             plan.version
         )));
     }
-    Ok(())
+    validate_operation_inventory(plan, content)?;
+    validate_plan_destinations(plan, content)
 }
 
 /// A plan this build derives matches its canonical inventory and order. A

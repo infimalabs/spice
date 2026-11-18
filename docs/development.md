@@ -59,6 +59,12 @@ inventing the first migration. The schema contract test fails when the first
 step does not leave zero, the final step does not reach the current schema, or
 retained steps have a gap.
 
+An install receipt shape change follows the same forward-only rule: increment
+`install`, add one `spice/src/install/record/migrate/vN.rs` crossing for the
+schema being left, register it in `migrate.rs`, and exercise the oldest retained
+schema through current apply. Every crossing in the current product major stays
+registered as one uninterrupted chain; install never downgrades a receipt.
+
 ## Feedback
 
 Permanent tests follow [AGENTS.md](../AGENTS.md#permanent-test-value). Retained

@@ -7,11 +7,13 @@ use wire::Digest;
 
 use super::files::{observe_bound, publish_bound};
 use super::{
-    FileImage, Generation, InstallError, InstallPlan, InstallPlanSummary, InstallReceipt,
-    InstallStatus, RECORD_MODE, RECORD_PATH, RECORD_VERSION, REVERSAL_PATH, ReceiptGeneration,
-    Repository, RepositoryIdentity, bind_record_destination, record_location,
-    validate_install_record_binding,
+    FileImage, GeneratedContentAuthority, Generation, InstallError, InstallPlan,
+    InstallPlanSummary, InstallReceipt, InstallStatus, RECORD_MODE, RECORD_PATH, RECORD_VERSION,
+    REVERSAL_PATH, ReceiptGeneration, Repository, RepositoryIdentity, bind_record_destination,
+    record_location, validate_install_record_binding, validation,
 };
+
+mod migrate;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -247,28 +249,41 @@ impl InstallRecord {
     }
 
     fn validate_with_content(&self, historical: bool) -> Result<(), InstallError> {
+        self.validate_with_content_at_version(historical, RECORD_VERSION)
+    }
+
+    fn validate_with_content_at_version(
+        &self,
+        historical: bool,
+        version: u16,
+    ) -> Result<(), InstallError> {
         if self.version != self.plan.version {
             return Err(InstallError::InvalidRecord(
                 "install record and plan versions do not match".to_owned(),
             ));
         }
-        if self.version != RECORD_VERSION {
+        if self.version != version {
             return Err(InstallError::InvalidRecord(format!(
-                "install record version {} is not {RECORD_VERSION}",
+                "install record version {} is not {version}",
                 self.version
             )));
         }
-        self.validate_plan_content(historical)?;
-        self.validate_progress_content()
-    }
-
-    fn validate_plan_content(&self, historical: bool) -> Result<(), InstallError> {
-        if historical {
-            self.plan.validate_historical_receipt()?;
+        if version == RECORD_VERSION {
+            if historical {
+                self.plan.validate_historical_receipt()?;
+            } else {
+                self.plan.validate()?;
+            }
         } else {
-            self.plan.validate()?;
+            let content = if historical {
+                GeneratedContentAuthority::HistoricalReceipt
+            } else {
+                GeneratedContentAuthority::CurrentBuild
+            };
+            validation::validate_plan_at_version(&self.plan, content, version)?;
         }
-        self.validate_plan_closure()
+        self.validate_plan_closure()?;
+        self.validate_progress_content()
     }
 
     fn validate_plan_closure(&self) -> Result<(), InstallError> {
@@ -450,7 +465,7 @@ impl InstallRecord {
 }
 
 pub(super) fn read_record(repository: &Repository) -> Result<Option<LoadedRecord>, InstallError> {
-    let Some(mut loaded) = decode_record(repository)? else {
+    let Some((mut loaded, _)) = decode_record(repository, false)? else {
         return Ok(None);
     };
     finish_loaded_record(repository, &mut loaded)?;
@@ -460,10 +475,11 @@ pub(super) fn read_record(repository: &Repository) -> Result<Option<LoadedRecord
 pub(super) fn read_record_for_refresh(
     repository: &Repository,
 ) -> Result<Option<RefreshRecord>, InstallError> {
-    let Some(mut loaded) = decode_record(repository)? else {
+    let Some((mut loaded, migrated)) = decode_record(repository, true)? else {
         return Ok(None);
     };
-    Ok(Some(match finish_loaded_record(repository, &mut loaded)? {
+    let original_digest = migrated.or(finish_loaded_record(repository, &mut loaded)?);
+    Ok(Some(match original_digest {
         Some(original_digest) => RefreshRecord::Repairable {
             loaded,
             original_digest,
@@ -472,7 +488,10 @@ pub(super) fn read_record_for_refresh(
     }))
 }
 
-fn decode_record(repository: &Repository) -> Result<Option<LoadedRecord>, InstallError> {
+fn decode_record(
+    repository: &Repository,
+    migrate: bool,
+) -> Result<Option<(LoadedRecord, Option<Digest>)>, InstallError> {
     record_path(repository)?;
     let state_root = repository.state_root();
     if fs::symlink_metadata(&state_root).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
@@ -488,20 +507,21 @@ fn decode_record(repository: &Repository) -> Result<Option<LoadedRecord>, Instal
     let generation = ReceiptGeneration::observed(&observed);
     let image = observed.image;
     let header: InstallRecordHeader = wire::decode(&image.bytes).map_err(InstallError::Decode)?;
-    if header.version != RECORD_VERSION {
-        return Err(InstallError::ForeignRecord {
-            path: record_path(repository)?,
-            version: header.version,
-        });
+    if header.version != RECORD_VERSION && (!migrate || !migrate::supports(header.version)) {
+        return Err(migrate::foreign(repository, header.version));
     }
-    let record: InstallRecord = wire::decode(&image.bytes).map_err(InstallError::Decode)?;
+    let mut record: InstallRecord = wire::decode(&image.bytes).map_err(InstallError::Decode)?;
     let canonical = wire::encode(&record).map_err(InstallError::Encode)?;
     if canonical != image.bytes {
         return Err(InstallError::InvalidRecord(
             "install record is not canonical".to_owned(),
         ));
     }
-    Ok(Some(LoadedRecord { record, generation }))
+    let migrated = migrate
+        .then(|| migrate::forward(repository, &mut record))
+        .transpose()?
+        .flatten();
+    Ok(Some((LoadedRecord { record, generation }, migrated)))
 }
 
 /// Validate a decoded record against `repository`, returning the on-disk

@@ -1164,11 +1164,13 @@ exact generation. Empty install and state parents leave with it; unrelated
 runtime state keeps those parents in place.
 
 **Invariant —** Install support is bounded by receipt schema, not product
-version. The current schema is the one shape any install command reads. A
-receipt of any other schema, older or newer, refuses before receipt-owned
-mutation as release-owned state naming its schema; the appliance that wrote
-it unapplies it before this build installs. Malformed and inconsistent
-receipts are store failures. Only a change to the record layout, the digest
+version. Within one product major, every retained schema has one registered
+forward crossing and the crossings form an uninterrupted chain into the
+current canonical model. Decoding validates the source schema before crossing;
+planning and apply then use only the final current model, and the first guarded
+receipt write makes the transition durable. Missing crossings, future schemas,
+malformed or inconsistent receipts refuse before receipt-owned mutation.
+Downgrade is never supported. Only a change to the record layout, digest
 domain, or ownership semantics bumps the schema; adding or removing an
 installed asset does not, because retirements derive from the receipt.
 
