@@ -488,6 +488,18 @@ pub(super) fn read_record_for_refresh(
     }))
 }
 
+pub(super) fn read_record_for_unapply(
+    repository: &Repository,
+) -> Result<Option<(LoadedRecord, bool)>, InstallError> {
+    let Some((mut loaded, migrated)) = decode_record(repository, true)? else {
+        return Ok(None);
+    };
+    let requires_publish = migrated
+        .or(finish_loaded_record(repository, &mut loaded)?)
+        .is_some();
+    Ok(Some((loaded, requires_publish)))
+}
+
 fn decode_record(
     repository: &Repository,
     migrate: bool,
