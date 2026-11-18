@@ -87,16 +87,7 @@ fn source_paths(root: &Path) -> Result<Vec<String>, AppBuildError> {
         collect_directory(root, &root.join(directory), &mut paths)?;
     }
     let renderer = root.join(super::renderer::DIRECTORY);
-    match fs::symlink_metadata(&renderer) {
-        Ok(_) => collect_directory(root, &renderer, &mut paths)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(source) => {
-            return Err(AppBuildError::Io {
-                path: renderer,
-                source,
-            });
-        }
-    }
+    collect_directory(root, &renderer, &mut paths)?;
     paths.sort();
     Ok(paths)
 }
@@ -250,6 +241,10 @@ mod tests {
                     .expect("create source-module parent");
                 fs::write(path, directory).expect("write source-module fixture");
             }
+            let renderer = root.join(super::super::renderer::DIRECTORY);
+            fs::create_dir_all(&renderer).expect("create renderer-source directory");
+            fs::write(renderer.join("renderer-000.html"), "renderer shell")
+                .expect("write renderer-source fixture");
             Self(root)
         }
     }
