@@ -607,7 +607,14 @@ fn up_from_with(
     if let Err(error) = fs::create_dir_all(&paths.data) {
         return environment_fault("resident::data-unavailable", &error.to_string());
     }
-    let resident_lock = match ResidentLock::acquire(&paths) {
+    let resident_lock = match acquire_for_up(
+        &paths,
+        binding.access.token.as_deref(),
+        open,
+        progress,
+        endpoint,
+        crate::command_client::system_browser,
+    ) {
         Ok(lock) => lock,
         Err(outcome) => return outcome,
     };
@@ -684,6 +691,37 @@ fn up_from_with(
         return store_fault("bus::shutdown-failed", &error.to_string());
     }
     answer
+}
+
+/// Acquire this start's lock. An explicit browser request remains useful when
+/// another resident already owns it: admit and open that resident's published
+/// endpoint, then preserve the truthful contention refusal.
+pub(super) fn acquire_for_up(
+    paths: &RuntimePaths,
+    auth_token: Option<&str>,
+    open: bool,
+    progress: &mut dyn io::Write,
+    endpoint: &mut dyn io::Write,
+    browser: impl FnOnce(&str) -> Result<(), String>,
+) -> CommandResult<ResidentLock> {
+    let acquired = ResidentLock::acquire(paths);
+    if open
+        && matches!(
+            &acquired,
+            Err(Outcome::Refusal(refusal)) if refusal.reason() == "resident::already-up"
+        )
+    {
+        surface::announce_app(
+            &paths.serve,
+            auth_token,
+            true,
+            || {},
+            browser,
+            endpoint,
+            progress,
+        );
+    }
+    acquired
 }
 
 fn journal_open_failure(error: journal::OpenError) -> Outcome<()> {
