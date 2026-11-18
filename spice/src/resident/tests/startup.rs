@@ -287,6 +287,67 @@ fn contended_resident_names_the_holder_while_its_record_is_rewritten() {
     drop(possession);
     fs::remove_dir_all(root).expect("fixture cleanup");
 }
+/// Contention does not discard an explicit browser side effect. The current
+/// resident's admitted discovery is opened, while the caller still receives
+/// the truthful already-up refusal. A plain contender never launches.
+#[test]
+fn open_request_dials_the_current_resident_despite_contention() {
+    const TOKEN: &str = "correct-horse-battery-staple";
+
+    let (root, paths) = resident_fixture("open-contended-resident");
+    let holder = ResidentLock::acquire(&paths).expect("resident holder acquires");
+    let discovery = serve::Discovery {
+        endpoint: "http://127.0.0.1:48239".to_owned(),
+        capability: test_uuid(1),
+        epoch: test_uuid(2),
+    };
+    holder
+        .set_epoch(discovery.epoch)
+        .expect("holder epoch writes");
+    discovery
+        .publish(&paths.serve)
+        .expect("resident discovery publishes");
+
+    let mut plain_launched = false;
+    let Err(Outcome::Refusal(plain_refusal)) = acquire_for_up(
+        &paths,
+        Some(TOKEN),
+        false,
+        &mut io::sink(),
+        &mut io::sink(),
+        |_| {
+            plain_launched = true;
+            Ok(())
+        },
+    ) else {
+        panic!("a plain contender must receive the already-up refusal");
+    };
+    assert_eq!(plain_refusal.reason(), "resident::already-up");
+    assert!(!plain_launched);
+
+    let mut launched = None;
+    let Err(Outcome::Refusal(open_refusal)) = acquire_for_up(
+        &paths,
+        Some(TOKEN),
+        true,
+        &mut io::sink(),
+        &mut io::sink(),
+        |endpoint| {
+            launched = Some(endpoint.to_owned());
+            Ok(())
+        },
+    ) else {
+        panic!("an opening contender must preserve the already-up refusal");
+    };
+    assert_eq!(open_refusal.reason(), "resident::already-up");
+    assert_eq!(
+        launched.as_deref(),
+        Some("http://127.0.0.1:48239#correct-horse-battery-staple")
+    );
+
+    drop(holder);
+    fs::remove_dir_all(root).expect("fixture cleanup");
+}
 
 /// A liveness observation cannot impersonate the resident it is checking.
 ///

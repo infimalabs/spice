@@ -184,6 +184,9 @@ admitted live vendor identity; transcript prose may select evidence but never
 impersonates the caller. The resident runs in the foreground of its owning
 process: `spice up` may detach that process, `spice down` owns semantic
 shutdown, and an operating-system service manager may own restart policy.
+`spice up --open` admits and opens the published endpoint even when another
+resident already holds startup authority and the command returns
+`resident::already-up`; a plain contending `spice up` has no browser effect.
 
 A task invitation is one typed peer steering head (`task-invite:` control);
 there is no separate stored invitation state. Named-task reads and task detail
