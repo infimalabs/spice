@@ -348,9 +348,7 @@ The primary worktree's Git directory is the Git-common directory, so its
 `authority/worktree/` shares the common root. Deleting `runtime/`, `cache/`, or
 `output/` while no resident runs loses no journal, task, tape, artifact,
 configuration, task recovery, or steering-delivery state; the next start
-recreates what it needs. Startup refuses a root that still holds a member of an
-older layout and names the reset it requires; other names are ignored, and no
-command migrates an older layout.
+recreates what it needs. Names outside this layout are ignored.
 
 ## Recovery
 

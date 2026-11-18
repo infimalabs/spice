@@ -592,12 +592,6 @@ fn state_failure(error: StateError) -> Failure {
         StateError::Filesystem { .. } => {
             Failure::environment("repository::state-path-unavailable", error.to_string())
         }
-        StateError::Retired { .. } => Failure::refusal(
-            "repository::state-reset-required",
-            "the canonical lifetime-grouped state layout",
-            error.to_string(),
-            "stop every writer and run the offline common-layout reset",
-        ),
         StateError::Linked { .. }
         | StateError::NotDirectory { .. }
         | StateError::NotRegularFile { .. } => Failure::refusal(

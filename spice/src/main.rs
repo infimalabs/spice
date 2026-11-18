@@ -216,15 +216,6 @@ fn state_failure(error: &spice::repository::StateError) -> StateFailure {
             reason: "repository::state-path-unavailable".to_owned(),
             detail: error.to_string(),
         }),
-        spice::repository::StateError::Retired { .. } => StateFailure::Refusal(Refusal::bare(
-            wire::RefusalDiagnostic::new(
-                "repository::state-reset-required".to_owned(),
-                Some("retired-state-member".to_owned()),
-                Some("the canonical lifetime-grouped state layout".to_owned()),
-                Some(error.to_string()),
-            )
-            .with_detail("stop every writer and run the offline common-layout reset"),
-        )),
         spice::repository::StateError::Linked { .. }
         | spice::repository::StateError::NotDirectory { .. }
         | spice::repository::StateError::NotRegularFile { .. } => {

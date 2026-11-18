@@ -427,85 +427,6 @@ impl StatePaths {
         ]
     }
 }
-const RETIRED_COMMON_MEMBERS: &[&str] = &[
-    "artifacts",
-    "cargo-output",
-    "config.lock",
-    "data",
-    "degraded",
-    "develop",
-    "gate-arms.json",
-    "gate-arms.lock",
-    "gate-output",
-    "gate-state.json",
-    "gate-state.lock",
-    "gate-store",
-    "gate-sweep.json",
-    "gate-sweep.lock",
-    "install-reversals",
-    "install.json",
-    "keeper",
-    "keeper.json",
-    "keeper.log",
-    "omp-credit-balance.mjs",
-    "locks",
-    "proof",
-    "rack",
-    "release-plans",
-    "release-probes",
-    "resident",
-    "resident.log",
-    "rtk",
-    "serve",
-    "serve-lanes",
-    "steering-media",
-    "supervisor-capture.sock",
-    "supervisors",
-    "tape",
-    "windows-guest",
-];
-
-const RETIRED_WORKTREE_MEMBERS: &[&str] = &[
-    "cargo-output.lock",
-    "config.lock",
-    "gate-native-source",
-    "gate-native-source.lock",
-    "locks",
-    "pre-commit.lock",
-    "session-meter-loss.json",
-    "session-meter-owner.json",
-    "session-meter.json",
-    "steering-delivery.json",
-    "steering-delivery.lock",
-    "task-recovery",
-];
-
-fn refuse_retired_members(root: &Path, names: &[&str]) -> Result<(), StateError> {
-    for name in names {
-        let path = root.join(name);
-        match fs::symlink_metadata(&path) {
-            Ok(_) => return Err(StateError::Retired { path }),
-            Err(source) if source.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => return Err(StateError::filesystem(&path, source)),
-        }
-    }
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => return Err(StateError::filesystem(root, source)),
-    };
-    for entry in entries {
-        let entry = entry.map_err(|source| StateError::filesystem(root, source))?;
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with("task-recovery-"))
-        {
-            return Err(StateError::Retired { path: entry.path() });
-        }
-    }
-    Ok(())
-}
 
 impl Repository {
     /// Resolves the nearest repository containing `start`.
@@ -616,8 +537,6 @@ impl Repository {
         if paths.worktree_runtime() != paths.runtime() {
             admit(paths.worktree_runtime(), StateShape::Directory)?;
         }
-        refuse_retired_members(paths.runtime(), RETIRED_COMMON_MEMBERS)?;
-        refuse_retired_members(paths.worktree_runtime(), RETIRED_WORKTREE_MEMBERS)?;
         for path in paths.admitted_directories() {
             admit(path, StateShape::Directory)?;
         }
@@ -641,8 +560,6 @@ impl Repository {
         if paths.worktree_runtime() != paths.runtime() {
             admit(paths.worktree_runtime(), StateShape::Directory)?;
         }
-        refuse_retired_members(paths.runtime(), RETIRED_COMMON_MEMBERS)?;
-        refuse_retired_members(paths.worktree_runtime(), RETIRED_WORKTREE_MEMBERS)?;
         for path in [paths.runtime(), paths.lane_serve()] {
             admit(path, StateShape::Directory)?;
         }
@@ -699,8 +616,6 @@ pub enum StateError {
     NotDirectory { path: PathBuf },
     /// An existing state leaf is not a regular file.
     NotRegularFile { path: PathBuf },
-    /// A retired state member requires the one-time offline reset.
-    Retired { path: PathBuf },
     /// A component could not be inspected without following it.
     Filesystem { path: PathBuf, source: io::Error },
 }
@@ -720,7 +635,6 @@ impl StateError {
             Self::Linked { path }
             | Self::NotDirectory { path }
             | Self::NotRegularFile { path }
-            | Self::Retired { path }
             | Self::Filesystem { path, .. } => path,
         }
     }
@@ -746,11 +660,6 @@ impl fmt::Display for StateError {
                 "Rust state leaf is not a regular file: {}",
                 path.display()
             ),
-            Self::Retired { path } => write!(
-                formatter,
-                "retired appliance state requires the offline layout reset: {}",
-                path.display()
-            ),
             Self::Filesystem { path, source } => write!(
                 formatter,
                 "Rust state component could not be inspected at {}: {source}",
@@ -764,10 +673,7 @@ impl Error for StateError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Filesystem { source, .. } => Some(source),
-            Self::Linked { .. }
-            | Self::NotDirectory { .. }
-            | Self::NotRegularFile { .. }
-            | Self::Retired { .. } => None,
+            Self::Linked { .. } | Self::NotDirectory { .. } | Self::NotRegularFile { .. } => None,
         }
     }
 }
