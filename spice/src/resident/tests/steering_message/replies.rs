@@ -130,6 +130,71 @@ fn a_bare_ack_to_a_departed_sender_creates_no_reply_duty() {
     lanes.finish();
 }
 
+/// A visible RST is the sender's control, not a recipient answer: it cancels
+/// each live send the authoring lane owns while historical and received keys
+/// stay unchanged. One common reason reaches the canceled send's recipient.
+#[test]
+fn visible_rst_cancels_only_the_authoring_lanes_live_sends() {
+    let lanes = Lanes::new("visible-rst");
+    let first = lanes.address(FIRST);
+    lanes.author(SENDER, &format!("SYN {first}: wrong question"));
+    lanes.hear(SENDER, test_uuid(SENDER + 1));
+    let cancelable = delivered(&lanes, FIRST);
+
+    lanes.author(SENDER, &format!("SYN {first}: settled question"));
+    lanes.hear(SENDER, test_uuid(SENDER + 1));
+    let settled = lanes
+        .pending(FIRST)
+        .into_iter()
+        .find(|pending| pending.key != cancelable.key)
+        .expect("the second send is pending");
+    lanes.answer(FIRST, &[&settled.key], &format!("ACK {}", settled.key));
+    let received = lanes.direct(SENDER, 40, "operator direction");
+    let unknown = steer::Key::for_identity(test_uuid(99)).to_string();
+    let before = lanes.cursor();
+
+    lanes.answer(
+        SENDER,
+        &[&received, &unknown, &cancelable.key, &settled.key],
+        &format!(
+            "RST {} {} {} {}: I asked the wrong lane.",
+            received, unknown, cancelable.key, settled.key
+        ),
+    );
+
+    let standing = |key: &str| {
+        let key = key.to_owned();
+        lanes
+            .bus
+            .read(move |read| read.steering_key(&key))
+            .expect("steering index reads")
+            .expect("the keyed directive exists")
+            .body()
+            .disposition
+    };
+    assert_eq!(standing(&cancelable.key), wire::Disposition::Canceled);
+    assert_eq!(standing(&settled.key), wire::Disposition::Acked);
+    assert_eq!(standing(&received), wire::Disposition::Live);
+
+    let told = steering::line_outcomes(
+        &lanes.bus,
+        wire::Seq::new(before + 1).expect("a later position is positive"),
+        wire::Seq::new(lanes.cursor()).expect("the journal has facts"),
+        |lane| (lane == test_uuid(FIRST)).then_some(test_uuid(FIRST + 1)),
+    )
+    .expect("outcomes read");
+    let [(lane, notice)] = <[_; 1]>::try_from(told)
+        .unwrap_or_else(|told| panic!("only the canceled recipient is told: {told:?}"));
+    assert_eq!(lane, test_uuid(FIRST));
+    assert_eq!(
+        notice.outcome,
+        steering::LineOutcome::Canceled {
+            reason: Some("I asked the wrong lane.".to_owned())
+        }
+    );
+    lanes.finish();
+}
+
 /// A blank line after a payload-free control returns the following paragraph
 /// to ordinary assistant prose. Open and closed lines share that authored
 /// boundary, and a bodyless FIN closes without sending the paragraph.

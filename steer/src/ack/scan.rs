@@ -666,11 +666,11 @@ struct Clause {
 impl Clause {
     /// The exact key run this packet names against current standing.
     ///
-    /// The first syntactic key establishes that this is a control attempt, so
-    /// an unknown first key still receives its truthful refusal. After that,
-    /// only keys present in current standing extend the run; the first other
-    /// token begins the optional body. This preserves ordinary same-line and
-    /// multiline prose without requiring a colon.
+    /// The first syntactic key establishes a control attempt. RST judges every
+    /// shaped key independently, including unknown ones. For recipient controls
+    /// only keys present in current standing extend the run after the first;
+    /// the first other token begins the optional body. This preserves ordinary
+    /// ACK/FIN/NAK prose without requiring a colon.
     fn effective<'a>(
         &'a self,
         prose: &str,
@@ -681,10 +681,9 @@ impl Clause {
             .iter()
             .enumerate()
             .take_while(|&(index, &(start, end))| {
-                prose[start..end]
-                    .parse::<Key>()
-                    .ok()
-                    .is_some_and(|key| index == 0 || standing.disposition(&key).is_some())
+                prose[start..end].parse::<Key>().ok().is_some_and(|key| {
+                    index == 0 || self.marker == Marker::Rst || standing.disposition(&key).is_some()
+                })
             })
             .count();
         let tokens = &self.tokens[..named];
