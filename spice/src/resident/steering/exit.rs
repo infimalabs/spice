@@ -147,11 +147,15 @@ fn candidates(
                 Ok(candidates)
             })
         }
+        // Inputs owed an answer search first, so the lane's own live sends
+        // cannot exhaust the shared evidence deadline before those are found.
         Reading::AtExit | Reading::AtStartup => bus.read(move |read| {
-            Ok(crate::steering_read::pending(read, None)?
+            let mut candidates = crate::steering_read::pending(read, None)?
                 .into_iter()
                 .filter(|head| head.body().recipient == actor || head.body().sender == actor)
-                .collect())
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|head| head.body().recipient != actor);
+            Ok(candidates)
         }),
     }
 }
