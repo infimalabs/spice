@@ -463,7 +463,13 @@ fn landing_message_matches(message: &str, meta: Metadata<'_>) -> Result<bool, Er
         return Ok(false);
     };
     let body = &narrative[body_separator + 1..];
-    if body.len() != 1 || body[0].strip_suffix('\r').unwrap_or(body[0]) != meta.pitch {
+    let pitch = crate::commit_message::fold_prose(meta.pitch);
+    if body.len() != pitch.len()
+        || body
+            .iter()
+            .zip(&pitch)
+            .any(|(line, folded)| line.strip_suffix('\r').unwrap_or(line) != folded)
+    {
         return Ok(false);
     }
     let mut fields = BTreeMap::new();
@@ -544,7 +550,8 @@ pub(super) fn compose_message(meta: Metadata<'_>) -> Result<String, Error> {
         .join("\n");
     Ok(format!(
         "{prefix}{title} {}{phase}\n\n{}\n\n{trailers}",
-        meta.label, meta.pitch
+        meta.label,
+        crate::commit_message::fold_prose(meta.pitch).join("\n")
     ))
 }
 
@@ -872,6 +879,29 @@ mod tests {
             )
         );
         assert!(!message.contains("00000000-0000-4000-8000-000000000123"));
+    }
+
+    #[test]
+    fn a_long_landing_pitch_folds_within_the_wrap_limit_and_reads_back() {
+        let pitch = concat!(
+            "Design pass operations belong beside the task lifecycle they inspect and settle, ",
+            "not in a two-command top-level namespace."
+        );
+        let meta = Metadata {
+            pitch,
+            ..landing_metadata()
+        };
+        let message = compose_message(meta).expect("admitted pitch");
+        let lines = message.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 8, "the pitch paragraph spans two lines");
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.chars().count() <= crate::commit_message::WRAP_LIMIT)
+        );
+        assert!(landing_message_matches(&message, meta).unwrap());
+        let truncated = message.replace(" namespace.", "");
+        assert!(!landing_message_matches(&truncated, meta).unwrap());
     }
 
     #[test]
