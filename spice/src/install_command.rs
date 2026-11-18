@@ -466,8 +466,7 @@ pub(crate) fn failure<B>(error: InstallError) -> Outcome<B> {
         InstallError::State(
             StateError::Linked { .. }
             | StateError::NotDirectory { .. }
-            | StateError::NotRegularFile { .. }
-            | StateError::Retired { .. },
+            | StateError::NotRegularFile { .. },
         ) => install_refusal(
             &error,
             "install-state",
@@ -519,7 +518,6 @@ fn install_refusal_reason(error: &InstallError) -> &'static str {
         InstallError::PathOutsideRoot(_) => "install::path-outside-root",
         InstallError::ParentChanged(_) => "install::parent-changed",
         InstallError::GenerationChanged(_) => "install::generation-changed",
-        InstallError::State(StateError::Retired { .. }) => "repository::state-reset-required",
         InstallError::State(_) => "install::state-refused",
         _ => "install::input-refused",
     }
@@ -620,10 +618,6 @@ fn state_remedy(error: &InstallError) -> Option<String> {
         InstallError::State(StateError::NotRegularFile { path }) => Some(format!(
             "inspect the Rust state leaf with `{}` and restore that fixed component as a regular file before retrying preview",
             inspect_path(path),
-        )),
-        InstallError::State(StateError::Retired { path }) => Some(format!(
-            "stop every writer and run the offline common-layout reset; retired state remains at {}",
-            path.display(),
         )),
         _ => None,
     }

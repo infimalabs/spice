@@ -83,32 +83,6 @@ fn main_and_nested_repositories_resolve_the_nearest_common_state() {
 }
 
 #[test]
-fn retired_state_members_require_the_offline_layout_reset() {
-    let scratch = Scratch::new();
-    let root = case(&scratch, "retired state");
-    let git = root.join(".git");
-    let state = git.join(STATE_DIRECTORY);
-    fs::create_dir_all(state.join("authority")).expect("create mixed state root");
-    fs::create_dir(state.join("data")).expect("create retired common member");
-    let repository = Repository::discover(&root).expect("discover repository");
-
-    let error = repository
-        .admit_state()
-        .expect_err("retired common member refuses");
-    assert!(matches!(error, StateError::Retired { .. }));
-    assert_eq!(error.path(), state.join("data"));
-
-    fs::remove_dir(state.join("data")).expect("remove retired common member");
-    let quarantine = state.join("task-recovery-file-transaction");
-    fs::create_dir(&quarantine).expect("create retired worktree quarantine");
-    let error = repository
-        .admit_state()
-        .expect_err("retired worktree quarantine refuses");
-    assert!(matches!(error, StateError::Retired { .. }));
-    assert_eq!(error.path(), quarantine);
-}
-
-#[test]
 fn linked_worktree_resolves_relative_gitdir_and_commondir_with_spaces() {
     let scratch = Scratch::new();
     let origin = scratch.join("origin repository");

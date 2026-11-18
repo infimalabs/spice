@@ -746,11 +746,6 @@ pub(in crate::board_command) fn repository_state_failure(
         spice::repository::StateError::Filesystem { .. } => {
             environment_fault("repository::state-path-unavailable", error.to_string())
         }
-        spice::repository::StateError::Retired { .. } => refusal(
-            "repository::state-reset-required",
-            Some(error.to_string()),
-            "stop every writer and run the offline common-layout reset",
-        ),
         spice::repository::StateError::Linked { .. }
         | spice::repository::StateError::NotDirectory { .. }
         | spice::repository::StateError::NotRegularFile { .. } => refusal(
