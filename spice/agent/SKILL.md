@@ -93,9 +93,9 @@ this occupant reuse one submission; successors are separate.
 - Plan/Design purpose survives phases; done never replaces review. Creation under
   a held Plan/Design makes a controlled Draft; `--origin` escapes and
   `--preparation` binds. Drafts stay editable, unclaimed, and non-runnable
-  until `task decide` or Plan completion. Decisions pin revisions; edits go
-  stale. Unspecified completion permits work, but done needs own AC plus linked
-  pending, activated AC work, or `task done --disposition
+  until `task decide` or Plan completion. Decisions pin revisions; edits stale
+  them. Unspecified completion permits work, but done needs own AC, linked
+  pending activated AC work, or `task done --disposition
   no-work|duplicate|covered|deferred [--cover REF]`. A Plan instead needs
   AC-bearing child work constructed under it; edges and own AC never suffice.
   Taste holds only the statement. Design participants charge all questions,
@@ -105,7 +105,7 @@ this occupant reuse one submission; successors are separate.
 - A selected statement is its contract. To narrow a Design output, first `task
   modify` and get fresh operator authority. Validation notes, disclosure,
   agreement, and silence give none. Done cites the selected construction and
-  superseding decision. Review maps each term to integrated evidence or that
+  any superseding decision. Review maps each term to integrated evidence or that
   decision; gaps are findings.
 - Work incrementally; commit only under the matching claim. Never pull/push or
   alter harness attribution. Release unfinished work via `task free` or
