@@ -143,6 +143,7 @@ pub(crate) fn app_from_to(
         });
     }
     let generation = app_at(
+        root,
         publish_root,
         &source_identity,
         output,
@@ -156,14 +157,15 @@ pub(crate) fn app_from_to(
 }
 
 fn app_at<W: Write>(
-    root: &Path,
+    source_root: &Path,
+    publish_root: &Path,
     source_identity: &Digest,
     output: &mut W,
     build: impl FnOnce(&Path, &mut W) -> Result<(), AppBuildError>,
     verify_sources: impl FnOnce() -> Result<(), AppBuildError>,
 ) -> Result<Digest, AppBuildError> {
-    let stage = root.join(spice::serve::APP_STAGE);
-    let temporary_parent = root.join("dist");
+    let stage = publish_root.join(spice::serve::APP_STAGE);
+    let temporary_parent = publish_root.join("dist");
     fs::create_dir_all(&temporary_parent).map_err(|source| AppBuildError::Io {
         path: temporary_parent.clone(),
         source,
@@ -181,7 +183,7 @@ fn app_at<W: Write>(
     }
     let result = (|| {
         build(&temporary, output)?;
-        renderer::stage(root, &temporary)?;
+        renderer::stage(source_root, &temporary)?;
         verify_sources()?;
         let identity = finalize_stage(&temporary, source_identity)?;
         publish_generation(&stage, &temporary, &identity)?;
@@ -190,7 +192,7 @@ fn app_at<W: Write>(
             "[app] {} generation {identity} from selected sources {} ({source_identity}) is ready \
              for `spice up` in this worktree",
             stage.display(),
-            root.display(),
+            source_root.display(),
         )
         .map_err(AppBuildError::Output)?;
         Ok(identity)
