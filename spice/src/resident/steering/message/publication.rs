@@ -43,13 +43,6 @@ pub(super) fn publish_packet_judged(
     view: &bus::TaskSnapshot,
     judgment: Option<outbox::Judgment>,
 ) -> Result<Published, Unpublished> {
-    let selectorless;
-    let packet = if packet.routes.is_empty() {
-        selectorless = current_task_packet(packet, view)?;
-        &selectorless
-    } else {
-        packet
-    };
     refuse_key_recipients(bus, packet)?;
     let resolved_packet;
     let routes = if packet
@@ -85,38 +78,6 @@ pub(super) fn publish_packet_judged(
     } else {
         publish_message(bus, epoch, config, view, judgment, routes)
     }
-}
-
-/// Resolve selectorless publication against the author's sole active claim.
-fn current_task_packet<'a>(
-    packet: &Packet<'a>,
-    view: &bus::TaskSnapshot,
-) -> Result<Packet<'a>, Unpublished> {
-    let actor = Actor::Lane(packet.lane);
-    let mut candidates = view.tasks().iter().filter_map(|task| {
-        task.active_claim_of(&actor)
-            .map(|_| task.statement().body().handle(task.workflow().body().phase))
-    });
-    let Some(task) = candidates.next() else {
-        return Err(Unpublished::Refused {
-            reason: "syn::current-task-missing".to_owned(),
-            detail: "selectorless SYN requires one active claim".to_owned(),
-        });
-    };
-    if candidates.next().is_some() {
-        return Err(Unpublished::Refused {
-            reason: "syn::current-task-ambiguous".to_owned(),
-            detail: "selectorless SYN names more than one active claim".to_owned(),
-        });
-    }
-    let mut resolved = packet.clone();
-    resolved.routes.push(Route {
-        audience: None,
-        context: Some(task),
-        direction: None,
-        span: 0..0,
-    });
-    Ok(resolved)
 }
 
 /// Refuse a packet that writes an input key where an occupant belongs.
