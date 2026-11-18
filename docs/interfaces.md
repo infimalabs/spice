@@ -200,7 +200,7 @@ immutable judgment. Refused or withheld packets neither undo earlier successes
 nor block valid neighbors. Partial success returns a submission with settled
 and unresolved positions and any interruption, never an atomic-batch rollback.
 
-`RST KEY [KEY ...]: REASON` is the sender's control: each key that names a
+`RST KEY [KEY ...][: REASON]` is the sender's control: each key that names a
 live send of the writing lane is canceled through the same guarded transition
 the operator's `steer cancel` uses, retaining the optional reason. Any other
 key refuses alone as `steer::rst-unavailable`. RST settles only through the
