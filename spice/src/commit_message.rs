@@ -88,7 +88,17 @@ fn fold(message: &str) -> String {
 }
 
 fn fold_body_line(line: &str) -> Vec<String> {
-    if line.chars().count() <= WRAP_LIMIT || exempt_from_wrap(line) {
+    if exempt_from_wrap(line) {
+        return vec![line.to_owned()];
+    }
+    fold_prose(line)
+}
+
+/// Fold one line of prose at [`WRAP_LIMIT`], continuing a list item under its
+/// marker; a word wider than the limit keeps a line of its own.
+#[must_use]
+pub fn fold_prose(line: &str) -> Vec<String> {
+    if line.chars().count() <= WRAP_LIMIT {
         return vec![line.to_owned()];
     }
 
