@@ -42,8 +42,9 @@ fn a_leading_clause_retires_every_key_it_names() {
     );
 }
 
-/// Standing is loaded only when the canonical grammar sees an authored
-/// attempt; preflight and scanning must share multiline and context guards.
+/// Standing is loaded exactly when the canonical grammar sees a marker followed
+/// by a key-shaped token. Authored prose before that structural header never
+/// changes whether the packet speaks.
 #[test]
 fn acknowledgement_preflight_uses_the_canonical_clause_grammar() {
     for prose in [
@@ -53,6 +54,17 @@ fn acknowledgement_preflight_uses_the_canonical_clause_grammar() {
         "Progress follows: ACK 1kJK6N3Rx. applied.",
         "ACK\n1kJK6N3Rx\n: cross-line.",
         "**ACK** **1kJK6N3Rx**:** emphasized.",
+        "ACK bcdfghjkl: lower-case key shape.",
+        "As you said, ACK 1kJK6N3Rx: heard.",
+        "If that is all, ACK 1kJK6N3Rx: heard.",
+        "The form now validates, ACK 1kJK6N3Rx: heard.",
+        "Fixed the token refresh, ACK 1kJK6N3Rx: heard.",
+        "I do not ACK 1kJK6N3Rx: heard.",
+        "If I ACK 1kJK6N3Rx: heard.",
+        "The example ACK 1kJK6N3Rx: heard.",
+        "I emitted ACK 1kJK6N3Rx: heard.",
+        "The parser recognizes ACK 1kJK6N3Rx: as protocol.",
+        "This sentence contains ACK 1kJK6N3Rx: as an example.",
     ] {
         assert!(has_acknowledgement(prose), "missed {prose:?}");
     }
@@ -60,18 +72,13 @@ fn acknowledgement_preflight_uses_the_canonical_clause_grammar() {
     for prose in [
         "> ACK\t1kJK6N3Rx: quoted.",
         "    NAK\t1kJK7Sqyx: code.",
-        "I do not ACK 1kJK6N3Rx: negated.",
-        "I didn't ACK 1kJK6N3Rx: negated.",
-        "I haven\u{2019}t NAK 1kJK7Sqyx: negated typographically.",
-        "Never ACK 1kJK6N3Rx: negated.",
-        "If I ACK 1kJK6N3Rx: hypothetical.",
-        "The example ACK 1kJK6N3Rx: narrated.",
-        "I emitted ACK 1kJK6N3Rx: narration about prior prose.",
-        "The parser recognizes ACK 1kJK6N3Rx: as protocol.",
-        "This sentence contains ACK 1kJK6N3Rx: as an example.",
+        "`ACK 1kJK6N3Rx: inline code.`",
         "src/ack.rs:12: ACK 1kJK6N3Rx: rendered source context.",
         "- ACK 1kJK6N3Rx: list example.",
         "1. NAK 1kJK7Sqyx: list example.",
+        "ACK",
+        "ACK the changes.",
+        "ACK 1kJK6N3R: short non-key.",
     ] {
         assert!(!has_acknowledgement(prose), "accepted {prose:?}");
     }
@@ -275,7 +282,7 @@ fn a_refusal_retires_the_directive_as_declined() {
 }
 
 /// Unknown, quoted, and historical keys alter nothing and are reported by
-/// name. Guarded narration is ignored; a malformed non-key stays silent.
+/// name. A malformed non-key never establishes a packet.
 #[test]
 fn every_way_a_clause_fails_to_land_is_reported_by_name() {
     let board = board();
@@ -363,8 +370,8 @@ fn a_leading_clause_stops_before_non_key_response_prose() {
     );
 }
 
-/// Every unguarded marker starts another authentic packet, even when ordinary
-/// response prose precedes it on the same line.
+/// Every structurally valid marker starts another authentic packet, even when
+/// ordinary response prose precedes it on the same line.
 #[test]
 fn an_unseparated_second_clause_on_a_line_also_speaks() {
     let board = board();
@@ -443,8 +450,8 @@ fn the_decisive_recognition_is_the_last_of_the_highest_rank() {
             Some("2:5 1kJK6N3Rx declined"),
         ),
         (
-            "> ACK 1kJK6N3Rx: quoted\nI said ACK 1kJK6N3Rx: narrated",
-            Some("1:7 1kJK6N3Rx quoted"),
+            "> ACK 1kJK6N3Rx: quoted\nI said ACK 1kJK6N3Rx: authored",
+            Some("2:12 1kJK6N3Rx acked"),
         ),
         ("ACK 1kJK6M0Vx: another key entirely.", None),
     ] {
@@ -563,7 +570,6 @@ fn the_ledger_answers_as_standing() {
 fn every_miss_is_reported_under_one_word() {
     for (miss, word) in [
         (Miss::Quoted, "quoted"),
-        (Miss::Malformed, "malformed"),
         (Miss::Unknown, "unknown"),
         (Miss::Historical, "historical"),
     ] {

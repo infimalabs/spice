@@ -1,9 +1,9 @@
 //! Reading authored SYN packets out of assistant prose.
 //!
-//! Publication packets share the acknowledgment header grammar's
-//! authored-context rules but publish rather than retire: each placed packet
-//! names its routes, each an audience, a task context, or an audience in a
-//! context, and owns exactly the body hunk up to the next placed packet.
+//! Publication packets share the acknowledgment header grammar's structural
+//! rules but publish rather than retire: each placed packet names its routes,
+//! each an audience, a task context, or an audience in a context, and owns
+//! exactly the body hunk up to the next placed packet.
 
 use steer::ack::keys::Key;
 use steer::ack::scan::{
@@ -106,14 +106,6 @@ fn a_task_pointer_records_the_room_without_reaching_an_occupant() {
     };
     assert_eq!(route.audience, None);
     assert_eq!(route.context, Some(handle("ROOMS-dVrD244Jd")));
-
-    let selectorless = "SYN: current task";
-    let [message] = scan_messages(selectorless)
-        .try_into()
-        .expect("one selectorless packet");
-    let publication = message.publication.expect("resident resolves current task");
-    assert!(publication.routes.is_empty());
-    assert_eq!(&selectorless[publication.body], "current task");
 }
 
 /// A malformed qualifier, a repeated destination, or a room named twice
@@ -225,7 +217,7 @@ fn a_body_runs_to_the_next_placed_packet_or_the_end() {
         "SYN 6HmS, 7Bc 9x: First line.\n",
         "Wrapped   line.\n",
         " \t\r\n",
-        "Second paragraph; the example SYN 6HmS: narrated.\n",
+        "Second paragraph; the example SYN packet is narrated.\n",
         "ACK 1kJK6N3Rx: applied\n\nacross a blank line\n",
         "NAK 1kJK6M0Vx: declined SYN 6HmS: Only for you.\n\n",
         "Closing report.",
@@ -238,7 +230,7 @@ fn a_body_runs_to_the_next_placed_packet_or_the_end() {
         sent(prose, &messages[0]),
         (
             vec!["6HmS", "7Bc", "9x"],
-            "First line.\nWrapped   line.\n \t\r\nSecond paragraph; the example SYN 6HmS: narrated."
+            "First line.\nWrapped   line.\n \t\r\nSecond paragraph; the example SYN packet is narrated."
         )
     );
     let private = prose.find("SYN 6HmS: Only").expect("fixture packet");
@@ -332,8 +324,8 @@ fn ack_reactions_accept_only_nods_with_their_trailing_punctuation() {
     }
 }
 
-/// Quoted, coded, rendered, negated, hypothetical, and narrated markers send
-/// nothing, and inside a body they are content rather than boundaries.
+/// Quoted, coded, and rendered-source markers send nothing, and inside a body
+/// they are content rather than boundaries.
 #[test]
 fn unauthored_markers_neither_publish_nor_bound_a_body() {
     for prose in [
@@ -342,17 +334,6 @@ fn unauthored_markers_neither_publish_nor_bound_a_body() {
         "```\nSYN 6HmS: fenced.\n```",
         "Use `SYN 6HmS: hi` to send.",
         "src/peer.rs:3: SYN 6HmS: rendered source.",
-        "I will not SYN 6HmS: negated.",
-        "Don't SYN 6HmS: negated.",
-        "Never SYN 6HmS: negated.",
-        "I shouldn\u{2019}t SYN 6HmS: negated typographically.",
-        "You mustn't SYN 6HmS: negated.",
-        "If I SYN 6HmS: hypothetical.",
-        "The example SYN 6HmS: narrated.",
-        "The \u{2018}example\u{2019} SYN 6HmS: narrated.",
-        "The example\u{2019}s SYN 6HmS: narrated.",
-        "I will \u{2018}not\u{2019} SYN 6HmS: negated.",
-        "If\u{2019} I SYN 6HmS: hypothetical.",
     ] {
         assert_eq!(scan_messages(prose), [], "published {prose:?}");
     }
@@ -366,20 +347,28 @@ fn unauthored_markers_neither_publish_nor_bound_a_body() {
     let messages = scan_messages(prose);
     assert_eq!(messages.len(), 1);
     assert_eq!(sent(prose, &messages[0]).1, &prose["SYN 6HmS: ".len()..]);
-
-    for prose in [
-        "SYN 6HmS: Keep going. Don't SYN 7Bc: that one is still ours.",
-        "SYN 6HmS: Keep going. Don\u{2019}t SYN 7Bc: that one is still ours.",
-    ] {
-        let messages = scan_messages(prose);
-        assert_eq!(messages.len(), 1, "{prose:?}");
-        assert_eq!(sent(prose, &messages[0]).1, &prose["SYN 6HmS: ".len()..]);
-    }
     assert!(
         scan(prose, &Live)
             .iter()
             .all(|recognition| !matches!(recognition.outcome, Outcome::Retired { .. }))
     );
+}
+
+/// A route-shaped header speaks structurally; surrounding prose never changes
+/// whether the same bytes publish.
+#[test]
+fn route_shaped_headers_speak_regardless_of_preceding_prose() {
+    for prose in [
+        "I will not SYN 6HmS: negated.",
+        "Don't SYN 6HmS: negated.",
+        "If I SYN 6HmS: hypothetical.",
+        "The example SYN 6HmS: narrated.",
+        "As you said, SYN 6HmS: sent.",
+        "The form validates, SYN 6HmS: sent.",
+    ] {
+        let [message] = scan_messages(prose).try_into().expect("one packet");
+        assert_eq!(sent(prose, &message).0, ["6HmS"], "{prose:?}");
+    }
 }
 
 /// Markdown list examples describe packets; they never send or retire one.
@@ -478,6 +467,7 @@ fn prose_that_only_uses_the_word_is_not_a_packet() {
         "SYN #1: first heading",
         "SYN #: hash only",
         "SYN #rooms-dVrD244Jd tag",
+        "SYN: current task",
     ] {
         assert_eq!(scan_messages(prose), [], "published {prose:?}");
     }
@@ -529,8 +519,8 @@ fn a_reply_clause_runs_to_the_next_placed_packet_or_the_end() {
             "done here `SYN 6HmS: inline`",
         ),
         (
-            "ACK 1kJK6N3Rx: done here; the example SYN 6HmS: narrated",
-            "done here; the example SYN 6HmS: narrated",
+            "ACK 1kJK6N3Rx: done here; the example SYN packet is narrated",
+            "done here; the example SYN packet is narrated",
         ),
         (
             "ACK 1kJK6N3Rx: done here, SYN count: 3",

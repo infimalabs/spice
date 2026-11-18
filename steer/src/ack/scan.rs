@@ -1,14 +1,14 @@
 //! Recognizing explicit protocol packets in assistant prose.
 //!
-//! Acknowledgment is a narrow protocol at the assistant-output boundary, not an
-//! interpretation of what a turn seems to have meant. A clause retires a
-//! directive only when it spells a marker in authored prose, names a key-shaped
-//! token, and that key belongs to a directive still live. Everything else —
-//! unknown, malformed, quoted, or historical — alters nothing and is reported
-//! by name, because a silent non-recognition and a refusal look identical to an
-//! operator waiting on an answer.
+//! Acknowledgment is a narrow structural protocol at the assistant-output
+//! boundary, not an interpretation of what a turn seems to have meant. A
+//! clause exists only when a marker is followed by at least one key-shaped
+//! token. It retires a directive only when that key belongs to a directive
+//! still live. Unknown, quoted, or historical keys alter nothing and are
+//! reported by name, because a silent non-recognition and a refusal look
+//! identical to an operator waiting on an answer.
 //!
-//! The same authored-context grammar reads [`message`] packets: `SYN` headers
+//! The same structural grammar reads [`message`] packets: `SYN` headers
 //! that name their routes and own a body hunk but never retire anything. One
 //! visitor finds every packet, so a placed header bounds the body before it.
 //!
@@ -68,8 +68,6 @@ pub enum Miss {
     /// The clause sat inside quoting, code, or rendered source context, where a
     /// key is shown rather than spoken.
     Quoted,
-    /// The token is not spelled as a key.
-    Malformed,
     /// No directive carries the key.
     Unknown,
     /// The directive carrying the key already retired.
@@ -82,7 +80,6 @@ impl Miss {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Quoted => "quoted",
-            Self::Malformed => "malformed",
             Self::Unknown => "unknown",
             Self::Historical => "historical",
         }
@@ -287,9 +284,9 @@ fn first_blank_line(prose: &str, start: usize, end: usize) -> Option<usize> {
 
 /// Reads acknowledgment packets with their source header boundaries.
 ///
-/// A packet may appear anywhere in authored prose. Markers in quoted, code, or
-/// rendered source context remain misses, while explicit negation,
-/// hypothetical phrasing, and narration about protocol markers stay silent.
+/// A packet may appear anywhere in authored prose once its marker is followed
+/// by a structurally valid header. Markers in quoted, code, or rendered source
+/// context remain misses.
 pub fn scan_acknowledgements(prose: &str, standing: &impl Standing) -> Vec<Acknowledgement> {
     let mut acknowledgements = Vec::new();
     let _ = visit_packets(prose, |lines, packet| {
@@ -333,10 +330,9 @@ pub fn has_message(prose: &str) -> bool {
 /// Reads every placed SYN packet, each bounded by the next placed packet or the
 /// end of the prose.
 ///
-/// Quoted, code, rendered-source, negated, hypothetical, and narrated markers
-/// publish nothing and bound nothing. The scan needs no standing: a
-/// publication retires no key, and whether an ACK, FIN, or NAK header is placed
-/// does not depend on which keys are live.
+/// Quoted, code, and rendered-source markers publish nothing and bound nothing.
+/// The scan needs no standing: a publication retires no key, and whether an
+/// ACK, FIN, or NAK header is placed does not depend on which keys are live.
 #[must_use]
 pub fn scan_messages(prose: &str) -> Vec<Message> {
     let mut placed = Vec::new();
@@ -413,9 +409,9 @@ pub fn has_acknowledgement(prose: &str) -> bool {
 /// An ACK, FIN, or NAK range runs from its marker, including touching emphasis,
 /// through its key list and optional separator; a SYN range is that message's
 /// [`Message::header`]. Bodies and response prose are never inside a range, and
-/// quoted, code, rendered-source, negated, hypothetical, and narrated markers
-/// contribute none, so removing every range leaves what author wrote around
-/// the protocol. The scan needs no standing.
+/// quoted, code, and rendered-source markers contribute none, so removing
+/// every range leaves what the author wrote around the protocol. The scan needs
+/// no standing.
 #[must_use]
 pub fn placed_headers(prose: &str) -> Vec<Range<usize>> {
     let mut headers = Vec::new();
@@ -436,7 +432,7 @@ pub fn placed_headers(prose: &str) -> Vec<Range<usize>> {
     headers
 }
 
-/// One protocol header the authored-context grammar recognized.
+/// One protocol header the structural grammar recognized.
 enum Packet {
     /// An ACK, FIN, or NAK clause.
     Retirement(Clause),
@@ -459,41 +455,32 @@ fn visit_packets(
         };
         let decorated_start = emphasis_start(prose, start);
         let quoted = lines.suppressed(start) || inline_quoted(prose, start, &lines);
-        if !quoted && guarded_context(prose, start) {
-            continue;
-        }
-        let packet =
-            match lead {
-                Lead::Retirement(marker) => {
-                    let Some(header) = tokens_after(prose, start + marker.as_str().len()) else {
-                        continue;
-                    };
-                    if !header.tokens.iter().any(|&(token_start, token_end)| {
-                        intended_token(&prose[token_start..token_end])
-                    }) {
-                        continue;
-                    }
-                    Packet::Retirement(Clause {
-                        marker,
-                        position: position(quoted, &header.tokens, &lines),
-                        start: decorated_start,
-                        end: header.end,
-                        separator: header.separator,
-                        tokens: header.tokens,
-                    })
+        let packet = match lead {
+            Lead::Retirement(marker) => {
+                let Some(header) = tokens_after(prose, start + marker.as_str().len()) else {
+                    continue;
+                };
+                Packet::Retirement(Clause {
+                    marker,
+                    position: position(quoted, &header.tokens, &lines),
+                    start: decorated_start,
+                    end: header.end,
+                    separator: header.separator,
+                    tokens: header.tokens,
+                })
+            }
+            Lead::Message => {
+                let Some(header) = message::header_after(prose, start + message::MARKER.len())
+                else {
+                    continue;
+                };
+                Packet::Message {
+                    position: position(quoted, &header.tokens, &lines),
+                    start: decorated_start,
+                    header,
                 }
-                Lead::Message => {
-                    let Some(header) = message::header_after(prose, start + message::MARKER.len())
-                    else {
-                        continue;
-                    };
-                    Packet::Message {
-                        position: position(quoted, &header.tokens, &lines),
-                        start: decorated_start,
-                        header,
-                    }
-                }
-            };
+            }
+        };
         visit(&lines, packet)?;
     }
     ControlFlow::Continue(())
@@ -737,9 +724,9 @@ impl Clause {
         if self.position == Position::Quoted {
             return missed(Miss::Quoted);
         }
-        let Ok(key) = token.parse::<Key>() else {
-            return missed(Miss::Malformed);
-        };
+        let key = token
+            .parse::<Key>()
+            .expect("a parsed header token carries the key shape");
         match standing.disposition(&key) {
             None => missed(Miss::Unknown),
             Some(Disposition::Live) => Outcome::Retired {
@@ -904,12 +891,6 @@ fn skip_key_decoration(prose: &str, mut cursor: usize) -> usize {
     cursor
 }
 
-fn intended_token(token: &str) -> bool {
-    token
-        .bytes()
-        .any(|byte| byte.is_ascii_digit() || byte.is_ascii_uppercase())
-}
-
 fn inline_quoted(prose: &str, marker_start: usize, lines: &SourceLines) -> bool {
     let Some((_, line)) = lines.line(marker_start) else {
         return false;
@@ -929,233 +910,6 @@ fn inline_quoted(prose: &str, marker_start: usize, lines: &SourceLines) -> bool 
             % 2
             == 1
     })
-}
-
-const CONTEXT_WINDOW: usize = 6;
-/// Negations that are not an `n't` contraction, which [`negates`] reads by
-/// its ending instead.
-const NEGATION_WORDS: &[&str] = &[
-    "cannot", "cant", "never", "not", "refuse", "refused", "refuses", "refusing", "will-not",
-    "wont",
-];
-/// The `n't` ending of a negative contraction, with a straight or a
-/// typographic apostrophe.
-const CONTRACTED_NEGATIONS: &[&str] = &["n't", "n\u{2019}t"];
-const PROHIBITION_WORDS: &[&str] = &[
-    "avoid",
-    "avoided",
-    "avoiding",
-    "avoids",
-    "ban",
-    "banned",
-    "banning",
-    "bans",
-    "delete",
-    "deleted",
-    "deletes",
-    "deleting",
-    "eliminate",
-    "eliminated",
-    "eliminates",
-    "eliminating",
-    "forbid",
-    "forbids",
-    "forbidden",
-    "forbidding",
-    "prevent",
-    "prevented",
-    "preventing",
-    "prevents",
-    "remove",
-    "removed",
-    "removes",
-    "removing",
-];
-const RELATION_BREAK_WORDS: &[&str] = &["by", "through", "using", "via", "with"];
-const TURNING_WORDS: &[&str] = &["but", "hence", "so", "therefore", "thus"];
-const HYPOTHETICAL_WORDS: &[&str] = &[
-    "could",
-    "hypothetically",
-    "if",
-    "should",
-    "whether",
-    "would",
-];
-const NARRATION_WORDS: &[&str] = &[
-    "cite",
-    "cited",
-    "contain",
-    "contained",
-    "containing",
-    "contains",
-    "emit",
-    "emits",
-    "emitted",
-    "emitting",
-    "example",
-    "examples",
-    "form",
-    "literal",
-    "mention",
-    "mentioned",
-    "mentions",
-    "narrated",
-    "phrase",
-    "quote",
-    "quoted",
-    "recognise",
-    "recognised",
-    "recognises",
-    "recognising",
-    "recognize",
-    "recognized",
-    "recognizes",
-    "recognizing",
-    "said",
-    "say",
-    "saying",
-    "string",
-    "token",
-    "write",
-    "writes",
-    "writing",
-    "wrote",
-];
-
-fn guarded_context(prose: &str, marker_start: usize) -> bool {
-    let words = RecentWords::before(prose, marker_start);
-    words.contains_negation()
-        || words.contains_pair("instead", "of")
-        || words.contains("instead-of")
-        || ["refuse", "refused", "refuses", "refusing"]
-            .into_iter()
-            .any(|word| words.contains_pair(word, "to"))
-        || words.direct_prohibition()
-        || words.contains_any(HYPOTHETICAL_WORDS)
-        || words.contains_any(NARRATION_WORDS)
-}
-
-struct RecentWords<'a> {
-    words: [&'a str; CONTEXT_WINDOW],
-    len: usize,
-}
-
-impl<'a> RecentWords<'a> {
-    fn before(prose: &'a str, marker_start: usize) -> Self {
-        let clause_start = prose[..marker_start]
-            .rfind(['\r', '\n', '.', '!', '?', ';'])
-            .map_or(0, |index| index + 1);
-        let prefix = &prose[clause_start..marker_start];
-        let mut words = Self {
-            words: [""; CONTEXT_WINDOW],
-            len: 0,
-        };
-        let mut cursor = 0;
-        while cursor < prefix.len() {
-            let Some(character) = prefix[cursor..].chars().next() else {
-                break;
-            };
-            if !character.is_alphanumeric() {
-                cursor += character.len_utf8();
-                continue;
-            }
-            let start = cursor;
-            cursor += character.len_utf8();
-            while cursor < prefix.len() {
-                let Some(character) = prefix[cursor..].chars().next() else {
-                    break;
-                };
-                let joins = character.is_alphanumeric()
-                    || matches!(character, '\'' | '-')
-                    || (character == '\u{2019}' && contraction_apostrophe(prefix, cursor));
-                if !joins {
-                    break;
-                }
-                cursor += character.len_utf8();
-            }
-            words.push(&prefix[start..cursor]);
-        }
-        words
-    }
-
-    fn push(&mut self, word: &'a str) {
-        if contains_word(TURNING_WORDS, word) {
-            self.len = 0;
-            return;
-        }
-        if self.len < CONTEXT_WINDOW {
-            self.words[self.len] = word;
-            self.len += 1;
-        } else {
-            self.words.rotate_left(1);
-            self.words[CONTEXT_WINDOW - 1] = word;
-        }
-    }
-
-    fn contains(&self, expected: &str) -> bool {
-        self.words[..self.len]
-            .iter()
-            .any(|word| word.eq_ignore_ascii_case(expected))
-    }
-
-    fn contains_negation(&self) -> bool {
-        self.words[..self.len].iter().any(|word| negates(word))
-    }
-
-    fn contains_any(&self, expected: &[&str]) -> bool {
-        self.words[..self.len]
-            .iter()
-            .any(|word| contains_word(expected, word))
-    }
-
-    fn contains_pair(&self, first: &str, second: &str) -> bool {
-        self.words[..self.len]
-            .windows(2)
-            .any(|pair| pair[0].eq_ignore_ascii_case(first) && pair[1].eq_ignore_ascii_case(second))
-    }
-
-    fn direct_prohibition(&self) -> bool {
-        let words = &self.words[..self.len];
-        for index in (0..words.len()).rev() {
-            if contains_word(PROHIBITION_WORDS, words[index]) {
-                return !words[index + 1..]
-                    .iter()
-                    .any(|word| contains_word(RELATION_BREAK_WORDS, word));
-            }
-        }
-        false
-    }
-}
-
-/// Whether the U+2019 at `at` is the apostrophe of a word's final `n’t`.
-/// Anywhere else it is a closing quote or a possessive mark and ends the word,
-/// so the guard word before it still reads bare.
-fn contraction_apostrophe(prefix: &str, at: usize) -> bool {
-    let mut following = prefix[at + '\u{2019}'.len_utf8()..].chars();
-    prefix[..at].ends_with(['n', 'N'])
-        && following
-            .next()
-            .is_some_and(|next| next.eq_ignore_ascii_case(&'t'))
-        && !following.next().is_some_and(char::is_alphanumeric)
-}
-
-fn contains_word(words: &[&str], candidate: &str) -> bool {
-    words
-        .iter()
-        .any(|word| candidate.eq_ignore_ascii_case(word))
-}
-
-/// Whether `word` is a negation: a listed one, or any contraction ending in
-/// `n't`, so every auxiliary's negative form reads alike.
-fn negates(word: &str) -> bool {
-    contains_word(NEGATION_WORDS, word)
-        || CONTRACTED_NEGATIONS.iter().any(|ending| {
-            word.len()
-                .checked_sub(ending.len())
-                .filter(|start| *start > 0)
-                .and_then(|start| word.get(start..))
-                .is_some_and(|tail| tail.eq_ignore_ascii_case(ending))
-        })
 }
 
 /// Markdown indentation columns, with a tab advancing to the next four-column stop.
