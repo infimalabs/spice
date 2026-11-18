@@ -95,7 +95,7 @@ fn fold_body_line(line: &str) -> Vec<String> {
 }
 
 /// Fold one line of prose at [`WRAP_LIMIT`], continuing a list item under its
-/// marker; a word wider than the limit keeps a line of its own.
+/// marker; a word wider than the room left on its line is split at the limit.
 #[must_use]
 pub fn fold_prose(line: &str) -> Vec<String> {
     if line.chars().count() <= WRAP_LIMIT {
@@ -134,16 +134,35 @@ pub fn fold_prose(line: &str) -> Vec<String> {
         let word_width = word.chars().count();
         let separator_width = separator.chars().count();
         if words_on_line > 0 && current_width + separator_width + word_width > WRAP_LIMIT {
-            wrapped.push(current);
-            current = " ".repeat(subsequent_indent);
+            wrapped.push(std::mem::replace(
+                &mut current,
+                " ".repeat(subsequent_indent),
+            ));
             current_width = subsequent_indent;
             words_on_line = 0;
         } else {
             current.push_str(separator);
             current_width += separator_width;
         }
-        current.push_str(word);
-        current_width += word_width;
+        let mut rest = word;
+        let mut rest_width = word_width;
+        while current_width + rest_width > WRAP_LIMIT {
+            let room = WRAP_LIMIT.saturating_sub(current_width).max(1);
+            let split = rest
+                .char_indices()
+                .nth(room)
+                .map_or(rest.len(), |(index, _)| index);
+            current.push_str(&rest[..split]);
+            wrapped.push(std::mem::replace(
+                &mut current,
+                " ".repeat(subsequent_indent),
+            ));
+            current_width = subsequent_indent;
+            rest = &rest[split..];
+            rest_width -= room.min(rest_width);
+        }
+        current.push_str(rest);
+        current_width += rest_width;
         words_on_line += 1;
     }
     if !current.is_empty() {

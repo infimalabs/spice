@@ -905,6 +905,27 @@ mod tests {
     }
 
     #[test]
+    fn an_unbroken_admitted_pitch_splits_within_the_wrap_limit_and_reads_back() {
+        for width in [101, wire::pitch::PITCH_CHARS] {
+            let pitch = "é".repeat(width);
+            wire::pitch::admit(&pitch).expect("admitted pitch");
+            let meta = Metadata {
+                pitch: &pitch,
+                ..landing_metadata()
+            };
+            let message = compose_message(meta).expect("admitted pitch");
+            let lines = message.lines().collect::<Vec<_>>();
+            assert!(
+                lines
+                    .iter()
+                    .all(|line| line.chars().count() <= crate::commit_message::WRAP_LIMIT)
+            );
+            assert_eq!(lines[2..lines.len() - 4].concat(), pitch);
+            assert!(landing_message_matches(&message, meta).unwrap());
+        }
+    }
+
+    #[test]
     fn landing_reader_accepts_only_the_canonical_terminal_stamp() {
         let meta = landing_metadata();
         let canonical = concat!(
