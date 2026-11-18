@@ -378,12 +378,14 @@ impl InstallPlan {
 /// Inspect a supported installation receipt without deriving a plan or
 /// acquiring mutation authority. Retained schemas cross into the current model
 /// in memory so command preflights and their transition consume one contract.
-pub fn inspect(repository: &Repository) -> Result<Option<InstallReceipt>, InstallError> {
-    let Some((loaded, _)) = read_record_for_transition(repository)? else {
+/// The flag reports that the receipt on disk differs from that current model
+/// and awaits a digest-bound forward repair.
+pub fn inspect(repository: &Repository) -> Result<Option<(InstallReceipt, bool)>, InstallError> {
+    let Some((loaded, forward_repair)) = read_record_for_transition(repository)? else {
         return Ok(None);
     };
     verify_progress(repository, &loaded.record)?;
-    Ok(Some(loaded.record.receipt()))
+    Ok(Some((loaded.record.receipt(), forward_repair)))
 }
 
 /// Capture the canonical installation generation without validating owned assets.

@@ -553,15 +553,29 @@ fn a_schema_one_receipt_rolls_forward_through_current_apply() {
 
 #[test]
 fn a_schema_one_receipt_passes_command_inspection_and_unapplies_without_a_refresh() {
+    let (_current_scratch, current) = repository("current-inspection");
+    install_without_binary(&current);
+    let (_, forward_repair) = super::super::inspect(&current)
+        .expect("current receipt inspects")
+        .expect("current receipt exists");
+    assert!(
+        !forward_repair,
+        "a current receipt awaits no forward repair"
+    );
+
     let (_scratch, repository) = repository("schema-one-unapply");
     let schema_one = write_schema_one(&repository);
     let hook = repository.common_dir().join(GIT_PRE_COMMIT_PATH);
     assert!(hook.exists(), "fixture did not install the generated hook");
 
-    let inspected = super::super::inspect(&repository)
+    let (inspected, forward_repair) = super::super::inspect(&repository)
         .expect("command preflight inspects schema one")
         .expect("schema-one receipt exists");
     assert_eq!(inspected.status(), InstallStatus::Complete);
+    assert!(
+        forward_repair,
+        "a schema-one receipt awaits its forward repair"
+    );
     assert_eq!(
         fs::read(record_path(&repository).expect("record path resolves"))
             .expect("schema-one receipt remains"),

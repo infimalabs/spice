@@ -268,7 +268,7 @@ fn unapply_with_keeper(repository: &Repository, ambient: &Ambient) -> Outcome<In
     }
     let owned = if inspected
         .as_ref()
-        .is_some_and(|receipt| receipt.status() != InstallStatus::Applying)
+        .is_some_and(|(receipt, _)| receipt.status() != InstallStatus::Applying)
         && let Some(expected) = &lifecycle
     {
         match crate::resident::keeper::quiesce_for_install(repository, expected, ambient) {
