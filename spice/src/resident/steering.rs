@@ -945,31 +945,6 @@ fn directive_head(
     .map_err(|error| store_fault("steer::index-unreadable", &error.to_string()))
 }
 
-struct IndexedStanding {
-    key: Option<steer::Key>,
-    disposition: Option<Disposition>,
-}
-
-impl IndexedStanding {
-    fn new(
-        key: Option<steer::Key>,
-        head: Option<&journal::JournalHead<wire::SteeringHead>>,
-    ) -> Self {
-        Self {
-            key,
-            disposition: head.map(|head| head.body().disposition),
-        }
-    }
-}
-
-impl steer::Standing for IndexedStanding {
-    fn disposition(&self, key: &steer::Key) -> Option<Disposition> {
-        (self.key.as_ref() == Some(key))
-            .then_some(self.disposition)
-            .flatten()
-    }
-}
-
 type SteeringKeyspace = (
     Option<journal::JournalHead<wire::SteeringHead>>,
     Option<i64>,

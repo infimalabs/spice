@@ -120,12 +120,73 @@ impl Reading<'_> {
             Self::OnLanding(_) => "on landing",
         }
     }
+}
 
-    fn answered(&self, key: &str) -> bool {
-        match self {
-            Self::AtExit | Self::AtStartup => true,
-            Self::OnLanding(keys) => keys.iter().any(|heard| heard.as_str() == key),
+/// Live inputs this lane may answer and live sends it may cancel. Landing
+/// already names the exact keys to read; recovery pages live authority because
+/// an authored RST can be the only retained reference to its send.
+fn candidates(
+    bus: &Bus,
+    lane: CanonicalUuid,
+    reading: &Reading<'_>,
+) -> Result<Vec<journal::JournalHead<wire::SteeringHead>>, bus::BusReadError> {
+    let actor = Actor::Lane(lane);
+    match reading {
+        Reading::OnLanding(keys) => {
+            let keys = keys.iter().map(ToString::to_string).collect::<Vec<_>>();
+            bus.read(move |read| {
+                let mut candidates = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let Some(head) = read.steering_key(&key)? else {
+                        continue;
+                    };
+                    if head.body().recipient == actor || head.body().sender == actor {
+                        candidates.push(head);
+                    }
+                }
+                Ok(candidates)
+            })
         }
+        Reading::AtExit | Reading::AtStartup => bus.read(move |read| {
+            Ok(crate::steering_read::pending(read, None)?
+                .into_iter()
+                .filter(|head| head.body().recipient == actor || head.body().sender == actor)
+                .collect())
+        }),
+    }
+}
+
+/// Standing shared by every key in one authored header. Without the whole
+/// candidate set, the scanner would mistake later valid keys for reason text.
+struct CandidateStanding(BTreeMap<steer::Key, Disposition>);
+
+impl CandidateStanding {
+    fn read(
+        lane: CanonicalUuid,
+        candidates: &[journal::JournalHead<wire::SteeringHead>],
+    ) -> Result<Self, String> {
+        let recipient = Actor::Lane(lane);
+        let mut standing = BTreeMap::new();
+        for head in candidates {
+            let body = head.body();
+            let key = body
+                .key
+                .parse()
+                .map_err(|error: steer::KeyError| error.to_string())?;
+            let disposition = if body.recipient == recipient && prior_peer_receipt(body) {
+                Disposition::Live
+            } else {
+                body.disposition
+            };
+            standing.insert(key, disposition);
+        }
+        Ok(Self(standing))
+    }
+}
+
+impl steer::Standing for CandidateStanding {
+    fn disposition(&self, key: &steer::Key) -> Option<Disposition> {
+        self.0.get(key).copied()
     }
 }
 
@@ -139,8 +200,8 @@ fn dispose_pending(
     diagnostic: &mut dyn io::Write,
 ) {
     let moment = reading.moment();
-    let pending = match bus.read(move |read| crate::steering_read::pending(read, Some(lane))) {
-        Ok(pending) => pending,
+    let candidates = match candidates(bus, lane, reading) {
+        Ok(candidates) => candidates,
         Err(error) => {
             let _ = writeln!(
                 diagnostic,
@@ -149,11 +210,18 @@ fn dispose_pending(
             return;
         }
     };
-    let mut pending = pending
-        .iter()
-        .filter(|head| reading.answered(&head.body().key))
-        .peekable();
-    let Some(first) = pending.peek() else {
+    let standing = match CandidateStanding::read(lane, &candidates) {
+        Ok(standing) => standing,
+        Err(error) => {
+            let _ = writeln!(
+                diagnostic,
+                "lane {lane} steering left pending {moment}: steer::key-invalid: {error}"
+            );
+            return;
+        }
+    };
+    let mut candidates = candidates.iter().peekable();
+    let Some(first) = candidates.peek() else {
         return;
     };
     let evidence = match TranscriptEvidence::read(paths, lane, vendor, &first.body().key) {
@@ -169,7 +237,7 @@ fn dispose_pending(
     };
     let mut retired = false;
     let mut replied = BTreeSet::new();
-    for head in pending {
+    for head in candidates {
         if evidence.exhausted() {
             let _ = writeln!(
                 diagnostic,
@@ -178,7 +246,15 @@ fn dispose_pending(
             break;
         }
         let key = head.body().key.as_str();
-        match dispose_head(bus, config, (epoch, joining), lane, head, &evidence) {
+        match dispose_head(
+            bus,
+            config,
+            (epoch, joining),
+            lane,
+            head,
+            &evidence,
+            &standing,
+        ) {
             Ok(disposed) => {
                 retired = true;
                 replied.extend(disposed.replied);
@@ -225,20 +301,17 @@ fn dispose_head(
     lane: CanonicalUuid,
     head: &journal::JournalHead<wire::SteeringHead>,
     evidence: &TranscriptEvidence,
+    standing: &CandidateStanding,
 ) -> Result<Disposed, Outcome<CommandAnswer>> {
     let token = head.body().key.as_str();
-    let parsed = token
-        .parse::<steer::Key>()
-        .map_err(|error| protocol_fault("steer::key-invalid", &error.to_string()))?;
-    let standing = IndexedStanding::new(Some(parsed), Some(head));
-    let recognition = evidence.recognize(token, &standing)?;
+    let recognition = evidence.recognize(token, standing)?;
     dispose_recognized(bus, (config, epoch, joining), lane, head, recognition, None)
 }
 
 /// What disposing one recognized header did.
 pub(super) struct Disposed {
     pub(super) disposition: Disposition,
-    /// The peer lane whose inbox gained the answer.
+    /// Peer lane whose inbox gained a reply or sender-cancellation notice.
     pub(super) replied: Option<CanonicalUuid>,
     /// Whether the answering lane's own inbox gained the correction a refused
     /// line body owes it, which committed with the retirement. An error is
@@ -259,6 +332,23 @@ pub(super) fn prior_peer_receipt(head: &wire::SteeringHead) -> bool {
             .as_deref()
             .and_then(wire::parse_peer_line_control)
             .is_some()
+}
+fn recognized_outcome(
+    recognition: &transcript::TranscriptRecognition,
+) -> Result<(steer::Marker, steer::Key, Disposition), Outcome<CommandAnswer>> {
+    match &recognition.outcome {
+        ScanOutcome::Retired {
+            marker,
+            key,
+            disposition,
+        } => Ok((*marker, key.clone(), *disposition)),
+        ScanOutcome::Missed { token, miss } => Err(refusal(
+            "steer::ack-missed",
+            Some("one authorized control recognition".to_owned()),
+            Some(format!("{token}:{}", miss.as_str())),
+            "the latest transcript mention of the key is not a placed header",
+        )),
+    }
 }
 
 /// Both ordinary tape prose and admitted outbox prose use this same transition.
@@ -281,21 +371,16 @@ pub(super) fn dispose_recognized(
     recognition: transcript::TranscriptRecognition,
     judgment: Option<outbox::Judgment>,
 ) -> Result<Disposed, Outcome<CommandAnswer>> {
-    let (marker, key, disposition) = match recognition.outcome {
-        ScanOutcome::Retired {
-            marker,
-            key,
-            disposition,
-        } => (marker, key, disposition),
-        ScanOutcome::Missed { token, miss } => {
-            return Err(refusal(
-                "steer::ack-missed",
-                Some("one authorized control recognition".to_owned()),
-                Some(format!("{token}:{}", miss.as_str())),
-                "the latest transcript mention of the key is not a placed header",
+    let (marker, key, disposition) = recognized_outcome(&recognition)?;
+    if marker == steer::Marker::Rst {
+        if judgment.is_some() {
+            return Err(store_fault(
+                "steer::rst-judgment-invalid",
+                "outbox RST must settle through its packet judgment",
             ));
         }
-    };
+        return cancel_visible(bus, lane, head, &key, recognition.answer);
+    }
     let clause = recognition.answer.as_ref();
     admit_receipt(head.body(), lane, marker, &key)?;
     let disposition = if disposition == Disposition::Acked && is_invitation(head.body()) {
@@ -391,6 +476,79 @@ pub(super) fn dispose_recognized(
         }),
         notice: reply.notice,
     })
+}
+
+/// Cancel one live send from source-proved assistant text. The command-door
+/// producer is the admitted producer for `steer::canceled`; the lane actor and
+/// live guard carry the sender authorization and replay safety.
+fn cancel_visible(
+    bus: &Bus,
+    lane: CanonicalUuid,
+    head: &journal::JournalHead<wire::SteeringHead>,
+    key: &steer::Key,
+    clause: Option<transcript::Clause>,
+) -> Result<Disposed, Outcome<CommandAnswer>> {
+    if head.body().sender != Actor::Lane(lane) {
+        return Err(refusal(
+            "steer::rst-received",
+            Some("ACK, FIN or NAK".to_owned()),
+            Some(key.to_string()),
+            "RST cancels only this lane's own sends; answer a received key with ACK, FIN or NAK",
+        ));
+    }
+    let reason = clause.map(|clause| clause.text);
+    let recipient = head.body().recipient.lane();
+    let mut current = head.clone();
+    loop {
+        let at = current_instant()?;
+        let mut proposal = JournalWrite::new(
+            Actor::Lane(lane),
+            current.body().origin.clone(),
+            at,
+            Producer::CommandDoor,
+        );
+        transitions::stage_cancel(bus, &mut proposal, &current, reason.clone(), at)?;
+        match commit(bus, proposal).map_err(typed_outcome) {
+            Ok(_) => {
+                return Ok(Disposed {
+                    disposition: Disposition::Canceled,
+                    replied: recipient,
+                    corrected: Ok(false),
+                    notice: None,
+                });
+            }
+            Err(Outcome::Refusal(refused))
+                if [LIVE_MOVED, LINE_CLOSED].contains(&refused.reason()) =>
+            {
+                let token = key.to_string();
+                let Some(next) =
+                    bus.read(move |read| read.steering_key(&token))
+                        .map_err(|error| {
+                            store_fault("steer::rst-head-unreadable", &error.to_string())
+                        })?
+                else {
+                    return Err(refusal(
+                        "steer::rst-unavailable",
+                        Some("one live send owned by this lane".to_owned()),
+                        Some(key.to_string()),
+                        "the named directive no longer exists",
+                    ));
+                };
+                if next.body().sender != Actor::Lane(lane)
+                    || next.body().disposition != Disposition::Live
+                {
+                    return Err(refusal(
+                        "steer::rst-unavailable",
+                        Some("one live send owned by this lane".to_owned()),
+                        Some(key.to_string()),
+                        "the named directive is no longer cancelable",
+                    ));
+                }
+                current = next;
+            }
+            Err(outcome) => return Err(outcome),
+        }
+    }
 }
 
 /// Admit exact prior peer receipts without reopening typed domain actions;
