@@ -4,7 +4,7 @@ use std::path::Path;
 
 use sill::authority;
 use sill::{Availability, LockFile, LockName};
-use spice::install::{ApplianceState, InstallStatus, InstallTempInspection};
+use spice::install::{ApplianceState, InstallReceipt, InstallStatus, InstallTempInspection};
 use spice::repository::{Repository, StatePaths};
 use wire::{DoctorObservation, DoctorSubsystem, DoctorSubsystemDiagnosis, FactKind, ResidencyHead};
 
@@ -303,32 +303,9 @@ fn resident_record(path: &Path, expected: wire::CanonicalUuid) -> DoctorObservat
 fn installation(repository: &Repository) -> DoctorObservation {
     let receipt = match spice::install::inspect(repository) {
         Ok(None) => not_applicable("installation receipt is absent"),
-        Ok(Some(receipt)) => match receipt.status() {
-            InstallStatus::Complete => ready(),
-            InstallStatus::Uninstalled => {
-                not_applicable("installation receipt records an uninstalled repository")
-            }
-            InstallStatus::Applying => DoctorObservation::InputRequired {
-                reason: format!(
-                    "installation stopped while applying after {} operations; resume the exact plan",
-                    receipt.completed()
-                ),
-            },
-            InstallStatus::Establishing => DoctorObservation::InputRequired {
-                reason: "installation published its files but its lifecycle owner is not \
-                         established; rerun the exact apply"
-                    .to_owned(),
-            },
-            InstallStatus::Unapplying => DoctorObservation::InputRequired {
-                reason: format!(
-                    "installation stopped while unapplying after {} operations; resume the exact plan",
-                    receipt.completed()
-                ),
-            },
-        },
-        Err(error) => repairable_installation(repository).unwrap_or_else(|| {
-            unavailable(format!("installation receipt is unavailable: {error}"))
-        }),
+        Ok(Some((receipt, true))) => forward_repair_installation(repository, &receipt),
+        Ok(Some((receipt, false))) => receipt_observation(&receipt),
+        Err(error) => unavailable(format!("installation receipt is unavailable: {error}")),
     };
     match spice::install::inspect_temporary_records(repository) {
         Ok(temporary) => installation_with_temporary_evidence(receipt, &temporary),
@@ -336,6 +313,32 @@ fn installation(repository: &Repository) -> DoctorObservation {
             "installation temporary publications are unavailable: {error}; {}",
             receipt_diagnosis(&receipt),
         )),
+    }
+}
+
+fn receipt_observation(receipt: &InstallReceipt) -> DoctorObservation {
+    match receipt.status() {
+        InstallStatus::Complete => ready(),
+        InstallStatus::Uninstalled => {
+            not_applicable("installation receipt records an uninstalled repository")
+        }
+        InstallStatus::Applying => DoctorObservation::InputRequired {
+            reason: format!(
+                "installation stopped while applying after {} operations; resume the exact plan",
+                receipt.completed()
+            ),
+        },
+        InstallStatus::Establishing => DoctorObservation::InputRequired {
+            reason: "installation published its files but its lifecycle owner is not \
+                     established; rerun the exact apply"
+                .to_owned(),
+        },
+        InstallStatus::Unapplying => DoctorObservation::InputRequired {
+            reason: format!(
+                "installation stopped while unapplying after {} operations; resume the exact plan",
+                receipt.completed()
+            ),
+        },
     }
 }
 
@@ -388,17 +391,35 @@ fn receipt_diagnosis(observation: &DoctorObservation) -> String {
     }
 }
 
-fn repairable_installation(repository: &Repository) -> Option<DoctorObservation> {
-    let current_binary = std::env::current_exe().ok()?;
-    let audit = spice::install::audit_appliance(repository, &current_binary).ok()?;
-    (audit.state() == ApplianceState::RepairableReceipt).then(|| {
-        DoctorObservation::InputRequired {
-            reason: format!(
-                "installation receipt requires an exact digest-bound forward-repair preview; run {} and authorize only the emitted plan",
-                audit.repair().expect("repairable audits name their preview command")
-            ),
+/// A receipt awaiting forward repair is never ready: name the exact preview
+/// when this executable can derive it, otherwise why it cannot.
+fn forward_repair_installation(
+    repository: &Repository,
+    receipt: &InstallReceipt,
+) -> DoctorObservation {
+    let audit = std::env::current_exe()
+        .map_err(|error| error.to_string())
+        .and_then(|binary| {
+            spice::install::audit_appliance(repository, &binary).map_err(|error| error.to_string())
+        });
+    match audit {
+        Ok(audit) if audit.state() == ApplianceState::RepairableReceipt => {
+            DoctorObservation::InputRequired {
+                reason: format!(
+                    "installation receipt requires an exact digest-bound forward-repair preview; run {} and authorize only the emitted plan",
+                    audit
+                        .repair()
+                        .expect("repairable audits name their preview command")
+                ),
+            }
         }
-    })
+        Ok(_) => receipt_observation(receipt),
+        Err(error) => DoctorObservation::InputRequired {
+            reason: format!(
+                "installation receipt requires a digest-bound forward repair that this executable cannot preview: {error}"
+            ),
+        },
+    }
 }
 
 fn release(authority: &Authority) -> DoctorObservation {
