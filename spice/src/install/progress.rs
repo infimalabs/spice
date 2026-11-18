@@ -1,6 +1,6 @@
 use super::record::{
-    InstallRecord, LoadedRecord, RefreshRecord, read_record_for_refresh, record_path,
-    remove_record, write_initial_record, write_record,
+    InstallRecord, LoadedRecord, RefreshRecord, read_record_for_refresh, read_record_for_unapply,
+    record_path, remove_record, write_initial_record, write_record,
 };
 use super::*;
 
@@ -435,17 +435,20 @@ fn validate_existing_generation(
 }
 
 pub(super) fn unapply_record(repository: &Repository) -> Result<InstallReceipt, InstallError> {
-    let loaded = read_record(repository)?.ok_or(InstallError::RecordMissing)?;
+    let (loaded, requires_publish) =
+        read_record_for_unapply(repository)?.ok_or(InstallError::RecordMissing)?;
     let mut record = loaded.record;
     let mut record_generation = loaded.generation;
-    // Reversal is an executable direction, not historical inspection. Finish
-    // it with the build that owns the live receipt; a newer build should derive
-    // and apply its refresh instead of withdrawing the appliance.
+    // Reversal is an executable direction. Supported retained schemas cross
+    // into this build's current model before the canonical reversal begins.
     record.validate_for_repository(repository)?;
     match record.status {
         InstallStatus::Applying => return Err(InstallError::ApplyInProgress),
         InstallStatus::Uninstalled => {
             verify_progress(repository, &record)?;
+            if requires_publish {
+                write_record(repository, &record, record_generation)?;
+            }
             return Ok(record.receipt());
         }
         InstallStatus::Establishing | InstallStatus::Complete => {

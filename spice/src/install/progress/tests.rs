@@ -551,6 +551,46 @@ fn a_schema_one_receipt_rolls_forward_through_current_apply() {
     assert_eq!(reversed.status(), InstallStatus::Uninstalled);
 }
 
+#[test]
+fn a_schema_one_receipt_unapplies_without_a_refresh() {
+    let (_scratch, repository) = repository("schema-one-unapply");
+    write_schema_one(&repository);
+    let hook = repository.common_dir().join(GIT_PRE_COMMIT_PATH);
+    assert!(hook.exists(), "fixture did not install the generated hook");
+
+    let receipt = super::super::unapply(&repository).expect("schema-one install unapplies");
+
+    assert_eq!(receipt.status(), InstallStatus::Uninstalled);
+    assert!(
+        !hook.exists(),
+        "schema-one installed asset survived unapply"
+    );
+    assert!(
+        !record_path(&repository)
+            .expect("record path resolves")
+            .exists(),
+        "terminal schema-one receipt survived retirement"
+    );
+}
+
+#[test]
+fn an_unsettled_schema_one_receipt_refuses_unapply_without_mutation() {
+    let (_scratch, repository) = repository("schema-one-unsettled");
+    let bytes = write_schema_one(&repository);
+    let mut record: InstallRecord = wire::decode(&bytes).expect("schema-one receipt decodes");
+    record.status = InstallStatus::Applying;
+    let unsettled = wire::encode(&record).expect("unsettled schema-one receipt encodes");
+    let path = record_path(&repository).expect("record path resolves");
+    fs::write(&path, &unsettled).expect("unsettled schema-one receipt publishes");
+
+    assert_foreign(unapply_record(&repository), 1, "unsettled-schema-one");
+    assert_eq!(
+        fs::read(path).expect("refused receipt remains"),
+        unsettled,
+        "unapply mutated the unsettled schema-one receipt"
+    );
+}
+
 fn assert_foreign<T>(result: Result<T, InstallError>, version: u16, label: &str) {
     match result {
         Err(InstallError::ForeignRecord { version: named, .. }) => {
