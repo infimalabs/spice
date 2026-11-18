@@ -226,6 +226,26 @@ is not newer than its own:
 "$SPICE_BIN" install --package /absolute/path/to/spice-release-package --apply=DIGEST_PRINTED_BY_PREVIEW || exit
 ```
 
+### Upgrade from v0.2
+
+Spice v0.3 reads the retained v0.2 install receipt through its forward schema
+crossing. Invoke the v0.3 executable directly: either preview and apply it over
+the existing install, or unapply the v0.2 install without an intermediate
+upgrade. Do not edit the receipt.
+
+```sh
+NEW_SPICE=/absolute/path/to/spice-v0.3
+"$NEW_SPICE" install
+"$NEW_SPICE" install --apply=DIGEST_PRINTED_BY_PREVIEW
+
+# Alternatively, remove the v0.2 install directly:
+"$NEW_SPICE" install --unapply
+```
+
+Both directions preserve unrelated retained state, including journals and lane
+data. Unsupported or incomplete receipts refuse before mutation; Spice never
+downgrades an install receipt.
+
 From source, refresh in place through the installed appliance; do not unapply
 first. The shortcut builds as above, stops the published resident, applies,
 and starts the new executable; `--no-resident` omits that lifecycle and

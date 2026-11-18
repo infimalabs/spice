@@ -552,12 +552,22 @@ fn a_schema_one_receipt_rolls_forward_through_current_apply() {
 }
 
 #[test]
-fn a_schema_one_receipt_unapplies_without_a_refresh() {
+fn a_schema_one_receipt_passes_command_inspection_and_unapplies_without_a_refresh() {
     let (_scratch, repository) = repository("schema-one-unapply");
-    write_schema_one(&repository);
+    let schema_one = write_schema_one(&repository);
     let hook = repository.common_dir().join(GIT_PRE_COMMIT_PATH);
     assert!(hook.exists(), "fixture did not install the generated hook");
 
+    let inspected = super::super::inspect(&repository)
+        .expect("command preflight inspects schema one")
+        .expect("schema-one receipt exists");
+    assert_eq!(inspected.status(), InstallStatus::Complete);
+    assert_eq!(
+        fs::read(record_path(&repository).expect("record path resolves"))
+            .expect("schema-one receipt remains"),
+        schema_one,
+        "command inspection mutated the retained receipt"
+    );
     let receipt = super::super::unapply(&repository).expect("schema-one install unapplies");
 
     assert_eq!(receipt.status(), InstallStatus::Uninstalled);

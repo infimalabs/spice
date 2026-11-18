@@ -48,7 +48,7 @@ use progress::{
     apply_expected, apply_prepared_record, retire_uninstalled_record, unapply_record,
     verify_progress,
 };
-use record::{read_record, read_record_for_refresh};
+use record::{read_record, read_record_for_refresh, read_record_for_transition};
 use validation::{asset_contract, fixed_content_differs_from_current_build};
 
 pub use fold::{
@@ -375,10 +375,11 @@ impl InstallPlan {
     }
 }
 
-/// Inspect the current strict installation receipt without deriving a plan or
-/// acquiring mutation authority.
+/// Inspect a supported installation receipt without deriving a plan or
+/// acquiring mutation authority. Retained schemas cross into the current model
+/// in memory so command preflights and their transition consume one contract.
 pub fn inspect(repository: &Repository) -> Result<Option<InstallReceipt>, InstallError> {
-    let Some(loaded) = read_record(repository)? else {
+    let Some((loaded, _)) = read_record_for_transition(repository)? else {
         return Ok(None);
     };
     verify_progress(repository, &loaded.record)?;
