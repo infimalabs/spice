@@ -339,6 +339,7 @@ fn an_operator_cancel_retires_a_live_directive() {
         .absorb(Steering::Canceled(&SteerCanceled {
             key: ROOT.to_owned(),
             recipient: Actor::Lane(lane()),
+            reason: None,
         }))
         .expect("canceled");
 
@@ -727,6 +728,7 @@ fn a_reminder_lapses_recovers_and_cancels_exactly_as_a_send_does() {
         .absorb(Steering::Canceled(&SteerCanceled {
             key: ROOT.to_owned(),
             recipient: Actor::Lane(lane()),
+            reason: None,
         }))
         .expect("the operator withdraws a reminder like any directive");
     assert_eq!(ledger.disposition(&key(ROOT)), Some(Disposition::Canceled));

@@ -238,12 +238,7 @@ fn append_line_control(
             state.root,
         );
     }
-    let action = match marker {
-        steer::Marker::Ack if reaction => wire::body::PeerLineAction::Reaction,
-        steer::Marker::Ack => wire::body::PeerLineAction::Continue,
-        steer::Marker::Fin => wire::body::PeerLineAction::Finish,
-        steer::Marker::Nak => wire::body::PeerLineAction::Decline,
-    };
+    let action = line_action(marker, reaction);
     let fate = match body {
         Some(body) => Some(admit_line_body(
             bus,
@@ -346,12 +341,7 @@ fn append_principal_line_control(
             state.root,
         );
     }
-    let action = match marker {
-        steer::Marker::Ack if reaction => wire::body::PeerLineAction::Reaction,
-        steer::Marker::Ack => wire::body::PeerLineAction::Continue,
-        steer::Marker::Fin => wire::body::PeerLineAction::Finish,
-        steer::Marker::Nak => wire::body::PeerLineAction::Decline,
-    };
+    let action = line_action(marker, reaction);
     let mut carried = None;
     let mut admitted_body = None;
     if let Some(text) = body {
@@ -434,6 +424,17 @@ fn append_principal_line_control(
             body: carried,
         }),
     })
+}
+
+/// The line action a recipient's answering marker takes.
+fn line_action(marker: steer::Marker, reaction: bool) -> wire::body::PeerLineAction {
+    match marker {
+        steer::Marker::Ack if reaction => wire::body::PeerLineAction::Reaction,
+        steer::Marker::Ack => wire::body::PeerLineAction::Continue,
+        steer::Marker::Fin => wire::body::PeerLineAction::Finish,
+        steer::Marker::Nak => wire::body::PeerLineAction::Decline,
+        steer::Marker::Rst => unreachable!("RST cancels a send and never answers one"),
+    }
 }
 
 /// Judge a control that reached its line after the line closed: the key it

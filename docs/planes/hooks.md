@@ -183,7 +183,9 @@ notice deliver exactly one; a notice that fails to write gives the claim back.
 is the acknowledgment evidence: admitted outbox prose and visible prose.
 Reasoning, tool-call intents, tool arguments and quoted examples do not
 qualify. `ACK KEY [KEY ...]: response` can retire several keys;
-`NAK KEY: reason` declines one. Recognition happens on landing, not at turn end.
+`NAK KEY: reason` declines one; `RST KEY [KEY ...]: reason` in the outbox
+cancels the writer's own live sends. Recognition happens on landing, not at
+turn end.
 A placed header naming a pending key in reasoning or a tool-call intent draws
 one hidden-answer correction per key per pending inbox, naming
 `spice://outbox`.

@@ -80,7 +80,7 @@ spice://task/HANDLE/room/awareness  room awareness HANDLE [?limit=N&max-bytes=N&
 spice://task/HANDLE/design  task authority HANDLE [?limit=N&max-bytes=N&after=POSITION]; reading changes nothing
 spice://room/inbox  room inbox; this lane's unread room activity, one bounded page from its delivery cursor; reading changes nothing
 spice://inbox  inbox [?limit=N&max-bytes=N&max-text=N&after=ID]; reading acknowledges nothing
-spice://outbox  write text you author between tool calls, ordinary or SYN/ACK/FIN/NAK packets, with no preparation read: a provider may fold mid-turn text into reasoning, while a final message arrives intact and is never copied here; the host preserves its tape source and exact occupant; identical complete bytes within that occupant reuse one submission and its decided outcomes; write receipts report reused: false for fresh admission, true for reuse
+spice://outbox  write text you author between tool calls, ordinary or SYN/ACK/FIN/NAK/RST packets, with no preparation read: a provider may fold mid-turn text into reasoning, while a final message arrives intact and is never copied here; the host preserves its tape source and exact occupant; identical complete bytes within that occupant reuse one submission and its decided outcomes; write receipts report reused: false for fresh admission, true for reuse
 spice://outbox/UUID  side-effect-free exact-author inspection of an accepted submission: exact tape text, quote reference, decided packet outcomes and unresolved positions; cancellation or a lost reply never rolls back accepted bytes or effects; no query, selector or write
 spice://lanes  lane list [?limit=N&max-bytes=N&after=LANE]
 spice://session/briefing  session briefing [?file=PATH...&capture=BINDING&deadline-seconds=N]
@@ -1117,7 +1117,7 @@ impl Seat {
     ) -> Result<String, String> {
         if submission.is_none() && access == Access::Read {
             return Ok(
-                    "Write complete UTF-8 assistant text to spice://outbox. No preparation read is needed. The tape remains authoritative. Identical complete bytes from one exact occupant resolve the same submission. SYN/ACK/FIN/NAK packets settle independently; any other header word is prose. Inspect the returned spice://outbox/IDENTITY without causing effects."
+                    "Write complete UTF-8 assistant text to spice://outbox. No preparation read is needed. The tape remains authoritative. Identical complete bytes from one exact occupant resolve the same submission. SYN/ACK/FIN/NAK/RST packets settle independently; any other header word is prose. Inspect the returned spice://outbox/IDENTITY without causing effects."
                         .to_owned(),
                 );
         }
@@ -1306,7 +1306,7 @@ This seat serves `spice://` through `read`: `spice://` is the index naming every
 - Reading changes nothing: it acknowledges no steering, claims nothing, and may repeat freely.
 - A task's description and terms also take a `write`: read `spice://task/HANDLE/description` or `/terms`, then write the whole new text to the URL its first line names; a write over text that changed since that read is refused. `spice://task/HANDLE/term/ITEM` reads one term by its item handle, and a write to it replaces that term alone.
 - `write` to `spice://task/HANDLE/invite` to recruit a teammate, or to `spice://task/HANDLE/invite/ADDRESS` to invite that lane; the whole body, which may be empty, is your message to the invited lane, tracked like an outbox write and delivered to that lane in the task's room. `write` an empty body to `spice://task/HANDLE/join` to join that task's phase. Each write is one `task join` request answered as the CLI answers it.
-- Between tool calls, write text you author, ordinary or SYN/ACK/FIN/NAK packets, to `spice://outbox` with no preparation read: a provider may fold mid-turn text into reasoning, while a final message arrives intact, so never copy it there. It preserves the tape source; other tool arguments remain inert. Exact repeated bytes within this occupant reuse one submission. Its receipt names `spice://outbox/UUID` for side-effect-free exact-text and packet-outcome inspection; a canceled or lost result never rolls back accepted work.
+- Between tool calls, write text you author, ordinary or SYN/ACK/FIN/NAK/RST packets, to `spice://outbox` with no preparation read: a provider may fold mid-turn text into reasoning, while a final message arrives intact, so never copy it there. It preserves the tape source; other tool arguments remain inert. Exact repeated bytes within this occupant reuse one submission. Its receipt names `spice://outbox/UUID` for side-effect-free exact-text and packet-outcome inspection; a canceled or lost result never rolls back accepted work. `RST KEY [KEY ...]: REASON` cancels your own live sends and settles only here.
 - Every other write and workflow act stays a `spice` command; visible SYN/ACK/FIN/NAK text remains supported; any other header word is prose.
 </system-notice>";
 

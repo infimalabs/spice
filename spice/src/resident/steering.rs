@@ -1322,6 +1322,9 @@ fn internal_send_guard(directive: CanonicalUuid, key: steer::Key) -> JournalGuar
     })
 }
 
+/// Refusal of a write whose live directive moved after it was read.
+const LIVE_MOVED: &str = "steer::directive-moved";
+
 fn live_guard(directive: CanonicalUuid, position: Seq) -> JournalGuard {
     JournalGuard::new(move |read| match read.steering_head(directive)? {
         Some(current)
@@ -1330,7 +1333,7 @@ fn live_guard(directive: CanonicalUuid, position: Seq) -> JournalGuard {
         {
             Ok(())
         }
-        _ => Err(GuardError::refused("steer::directive-moved")),
+        _ => Err(GuardError::refused(LIVE_MOVED)),
     })
 }
 

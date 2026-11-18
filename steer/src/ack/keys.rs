@@ -185,7 +185,7 @@ pub fn disposition(word: &str) -> Result<Disposition, DispositionError> {
         .ok_or_else(|| DispositionError(word.to_owned()))
 }
 
-/// The three words assistant prose leads a keyed control with.
+/// The four words assistant prose leads a keyed control with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Marker {
     /// The directive was heard; an optional body continues its line.
@@ -194,10 +194,12 @@ pub enum Marker {
     Fin,
     /// The directive and its line were declined.
     Nak,
+    /// The directive's own sender canceled it; an optional body is the reason.
+    Rst,
 }
 
 /// Every marker, in the order the protocol states them.
-pub const MARKERS: [Marker; 3] = [Marker::Nak, Marker::Fin, Marker::Ack];
+pub const MARKERS: [Marker; 4] = [Marker::Nak, Marker::Fin, Marker::Ack, Marker::Rst];
 
 impl Marker {
     /// The marker this word spells, if it spells one.
@@ -213,6 +215,7 @@ impl Marker {
             Self::Ack => "ACK",
             Self::Fin => "FIN",
             Self::Nak => "NAK",
+            Self::Rst => "RST",
         }
     }
 
@@ -222,6 +225,7 @@ impl Marker {
         match self {
             Self::Ack | Self::Fin => Disposition::Acked,
             Self::Nak => Disposition::Declined,
+            Self::Rst => Disposition::Canceled,
         }
     }
 }

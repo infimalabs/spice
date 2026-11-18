@@ -468,6 +468,7 @@ fn snapshot_stops_follow_the_board_and_later_live_facts_retire_authority() {
         &wire::body::SteerCanceled {
             key: STOP_KEY.to_owned(),
             recipient: wire::Actor::Lane(uuid(LANE)),
+            reason: None,
         },
     );
     runtime.apply_stream_frame(&admitted_stream(&session, &live_fact(canceled)));

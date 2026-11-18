@@ -551,12 +551,12 @@ fn acknowledgement_marker(disposition: wire::Disposition) -> Result<&'static str
     match disposition {
         wire::Disposition::Acked => Ok("ACK"),
         wire::Disposition::Declined => Ok("NAK"),
-        wire::Disposition::Live
-        | wire::Disposition::Lapsed
-        | wire::Disposition::DeadLettered
-        | wire::Disposition::Canceled => Err(format!(
-            "acknowledgment scanner returned nonterminal disposition {disposition:?}"
-        )),
+        wire::Disposition::Canceled => Ok("RST"),
+        wire::Disposition::Live | wire::Disposition::Lapsed | wire::Disposition::DeadLettered => {
+            Err(format!(
+                "acknowledgment scanner returned nonterminal disposition {disposition:?}"
+            ))
+        }
     }
 }
 

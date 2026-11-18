@@ -252,7 +252,8 @@ impl LineEffect {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum PacketOutcome {
-    /// An acknowledgment or reasoned refusal retired this directive.
+    /// A keyed control retired this directive: its recipient's ACK, FIN or
+    /// NAK, or its own sender's RST.
     Acknowledged {
         /// Exact directive key.
         key: String,

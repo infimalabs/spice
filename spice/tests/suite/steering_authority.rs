@@ -140,6 +140,7 @@ fn cancel_write(observed: &JournalHead<SteeringHead>) -> JournalWrite {
             SteerCanceled {
                 key: observed.body().key.clone(),
                 recipient: observed.body().recipient.clone(),
+                reason: None,
             },
             FactCause::Existing(observed.position()),
         )

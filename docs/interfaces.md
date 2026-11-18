@@ -195,10 +195,16 @@ stable identity and author label, requiring exact body/occupant proof. Only
 the canonical message owns its Chat card and speech.
 
 Bodies admit at most 256 KiB and 256 packet positions, using native
-SYN/ACK/FIN/NAK grammar and recipient rules. Each effect commits with its
+SYN/ACK/FIN/NAK/RST grammar and recipient rules. Each effect commits with its
 immutable judgment. Refused or withheld packets neither undo earlier successes
 nor block valid neighbors. Partial success returns a submission with settled
 and unresolved positions and any interruption, never an atomic-batch rollback.
+
+`RST KEY [KEY ...]: REASON` is the sender's control: each key that names a
+live send of the writing lane is canceled through the same guarded transition
+the operator's `steer cancel` uses, retaining the optional reason. Any other
+key refuses alone as `steer::rst-unavailable`. RST settles only through the
+outbox; the recipient's late ACK, FIN or NAK refuses as `steer::canceled`.
 
 Write receipts name a canonical quote and `spice://outbox/UUID`. They report
 `reused: false` for fresh admission or `reused: true` for an existing

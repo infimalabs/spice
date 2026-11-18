@@ -1021,6 +1021,7 @@ pub(super) fn retire_write(
             SteerCanceled {
                 key,
                 recipient: lane,
+                reason: None,
             },
             cause,
         ),

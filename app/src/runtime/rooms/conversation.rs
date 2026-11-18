@@ -544,6 +544,7 @@ mod tests {
             SteerCanceled {
                 key: "dW4Wl4fRP".to_owned(),
                 recipient: Actor::Lane(uuid(0xa1)),
+                reason: None,
             },
         )));
         assert!(projection.provisional_directions().next().is_none());

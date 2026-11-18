@@ -451,7 +451,7 @@ vocabulary! {
     SteerLapsed = "steer::lapsed" by BusTimer;
     /// A live directive was parked because its lane could not start.
     SteerDeadLettered = "steer::deadlettered" by ResidentRecognition;
-    /// The operator withdrew a live directive.
+    /// The operator, or with RST the directive's own sender, canceled it.
     SteerCanceled = "steer::canceled" by CommandDoor;
 
     /// An ACP permission request arrived, bound to its cause.

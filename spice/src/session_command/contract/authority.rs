@@ -431,6 +431,7 @@ fn seed_retired_peer_steering(path: &Path) {
             body::SteerCanceled {
                 key: current.body().key.clone(),
                 recipient: Actor::Lane(lane),
+                reason: None,
             },
             FactCause::Existing(current.body().created),
         )
