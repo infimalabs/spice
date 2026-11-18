@@ -90,22 +90,23 @@ this occupant reuse one submission; successors are separate.
   review, nor free/defer it for authorship.
 - Rehydrate assignment context from another session before editing. Update,
   split, or release stale scope rather than force it.
-- Plan/Design purpose survives phases; done cannot replace review. Ambient
-  creation under a held Plan/Design binds a controlled Draft unless another
-  `--origin`; `--preparation` binds explicitly. Controlled Drafts stay
-  editable, unclaimed and non-runnable until `task decide` or the Plan's
-  positive completion releases them; a decision pins the revisions it read,
-  so a later edit refuses it as stale. An unspecified completion contract
-  permits work, not successful completion: add own AC, link pending activated
-  AC-bearing work in either dependency direction, or use `task done
-  --disposition no-work|duplicate|covered|deferred [--cover REF]`. A Plan
-  instead needs AC-bearing child work constructed under it; dependency edges
-  and own AC never suffice. Taste is a separate statement hold; neither
-  changes flow. A pass investigates and charges every Design question; each
-  participant ends it with `task done`, reasoning in the room and
-  validation. The operator then decides its acceptance-bearing outputs built
-  under the claim with `task decide`; rejection closes the output and its
-  controlled subtree. Only the operator concludes a Design; stop means checkpoint/free.
+- Plan/Design purpose survives phases; done never replaces review. Creation under
+  a held Plan/Design makes a controlled Draft; `--origin` escapes and
+  `--preparation` binds. Drafts stay editable, unclaimed, and non-runnable
+  until `task decide` or Plan completion. Decisions pin revisions; edits go
+  stale. Unspecified completion permits work, but done needs own AC plus linked
+  pending, activated AC work, or `task done --disposition
+  no-work|duplicate|covered|deferred [--cover REF]`. A Plan instead needs
+  AC-bearing child work constructed under it; edges and own AC never suffice.
+  Taste holds only the statement. Design participants charge all questions,
+  then `task done` with room reasoning and validation. The operator selects
+  outputs with `task decide`; rejection closes their controlled subtree. Only
+  the operator concludes a Design; stop checkpoints.
+- A selected statement is its contract. To narrow a Design output, first `task
+  modify` and get fresh operator authority. Validation notes, disclosure,
+  agreement, and silence give none. Done cites the selected construction and
+  superseding decision. Review maps each term to integrated evidence or that
+  decision; gaps are findings.
 - Work incrementally; commit only under the matching claim. Never pull/push or
   alter harness attribution. Release unfinished work via `task free` or
   self-deferral, never stash/gate bypass. Resolve merges/replays before
