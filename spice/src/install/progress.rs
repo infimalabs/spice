@@ -1,6 +1,6 @@
 use super::record::{
-    InstallRecord, LoadedRecord, RefreshRecord, read_record_for_refresh, read_record_for_unapply,
-    record_path, remove_record, write_initial_record, write_record,
+    InstallRecord, LoadedRecord, RefreshRecord, read_record_for_refresh,
+    read_record_for_transition, record_path, remove_record, write_initial_record, write_record,
 };
 use super::*;
 
@@ -436,7 +436,7 @@ fn validate_existing_generation(
 
 pub(super) fn unapply_record(repository: &Repository) -> Result<InstallReceipt, InstallError> {
     let (loaded, requires_publish) =
-        read_record_for_unapply(repository)?.ok_or(InstallError::RecordMissing)?;
+        read_record_for_transition(repository)?.ok_or(InstallError::RecordMissing)?;
     let mut record = loaded.record;
     let mut record_generation = loaded.generation;
     // Reversal is an executable direction. Supported retained schemas cross
