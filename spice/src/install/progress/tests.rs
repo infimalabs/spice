@@ -82,6 +82,86 @@ fn refresh_without_binary(repository: &Repository) -> Vec<(Location, String)> {
 }
 
 #[test]
+fn fresh_preview_leaves_the_state_root_absent() {
+    let (_scratch, repository) = repository("read-only-preview");
+    let state_root = repository.state_root();
+    assert!(!state_root.exists());
+
+    super::super::preview(&repository, None).expect("install previews");
+
+    assert!(!state_root.exists(), "preview created runtime state");
+}
+
+#[test]
+fn unapply_retires_disposable_state_and_generated_git_shadows() {
+    let (_scratch, repository) = repository("unapply-disposable-state");
+    install_without_binary(&repository);
+    let shadow = repository
+        .git_dir()
+        .join(crate::git_shadow::AGENT_GITCONFIG_NAME);
+    let linked = repository
+        .common_dir()
+        .join("worktrees/lane")
+        .join(crate::git_shadow::AGENT_GITCONFIG_NAME);
+    fs::create_dir_all(linked.parent().expect("linked shadow has a parent"))
+        .expect("linked Git administration creates");
+    let content = crate::git_shadow::shadow_content("lane", "/etc/gitconfig");
+    fs::write(&shadow, &content).expect("Git shadow writes");
+    fs::write(&linked, content).expect("linked Git shadow writes");
+
+    let receipt = super::super::unapply(&repository).expect("install unapplies");
+
+    assert_eq!(receipt.status(), InstallStatus::Uninstalled);
+    assert!(!shadow.exists(), "generated Git shadow survived unapply");
+    assert!(
+        !linked.exists(),
+        "generated linked Git shadow survived unapply"
+    );
+    assert!(
+        !repository.state_root().exists(),
+        "empty runtime state survived unapply"
+    );
+}
+
+#[test]
+fn unapply_preserves_durable_runtime_state() {
+    let (_scratch, repository) = repository("unapply-durable-state");
+    install_without_binary(&repository);
+    let configuration = repository.state_root().join("config.toml");
+    fs::write(&configuration, b"[app]\n").expect("runtime configuration writes");
+
+    super::super::unapply(&repository).expect("install unapplies");
+
+    assert_eq!(
+        fs::read(&configuration).expect("runtime configuration remains"),
+        b"[app]\n"
+    );
+}
+
+#[test]
+fn foreign_git_shadow_refuses_unapply_before_install_mutation() {
+    let (_scratch, repository) = repository("unapply-foreign-shadow");
+    install_without_binary(&repository);
+    let shadow = repository
+        .git_dir()
+        .join(crate::git_shadow::AGENT_GITCONFIG_NAME);
+    fs::write(&shadow, b"operator-owned\n").expect("foreign Git shadow writes");
+
+    assert!(matches!(
+        super::super::unapply(&repository),
+        Err(InstallError::Drift { .. })
+    ));
+    assert_eq!(
+        fs::read(&shadow).expect("foreign Git shadow remains"),
+        b"operator-owned\n"
+    );
+    assert!(
+        repository.common_dir().join(".spice-install").exists(),
+        "unapply mutated the appliance before refusing the foreign shadow"
+    );
+}
+
+#[test]
 fn refresh_keeps_each_initial_parent_reversal_until_unapply() {
     let (_scratch, repository) = repository("refresh-parent-ownership");
     let initial = install_without_binary(&repository);

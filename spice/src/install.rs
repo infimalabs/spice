@@ -32,7 +32,9 @@ mod symbols;
 mod validation;
 
 pub use audit::{ApplianceAudit, ApplianceState, audit_appliance};
-use binding::{BoundDestination, bind_destination, validate_operation_binding};
+use binding::{
+    BoundDestination, bind_destination, validate_operation_binding, validate_record_binding,
+};
 pub use binding::{Generation, ParentObservation};
 pub use error::InstallError;
 use files::{
@@ -42,7 +44,10 @@ use files::{
 };
 use path::validate_relative;
 pub use progress::PreparedInstall;
-use progress::{apply_expected, apply_prepared_record, unapply_record, verify_progress};
+use progress::{
+    apply_expected, apply_prepared_record, retire_uninstalled_record, unapply_record,
+    verify_progress,
+};
 use record::{read_record, read_record_for_refresh};
 use validation::{asset_contract, fixed_content_differs_from_current_build};
 
@@ -94,9 +99,9 @@ const EXECUTABLE_MODE: u32 = 0o755;
 #[cfg(windows)]
 const EXECUTABLE_MODE: u32 = 0o700;
 
-// The state root exists before any plan is derived. Appliance
-// assets use a sibling namespace so that publication cannot invalidate the
-// side-effect-free preview's descriptor-bound parent observations.
+// Appliance assets use a sibling namespace. The receipt binds from the
+// existing Git-common directory so a fresh preview does not create its state
+// root; apply creates every missing parent under the same admitted binding.
 const GIT_PRE_COMMIT_PATH: &str = ".spice-install/githooks/pre-commit";
 const GIT_COMMIT_MESSAGE_PATH: &str = ".spice-install/githooks/commit-msg";
 const GIT_REFERENCE_TRANSACTION_PATH: &str = ".spice-install/githooks/reference-transaction";
@@ -271,7 +276,7 @@ impl InstallPlan {
         settled: bool,
     ) -> Result<(), InstallError> {
         self.repository.validate(repository)?;
-        binding::validate_record_binding(&repository.state_root(), &self.record, RECORD_PATH)?;
+        validate_install_record_binding(repository, &self.record)?;
         for operation in &self.operations {
             validate_operation_binding(
                 repository,
@@ -298,7 +303,8 @@ impl InstallPlan {
 
     fn validate_pristine(&self, repository: &Repository) -> Result<(), InstallError> {
         self.validate_for_repository(repository)?;
-        if bind_destination(&repository.state_root(), RECORD_PATH)? != self.record {
+        let (record_root, record_logical) = record_location(repository, &self.record)?;
+        if bind_destination(&record_root, &record_logical)? != self.record {
             return Err(InstallError::ParentChanged(
                 repository.state_root().join(RECORD_PATH),
             ));
@@ -440,38 +446,140 @@ pub fn complete_lifecycle(repository: &Repository) -> Result<InstallReceipt, Ins
     progress::complete_lifecycle(repository)
 }
 
-/// Create the state root when it does not exist, so the receipt binds below a
-/// real directory.
-fn ensure_state_root(repository: &Repository) -> Result<(), InstallError> {
-    let root = repository.state_root();
-    match fs::symlink_metadata(&root) {
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => state_root_builder()
-            .create(&root)
-            .map_err(|source| InstallError::io("create state root", root, source)),
-        Err(source) => Err(InstallError::io("inspect state root", root, source)),
-    }
+fn record_logical_path() -> String {
+    format!("{}/{RECORD_PATH}", wire::STATE_DIRECTORY)
 }
 
-/// The owner-only directory builder for a fresh state root.
-fn state_root_builder() -> fs::DirBuilder {
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt as _;
-        builder.mode(DIRECTORY_MODE);
-    }
-    #[cfg(not(unix))]
-    {
-        builder.recursive(false);
-    }
-    builder
+fn bind_record_destination(repository: &Repository) -> Result<BoundDestination, InstallError> {
+    bind_destination(repository.common_dir(), &record_logical_path())
 }
 
-/// Reverse the complete current install without touching drifted targets.
-pub fn unapply(repository: &Repository) -> Result<InstallReceipt, InstallError> {
+/// Root and logical path used by a current receipt binding.
+fn record_location(
+    repository: &Repository,
+    binding: &BoundDestination,
+) -> Result<(PathBuf, String), InstallError> {
+    let logical = record_logical_path();
+    if binding.destination != logical {
+        return Err(InstallError::InvalidRecord(
+            "install receipt binding names no current state location".to_owned(),
+        ));
+    }
+    Ok((repository.common_dir().to_path_buf(), logical))
+}
+
+fn validate_install_record_binding(
+    repository: &Repository,
+    binding: &BoundDestination,
+) -> Result<(), InstallError> {
+    let (root, logical) = record_location(repository, binding)?;
+    validate_record_binding(&root, binding, &logical)
+}
+
+struct GitShadowAdmission {
+    root: PathBuf,
+    bound: BoundDestination,
+    generation: Generation,
+}
+
+fn git_shadow_roots(repository: &Repository) -> Result<BTreeSet<PathBuf>, InstallError> {
+    let mut roots = BTreeSet::from([
+        repository.common_dir().to_path_buf(),
+        repository.git_dir().to_path_buf(),
+    ]);
+    let worktrees = repository.common_dir().join("worktrees");
+    let metadata = match fs::symlink_metadata(&worktrees) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(roots),
+        Err(source) => {
+            return Err(InstallError::io(
+                "inspect Git worktree administration",
+                worktrees,
+                source,
+            ));
+        }
+    };
+    if !metadata.is_dir() {
+        return Err(InstallError::PathShape(worktrees));
+    }
+    let entries = fs::read_dir(&worktrees).map_err(|source| {
+        InstallError::io("read Git worktree administration", &worktrees, source)
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| {
+            InstallError::io("read Git worktree administration", &worktrees, source)
+        })?;
+        let kind = entry.file_type().map_err(|source| {
+            InstallError::io("inspect Git worktree administration", entry.path(), source)
+        })?;
+        if kind.is_dir() {
+            roots.insert(entry.path());
+        }
+    }
+    Ok(roots)
+}
+
+fn admit_git_shadows(repository: &Repository) -> Result<Vec<GitShadowAdmission>, InstallError> {
+    let mut admitted = Vec::new();
+    for root in git_shadow_roots(repository)? {
+        let path = crate::git_shadow::AGENT_GITCONFIG_NAME;
+        let bound = bind_destination(&root, path)?;
+        let (observed, _) = observe_bound(&root, &bound.destination, &bound.parent)?;
+        let Some(observed) = observed else {
+            continue;
+        };
+        if !crate::git_shadow::is_generated_shadow(&observed.image.bytes) {
+            return Err(InstallError::Drift {
+                path: root.join(path).display().to_string(),
+                observed: Some(observed.image.digest),
+            });
+        }
+        admitted.push(GitShadowAdmission {
+            root,
+            bound,
+            generation: observed.generation,
+        });
+    }
+    Ok(admitted)
+}
+
+fn retire_git_shadow(admission: GitShadowAdmission) -> Result<(), InstallError> {
+    let path = handle::AdmittedPath::open(
+        &admission.root,
+        &admission.bound.destination,
+        &admission.bound.parent,
+        false,
+        0,
+    )?;
+    path.remove(admission.generation)
+}
+
+/// Reverse the current install while retaining its terminal receipt.
+///
+/// The command layer uses this boundary while it removes an external
+/// lifecycle owner. [`retire_unapplied`] completes the local cleanup only
+/// after that owner transition succeeds.
+#[doc(hidden)]
+pub fn unapply_retained(repository: &Repository) -> Result<InstallReceipt, InstallError> {
+    admit_git_shadows(repository)?;
     reclaim_temporary_records(repository)?;
     unapply_record(repository)
+}
+
+/// Retire the disposable state of a terminal reversal.
+#[doc(hidden)]
+pub fn retire_unapplied(repository: &Repository) -> Result<(), InstallError> {
+    for shadow in admit_git_shadows(repository)? {
+        retire_git_shadow(shadow)?;
+    }
+    retire_uninstalled_record(repository)
+}
+
+/// Reverse the complete current install and retire its disposable state.
+pub fn unapply(repository: &Repository) -> Result<InstallReceipt, InstallError> {
+    let receipt = unapply_retained(repository)?;
+    retire_unapplied(repository)?;
+    Ok(receipt)
 }
 
 fn build_plan(
@@ -564,7 +672,7 @@ fn build_plan_over(
     symbols: Option<symbols::Source>,
     lifecycle_owner: Option<LifecycleOwnerStanding>,
 ) -> Result<InstallPlan, InstallError> {
-    ensure_state_root(repository)?;
+    let record = bind_record_destination(repository)?;
     let binary = spice_binary
         .map(|path| read_binary(path).map(|bytes| (path, bytes)))
         .transpose()?;
@@ -582,7 +690,6 @@ fn build_plan_over(
         symbols.as_ref(),
     )?;
 
-    let record = bind_destination(&repository.state_root(), RECORD_PATH)?;
     let (retirements, orphans) = derive_retirements(repository, installed, &operations)?;
     let plan = InstallPlan {
         version: PLAN_VERSION,

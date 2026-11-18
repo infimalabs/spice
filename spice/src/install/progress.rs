@@ -1,6 +1,6 @@
 use super::record::{
     InstallRecord, LoadedRecord, RefreshRecord, read_record_for_refresh, record_path,
-    write_initial_record, write_record,
+    remove_record, write_initial_record, write_record,
 };
 use super::*;
 
@@ -138,11 +138,8 @@ fn require_receipt(
     plan: &InstallPlan,
     expected: Option<&ReceiptGeneration>,
 ) -> Result<(), InstallError> {
-    let (observed, _) = observe_bound(
-        &repository.state_root(),
-        &plan.record.destination,
-        &plan.record.parent,
-    )?;
+    let (root, _) = record_location(repository, &plan.record)?;
+    let (observed, _) = observe_bound(&root, &plan.record.destination, &plan.record.parent)?;
     let unchanged = match (expected, observed.as_ref()) {
         (None, None) => true,
         (Some(expected), Some(observed)) => expected.matches(observed),
@@ -471,6 +468,20 @@ pub(super) fn unapply_record(repository: &Repository) -> Result<InstallReceipt, 
     let receipt = record.receipt();
     write_record(repository, &record, record_generation)?;
     Ok(receipt)
+}
+
+pub(super) fn retire_uninstalled_record(repository: &Repository) -> Result<(), InstallError> {
+    let LoadedRecord { record, generation } =
+        read_record(repository)?.ok_or(InstallError::RecordMissing)?;
+    record.validate_for_repository(repository)?;
+    if record.status != InstallStatus::Uninstalled {
+        return Err(InstallError::InvalidRecord(
+            "install receipt is not ready for retirement".to_owned(),
+        ));
+    }
+    verify_progress(repository, &record)?;
+    reversal::remove_payloads(repository, &record.plan)?;
+    remove_record(repository, &record, generation)
 }
 
 fn reverse_operations(
