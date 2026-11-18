@@ -962,12 +962,13 @@ One canonical status-bearing receipt owns the exact plan, fixed-size references
 to first-captured prior images, durable progress, and reversal outcomes. The
 referenced raw bytes live once in a receipt-owned content-addressed store.
 
-**Invariant —** What the operator reviews is produced purely by observation.
-Apply requires that plan's exact digest, re-resolves the plan and executable
-repository configuration, and refuses before mutation when either moved. A
-process that derives and applies its own plan, such as the development refresh,
-may carry it into apply but still proves every bound source, generation,
-destination, and receipt image before effect.
+**Invariant —** What the operator reviews is produced purely by observation:
+an absent state root remains absent, and the planned receipt binds through the
+existing Git-common directory. Apply requires that plan's exact digest,
+re-resolves the plan and executable repository configuration, and refuses
+before mutation when either moved. A process that derives and applies its own
+plan, such as the development refresh, may carry it into apply but still proves
+every bound source, generation, destination, and receipt image before effect.
 
 **Invariant —** Hook activation orders its worktree observations and per-worktree
 configuration mutations by their recorded UTF-8 path strings, removing duplicate
@@ -1017,9 +1018,9 @@ restores it; one that introduced its file is a discard no unapply restores.
 A retirement removes a file only while it still holds the image the receipt
 recorded. A drifted file stays in place, leaves receipt ownership, and is
 named with its recorded and observed digests in the preview and the refresh
-report; the refresh does not refuse. Once a receipt is complete or
-uninstalled, a discard's recorded parent carries no authority: removing that
-directory leaves the receipt readable, auditable, and refreshable.
+report; the refresh does not refuse. Once a receipt is settled, a discard's
+recorded parent carries no authority: removing that directory does not
+invalidate the remaining receipt.
 
 **Invariant —** A plan this build derives is validated against its canonical
 inventory and order. A settled receipt is validated intrinsically: unique
@@ -1120,8 +1121,9 @@ Reversal restores only what it can still recognize as its own.
 preview digest. It advances the exact `complete` (or `establishing`) receipt
 generation to `unapplying`, runs the exact inverse of the canonical
 application order, and publishes `uninstalled` only after every operation has
-a recorded outcome. A moved generation refuses and preserves the current
-receipt.
+a recorded outcome. It then retires the generated Git shadow, reversal
+payloads, receipt, and empty install-state parents. A moved generation refuses
+and preserves the current receipt.
 
 **Invariant —** Identity drift is a typed refusal, not a partial success: a
 file the plan still publishes whose bytes or mode no longer match the receipt
@@ -1130,13 +1132,11 @@ the observed digest. The refusal overwrites nothing, preserves the changed
 target and the receipt, and retry resumes the same receipt. A container the
 installation created is removed only when still empty.
 
-**Invariant —** An interrupted reversal blocks a new installation until it is
-resumed, so two plans never contend for one receipt's first-captured prior
-state.
-
-**Invariant —** Both directions are resumable and idempotent: a re-run performs
-only operations not yet recorded complete, and a plan already satisfied against
-unchanged state performs no receipt-owned effect.
+**Invariant —** An interrupted reversal or cleanup retains its receipt and
+blocks a new installation until it is resumed, so two plans never contend for
+one receipt's first-captured prior state. A re-run performs only operations or
+cleanup not yet complete. A plan already satisfied against unchanged state
+performs no receipt-owned effect.
 
 ### The canonical receipt
 
@@ -1153,14 +1153,15 @@ receipt refuses; it is never read as "not installed".
 **Invariant —** Every receipt is bound to the repository it describes. A
 nonterminal receipt that names another Git-common owner, or a terminal copy
 whose original owner still exists, fails as the store fault
-`install::state-failed`. A `complete`, `establishing`, or `uninstalled` receipt
-may rebase only after the old owner is gone, moving repository, plan, and
-activation bindings together.
+`install::state-failed`. A `complete`, `establishing`, or cleanup-pending
+`uninstalled` receipt may rebase only after the old owner is gone, moving
+repository, plan, and activation bindings together.
 
-**Invariant —** The receipt remains after clean terminal directions, retaining
-its plan, prior-image references, status, and progress. Its referenced raw
-payloads remain available for the receipt's next executable direction. Absence
-is never synthesized by deleting provenance.
+**Invariant —** A complete receipt retains its plan, prior-image references,
+status, and progress. Reversal first retains `uninstalled` as its resumable
+terminal checkpoint, then removes its referenced payloads and the receipt by
+exact generation. Empty install and state parents leave with it; unrelated
+runtime state keeps those parents in place.
 
 **Invariant —** Install support is bounded by receipt schema, not product
 version. The current schema is the one shape any install command reads. A

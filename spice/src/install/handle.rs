@@ -265,6 +265,13 @@ impl AdmittedPath {
         self.remove_with(expected, || Ok(()))
     }
 
+    pub(super) fn remove_receipt(&self, expected: ReceiptGeneration) -> Result<(), InstallError> {
+        let generation = expected.native();
+        self.remove_with(generation, || {
+            self.require_receipt_generation(Some(&expected))
+        })
+    }
+
     pub(super) fn retire(
         &self,
         expected: Generation,

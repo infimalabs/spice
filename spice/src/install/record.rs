@@ -1,15 +1,16 @@
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use wire::Digest;
 
-use super::binding::bind_destination;
 use super::files::{observe_bound, publish_bound};
 use super::{
     FileImage, Generation, InstallError, InstallPlan, InstallPlanSummary, InstallReceipt,
-    InstallStatus, RECORD_MODE, RECORD_PATH, RECORD_VERSION, ReceiptGeneration, Repository,
-    RepositoryIdentity,
+    InstallStatus, RECORD_MODE, RECORD_PATH, RECORD_VERSION, REVERSAL_PATH, ReceiptGeneration,
+    Repository, RepositoryIdentity, bind_record_destination, record_location,
+    validate_install_record_binding,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -421,11 +422,7 @@ impl InstallRecord {
             self.validate_progress_content()?;
             self.plan.validate_repository_binding(repository, true)
         } else {
-            super::binding::validate_record_binding(
-                &repository.state_root(),
-                &self.plan.record,
-                super::RECORD_PATH,
-            )
+            validate_install_record_binding(repository, &self.plan.record)
         }
     }
 
@@ -477,12 +474,13 @@ pub(super) fn read_record_for_refresh(
 
 fn decode_record(repository: &Repository) -> Result<Option<LoadedRecord>, InstallError> {
     record_path(repository)?;
-    let root = repository.state_root();
-    if std::fs::symlink_metadata(&root).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+    let state_root = repository.state_root();
+    if fs::symlink_metadata(&state_root).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
     {
         return Ok(None);
     }
-    let binding = bind_destination(&root, RECORD_PATH)?;
+    let binding = bind_record_destination(repository)?;
+    let (root, _) = record_location(repository, &binding)?;
     let (observed, _) = observe_bound(&root, &binding.destination, &binding.parent)?;
     let Some(observed) = observed else {
         return Ok(None);
@@ -528,8 +526,9 @@ pub(super) fn write_initial_record(
     record: &InstallRecord,
 ) -> Result<ReceiptGeneration, InstallError> {
     record.validate_for_write(repository)?;
+    let (root, _) = record_location(repository, &record.plan.record)?;
     let (observed, _) = observe_bound(
-        &repository.state_root(),
+        &root,
         &record.plan.record.destination,
         &record.plan.record.parent,
     )?;
@@ -554,14 +553,62 @@ fn write_record_bytes(
     expected: Option<ReceiptGeneration>,
 ) -> Result<ReceiptGeneration, InstallError> {
     let bytes = wire::encode(record).map_err(InstallError::Encode)?;
+    let (root, _) = record_location(repository, &record.plan.record)?;
     publish_bound(
-        &repository.state_root(),
+        &root,
         &record.plan.record.destination,
         &record.plan.record.parent,
         record.plan.record.introduced_parents.len(),
         &FileImage::new(RECORD_MODE, bytes),
         expected,
     )
+}
+
+pub(super) fn remove_record(
+    repository: &Repository,
+    record: &InstallRecord,
+    generation: ReceiptGeneration,
+) -> Result<(), InstallError> {
+    let (root, _) = record_location(repository, &record.plan.record)?;
+    let mut admitted = super::handle::AdmittedPath::open(
+        &root,
+        &record.plan.record.destination,
+        &record.plan.record.parent,
+        false,
+        record.plan.record.introduced_parents.len(),
+    )?;
+    admitted.remove_receipt(generation)?;
+    admitted.cleanup_introduced()?;
+    drop(admitted);
+
+    for path in [
+        repository.state_root().join(REVERSAL_PATH),
+        repository.state_root().join("appliance/install"),
+        repository.state_root().join("appliance"),
+        repository.state_root(),
+    ] {
+        remove_empty_directory(&path)?;
+    }
+    Ok(())
+}
+
+fn remove_empty_directory(path: &std::path::Path) -> Result<(), InstallError> {
+    match fs::remove_dir(path) {
+        Ok(()) => Ok(()),
+        Err(source)
+            if matches!(
+                source.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            Ok(())
+        }
+        Err(source) => Err(InstallError::io(
+            "remove empty retired install state directory",
+            path,
+            source,
+        )),
+    }
 }
 
 pub(super) fn record_path(repository: &Repository) -> Result<PathBuf, InstallError> {

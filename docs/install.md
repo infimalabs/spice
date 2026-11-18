@@ -321,8 +321,11 @@ configured by `spice up --keeper` stands; remove that owner with
 lifecycle owner and drains its resident before it removes the appliance, then
 removes the owner's private artifacts.
 
-The state roots `<git-common>/.spice` and `<git-dir>/.spice` stay in place,
-and the receipt there records the installation as uninstalled.
+Reversal retires the install receipt, its reversal payloads, and every
+generated `agent.gitconfig` in the repository's Git worktree administration.
+It removes now-empty install and state directories. Any state root carrying
+configuration, journal, task, artifact, lane, or other runtime state remains
+unchanged.
 
 ## State root
 

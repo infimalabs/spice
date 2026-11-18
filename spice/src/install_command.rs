@@ -278,18 +278,20 @@ fn unapply_with_keeper(repository: &Repository, ambient: &Ambient) -> Outcome<In
     } else {
         false
     };
-    let unapplied = spice::install::unapply(repository);
-    if unapplied.is_ok()
-        && owner_step == ReversalOwnerStep::Remove
+    let unapplied = spice::install::unapply_retained(repository);
+    if unapplied.is_err() {
+        if owned && let Err(owner) = ensure_keeper(repository) {
+            return both_failed(result(unapplied), owner);
+        }
+        return result(unapplied);
+    }
+    if owner_step == ReversalOwnerStep::Remove
         && let Err(outcome) = crate::resident::keeper::finish_unapply(repository)
     {
         return cast_outcome(outcome);
     }
-    if unapplied.is_err()
-        && owned
-        && let Err(owner) = ensure_keeper(repository)
-    {
-        return both_failed(result(unapplied), owner);
+    if let Err(error) = spice::install::retire_unapplied(repository) {
+        return failure(error);
     }
     result(unapplied)
 }

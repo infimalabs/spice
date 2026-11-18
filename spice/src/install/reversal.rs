@@ -57,6 +57,49 @@ pub(super) fn ensure_payloads(
     Ok(())
 }
 
+/// Retire every payload whose bytes have been restored by a completed
+/// reversal. Absence is accepted so an interrupted cleanup converges.
+pub(super) fn remove_payloads(
+    repository: &Repository,
+    plan: &InstallPlan,
+) -> Result<(), InstallError> {
+    let references = plan
+        .operations
+        .iter()
+        .filter_map(|operation| operation.previous.as_ref())
+        .chain(
+            plan.retirements
+                .iter()
+                .filter_map(|retirement| retirement.previous.as_ref()),
+        );
+    let mut removed = BTreeSet::new();
+    for reference in references {
+        if !removed.insert(&reference.digest) {
+            continue;
+        }
+        remove_payload(repository, reference)?;
+    }
+    Ok(())
+}
+
+fn remove_payload(repository: &Repository, reference: &GeneratedImage) -> Result<(), InstallError> {
+    let root = repository.state_root();
+    let bound = bind_destination(&root, &payload_path(reference))?;
+    let (observed, _) = observe_bound(&root, &bound.destination, &bound.parent)?;
+    let Some(observed) = observed else {
+        return Ok(());
+    };
+    if observed.image.mode != RECORD_MODE || observed.image.digest != reference.digest {
+        return Err(InstallError::InvalidRecord(format!(
+            "install reversal payload {} does not match its fixed reference",
+            reference.digest
+        )));
+    }
+    let admitted =
+        super::handle::AdmittedPath::open(&root, &bound.destination, &bound.parent, false, 0)?;
+    admitted.remove(observed.generation)
+}
+
 /// Read one exact reversal image and restore its recorded destination mode.
 pub(super) fn load_payload(
     repository: &Repository,
