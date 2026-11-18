@@ -12,6 +12,8 @@ use wire::{Digest, Domain};
 use super::PublishError;
 
 pub(super) const CHECKSUMS: &str = "SHA256SUMS";
+/// The admitted plan a request persists before any tag or release mutation.
+pub(super) const PLAN_FILE: &str = "plan.json";
 const SCHEMA: u16 = 1;
 const EXECUTABLE_MODE: u32 = 0o755;
 const SHA256_HEX_LENGTH: usize = 64;
@@ -121,7 +123,7 @@ impl PublicationPlan {
 
     pub(super) fn persist(&self, operation: &Path) -> Result<(), PublishError> {
         self.admit()?;
-        let path = operation.join("plan.json");
+        let path = operation.join(PLAN_FILE);
         let bytes = serde_json::to_vec(self).map_err(PublishError::Encode)?;
         match fs::read(&path) {
             Ok(existing) if existing == bytes => Ok(()),

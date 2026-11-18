@@ -17,19 +17,41 @@ mod session;
 use plan::PublicationPlan;
 use session::Publications;
 
+/// What one `publish-hosted-release` invocation asks of the pinned request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PublishRequest {
+    /// Pin landed `main` as a new request; refused while another is pending.
+    New,
+    /// Continue the pending request pinned to exactly this commit.
+    Resume(String),
+    /// Drop the pending request pinned to exactly this commit before any
+    /// release mutation.
+    Abandon(String),
+}
+
 /// Create or resume all hosted native stages, publish their exact executables,
 /// and read the public release back from fresh storage.
 ///
-/// A new request reads `main` once and pins that commit; every later
-/// invocation resumes the pinned request without consulting `main` until it
-/// publishes. The local checkout never selects the release.
+/// A new request reads `main` once and pins that commit. While it is pending,
+/// an invocation must name the pinned commit to resume it or abandon it; a
+/// bare invocation or another commit refuses. The local checkout never
+/// selects the release.
 pub fn publish_hosted_release(
+    request: &PublishRequest,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), PublishError> {
     let worktree = current_worktree()?;
     let publications = Publications::lock(&worktree)?;
-    let source_commit = match publications.pending()? {
+    if let PublishRequest::Abandon(commit) = request {
+        publications.abandon(commit)?;
+        return writeln!(
+            output,
+            "abandoned the pending publication request for {commit}"
+        )
+        .map_err(PublishError::Output);
+    }
+    let source_commit = match publications.admit(request)? {
         Some(commit) => commit,
         None => landed_commit()?,
     };
