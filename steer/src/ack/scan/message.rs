@@ -7,16 +7,14 @@
 //! SYN selector*: body
 //! ```
 //!
-//! The packet shares the authored-context rules of keyed controls: quotation,
-//! code, rendered-source, negation, hypothetical and narration exclusions
-//! decide whether the marker speaks. It retires nothing; its body is the source
-//! hunk the packet owns.
+//! The packet shares the structural rules of keyed controls: quotation, code,
+//! and rendered-source context decide whether a structurally valid header
+//! speaks. It retires nothing; its body is the source hunk the packet owns.
 //!
 //! An explicit audience is one [`OccupantAddress`]. A pointer-only selector
 //! reaches a task room when its `#` qualifier contains a hyphen, or identifies
 //! the exact input whose authorized counterpart receives a linked line when it
-//! names a steering [`Key`]. A selectorless SYN is retained for the resident to
-//! resolve against the author's sole held task.
+//! names a steering [`Key`].
 //!
 //! A body begins after the header's colon and runs to the next placed SYN, ACK,
 //! FIN, or NAK header or the end of the prose, with surrounding whitespace
@@ -196,17 +194,10 @@ pub(super) struct Header {
 /// line packet boundary, a later route-shaped selector also makes a terminated
 /// list an attempt so an explicitly malformed first selector is refused rather
 /// than ignored. An unterminated route-shaped list is an attempt only at that
-/// boundary. A selectorless line packet is the current-task form.
+/// boundary. A marker without a route-shaped selector is ordinary prose.
 pub(super) fn header_after(prose: &str, marker_end: usize) -> Option<Header> {
     let marker_boundary = skip_emphasis(prose, marker_end);
     let mut cursor = skip_header_space(prose, marker_boundary);
-    if prose.as_bytes().get(cursor) == Some(&b':') {
-        return marker_starts_line(prose, marker_end - MARKER.len()).then(|| Header {
-            tokens: Vec::new(),
-            end: skip_emphasis(prose, cursor + 1),
-            terminated: true,
-        });
-    }
     if cursor == marker_boundary {
         return None;
     }

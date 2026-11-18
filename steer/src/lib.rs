@@ -2,7 +2,7 @@
 //!
 //! Operator steering is state, not text that scrolled past. A directive is
 //! appended once, rendered where the lane it addresses will hear it, and
-//! retires only through a typed disposition: a semantic acknowledgment in
+//! retires only through a typed disposition: a structural acknowledgment in
 //! assistant prose, an authenticated lane command, an operator cancel, or its
 //! own expiry. Silence climbs a resend ladder and then alarms by name rather
 //! than escalating forever.
