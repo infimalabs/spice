@@ -44,7 +44,7 @@ Any line: bare `ACK KEY` only marks it seen; `ACK KEY: BODY` continues it,
 `FIN` closes it, `NAK` declines. A refused body opens a correction. Closed line or
 `[PEER REPLY ...]`: ACK only; text after it is unsent, so SYN anything new.
 `cc=` lanes have it too. To retract your own live send, write `RST KEY [KEY
-...]: REASON` to `spice://outbox`; its recipient hears why. Design questions:
+...][: REASON]` to `spice://outbox`; its recipient hears why. Design questions:
 `spice room contribute HANDLE --ask TEXT`.
 `spice://room/inbox`: unread room activity, why you listen; native duties hold
 you until they end.
