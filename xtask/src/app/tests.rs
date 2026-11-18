@@ -135,6 +135,7 @@ fn publish_fixture(root: &Path, label: &str) {
     let sources = fixture_source();
     app_at(
         root,
+        root,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -278,6 +279,7 @@ fn foreign_wasm_with_right_css_cannot_publish() {
 
     let error = app_at(
         &root,
+        &root,
         &expected,
         &mut Vec::new(),
         |stage, _| {
@@ -308,6 +310,7 @@ fn missing_renderer_sources_cannot_publish() {
 
     let error = app_at(
         &root,
+        &root,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -327,6 +330,42 @@ fn missing_renderer_sources_cannot_publish() {
         "a generation without renderer sources became current"
     );
     fs::remove_dir_all(root).expect("remove missing-renderer fixture");
+}
+
+#[test]
+fn renderer_sources_come_from_the_source_root_when_publishing_elsewhere() {
+    let source_root = fixture("split-root-app-sources");
+    let publish_root = fixture("split-root-app-publish");
+    write_renderer_sources(&source_root);
+    let sources = fixture_source();
+
+    let identity = app_at(
+        &source_root,
+        &publish_root,
+        &sources,
+        &mut Vec::new(),
+        |stage, _| {
+            write_raw_generation(stage, "split-root", &sources, true);
+            Ok(())
+        },
+        || Ok(()),
+    )
+    .expect("a split-root build publishes the source root's renderer");
+
+    let generation = publish_root
+        .join(spice::serve::APP_STAGE)
+        .join(spice::serve::APP_STAGE_GENERATIONS)
+        .join(identity.as_str());
+    for file in ["renderer-000.html", "renderer-000.mjs"] {
+        assert!(
+            generation.join(file).is_file(),
+            "the published generation lacks {file}"
+        );
+    }
+    let shell = fs::read_to_string(generation.join("app.html")).expect("read shell");
+    assert!(shell.contains(wire::manifest::renderer::ATTRIBUTE));
+    fs::remove_dir_all(source_root).expect("remove source fixture");
+    fs::remove_dir_all(publish_root).expect("remove publish fixture");
 }
 
 #[test]
@@ -607,6 +646,7 @@ fn publication_switches_only_after_an_event_releases_the_complete_generation() {
         let build = scope.spawn(move || {
             app_at(
                 &build_root,
+                &build_root,
                 &sources,
                 &mut Vec::new(),
                 |stage, _| {
@@ -686,6 +726,7 @@ fn concurrent_stagings_of_the_same_sources_publish_one_generation() {
                     scope.spawn(|| {
                         app_at(
                             &root,
+                            &root,
                             &sources,
                             &mut Vec::new(),
                             |stage, _| {
@@ -744,6 +785,7 @@ fn a_failed_finalization_preserves_the_prior_pointer_or_first_build_absence() {
 
     let error = app_at(
         &root,
+        &root,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -765,6 +807,7 @@ fn a_failed_finalization_preserves_the_prior_pointer_or_first_build_absence() {
     let fresh = fixture("worktree-app-first-failure");
     write_renderer_sources(&fresh);
     app_at(
+        &fresh,
         &fresh,
         &sources,
         &mut Vec::new(),
@@ -797,6 +840,7 @@ fn a_failed_build_preserves_the_prior_pointer_or_first_build_absence() {
 
     let error = app_at(
         &root,
+        &root,
         &sources,
         &mut Vec::new(),
         |stage, _| fail_partial_build(stage),
@@ -814,6 +858,7 @@ fn a_failed_build_preserves_the_prior_pointer_or_first_build_absence() {
 
     let fresh = fixture("worktree-app-first-build-failure");
     let error = app_at(
+        &fresh,
         &fresh,
         &sources,
         &mut Vec::new(),
