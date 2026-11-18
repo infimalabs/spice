@@ -51,8 +51,8 @@ pub enum InstallError {
         observed: Digest,
     },
     InvalidRecord(String),
-    /// A receipt of another install schema, which only the appliance that
-    /// wrote it can unapply.
+    /// A receipt whose install schema has no registered forward crossing and
+    /// can only be uninstalled by an executable that supports that schema.
     ForeignRecord {
         path: PathBuf,
         version: u16,
