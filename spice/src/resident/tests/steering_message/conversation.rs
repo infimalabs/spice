@@ -121,8 +121,9 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     lanes.finish();
 }
 
-/// Startup recovery sees an answer retained after its acknowledged direction
-/// left the live index, and records its one use exactly once.
+/// Startup recovery passes silently over an acknowledged direction holding
+/// only its nod, sees an answer retained after it left the live index, and
+/// records that answer's one use exactly once.
 #[test]
 fn startup_recovers_a_post_ack_operator_answer() {
     let lanes = Lanes::new("conv-direction-answer-recovery");
@@ -146,6 +147,12 @@ fn startup_recovers_a_post_ack_operator_answer() {
             .expect("answer evidence reads")
     };
     assert!(!answered(), "the nod has not spent answer authority");
+    assert_eq!(
+        lanes.restart(),
+        "",
+        "a direction holding only its nod is settled, not pending"
+    );
+    assert!(!answered(), "recovering the nod spends no answer authority");
 
     let message = serde_json::json!({
         "type": "message_end",

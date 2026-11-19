@@ -672,16 +672,19 @@ impl Lanes {
         .expect("recovery reads");
     }
 
-    /// Replay startup's transcript recovery, as a restarted resident does.
-    fn restart(&self) {
+    /// Replay startup's transcript recovery, as a restarted resident does,
+    /// and return its diagnostic lines.
+    fn restart(&self) -> String {
+        let mut diagnostic = Vec::new();
         crate::resident::ingest_surface::recover_transcripts(
             &self.bus,
             &self.paths,
             (self.epoch, self.joining.joining()),
             &steer::Config::default(),
-            &mut Vec::new(),
+            &mut diagnostic,
         )
         .expect("startup recovery replays");
+        String::from_utf8(diagnostic).expect("diagnostics are text")
     }
 
     /// Land one assistant message on a lane's tape and hear its answers.

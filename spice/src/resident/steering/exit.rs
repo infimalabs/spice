@@ -282,6 +282,11 @@ fn dispose_pending(
                     );
                 }
             }
+            // Recovery pages acknowledged operator directions only to find a
+            // retained FIN; one holding just its nod is settled, not pending.
+            Err(Outcome::Refusal(_))
+                if head.body().disposition != Disposition::Live
+                    && !matches!(reading, Reading::OnLanding(_)) => {}
             Err(outcome) => {
                 let _ = writeln!(
                     diagnostic,
