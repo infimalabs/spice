@@ -1,6 +1,6 @@
 use app::speech_queue::{
-    Advance, AutomaticChange, Enqueue, MAX_NARRATION_CURSORS, NarrationCursors, NarrationMessage,
-    SpeechControl, SpeechMode, SpeechQueue, SpeechRequest,
+    Advance, AutomaticChange, Enqueue, MAX_NARRATION_CURSORS, MEDIA_TITLE_CHARS, NarrationCursors,
+    NarrationMessage, SpeechControl, SpeechMode, SpeechQueue, SpeechRequest,
 };
 
 fn playback(lane: &str) -> wire::SpeechPlayback {
@@ -222,27 +222,59 @@ fn quiet_is_a_default_closed_team_policy_that_preserves_explicit_playback() {
 }
 
 #[test]
-fn only_narrate_keeps_one_session_active_across_teams_and_idle_queue_gaps() {
+fn narrate_holds_one_session_across_gaps_while_other_speech_holds_it_only_while_speaking() {
     let mut queue = SpeechQueue::default();
-    assert!(!queue.narration_session_active());
+    assert!(!queue.media_session_active());
 
     queue.set_mode("team-a", SpeechMode::Speak);
-    assert!(!queue.narration_session_active());
+    assert!(!queue.media_session_active());
+    let spoken = started(queue.enqueue(narration("team-a", "final answer")));
+    assert!(queue.media_session_active());
+    assert_eq!(queue.finish(spoken.id()), Advance::Idle);
+    assert!(!queue.media_session_active());
+    let explicit = started(queue.enqueue(manual("team-c", "card", "explicit")));
+    assert!(queue.media_session_active());
+    queue.stop();
+    assert!(!queue.media_session_active());
+    assert_eq!(queue.finish(explicit.id()), Advance::Ignored);
+
     queue.set_mode("team-a", SpeechMode::Narrate);
-    assert!(queue.narration_session_active());
+    assert!(queue.media_session_active());
     queue.set_mode("team-b", SpeechMode::Narrate);
     queue.stop();
-    assert!(queue.narration_session_active());
+    assert!(queue.media_session_active());
 
     queue.set_mode("team-a", SpeechMode::Speak);
-    assert!(queue.narration_session_active());
+    assert!(queue.media_session_active());
     queue.abandon_lane("team-b");
-    assert!(!queue.narration_session_active());
+    assert!(!queue.media_session_active());
 
     queue.set_mode("team-a", SpeechMode::Narrate);
-    assert!(queue.narration_session_active());
+    assert!(queue.media_session_active());
     queue.set_mode("team-a", SpeechMode::Quiet);
-    assert!(!queue.narration_session_active());
+    assert!(!queue.media_session_active());
+}
+
+#[test]
+fn entry_title_is_its_first_spoken_line_cut_with_an_ellipsis() {
+    let mut queue = SpeechQueue::default();
+    assert_eq!(queue.active_title(), None);
+    let entry = started(queue.enqueue(manual("team-a", "card", "\n  \n  First line.  \nSecond")));
+    assert_eq!(entry.title(), "First line.");
+    assert_eq!(queue.active_title().as_deref(), Some("First line."));
+    queue.stop();
+
+    let long = "é".repeat(MEDIA_TITLE_CHARS + 1);
+    let entry = started(queue.enqueue(manual("team-a", "long", &long)));
+    let title = entry.title();
+    assert_eq!(title.chars().count(), MEDIA_TITLE_CHARS);
+    assert!(title.ends_with('…'));
+    let exact = "é".repeat(MEDIA_TITLE_CHARS);
+    queue.stop();
+    assert_eq!(
+        started(queue.enqueue(manual("team-a", "exact", &exact))).title(),
+        exact
+    );
 }
 
 #[test]
