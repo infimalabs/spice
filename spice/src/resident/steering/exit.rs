@@ -177,7 +177,7 @@ impl CandidateStanding {
                 .key
                 .parse()
                 .map_err(|error: steer::KeyError| error.to_string())?;
-            let disposition = if body.recipient == recipient && prior_peer_receipt(body) {
+            let disposition = if body.recipient == recipient && prior_receipt(body) {
                 Disposition::Live
             } else {
                 body.disposition
@@ -326,17 +326,21 @@ pub(super) struct Disposed {
     pub(super) notice: Option<MessageRefusalNotice>,
 }
 
-/// A prior acknowledgment still proves this lane's exact peer input.
-/// Domain directions and invitations never gain reusable line authority.
-pub(super) fn prior_peer_receipt(head: &wire::SteeringHead) -> bool {
-    head.disposition == Disposition::Acked
-        && head.sender.lane().is_some()
-        && head
-            .control
-            .as_deref()
-            .and_then(wire::parse_peer_line_control)
-            .is_some()
+/// A prior acknowledgment still proves this lane's exact input from a peer
+/// lane or principal: a line input, or a principal's plain direction, whose
+/// later control answers without retiring it again. Domain directions and
+/// invitations never gain reusable authority.
+pub(super) fn prior_receipt(head: &wire::SteeringHead) -> bool {
+    let line = head
+        .control
+        .as_deref()
+        .and_then(wire::parse_peer_line_control)
+        .is_some();
+    let direction =
+        head.sender.principal().is_some() && head.fanout.is_some() && head.control.is_none();
+    head.disposition == Disposition::Acked && head.sender != Actor::Spice && (line || direction)
 }
+
 fn recognized_outcome(
     recognition: &transcript::TranscriptRecognition,
 ) -> Result<(steer::Marker, steer::Key, Disposition), Outcome<CommandAnswer>> {
@@ -367,6 +371,8 @@ fn recognized_outcome(
 /// the reply this write journals carries it, or nothing does. A join's reply
 /// and a reply's own answer carry none. A refused open-line body records its
 /// correction in the same write; a post-close body records only its judgment.
+/// A later answer to an acknowledged principal direction lives in its authored
+/// source, so without a packet judgment it journals nothing.
 pub(super) fn dispose_recognized(
     bus: &Bus,
     (config, epoch, joining): (&steer::Config, CanonicalUuid, Joining<'_>),
@@ -452,6 +458,10 @@ pub(super) fn dispose_recognized(
         },
         Some(config),
     )?;
+    let writes = !matches!(retirement, FactCause::Existing(_))
+        || judgment.is_some()
+        || reply.line.is_some()
+        || reply.told.is_some();
     if let Some(judgment) = judgment {
         let body = match &reply.line {
             Some(line) => line.body.as_ref().map(|body| match body {
@@ -471,7 +481,9 @@ pub(super) fn dispose_recognized(
             retirement,
         )?;
     }
-    commit(bus, proposal).map_err(typed_outcome)?;
+    if writes {
+        commit(bus, proposal).map_err(typed_outcome)?;
+    }
     Ok(Disposed {
         disposition,
         replied: reply.told,
@@ -572,7 +584,7 @@ fn admit_receipt(
         ));
     }
     if head.recipient == wire::Actor::Lane(lane)
-        && (head.disposition == Disposition::Live || prior_peer_receipt(head))
+        && (head.disposition == Disposition::Live || prior_receipt(head))
     {
         return Ok(());
     }

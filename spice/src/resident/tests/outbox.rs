@@ -997,8 +997,9 @@ fn a_refused_final_body_leaves_its_close_recorded_on_the_receipt() {
     lanes.finish();
 }
 
-/// An exact prior peer receipt remains authority for a new control, not
-/// another retirement. Other lanes and domain directions gain no authority.
+/// An exact prior receipt of a peer input or operator direction remains
+/// authority for a later control, not another retirement. Other lanes and
+/// unknown keys gain no authority.
 #[test]
 fn an_acknowledged_peer_input_can_continue_and_finish_its_open_line() {
     for (marker, terminal) in [
@@ -1044,11 +1045,31 @@ fn an_acknowledged_peer_input_can_continue_and_finish_its_open_line() {
 
         let operator = lanes.direct(FIRST, 40, "operator direction");
         said(FIRST, format!("ACK {operator}"));
-        for (lane, key) in [
-            (FIRST, operator),
-            (SENDER, root.clone()),
-            (FIRST, "ZZZZZZZZZ".to_owned()),
-        ] {
+        let direction = || {
+            let key = operator.clone();
+            lanes
+                .bus
+                .read(move |read| read.steering_key(&key))
+                .expect("the direction reads")
+                .expect("the direction remains")
+                .position()
+        };
+        let nodded = direction();
+        let answered = said(FIRST, format!("FIN {operator}: the answer"));
+        assert!(matches!(
+            &answered.decided[0].outcome,
+            PacketOutcome::Acknowledged {
+                disposition: wire::Disposition::Acked,
+                line: None,
+                ..
+            }
+        ));
+        assert_eq!(
+            direction(),
+            nodded,
+            "an answer after the nod never retires the direction again"
+        );
+        for (lane, key) in [(SENDER, root.clone()), (FIRST, "ZZZZZZZZZ".to_owned())] {
             let refused = said(lane, format!("ACK {key}: no authority"));
             assert!(matches!(&refused.decided[0].outcome,
                 PacketOutcome::Refused { reason, .. } if reason == "steer::ack-missed"));

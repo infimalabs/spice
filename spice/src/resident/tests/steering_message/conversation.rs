@@ -102,10 +102,11 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     );
     assert!(lanes.conversations().is_empty());
 
+    lanes.answer(SENDER, &[&own], &format!("ACK {own}"));
     lanes.answer(SENDER, &[&own], &format!("FIN {own}: Handled."));
     assert!(
         lanes.pending(SENDER).iter().all(|input| input.key != own),
-        "FIN retires operator direction"
+        "the nod retires operator direction and the later FIN answers it"
     );
     lanes
         .say(SENDER, &format!("SYN #{own}: which first?"))

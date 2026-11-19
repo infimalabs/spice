@@ -15,10 +15,9 @@ owns each rule summarized here.
   whatever its disposition, which for operator direction tells the operator
   about it
   ([grammar](invariants/identity.md#steering-a-syn-packet-owns-exactly-its-body-hunk)).
-  ACK answers operator direction with its response clause, FIN closes it with
-  its final clause, and NAK declines it with a reason; a longer or
-  source-backed answer goes by `SYN #KEY` before or after that one-line
-  control. On a peer line a bare ACK marks an input seen, an ACK with a
+  ACK nods that operator direction was seen, FIN carries its answer at any
+  length, even after that ACK, and NAK declines it with a reason. On a peer
+  line a bare ACK marks an input seen, an ACK with a
   body continues the line, FIN closes it with an optional final body, and NAK
   declines it. A blank line after a bare ACK, an ACK reaction (`ok`, `noted`,
   `thanks`, or `+1`, optionally followed only by characters from `.,:;!`), or
