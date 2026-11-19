@@ -850,3 +850,33 @@ fn a_tape_continuation_resumes_from_physical_progress_not_the_anchor() {
     let unserved = scan(vec![card_at(1, 7), card_at(1, 10)], true);
     assert_eq!(tape_continuation(&unserved, &anchor), at(1, 10));
 }
+
+#[test]
+fn a_final_revision_of_an_evicted_card_leaves_the_page_intact() {
+    let messages = CollectedMessages::new(1, Some(&card_at(1, 50)));
+    messages
+        .publish(card_at(1, 10))
+        .expect("older card collects");
+    messages
+        .publish(card_at(1, 20))
+        .expect("newer card evicts the older");
+    let mut evicted = card_at(1, 10);
+    evicted.final_answer = true;
+    assert!(
+        messages
+            .revise_final(evicted)
+            .expect("an evicted card's revision is dropped")
+    );
+    let mut kept = card_at(1, 20);
+    kept.final_answer = true;
+    kept.text = "settled".to_owned();
+    assert!(
+        messages
+            .revise_final(kept.clone())
+            .expect("a kept card revises")
+    );
+
+    let collected = messages.inner.into_inner().expect("history lock");
+    assert!(collected.dropped);
+    assert_eq!(collected.messages, vec![kept]);
+}

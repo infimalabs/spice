@@ -700,11 +700,9 @@ impl AgentMessagePublisher for CollectedMessages {
             .iter_mut()
             .find(|existing| existing.lane == message.lane && existing.locus == message.locus)
         else {
-            // A card at or after the anchor was never collected.
-            if !self.precedes_anchor(&message) {
-                return Ok(true);
-            }
-            return Err(serve::stream::MessagePublishError::IdentityConflict);
+            // A bounded window holds only some cards: this one stands at or
+            // after the anchor, was evicted by `limit`, or preceded the scan.
+            return Ok(true);
         };
         *existing = message;
         Ok(true)
