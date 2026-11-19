@@ -147,14 +147,18 @@ fn candidates(
                 Ok(candidates)
             })
         }
-        // Inputs owed an answer search first, so the lane's own live sends
-        // cannot exhaust the shared evidence deadline before those are found.
+        // Inputs owed an answer search first, then live sends, then one bounded
+        // newest-first page of unused historical operator receipts. Historical
+        // work therefore cannot consume the shared evidence deadline before
+        // any live authority has been considered.
         Reading::AtExit | Reading::AtStartup => bus.read(move |read| {
             let mut candidates = crate::steering_read::pending(read, None)?
                 .into_iter()
                 .filter(|head| head.body().recipient == actor || head.body().sender == actor)
                 .collect::<Vec<_>>();
             candidates.sort_by_key(|head| head.body().recipient != actor);
+            candidates
+                .extend(read.unanswered_direction_receipts(lane, journal::MAX_STEERING_PAGE_ROWS)?);
             Ok(candidates)
         }),
     }

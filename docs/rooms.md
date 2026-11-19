@@ -16,9 +16,11 @@ owns each rule summarized here.
   about it
   ([grammar](invariants/identity.md#steering-a-syn-packet-owns-exactly-its-body-hunk)).
   ACK nods that operator direction was seen, one FIN carries its answer at any
-  length, even after that ACK, and NAK declines it with a reason. On a peer
-  line a bare ACK marks an input seen, an ACK with a
-  body continues the line, FIN closes it with an optional final body, and NAK
+  length, even after that ACK, and NAK declines it with a reason. Exit and
+  startup recovery inspect live steering first, then a bounded newest-first
+  page of acknowledged operator directions whose FIN answer is still unused.
+  On a peer line a bare ACK marks an input seen, an ACK with a body continues
+  the line, FIN closes it with an optional final body, and NAK
   declines it. A blank line after a bare ACK, an ACK reaction (`ok`, `noted`,
   `thanks`, or `+1`, optionally followed only by characters from `.,:;!`), or
   a bodyless FIN returns the following paragraphs to ordinary operator prose;
