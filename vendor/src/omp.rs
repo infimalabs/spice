@@ -398,8 +398,8 @@ fn render(
 }
 
 /// The configuration overlay a lane writes before launch, stating the
-/// compaction threshold, language-server disposition, and todo reminder
-/// disposition this seat runs.
+/// compaction threshold, language-server disposition, todo reminder
+/// disposition, and commit route this seat runs.
 ///
 /// omp reads `compaction.thresholdTokens` ahead of every percentage or
 /// reserve it would otherwise derive, clamped beneath the model's window.
@@ -430,6 +430,11 @@ fn render(
 /// those subagents consume them. Ordinary `tool.<name>` calls remain on the
 /// registered tool boundary.
 ///
+/// omp's selective commit is off: its eval `commit` namespace comes with a
+/// system-prompt instruction to commit through it instead of `git commit`.
+/// A lane commits with CLI git under its claim, after `spice gate prove`,
+/// which is the route the repository's hooks and the allocator follow.
+///
 /// OpenAI live steering is explicitly disabled so queued steering lands at
 /// normal command boundaries.
 #[must_use]
@@ -441,7 +446,7 @@ pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
         "lsp:\n  enabled: false\n"
     });
     overlay.push_str(
-        "eval:\n  tools:\n    enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n",
+        "eval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n",
     );
     overlay
 }
