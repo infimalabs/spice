@@ -10,12 +10,16 @@ use super::CITABLE_KEYS;
 pub const DESIGN_REQUEST_QUESTIONS_BYTES: usize = 2 * 1024;
 
 /// The stance every Design request body opens with, whether it asks about
-/// question items or about the whole Design, and what a charge's sign weighs.
-const START_FROM_NO: &str = "Start from no: this Design and each question must earn its place \
-     from evidence. A charge weighs whether the question's answer changes what gets built: \
-     positive says it does, negative says it does not, and it never votes for one alternative \
-     the question names. A negative charge is the expected answer when a question has not \
-     earned its place; charge every question negative when the Design itself should not exist.";
+/// question items or about the whole Design.
+fn start_from_no() -> String {
+    format!(
+        "Start from no: this Design and each proposition must earn its place from evidence. A \
+         charge votes on the proposition stated by the question item: {}. A negative charge is \
+         the expected answer when evidence opposes that proposition; charge every proposition \
+         negative when the Design itself should not exist.",
+        wire::rooms::RoomCharge::VOTE_GUIDANCE,
+    )
+}
 /// What answers a Design request: a view the lane already holds is complete
 /// without new research or citation, citation is what a 0 or ±2 charge adds,
 /// and a leave is for a lane that, having considered its matched work, holds
@@ -231,13 +235,15 @@ pub fn request_text(request: &wire::intent::DesignRequest) -> String {
         questions.push_str("\n- none recorded");
     }
     let breadth = breadth(request.questions.len());
+    let stance = start_from_no();
+    let guidance = wire::rooms::RoomCharge::VOTE_GUIDANCE;
     format!(
-        "{head}{START_FROM_NO} {ANSWERING}\nOpen questions:{questions}\n{breadth}\
+        "{head}{stance} {ANSWERING}\nOpen questions:{questions}\n{breadth}\
          Read its room with `spice room history {design}` (`spice://task/{design}/room`). \
          Answer exactly once with `spice room contribute {design} --charge=C --question HEX \
-         [--cite KEY...] TEXT`, where HEX is the handle before an open question, C from -2 to +2 \
-         weighs it, and a 0 or ±2 charge cites {CITABLE_KEYS}; pose a \
-         new question with `spice room contribute {design} --ask TEXT`; or decline with `spice \
+         [--cite KEY...] TEXT`, where HEX is the handle before an open proposition, C votes on \
+         it ({guidance}), and a 0 or ±2 charge cites {CITABLE_KEYS}; pose an open research \
+         question with `spice room contribute {design} --ask TEXT`; or decline with `spice \
          room leave {design} --clause TEXT`. Until one answer publishes, `spice task next` \
          returns this request instead of allocating. {CONSULTATION} You hear this room's later \
          posts until that one answer, a contribution or a leave, ends the request and its \
@@ -298,14 +304,16 @@ fn item_request(request: &wire::intent::DesignRequest) -> String {
         String::new()
     };
     let (these, breadth) = match request.asks.len() {
-        1 => ("this question", ""),
-        count => ("these questions", breadth(count)),
+        1 => ("this proposition", ""),
+        count => ("these propositions", breadth(count)),
     };
+    let stance = start_from_no();
+    let guidance = wire::rooms::RoomCharge::VOTE_GUIDANCE;
     format!(
-        "{START_FROM_NO} {ANSWERING}\nWeigh {these}:{questions}{recharge}\n{breadth}\
+        "{stance} {ANSWERING}\nWeigh {these}:{questions}{recharge}\n{breadth}\
          Read its room with `spice room history {design}` (`spice://task/{design}/room`). Weigh \
-         the question whose handle is HEX with `spice room contribute {design} --charge=C \
-         --question HEX [--cite KEY...] TEXT`, where C runs from -2 to +2 and a 0 or ±2 \
+         the proposition whose handle is HEX with `spice room contribute {design} --charge=C \
+         --question HEX [--cite KEY...] TEXT`, where C votes on it ({guidance}) and a 0 or ±2 \
          charge cites what it rests on; or decline with `spice room leave {design} --clause \
          TEXT`. Until one answer publishes, `spice task next` returns this request instead of \
          allocating; one answer settles it. {CONSULTATION} You hear this room's later posts \

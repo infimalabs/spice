@@ -624,3 +624,24 @@ fn head_yield_history_and_memory_are_bounded() {
             .all(|state| *state == DesignItemState::UnopposedFor)
     );
 }
+
+/// The operator's vote words and maturity read a lone charge's sign the same
+/// way: a "for" vote opens an unopposed-for series, an "against" vote an
+/// unopposed-against one, and evidence opens none.
+#[test]
+fn vote_labels_share_maturity_polarity() {
+    let item = ITEMS[0];
+    for value in RoomCharge::ALL {
+        let mut maturity = DesignMaturity::default();
+        maturity.observe_contribution(&charge(1, item, value.get()));
+        let label = value.vote_label();
+        let expected = if label.ends_with("against") {
+            DesignItemState::UnopposedAgainst
+        } else if label.ends_with("for") {
+            DesignItemState::UnopposedFor
+        } else {
+            DesignItemState::Quiet
+        };
+        assert_eq!(item_state(&maturity, item), expected, "{label}");
+    }
+}

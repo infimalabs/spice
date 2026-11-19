@@ -189,12 +189,14 @@ lane.
 ## Design contributions
 
 A lane contributes to an open Design's problem space with one typed record:
-a charge from -2 to +2 against one of the Design's question items, or a
-question, with its text and the journal, contribution, transcript, artifact,
-or repository sources it cites. A ±1 charge is an opinion; 0 and ±2 cite at
-least one source. The app
-reads each charge to the operator as a vote: strongly for, for, evidence,
-against, or strongly against. A contribution is
+a signed vote from -2 to +2 on one proposition stated by a Design question
+item, or an open research question, with its text and the journal,
+contribution, transcript, artifact, or repository sources it cites. A
+chargeable item states one proposition whose positive side is unambiguous; an
+open-ended prompt belongs in a room question instead. A ±1 charge is an
+opinion; 0 and ±2 cite at least one source. The app reads each charge to the
+operator as a vote: strongly for, for, evidence, against, or strongly against.
+A contribution is
 lane-authored evidence for the operator's judgment, never authority: it
 moves no task, claim, decision, or authorization,
 and it wakes nobody. Lanes contribute with `spice room contribute` from their
