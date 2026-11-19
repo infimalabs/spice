@@ -147,18 +147,14 @@ fn candidates(
                 Ok(candidates)
             })
         }
-        // Inputs owed an answer search first, then live sends, then one bounded
-        // newest-first page of unused historical operator receipts. Historical
-        // work therefore cannot consume the shared evidence deadline before
-        // any live authority has been considered.
+        // Inputs owed an answer search first, so the lane's own live sends
+        // cannot exhaust the shared evidence deadline before those are found.
         Reading::AtExit | Reading::AtStartup => bus.read(move |read| {
             let mut candidates = crate::steering_read::pending(read, None)?
                 .into_iter()
                 .filter(|head| head.body().recipient == actor || head.body().sender == actor)
                 .collect::<Vec<_>>();
             candidates.sort_by_key(|head| head.body().recipient != actor);
-            candidates
-                .extend(read.unanswered_direction_receipts(lane, journal::MAX_STEERING_PAGE_ROWS)?);
             Ok(candidates)
         }),
     }
@@ -181,7 +177,7 @@ impl CandidateStanding {
                 .key
                 .parse()
                 .map_err(|error: steer::KeyError| error.to_string())?;
-            let disposition = if body.recipient == recipient && prior_receipt(body) {
+            let disposition = if body.recipient == recipient && prior_peer_receipt(body) {
                 Disposition::Live
             } else {
                 body.disposition
@@ -282,11 +278,6 @@ fn dispose_pending(
                     );
                 }
             }
-            // Recovery pages acknowledged operator directions only to find a
-            // retained FIN; one holding just its nod is settled, not pending.
-            Err(Outcome::Refusal(_))
-                if head.body().disposition != Disposition::Live
-                    && !matches!(reading, Reading::OnLanding(_)) => {}
             Err(outcome) => {
                 let _ = writeln!(
                     diagnostic,
@@ -335,30 +326,17 @@ pub(super) struct Disposed {
     pub(super) notice: Option<MessageRefusalNotice>,
 }
 
-/// A prior acknowledgment still proves this lane's exact peer-line input.
-fn prior_line_receipt(head: &wire::SteeringHead) -> bool {
+/// A prior acknowledgment still proves this lane's exact peer input.
+/// Domain directions and invitations never gain reusable line authority.
+pub(super) fn prior_peer_receipt(head: &wire::SteeringHead) -> bool {
     head.disposition == Disposition::Acked
-        && head.sender != Actor::Spice
+        && head.sender.lane().is_some()
         && head
             .control
             .as_deref()
             .and_then(wire::parse_peer_line_control)
             .is_some()
 }
-
-/// A plain principal direction grants its recipient one later FIN answer.
-fn prior_direction_receipt(head: &wire::SteeringHead) -> bool {
-    head.disposition == Disposition::Acked
-        && head.sender.principal().is_some()
-        && head.fanout.is_some()
-        && head.control.is_none()
-}
-
-/// Whether an acknowledged input grants any later receipt authority.
-pub(super) fn prior_receipt(head: &wire::SteeringHead) -> bool {
-    prior_line_receipt(head) || prior_direction_receipt(head)
-}
-
 fn recognized_outcome(
     recognition: &transcript::TranscriptRecognition,
 ) -> Result<(steer::Marker, steer::Key, Disposition), Outcome<CommandAnswer>> {
@@ -389,8 +367,6 @@ fn recognized_outcome(
 /// the reply this write journals carries it, or nothing does. A join's reply
 /// and a reply's own answer carry none. A refused open-line body records its
 /// correction in the same write; a post-close body records only its judgment.
-/// A later FIN on an acknowledged principal direction records one durable
-/// answer use whose transcript evidence binds the authored source.
 pub(super) fn dispose_recognized(
     bus: &Bus,
     (config, epoch, joining): (&steer::Config, CanonicalUuid, Joining<'_>),
@@ -410,7 +386,7 @@ pub(super) fn dispose_recognized(
         return cancel_visible(bus, lane, head, &key, recognition.answer);
     }
     let clause = recognition.answer.as_ref();
-    admit_receipt(bus, head, lane, marker, &key)?;
+    admit_receipt(head.body(), lane, marker, &key)?;
     let disposition = if disposition == Disposition::Acked && is_invitation(head.body()) {
         let body = body_fate(head.body(), clause, false);
         let mut settle = |write: &mut JournalWrite, accepted: PendingFact| match judgment {
@@ -579,17 +555,14 @@ fn cancel_visible(
     }
 }
 
-/// Admit exact prior peer receipts without reopening typed domain actions.
-/// A plain principal direction grants only one later FIN; its durable use is
-/// recorded, and guarded again, while the receipt is appended.
+/// Admit exact prior peer receipts without reopening typed domain actions;
+/// RST names only this lane's own sends, so it answers no received key.
 fn admit_receipt(
-    bus: &Bus,
-    head: &journal::JournalHead<wire::SteeringHead>,
+    head: &wire::SteeringHead,
     lane: CanonicalUuid,
     marker: steer::Marker,
     key: &steer::Key,
 ) -> Result<(), Outcome<CommandAnswer>> {
-    let (body, position) = (head.body(), head.position());
     if marker == steer::Marker::Rst {
         return Err(refusal(
             "steer::rst-received",
@@ -598,25 +571,10 @@ fn admit_receipt(
             "RST cancels only this lane's own sends; answer a received key with ACK, FIN or NAK",
         ));
     }
-    if body.recipient == wire::Actor::Lane(lane)
-        && (body.disposition == Disposition::Live || prior_line_receipt(body))
+    if head.recipient == wire::Actor::Lane(lane)
+        && (head.disposition == Disposition::Live || prior_peer_receipt(head))
     {
         return Ok(());
-    }
-    if body.recipient == wire::Actor::Lane(lane) && prior_direction_receipt(body) {
-        let used = bus
-            .read(move |read| read.steering_answered(position))
-            .map_err(|error| store_fault("steer::answer-unreadable", &error.to_string()))?;
-        return (marker == steer::Marker::Fin && !used)
-            .then_some(())
-            .ok_or_else(|| {
-                refusal(
-                    "steer::ack-missed",
-                    Some("one unused FIN answer".to_owned()),
-                    Some(key.to_string()),
-                    "an acknowledged operator direction admits only one later FIN answer",
-                )
-            });
     }
     Err(refusal(
         "steer::ack-missed",
@@ -626,8 +584,7 @@ fn admit_receipt(
     ))
 }
 
-/// Retire a live input once, reuse a peer-line receipt, or record the one
-/// answer use of an acknowledged plain principal direction.
+/// Retire a live input once, or guard and reuse its admitted prior receipt.
 fn append_receipt(
     proposal: &mut JournalWrite,
     head: &journal::JournalHead<wire::SteeringHead>,
@@ -639,28 +596,6 @@ fn append_receipt(
 ) -> Result<(FactCause, Disposition), Outcome<CommandAnswer>> {
     if head.body().disposition != Disposition::Live {
         let (directive, position) = (head.body().directive, head.position());
-        if prior_direction_receipt(head.body()) {
-            proposal.guard(JournalGuard::new(move |read| {
-                match read.steering_head(directive)? {
-                    Some(current) if current.position() == position => {}
-                    _ => return Err(GuardError::refused("steer::directive-moved")),
-                }
-                if read.steering_answered(position)? {
-                    return Err(GuardError::refused("steer::answer-used"));
-                }
-                Ok(())
-            }));
-            let answered = wire::body::SteerAnswered {
-                directive,
-                key: key.to_string(),
-                recipient: head.body().recipient.clone(),
-                evidence: wire::body::SteeringEvidence::Transcript { epoch, locus },
-            };
-            let pending = proposal
-                .fact(answered, FactCause::Existing(position))
-                .map_err(|error| store_fault("steer::fact-invalid", &error.to_string()))?;
-            return Ok((FactCause::Pending(pending), head.body().disposition));
-        }
         proposal.guard(JournalGuard::new(move |read| {
             match read.steering_head(directive)? {
                 Some(current) if current.position() == position => Ok(()),

@@ -749,19 +749,6 @@ pub struct SteerAcked {
     pub evidence: SteeringEvidence,
 }
 
-/// A lane used one acknowledged principal direction to carry its final answer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SteerAnswered {
-    /// Durable direction identity whose receipt carried the answer.
-    pub directive: CanonicalUuid,
-    /// Answered direction key.
-    pub key: String,
-    /// Lane that authored the answer.
-    pub recipient: Actor,
-    /// Authenticated transcript source carrying the FIN.
-    pub evidence: SteeringEvidence,
-}
-
 /// A live typed invitation was accepted through the command door.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SteerAccepted {

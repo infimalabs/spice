@@ -102,11 +102,10 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     );
     assert!(lanes.conversations().is_empty());
 
-    lanes.answer(SENDER, &[&own], &format!("ACK {own}"));
     lanes.answer(SENDER, &[&own], &format!("FIN {own}: Handled."));
     assert!(
         lanes.pending(SENDER).iter().all(|input| input.key != own),
-        "the nod retires operator direction and the later FIN answers it"
+        "FIN retires operator direction"
     );
     lanes
         .say(SENDER, &format!("SYN #{own}: which first?"))
@@ -118,62 +117,6 @@ fn an_operator_concern_names_the_direction_it_points_at() {
         .map(|route| route.direction)
         .collect::<Vec<_>>();
     assert_eq!(directions, [Some(own)]);
-    lanes.finish();
-}
-
-/// Startup recovery passes silently over an acknowledged direction holding
-/// only its nod, sees an answer retained after it left the live index, and
-/// records that answer's one use exactly once.
-#[test]
-fn startup_recovers_a_post_ack_operator_answer() {
-    let lanes = Lanes::new("conv-direction-answer-recovery");
-    lanes.declare(SENDER);
-    let direction = lanes.direct(SENDER, 63, "finish after the work");
-    lanes.answer(SENDER, &[&direction], &format!("ACK {direction}"));
-    let receipt = {
-        let key = direction.clone();
-        lanes
-            .bus
-            .read(move |read| {
-                read.steering_key(&key)
-                    .map(|head| head.expect("the acknowledged direction remains").position())
-            })
-            .expect("the direction reads")
-    };
-    let answered = || {
-        lanes
-            .bus
-            .read(move |read| read.steering_answered(receipt))
-            .expect("answer evidence reads")
-    };
-    assert!(!answered(), "the nod has not spent answer authority");
-    assert_eq!(
-        lanes.restart(),
-        "",
-        "a direction holding only its nod is settled, not pending"
-    );
-    assert!(!answered(), "recovering the nod spends no answer authority");
-
-    let message = serde_json::json!({
-        "type": "message_end",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "text", "text": format!("FIN {direction}: finished")}],
-            "stopReason": "stop",
-        },
-    });
-    lanes
-        .tape(SENDER)
-        .tee(format!("{message}\n").as_bytes())
-        .expect("the unheard answer is durable");
-
-    lanes.restart();
-    assert!(answered(), "startup records the retained FIN answer");
-    lanes.restart();
-    assert!(
-        answered(),
-        "a used historical receipt is absent from later recovery"
-    );
     lanes.finish();
 }
 
