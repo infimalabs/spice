@@ -79,11 +79,13 @@ owns each rule summarized here.
   `spice room contribute HANDLE --charge=C --question HEX [--cite KEY...] TEXT`
   or `spice room contribute HANDLE --ask TEXT`: a
   [typed](invariants/identity.md#identity-a-lane-contributes-typed-problem-space-records-to-an-open-design)
-  charge from -2 to +2 weighing one question item of the Design statement it
-  witnessed, or a question. A question item's identity is the digest of its
+  vote from -2 to +2 on one proposition stated by a Design question item, or
+  an open research question. A chargeable item states one proposition whose
+  positive side is unambiguous; an open-ended prompt belongs in a room question,
+  not in a charge target. A question item's identity is the digest of its
   normalized text, and every surface renders a question as a bullet led by its
   handle: the first six hex digits of that digest, extended only while another
-  current question shares them. `--question HEX` takes a prefix of at least
+  current question shares it. `--question HEX` takes a prefix of at least
   six hex digits that names exactly one current question; a shorter or
   non-hex prefix refuses `room::contribution-question-invalid`, one no current
   question begins with refuses `room::contribution-question-stale`, and one
@@ -92,15 +94,15 @@ owns each rule summarized here.
   resolved item against the statement head the command witnessed, so a
   statement edit that lands between the lane's read and its charge refuses as
   stale instead of re-aiming the charge. A reworded question is a new item
-  with a fresh charge series. A ±1 charge is an opinion; 0 and ±2 cite at
-  least one source. A charge's sign weighs whether the question's answer
-  changes what gets built: positive says it does, negative says it does not,
-  and a charge never votes for one alternative the question names.
-  Contributors start from no: the Design and each question must earn its place
-  from evidence. A negative charge is the expected answer when a question has
-  not; charging every question negative says the Design itself should not
-  exist. This is the stance every Design request renders. Each KEY resolves by
-  form: a key holding `/`, `.` or `:` cites repository source as
+  with a fresh charge series. Positive charges support the proposition,
+  negative charges oppose it, 0 records evidence without a position, and
+  magnitude is strength. A ±1 charge is an opinion; 0 and ±2 cite at least one
+  source. Contributors start from no: the Design and each proposition must earn
+  their place from evidence. A negative charge is expected when evidence
+  opposes the proposition; charging every proposition negative says the Design
+  itself should not exist. This is the stance every Design request renders.
+  Each KEY resolves by form: a key holding `/`, `.` or `:` cites repository
+  source as
   `[COMMIT:]PATH[:L1-L2]`, read at the lane's HEAD unless a commit is named; a
   task handle or stamp cites that task's statement head fact, a publication
   stamp a contribution in this room, a base-52 code that journal fact, and a

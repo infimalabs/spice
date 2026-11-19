@@ -20,16 +20,20 @@ pub const ROOM_CONTRIBUTION_TEXT_LIMIT: usize = 4_096;
 /// Maximum sources one contribution may cite.
 pub const ROOM_CONTRIBUTION_SOURCE_LIMIT: usize = 8;
 
-/// A contribution's signed weight on one Design question item.
+/// A contribution's signed vote on one proposition stated by a Design
+/// question item.
 ///
 /// +1 and -1 are opinions and need no citation; 0 is a neutral observation and
-/// +2 and -2 are strong charges, and each of those must cite a source.
+/// +2 and -2 are strong votes, and each of those must cite a source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RoomCharge(i8);
 
 impl RoomCharge {
     /// Every charge from strongest for to strongest against.
     pub const ALL: [Self; 5] = [Self(2), Self(1), Self(0), Self(-1), Self(-2)];
+    /// The one sentence every agent-facing request uses to explain the scale.
+    pub const VOTE_GUIDANCE: &'static str =
+        "+2/+1 support it, -1/-2 oppose it, and 0 records evidence without a position";
 
     /// The charge `value` names, if it lies in -2..=2.
     #[must_use]
@@ -45,6 +49,19 @@ impl RoomCharge {
     #[must_use]
     pub const fn get(self) -> i8 {
         self.0
+    }
+
+    /// Operator-facing words for this vote.
+    #[must_use]
+    pub const fn vote_label(self) -> &'static str {
+        match self.0 {
+            2 => "strongly for",
+            1 => "for",
+            0 => "evidence",
+            -1 => "against",
+            -2 => "strongly against",
+            _ => panic!("a vote lies in -2..=2"),
+        }
     }
 
     /// Whether this charge is an opinion that needs no citation: +1 or -1.

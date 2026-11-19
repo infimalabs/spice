@@ -550,8 +550,10 @@ route is plan,review. --intent design declares a Design with one open design
 phase; plan,design and review,design add an ordinary intake phase.
 
 A Design is itself a question: phrase TITLE as the question under Design.
-Each --term value is one open question for evidence and passes to answer,
-not an implementation completion criterion.";
+Each --term value states one proposition with an unambiguous positive side;
+participants vote on it, and it passes to answer rather than becoming an
+implementation completion criterion. Put an open-ended research prompt in the
+room with `spice room contribute HANDLE --ask TEXT` instead.";
 
 /// Usage notes for a leaf whose bounds its syntax line cannot carry.
 fn leaf_help(path: &[&str]) -> Option<&'static str> {

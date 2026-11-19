@@ -76,13 +76,13 @@ this occupant reuse one submission; successors are separate.
 - A pitch is one plain sentence saying why a task matters; the description is
   the how: durable need, mechanism, and invariants, not incidents. Acceptance
   is claimant-driven and checkable, never awaited activity. A Design's pitch is
-  its problem; its author itemizes only questions whose answer changes what
-  gets built. A Design, each question, and each output start from no and earn
-  their place from evidence: a negative charge or a collapse is a normal
-  answer. Outcome, not timing, chooses: a Design whose purpose is delivered,
-  even by earlier outputs, concludes; a failed premise collapses whenever
-  found, keeping selected outputs. Code/docs/tests state contract; task/commit
-  records keep history.
+  its problem; each chargeable term is one unambiguous proposition; open
+  research goes in the room via `--ask`. `+` supports, `-` opposes, `0` is
+  evidence; magnitude is strength. Every Design, proposition, and output starts
+  from no; a negative charge or collapse is normal. Outcome, not timing,
+  chooses: a Design whose purpose is delivered, even by earlier outputs,
+  concludes; a failed premise collapses whenever found, keeping selected
+  outputs. Code/docs/tests state contract; task/commit records keep history.
 - Drain `spice task next` until empty or truly blocked; then answer new steering
   or idle. Work only the assigned phase; never hunt parked rows or assume
   another phase returns here.
@@ -98,7 +98,7 @@ this occupant reuse one submission; successors are separate.
   pending activated AC work, or `task done --disposition
   no-work|duplicate|covered|deferred [--cover REF]`. A Plan instead needs
   AC-bearing child work constructed under it; edges and own AC never suffice.
-  Taste holds only the statement. Design participants charge all questions,
+  Taste holds only the statement. Design participants charge all propositions,
   then `task done` with room reasoning and validation. The operator selects
   outputs with `task decide`; rejection closes their controlled subtree. Only
   the operator concludes a Design; stop checkpoints.

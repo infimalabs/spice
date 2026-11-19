@@ -20,14 +20,7 @@ use crate::runtime::{Contribution, ContributionRead, RoomEvent, RoomEventKind};
 /// Words naming one contribution kind as the vote it casts, or a question.
 pub(super) const fn kind_label(kind: RoomContributionKind) -> &'static str {
     match kind {
-        RoomContributionKind::Charge(charge) => match charge.get() {
-            2 => "strongly for",
-            1 => "for",
-            0 => "evidence",
-            -1 => "against",
-            -2 => "strongly against",
-            _ => panic!("a vote lies in -2..=2"),
-        },
+        RoomContributionKind::Charge(charge) => charge.vote_label(),
         RoomContributionKind::Question => "question",
     }
 }
