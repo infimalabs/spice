@@ -15,7 +15,7 @@ owns each rule summarized here.
   whatever its disposition, which for operator direction tells the operator
   about it
   ([grammar](invariants/identity.md#steering-a-syn-packet-owns-exactly-its-body-hunk)).
-  ACK nods that operator direction was seen, FIN carries its answer at any
+  ACK nods that operator direction was seen, one FIN carries its answer at any
   length, even after that ACK, and NAK declines it with a reason. On a peer
   line a bare ACK marks an input seen, an ACK with a
   body continues the line, FIN closes it with an optional final body, and NAK

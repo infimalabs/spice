@@ -997,9 +997,9 @@ fn a_refused_final_body_leaves_its_close_recorded_on_the_receipt() {
     lanes.finish();
 }
 
-/// An exact prior receipt of a peer input or operator direction remains
-/// authority for a later control, not another retirement. Other lanes and
-/// unknown keys gain no authority.
+/// An exact prior receipt of a peer input remains authority for a later
+/// control, not another retirement. Other lanes and unknown keys gain no
+/// authority.
 #[test]
 fn an_acknowledged_peer_input_can_continue_and_finish_its_open_line() {
     for (marker, terminal) in [
@@ -1043,32 +1043,6 @@ fn an_acknowledged_peer_input_can_continue_and_finish_its_open_line() {
             "a new control never retires the same input again"
         );
 
-        let operator = lanes.direct(FIRST, 40, "operator direction");
-        said(FIRST, format!("ACK {operator}"));
-        let direction = || {
-            let key = operator.clone();
-            lanes
-                .bus
-                .read(move |read| read.steering_key(&key))
-                .expect("the direction reads")
-                .expect("the direction remains")
-                .position()
-        };
-        let nodded = direction();
-        let answered = said(FIRST, format!("FIN {operator}: the answer"));
-        assert!(matches!(
-            &answered.decided[0].outcome,
-            PacketOutcome::Acknowledged {
-                disposition: wire::Disposition::Acked,
-                line: None,
-                ..
-            }
-        ));
-        assert_eq!(
-            direction(),
-            nodded,
-            "an answer after the nod never retires the direction again"
-        );
         for (lane, key) in [(SENDER, root.clone()), (FIRST, "ZZZZZZZZZ".to_owned())] {
             let refused = said(lane, format!("ACK {key}: no authority"));
             assert!(matches!(&refused.decided[0].outcome,
@@ -1113,4 +1087,72 @@ fn an_acknowledged_peer_input_can_continue_and_finish_its_open_line() {
         assert_eq!(head().position(), acknowledged.position());
         lanes.finish();
     }
+}
+
+/// An acknowledged operator direction grants its recipient exactly one later
+/// FIN answer, recorded without retiring the direction again.
+#[test]
+fn an_acknowledged_operator_direction_admits_one_later_answer() {
+    let lanes = Lanes::new("outbox-direction-answer");
+    lanes.declare(SENDER);
+    lanes.declare(FIRST);
+    let said = |lane, text: String| receipt(submit(&lanes, lane, &captured(&lanes, lane, &text)));
+    let refused = |outcome: &PacketOutcome| matches!(outcome, PacketOutcome::Refused { reason, .. } if reason == "steer::ack-missed");
+    let operator = lanes.direct(FIRST, 40, "operator direction");
+    said(FIRST, format!("ACK {operator}"));
+    let direction = || {
+        let key = operator.clone();
+        lanes
+            .bus
+            .read(move |read| read.steering_key(&key))
+            .expect("the direction reads")
+            .expect("the direction remains")
+            .position()
+    };
+    let nodded = direction();
+    let answer_used = || {
+        lanes
+            .bus
+            .read(move |read| read.steering_answered(nodded))
+            .expect("answer evidence reads")
+    };
+    for wrong in ["ACK", "NAK"] {
+        let wrong = said(FIRST, format!("{wrong} {operator}: not a final answer"));
+        assert!(refused(&wrong.decided[0].outcome));
+        assert!(
+            !answer_used(),
+            "a refused control spends no answer authority"
+        );
+    }
+    let foreign = said(SENDER, format!("FIN {operator}: not mine"));
+    assert!(refused(&foreign.decided[0].outcome));
+    assert!(
+        !answer_used(),
+        "another lane's FIN spends no answer authority"
+    );
+
+    let answer = captured(&lanes, FIRST, &format!("FIN {operator}: the answer"));
+    let answered = receipt(submit(&lanes, FIRST, &answer));
+    assert!(matches!(
+        &answered.decided[0].outcome,
+        PacketOutcome::Acknowledged {
+            disposition: wire::Disposition::Acked,
+            line: None,
+            ..
+        }
+    ));
+    assert!(answer_used(), "the FIN records durable answer evidence");
+    assert_eq!(
+        direction(),
+        nodded,
+        "an answer after the nod never retires the direction again"
+    );
+    let before = lanes.cursor();
+    let replayed = receipt(submit(&lanes, FIRST, &answer));
+    assert_eq!(replayed.decided, answered.decided);
+    assert_eq!(lanes.cursor(), before, "a replayed answer writes nothing");
+    let repeated = said(FIRST, format!("FIN {operator}: a second answer"));
+    assert!(refused(&repeated.decided[0].outcome));
+    assert!(answer_used(), "a refused repeat preserves the first answer");
+    lanes.finish();
 }

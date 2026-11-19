@@ -181,9 +181,9 @@ pub(super) fn settle(
             );
             let disposed = match disposed {
                 Ok(disposed) => disposed,
-                // A refused invitation join leaves its directive live; the
-                // packet's judgment carries the refusal so it is never retried.
-                Err(Outcome::Refusal(refusal)) if is_invitation(head.body()) => {
+                // A policy refusal leaves the input unchanged. Its packet
+                // judgment makes the refusal durable and prevents retries.
+                Err(Outcome::Refusal(refusal)) => {
                     return record(
                         bus,
                         epoch,
