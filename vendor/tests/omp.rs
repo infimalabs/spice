@@ -382,7 +382,7 @@ fn the_compaction_threshold_rides_an_overlay_the_lane_must_have_written() {
     // its `--config` overlay; the layout is omp's own config.yml.
     assert_eq!(
         omp::config_overlay(170_000, false),
-        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: false\neval:\n  tools:\n    enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
+        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
     );
 
     let mut unwritten = fixture(Resume::Fresh);
@@ -415,7 +415,7 @@ fn the_language_server_disposition_names_the_tool_and_keeps_its_servers_in_the_l
     // which is exactly the process the lane could neither see nor reap.
     assert_eq!(
         omp::config_overlay(170_000, true),
-        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: true\n  shared: false\neval:\n  tools:\n    enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
+        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: true\n  shared: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
     );
 
     let mut implicit = fixture(Resume::Fresh);
