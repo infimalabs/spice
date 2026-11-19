@@ -330,7 +330,7 @@ pub(super) struct Disposed {
 /// Domain directions and invitations never gain reusable line authority.
 pub(super) fn prior_peer_receipt(head: &wire::SteeringHead) -> bool {
     head.disposition == Disposition::Acked
-        && head.sender.lane().is_some()
+        && head.sender != Actor::Spice
         && head
             .control
             .as_deref()
