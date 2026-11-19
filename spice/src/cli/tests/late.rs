@@ -103,6 +103,29 @@ fn every_first_run_option_has_help() {
     }
 }
 
+/// The CLI uses the same charge polarity sentence as agent-facing Design
+/// requests, so neither surface can silently invert the signed vote.
+#[test]
+fn room_charge_help_uses_the_shared_vote_guidance() {
+    let parser = command();
+    let contribute = ["room", "contribute"]
+        .iter()
+        .fold(&parser, |command, name| {
+            command
+                .find_subcommand(name)
+                .unwrap_or_else(|| panic!("missing command {name}"))
+        });
+    let charge = contribute
+        .get_arguments()
+        .find(|argument| argument.get_long() == Some("charge"))
+        .expect("room contribute owns --charge");
+
+    assert_eq!(
+        charge.get_help().map(ToString::to_string).as_deref(),
+        Some(wire::rooms::RoomCharge::VOTE_GUIDANCE)
+    );
+}
+
 #[test]
 fn lifecycle_owner_controls_are_symmetric() {
     for argv in [["spice", "up", "--keeper"], ["spice", "down", "--keeper"]] {

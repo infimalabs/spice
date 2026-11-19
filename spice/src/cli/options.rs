@@ -176,6 +176,11 @@ const OPTIONS: &[(&str, &str, &str)] = &[
         "description",
         "How the work is done: need, mechanism, invariants; the why belongs in --pitch",
     ),
+    (
+        "room contribute",
+        "charge",
+        wire::rooms::RoomCharge::VOTE_GUIDANCE,
+    ),
     ("room contribute", "cite", crate::rooms::CITABLE_KEYS),
     (
         "room contribute",
