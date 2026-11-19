@@ -46,7 +46,7 @@ fn current_standing(
             // Scanner eligibility is not another durable retirement: the
             // shared disposition path retains the acknowledged input head.
             let disposition =
-                if body.recipient == wire::Actor::Lane(lane) && exit::prior_peer_receipt(body) {
+                if body.recipient == wire::Actor::Lane(lane) && exit::prior_receipt(body) {
                     Disposition::Live
                 } else {
                     body.disposition
@@ -145,7 +145,7 @@ pub(super) fn settle(
                 Some(head)
                     if head.body().recipient == wire::Actor::Lane(submission.body.lane)
                         && (head.body().disposition == Disposition::Live
-                            || exit::prior_peer_receipt(head.body())) =>
+                            || exit::prior_receipt(head.body())) =>
                 {
                     head
                 }
