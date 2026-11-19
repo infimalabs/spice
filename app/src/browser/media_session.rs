@@ -67,13 +67,17 @@ pub(super) fn sync(active: bool, speaker: Option<&str>, title: Option<&str>) {
     };
     POSTURE.with(|posture| {
         let mut posture = posture.borrow_mut();
+        let retry_carrier = active && carrier_needs_start();
         if posture.as_ref() == Some(&next) {
+            if retry_carrier {
+                carry(true);
+            }
             return;
         }
         let playback_changed = posture
             .as_ref()
             .is_none_or(|current| current.active != active);
-        if playback_changed {
+        if playback_changed || retry_carrier {
             carry(active);
         }
         if let Some(session) = session() {
@@ -137,8 +141,8 @@ fn carry(active: bool) {
             return;
         };
         if active {
-            // A refused start (no gesture, as after a back-forward restore)
-            // leaves the metadata in place for the next gesture to surface.
+            // A refused start leaves the element paused; the next active sync
+            // retries it without allocating a second carrier.
             if let Ok(started) = element.play() {
                 wasm_bindgen_futures::spawn_local(async move {
                     let _ = wasm_bindgen_futures::JsFuture::from(started).await;
@@ -148,6 +152,15 @@ fn carry(active: bool) {
             let _ = element.pause();
         }
     });
+}
+
+fn carrier_needs_start() -> bool {
+    CARRIER.with(|carrier| {
+        carrier
+            .borrow()
+            .as_ref()
+            .is_none_or(|element| element.paused())
+    })
 }
 
 /// Select the Audio Session API type where the browser implements it, so
