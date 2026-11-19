@@ -431,6 +431,8 @@ vocabulary! {
     SteerRecovered = "steer::recovered" by CommandDoor;
     /// A live directive was acknowledged at a transcript locus.
     SteerAcked = "steer::acked" by AckScanner;
+    /// One acknowledged principal direction carried its recipient's final answer.
+    SteerAnswered = "steer::answered" by AckScanner;
     /// A live typed invitation was accepted through the command door.
     SteerAccepted = "steer::accepted" by CommandDoor;
     /// A live directive was declined at a transcript locus.

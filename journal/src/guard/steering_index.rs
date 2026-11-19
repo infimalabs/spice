@@ -75,6 +75,29 @@ impl JournalRead<'_> {
         self.steering_row("steering.steer_key", key)
     }
 
+    /// Whether one acknowledged direction receipt already carried its answer.
+    pub fn steering_answered(&self, receipt: wire::Seq) -> Result<bool, GuardError> {
+        self.require_current_steering_index()?;
+        let receipt = i64::try_from(receipt.get())
+            .map_err(|_| GuardError::Invalid("steering answer cause exceeds SQLite".to_owned()))?;
+        read_metrics::observe_query();
+        let count = self
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM fact_envelopes WHERE cause = ?1 AND kind = ?2",
+                params![receipt, wire::FactKind::SteerAnswered.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(GuardError::Store)?;
+        match count {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(GuardError::Invalid(format!(
+                "steering receipt {receipt} carries {count} answers"
+            ))),
+        }
+    }
+
     /// Live stop requests bound to `room`, in creation order. At most `limit`
     /// rows return; a caller that receives `limit` rows cannot know the set is
     /// complete.
