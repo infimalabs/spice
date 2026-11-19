@@ -2,7 +2,6 @@
 //! its line by key, and each lane's open lines say whom the line waits on.
 
 use super::*;
-use crate::resident::steering::Unpublished;
 use wire::body::{PeerAdmission, PeerBodyKind, PeerLineAction};
 use wire::intent::{LineAnswer, LineStanding, PeerLine, PendingDirective};
 
@@ -145,10 +144,10 @@ fn both_lanes_read_one_line_by_the_same_keys() {
     lanes.finish();
 }
 
-/// A fresh `SYN #KEY` opens a line linked from an input its lane only saw,
-/// and from no input a delivered body already answered.
+/// A fresh `SYN #KEY` opens a line linked from any input its lane received:
+/// one it only saw, and one a delivered body already answered.
 #[test]
-fn a_fresh_syn_links_only_from_an_input_no_body_answered() {
+fn a_fresh_syn_links_from_any_received_input() {
     let lanes = Lanes::new("line-link");
     let first = lanes.address(FIRST);
     lanes.author(SENDER, &format!("SYN {first}: is the parser settled?"));
@@ -185,12 +184,21 @@ fn a_fresh_syn_links_only_from_an_input_no_body_answered() {
         &[&linked.key],
         &format!("ACK {}: Go on.", linked.key),
     );
-    match lanes.say(SENDER, &format!("SYN #{}: again", linked.key)) {
-        Err(Unpublished::Refused { reason, .. } | Unpublished::Recorded { reason, .. }) => {
-            assert_eq!(reason, "syn::input-unauthorized");
-        }
-        other => panic!("an answered input links nothing: {other:?}"),
-    }
+    let continued = only(&lanes, FIRST);
+    lanes.answer(
+        FIRST,
+        &[&continued.key],
+        &format!("ACK {}: noted", continued.key),
+    );
+    lanes
+        .say(SENDER, &format!("SYN #{}: again", linked.key))
+        .expect("an input a delivered body answered still links a fresh SYN");
+    let again = only(&lanes, FIRST);
+    assert_eq!(again.text, "again");
+    assert_eq!(
+        again.line.expect("the follow-up opens a line").parent,
+        Some(linked.key.clone())
+    );
     lanes.finish();
 }
 

@@ -11,12 +11,14 @@ owns each rule summarized here.
 
 - **Publishing.** A lane's conversation publishes in authored assistant prose:
   `SYN #TASK` records in a room, `SYN ADDRESS#TASK` also opens a peer line to
-  a lane, and `SYN #KEY` opens a line linked to that input, which for operator
-  direction tells the operator about it
+  a lane, and `SYN #KEY` opens a line linked to any input the lane received,
+  whatever its disposition, which for operator direction tells the operator
+  about it
   ([grammar](invariants/identity.md#steering-a-syn-packet-owns-exactly-its-body-hunk)).
-  ACK answers operator direction with its response clause and NAK declines it
-  with a reason; a longer or source-backed answer goes by `SYN #KEY`, then a
-  one-line ACK. On a peer line a bare ACK marks an input seen, an ACK with a
+  ACK answers operator direction with its response clause, FIN closes it with
+  its final clause, and NAK declines it with a reason; a longer or
+  source-backed answer goes by `SYN #KEY` before or after that one-line
+  control. On a peer line a bare ACK marks an input seen, an ACK with a
   body continues the line, FIN closes it with an optional final body, and NAK
   declines it. A blank line after a bare ACK, an ACK reaction (`ok`, `noted`,
   `thanks`, or `+1`, optionally followed only by characters from `.,:;!`), or

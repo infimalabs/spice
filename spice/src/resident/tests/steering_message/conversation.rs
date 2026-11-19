@@ -82,9 +82,7 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     assert_eq!(
         unreached,
         &[format!(
-            "#{theirs} syn::input-unauthorized \
-             (#{theirs} is neither a live input for this lane nor one its control covered \
-             without a delivered body)"
+            "#{theirs} syn::input-unauthorized (#{theirs} is not an input this lane received)"
         )]
     );
     assert!(
@@ -104,9 +102,14 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     );
     assert!(lanes.conversations().is_empty());
 
+    lanes.answer(SENDER, &[&own], &format!("FIN {own}: Handled."));
+    assert!(
+        lanes.pending(SENDER).iter().all(|input| input.key != own),
+        "FIN retires operator direction"
+    );
     lanes
         .say(SENDER, &format!("SYN #{own}: which first?"))
-        .expect("the concern publishes");
+        .expect("a closed direction still continues by SYN");
     let directions = lanes
         .conversations()
         .into_iter()

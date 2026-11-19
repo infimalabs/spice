@@ -28,7 +28,7 @@ defer or stop unfinished work. After an ACK reminder, check the inbox; empty is
 valid.
 
 ACK = handled, clause = response; NAK = declined, clause = reason. Long or
-source-backed answers to direction: `SYN #KEY: BODY`, then a one-line ACK.
+source-backed answers: `SYN #KEY: BODY` on any key, even after its ACK/FIN.
 
 Use addresses from briefing/`spice lane list`, never UUID/name;
 `unavailable:REASON` means vacant. `SYN SELECTOR...: BODY` sends only from

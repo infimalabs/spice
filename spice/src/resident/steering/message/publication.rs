@@ -111,10 +111,9 @@ fn refuse_key_recipients(bus: &Bus, packet: &Packet<'_>) -> Result<(), Unpublish
 
 /// Resolve every `#INPUT` to its current authorized counterpart.
 ///
-/// An input links while its lane still holds it live, and after its control
-/// covered it without delivering a body: a nod, a bare terminal control, or a
-/// header whose body was refused. That retired input still has no answer, so
-/// a fresh SYN may name it. An input a delivered body answered links nothing.
+/// Any input this lane received links, whatever its disposition: a live,
+/// seen, answered, declined, or closed-line input each continues through a
+/// fresh linked line to the peer lane or principal that sent it.
 fn resolve_input_routes<'a>(
     bus: &Bus,
     packet: &Packet<'a>,
@@ -135,17 +134,10 @@ fn resolve_input_routes<'a>(
             .expect("an input audience carries its exact key");
         let written = key.to_string();
         let resolution = (|| {
-            let (head, linkable) = bus
+            let head = bus
                 .read({
                     let written = written.clone();
-                    move |read| {
-                        let Some(head) = read.steering_key(&written)? else {
-                            return Ok(None);
-                        };
-                        let linkable = head.body().disposition == Disposition::Live
-                            || unanswered(read, &head)?;
-                        Ok(Some((head, linkable)))
-                    }
+                    move |read| read.steering_key(&written)
                 })
                 .map_err(|error| {
                     Unpublished::Failed(store_fault("steer::input-unreadable", &error.to_string()))
@@ -155,13 +147,10 @@ fn resolve_input_routes<'a>(
                     detail: format!("#{written} names no input"),
                 })?;
             let head = head.body();
-            if head.recipient != wire::Actor::Lane(packet.lane) || !linkable {
+            if head.recipient != wire::Actor::Lane(packet.lane) {
                 return Err(Unpublished::Refused {
                     reason: "syn::input-unauthorized".to_owned(),
-                    detail: format!(
-                        "#{written} is neither a live input for this lane nor one its control \
-                         covered without a delivered body"
-                    ),
+                    detail: format!("#{written} is not an input this lane received"),
                 });
             }
             let Some(peer) = head.sender.lane() else {
@@ -229,29 +218,6 @@ fn resolve_input_routes<'a>(
         parents,
         refused,
     })
-}
-
-/// Whether `head` is a retired peer line input its control covered without
-/// delivering a body.
-fn unanswered(
-    read: &journal::JournalRead<'_>,
-    head: &journal::JournalHead<wire::SteeringHead>,
-) -> Result<bool, GuardError> {
-    let head = head.body();
-    let Some((line, _, _)) = head
-        .control
-        .as_deref()
-        .and_then(wire::parse_peer_line_control)
-    else {
-        return Ok(false);
-    };
-    let Some(state) = read.peer_line_head(line.root)? else {
-        return Ok(false);
-    };
-    Ok(
-        crate::peer_line::answers(read, &state)?.get(&head.directive)
-            == Some(&wire::intent::LineAnswer::Seen {}),
-    )
 }
 
 /// Outbox effects and their immutable judgments share the native transaction.
