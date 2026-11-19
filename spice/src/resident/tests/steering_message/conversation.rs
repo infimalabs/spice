@@ -121,6 +121,55 @@ fn an_operator_concern_names_the_direction_it_points_at() {
     lanes.finish();
 }
 
+/// Startup recovery sees an answer retained after its acknowledged direction
+/// left the live index, and records its one use exactly once.
+#[test]
+fn startup_recovers_a_post_ack_operator_answer() {
+    let lanes = Lanes::new("conv-direction-answer-recovery");
+    lanes.declare(SENDER);
+    let direction = lanes.direct(SENDER, 63, "finish after the work");
+    lanes.answer(SENDER, &[&direction], &format!("ACK {direction}"));
+    let receipt = {
+        let key = direction.clone();
+        lanes
+            .bus
+            .read(move |read| {
+                read.steering_key(&key)
+                    .map(|head| head.expect("the acknowledged direction remains").position())
+            })
+            .expect("the direction reads")
+    };
+    let answered = || {
+        lanes
+            .bus
+            .read(move |read| read.steering_answered(receipt))
+            .expect("answer evidence reads")
+    };
+    assert!(!answered(), "the nod has not spent answer authority");
+
+    let message = serde_json::json!({
+        "type": "message_end",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": format!("FIN {direction}: finished")}],
+            "stopReason": "stop",
+        },
+    });
+    lanes
+        .tape(SENDER)
+        .tee(format!("{message}\n").as_bytes())
+        .expect("the unheard answer is durable");
+
+    lanes.restart();
+    assert!(answered(), "startup records the retained FIN answer");
+    lanes.restart();
+    assert!(
+        answered(),
+        "a used historical receipt is absent from later recovery"
+    );
+    lanes.finish();
+}
+
 /// A peer that writes an input's key where an occupant belongs hears the
 /// `#KEY` spelling, and no route of that packet publishes, while a recorded
 /// address in the same position routes as written.

@@ -367,6 +367,59 @@ impl JournalRead<'_> {
         Ok(retired)
     }
 
+    /// Most recent acknowledged plain principal directions addressed to
+    /// `lane` whose one later answer receipt remains unused.
+    ///
+    /// Recovery uses a bounded newest-first page so historical receipts run
+    /// only after live steering and cannot make candidate collection
+    /// unbounded.
+    pub fn unanswered_direction_receipts(
+        &self,
+        lane: wire::CanonicalUuid,
+        limit: usize,
+    ) -> Result<Vec<JournalHead<wire::SteeringHead>>, GuardError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.require_current_steering_index()?;
+        let limit = i64::try_from(limit).map_err(|_| {
+            GuardError::Invalid("direction receipt limit exceeds SQLite".to_owned())
+        })?;
+        let mut statement = self
+            .connection
+            .prepare(concat!(
+                "SELECT ",
+                steering_columns!(),
+                " FROM ",
+                steering_source!(),
+                " WHERE steering.disposition = 'acked' AND steering.recipient = ?1 \
+                 AND json_extract(CAST(steering.body AS TEXT), '$.sender') LIKE 'principal:%' \
+                 AND json_type(CAST(steering.body AS TEXT), '$.fanout') IS NOT NULL \
+                 AND json_type(CAST(steering.body AS TEXT), '$.control') IS NULL \
+                 AND NOT EXISTS (SELECT 1 FROM fact_envelopes AS answered \
+                     WHERE answered.cause = steering.head_seq AND answered.kind = ?2) \
+                 ORDER BY steering.head_seq DESC LIMIT ?3",
+            ))
+            .map_err(GuardError::Store)?;
+        read_metrics::observe_query();
+        let rows = statement
+            .query_map(
+                params![
+                    wire::Actor::Lane(lane).to_string(),
+                    wire::FactKind::SteerAnswered.as_str(),
+                    limit
+                ],
+                read_steering_columns,
+            )
+            .map_err(GuardError::Store)?;
+        let mut receipts = Vec::new();
+        for row in rows {
+            read_metrics::observe_row();
+            receipts.push(self.decode_steering_row(row.map_err(GuardError::Store)?)?);
+        }
+        Ok(receipts)
+    }
+
     /// Greatest moment already consumed by the current key mint.
     pub fn steering_minted_micros(&self) -> Result<Option<i64>, GuardError> {
         self.require_current_steering_index()?;
