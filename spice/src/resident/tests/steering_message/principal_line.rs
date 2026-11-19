@@ -297,6 +297,7 @@ fn an_operator_principal_continues_and_finishes_with_raw_line_bodies() {
             panic!("the lane body was refused: {reason}")
         }
     };
+    lanes.answer(SENDER, &[lane_key.as_str()], &format!("ACK {lane_key}"));
     lanes.answer(
         SENDER,
         &[lane_key.as_str()],
