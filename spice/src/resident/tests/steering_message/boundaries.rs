@@ -5,7 +5,7 @@ use super::*;
 
 /// End one agent turn on `lane`: a final assistant message that stopped by
 /// itself, then the completed prompt that ran it.
-fn end_turn(lanes: &Lanes, lane: u8) {
+pub(super) fn end_turn(lanes: &Lanes, lane: u8) {
     lanes.land(
         lane,
         &[],
@@ -22,7 +22,7 @@ fn end_turn(lanes: &Lanes, lane: u8) {
 }
 
 /// The checkpoint a later judgment may reuse on `lane` after one more sweep.
-fn swept(lanes: &Lanes, lane: u8) -> Option<wire::body::LaneCheckpoint> {
+pub(super) fn swept(lanes: &Lanes, lane: u8) -> Option<wire::body::LaneCheckpoint> {
     lanes.restart();
     let lane = test_uuid(lane);
     lanes
@@ -112,7 +112,7 @@ fn settled_line(lanes: &Lanes) -> wire::intent::PendingDirective {
     opening
 }
 
-fn automatic_finishes(lanes: &Lanes, line: CanonicalUuid) -> usize {
+pub(super) fn automatic_finishes(lanes: &Lanes, line: CanonicalUuid) -> usize {
     lanes
         .bus
         .transact(|journal| {

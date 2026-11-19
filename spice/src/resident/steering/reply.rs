@@ -1023,8 +1023,10 @@ fn automatic_finish_candidate(
         }
     }
     for participant in state.participants() {
-        let Some(lane) = participant.lane() else {
-            return Ok(None);
+        let lane = match participant {
+            Actor::Lane(lane) => *lane,
+            Actor::Principal(_) => continue,
+            Actor::Spice => return Ok(None),
         };
         let Some(checkpoint) = read.qualified_turn_checkpoint(lane)? else {
             return Ok(None);
@@ -1042,8 +1044,8 @@ fn automatic_finish_candidate(
     }))
 }
 
-/// Whether `line` is fully settled and both its lanes have since crossed a
-/// clean turn checkpoint, which is exactly when reconciliation closes it.
+/// Whether `line` is fully settled and each participant lane has since crossed
+/// a clean turn checkpoint, which is exactly when reconciliation closes it.
 pub(super) fn clean(
     read: &journal::JournalRead<'_>,
     line: CanonicalUuid,

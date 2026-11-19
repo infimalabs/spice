@@ -232,6 +232,40 @@ fn role_loss_settles_the_header_but_refuses_new_direction_text() {
     lanes.finish();
 }
 
+/// A principal has no turns, so the lane's first clean checkpoint after the
+/// acknowledged line's newest effect is its only automatic-finish boundary.
+#[test]
+fn an_acknowledged_principal_line_finishes_after_its_lane_turn() {
+    let lanes = Lanes::new("principal-line-auto-finish");
+    lanes.declare(SENDER);
+    let principal = lanes.bootstrap().principal().expect("bootstrap principal");
+    let input = seed_input(&lanes, principal, test_uuid(70), "1kQnrzNZx");
+    let acknowledgment = wire::intent::SteerLineControl {
+        input,
+        action: wire::intent::SteerLineAction::Ack,
+        body: None,
+    };
+    let command = admitted_control(&lanes, 72, principal, &acknowledgment);
+    let _ = answer(&control(&lanes, &command, &acknowledgment));
+    assert_eq!(
+        super::boundaries::automatic_finishes(&lanes, test_uuid(70)),
+        0
+    );
+
+    super::boundaries::end_turn(&lanes, SENDER);
+    assert_eq!(
+        super::boundaries::swept(&lanes, SENDER)
+            .expect("the lane's turn checkpoint qualifies")
+            .boundary,
+        wire::body::CheckpointBoundary::Turn
+    );
+    assert_eq!(
+        super::boundaries::automatic_finishes(&lanes, test_uuid(70)),
+        1
+    );
+    lanes.finish();
+}
+
 #[test]
 fn an_operator_principal_continues_and_finishes_with_raw_line_bodies() {
     let lanes = Lanes::new("principal-line-bodies");
