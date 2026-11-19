@@ -46,7 +46,7 @@ fn current_standing(
             // Scanner eligibility is not another durable retirement: the
             // shared disposition path retains the acknowledged input head.
             let disposition =
-                if body.recipient == wire::Actor::Lane(lane) && exit::prior_receipt(body) {
+                if body.recipient == wire::Actor::Lane(lane) && exit::prior_peer_receipt(body) {
                     Disposition::Live
                 } else {
                     body.disposition
@@ -145,7 +145,7 @@ pub(super) fn settle(
                 Some(head)
                     if head.body().recipient == wire::Actor::Lane(submission.body.lane)
                         && (head.body().disposition == Disposition::Live
-                            || exit::prior_receipt(head.body())) =>
+                            || exit::prior_peer_receipt(head.body())) =>
                 {
                     head
                 }
@@ -181,9 +181,9 @@ pub(super) fn settle(
             );
             let disposed = match disposed {
                 Ok(disposed) => disposed,
-                // A policy refusal leaves the input unchanged. Its packet
-                // judgment makes the refusal durable and prevents retries.
-                Err(Outcome::Refusal(refusal)) => {
+                // A refused invitation join leaves its directive live; the
+                // packet's judgment carries the refusal so it is never retried.
+                Err(Outcome::Refusal(refusal)) if is_invitation(head.body()) => {
                     return record(
                         bus,
                         epoch,
