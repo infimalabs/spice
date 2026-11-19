@@ -307,11 +307,12 @@ impl SpeechRuntime {
     }
 
     fn sync_media_session(&self) {
-        let (active, worktree) = {
+        let (active, worktree, title) = {
             let queue = self.queue.borrow();
             (
-                queue.narration_session_active(),
+                queue.media_session_active(),
                 queue.active_worktree().map(str::to_owned),
+                queue.active_title(),
             )
         };
         let speaker = worktree.as_deref().and_then(|worktree| {
@@ -321,7 +322,7 @@ impl SpeechRuntime {
                 .get(worktree)
                 .map(|(_, label)| label.clone())
         });
-        media_session::sync(active, speaker.as_deref());
+        media_session::sync(active, speaker.as_deref(), title.as_deref());
     }
 }
 
@@ -397,7 +398,7 @@ pub(super) fn use_page_hide_speech_stop(speech_runtime: SpeechRuntime) {
             let pagehide =
                 Closure::<dyn FnMut(web_sys::Event)>::new(move |_event: web_sys::Event| {
                     hidden_runtime.stop();
-                    media_session::sync(false, None);
+                    media_session::sync(false, None, None);
                 });
             let shown_runtime = speech_runtime.clone();
             let pageshow =

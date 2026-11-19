@@ -220,7 +220,29 @@ impl SpeechEntry {
     pub const fn playback(&self) -> &wire::SpeechPlayback {
         self.request.playback()
     }
+
+    /// Now-playing title a platform media session shows for this entry: its
+    /// first non-blank line, cut at [`MEDIA_TITLE_CHARS`] with an ellipsis.
+    #[must_use]
+    pub fn title(&self) -> String {
+        let line = self
+            .text()
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default();
+        if line.chars().count() <= MEDIA_TITLE_CHARS {
+            return line.to_owned();
+        }
+        let mut title: String = line.chars().take(MEDIA_TITLE_CHARS - 1).collect();
+        title.truncate(title.trim_end().len());
+        title.push('…');
+        title
+    }
 }
+
+/// Longest now-playing title, in characters, before it is cut with an ellipsis.
+pub const MEDIA_TITLE_CHARS: usize = 120;
 
 /// Result of offering one request to the queue.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -318,8 +340,8 @@ impl SpeechQueue {
     ///
     /// Quiet discards that team's queued work, stops its automatic head, and
     /// remains in force for later requests. Speak and Narrate both admit
-    /// automatic playback; only Narrate participates in the page's durable
-    /// media session. Explicit playback is unaffected.
+    /// automatic playback; only Narrate holds the page's media session across
+    /// idle gaps. Explicit playback is unaffected.
     pub fn set_mode(&mut self, team: &str, mode: SpeechMode) -> AutomaticChange {
         if mode == SpeechMode::Narrate {
             self.narrated_teams.insert(team.to_owned());
@@ -354,10 +376,12 @@ impl SpeechQueue {
             .retain(|entry| entry.lane().is_none_or(|candidate| candidate != lane));
     }
 
-    /// Whether any live team keeps the page's Narrate-only media session active.
+    /// Whether the page's one media session is held: across idle gaps while
+    /// any live team selects Narrate, and otherwise only while an entry from
+    /// Speak or an explicit control is speaking.
     #[must_use]
-    pub fn narration_session_active(&self) -> bool {
-        !self.narrated_teams.is_empty()
+    pub fn media_session_active(&self) -> bool {
+        !self.narrated_teams.is_empty() || self.active.is_some()
     }
 
     /// Whether a renderer or media callback still belongs to the current head.
@@ -376,6 +400,12 @@ impl SpeechQueue {
     #[must_use]
     pub fn active_worktree(&self) -> Option<&str> {
         self.active.as_ref().map(SpeechEntry::worktree)
+    }
+
+    /// Now-playing title of the current head, when one is speaking.
+    #[must_use]
+    pub fn active_title(&self) -> Option<String> {
+        self.active.as_ref().map(SpeechEntry::title)
     }
 
     /// Exact rendered hunk owned by the current head, when it has one.

@@ -204,10 +204,13 @@ preserve recipients and message controls.
 
 Speech is browser-local to the team input: Quiet / Speak / Narrate, raised by
 Up/Right and lowered by Down/Left. Quiet speaks nothing automatically; Speak
-voices resident-classified final answers and acknowledged steering; Narrate
 voices every live card and keeps one page-level Media Session playing across
-idle gaps so mobile sleep does not retire the narration queue. All narrated
-teams share that session; it clears when the final team leaves Narrate.
+idle gaps so mobile sleep does not retire the narration queue; Speak and
+explicit playback hold that same session only while an entry speaks. An
+inaudible looping audio element carries it, because platforms surface only
+pages playing media; its artist is the speaking agent and its title the current
+entry's first line. It clears when the final narrated team leaves Narrate and
+nothing speaks.
 Steering-key acknowledgments are spoken fully without protocol headers. Other
 cards speak first/last meaningful paragraphs; lists are detail (opening list:
 first item; closing list: silent). Fenced code, quotes and Markdown marks are

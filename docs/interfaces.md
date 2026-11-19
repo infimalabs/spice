@@ -360,9 +360,15 @@ Speech is the viewing device's own system synthesis: the browser's
 offers the downloaded voices the embedded web view withholds (see
 [the console's speech surface](../app/CONSOLE.md#speech)); nothing renders
 audio on the resident. One global queue speaks entries sequentially and never
-overlaps them. Narrate alone keeps one page-level Media Session playing while
-any team selects it, including idle gaps between queue entries; Speak and Quiet
-do not. Platform pause and stop controls stop that same queue.
+overlaps them. The page holds one Media Session: Narrate keeps it playing while
+any team selects it, including idle gaps between queue entries, while Speak
+and explicit playback hold it only while an entry speaks. A platform surfaces a
+Media Session only for a page playing an audio or video element, which speech
+synthesis is not, so the session starts one looping element carrying an
+inaudible sine under the exclusive `playback` Audio Session type where the
+browser offers it; other apps' playback pauses. Its metadata names the
+speaking agent as artist and the current entry's first line as title, updating
+as the queue advances. Platform pause and stop controls stop that same queue.
 
 Browser synthesis partitions long text at authored boundaries into at most
 3,000 UTF-16 code units per platform utterance, preserving the complete text in
