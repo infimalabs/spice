@@ -274,12 +274,13 @@ impl MappedCommand {
     }
 
     fn steer_recover(contract: &Contract, directive: CanonicalUuid) -> ClientResult<Self> {
+        let request = wire::intent::DirectiveRef { directive };
         Self::new(
             contract,
             &["steer", "recover"],
             CommandKind::SteerRecover,
-            vec![Witness::Recoverable { steer: directive }],
-            &wire::intent::DirectiveRef { directive },
+            vec![request.recovery_witness()],
+            &request,
         )
     }
 

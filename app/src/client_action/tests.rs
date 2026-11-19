@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::{RoomPostAction, SteerControlRequest};
+use super::{CommandSendError, DirectiveResponse, RoomPostAction, SteerControlRequest};
 
 fn room() -> wire::TaskHandle {
     wire::TaskHandle::for_topic(
@@ -90,5 +90,59 @@ fn line_requests_keep_explicit_finish_and_only_substantive_raw_bodies() {
             action: wire::intent::SteerLineAction::Fin,
             body: Some("final body".to_owned()),
         })
+    );
+}
+
+#[test]
+fn steering_controls_build_commands_that_satisfy_the_wire_law() {
+    let line = SteerControlRequest::line(
+        principal_input(),
+        wire::intent::SteerLineAction::Ack,
+        String::new(),
+    );
+    assert!(line.expected().is_empty());
+
+    let input = principal_input();
+    let reference = wire::intent::DirectiveRef {
+        directive: input.directive,
+    };
+    let recovery = SteerControlRequest::Recover(reference.clone());
+    let command = wire::Command {
+        v: wire::WireVersion::CURRENT,
+        id: input.directive,
+        epoch: input.principal,
+        kind: wire::CommandKind::SteerRecover,
+        expected: recovery.expected(),
+        body: reference,
+    };
+    assert!(command.witnessed().is_ok());
+}
+
+#[test]
+fn a_local_control_refusal_settles_once_while_transport_failure_reconnects() {
+    let answers = Rc::new(RefCell::new(Vec::new()));
+    let respond: DirectiveResponse = {
+        let answers = Rc::clone(&answers);
+        Rc::new(move |answer| answers.borrow_mut().push(answer))
+    };
+
+    assert_eq!(
+        CommandSendError::Rejected("command law refused".to_owned()).settle(&respond),
+        Ok(None)
+    );
+    assert_eq!(answers.borrow().len(), 1);
+    assert_eq!(
+        answers.borrow()[0].as_ref().expect_err("local refusal"),
+        "command law refused"
+    );
+
+    assert_eq!(
+        CommandSendError::Transport("socket closed".to_owned()).settle(&respond),
+        Err("socket closed".to_owned())
+    );
+    assert_eq!(
+        answers.borrow().len(),
+        1,
+        "a transport failure stays queued for reconnect"
     );
 }
