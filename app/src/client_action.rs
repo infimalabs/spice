@@ -17,6 +17,38 @@ pub(crate) type PrincipalResponse =
     std::rc::Rc<dyn Fn(Result<wire::principal::PrincipalStanding, String>)>;
 pub(crate) type MessageResponse = DirectiveResponse;
 
+/// One command send that either failed before transport or lost its transport.
+pub(crate) enum CommandSendError {
+    /// The command could not be built, encoded, or reserved locally.
+    Rejected(String),
+    /// The command was built and reserved, but the socket send failed.
+    Transport(String),
+}
+
+impl CommandSendError {
+    /// Settle a local refusal once; leave transport failure for reconnect.
+    pub(crate) fn settle<T>(
+        self,
+        respond: &std::rc::Rc<dyn Fn(Result<T, String>)>,
+    ) -> Result<Option<CanonicalUuid>, String> {
+        match self {
+            Self::Rejected(error) => {
+                respond(Err(error));
+                Ok(None)
+            }
+            Self::Transport(error) => Err(error),
+        }
+    }
+}
+
+impl From<CommandSendError> for String {
+    fn from(error: CommandSendError) -> Self {
+        match error {
+            CommandSendError::Rejected(error) | CommandSendError::Transport(error) => error,
+        }
+    }
+}
+
 pub use crate::runtime::TrustDecision;
 
 /// One complete room publication request retained by the bounded action mailbox.
@@ -63,13 +95,6 @@ impl RoomPostAction {
 }
 
 /// One principal control over an exact actor-addressed steering input.
-#[cfg_attr(
-    all(test, not(target_arch = "wasm32")),
-    expect(
-        dead_code,
-        reason = "only the wasm32 browser room conversation controls steering inputs"
-    )
-)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SteerControlRequest {
     Line(wire::intent::SteerLineControl),
@@ -88,6 +113,14 @@ impl SteerControlRequest {
             action,
             body,
         })
+    }
+
+    /// Authority the resident must still observe before admitting this control.
+    pub(crate) fn expected(&self) -> Vec<wire::Witness> {
+        match self {
+            Self::Line(_) => Vec::new(),
+            Self::Recover(reference) => vec![reference.recovery_witness()],
+        }
     }
 }
 

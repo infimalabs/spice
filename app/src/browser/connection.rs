@@ -471,9 +471,7 @@ async fn dispatch_action(
         action @ (ClientAction::RoomPost(_)
         | ClientAction::SteerControl { .. }
         | ClientAction::Preparation { .. }) => {
-            dispatch_room_action(principal, writer, actions, action)
-                .await
-                .map(Some)
+            dispatch_room_action(principal, writer, actions, action).await
         }
         ClientAction::Principal { request, respond } => {
             refresh::send_principal_write(principal, writer, actions, request, respond)
@@ -545,11 +543,11 @@ async fn dispatch_room_action(
     writer: &mut SocketWriter,
     actions: &ActionQueue,
     action: &ClientAction,
-) -> Result<CanonicalUuid, String> {
+) -> Result<Option<CanonicalUuid>, String> {
     match action {
-        ClientAction::RoomPost(post) => {
-            rooms::send_room_post(principal, writer, actions, post).await
-        }
+        ClientAction::RoomPost(post) => rooms::send_room_post(principal, writer, actions, post)
+            .await
+            .map(Some),
         ClientAction::SteerControl {
             request,
             line_respond,
@@ -566,7 +564,9 @@ async fn dispatch_room_action(
             .await
         }
         ClientAction::Preparation { request, respond } => {
-            rooms::send_preparation(principal, writer, actions, request, respond).await
+            rooms::send_preparation(principal, writer, actions, request, respond)
+                .await
+                .map(Some)
         }
         _ => unreachable!("only room actions reach room dispatch"),
     }
@@ -933,8 +933,30 @@ async fn send_typed<B: Serialize>(
     expected: Vec<Witness>,
     body: B,
 ) -> Result<CanonicalUuid, String> {
-    let id = random_uuid()?;
-    send_typed_as(
+    send_typed_classified(
+        principal,
+        writer,
+        actions,
+        pending_kind,
+        kind,
+        expected,
+        body,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+async fn send_typed_classified<B: Serialize>(
+    principal: &Principal,
+    writer: &mut SocketWriter,
+    actions: &ActionQueue,
+    pending_kind: PendingKind,
+    kind: CommandKind,
+    expected: Vec<Witness>,
+    body: B,
+) -> Result<CanonicalUuid, crate::client_action::CommandSendError> {
+    let id = random_uuid().map_err(crate::client_action::CommandSendError::Rejected)?;
+    send_typed_as_classified(
         principal,
         writer,
         actions,
@@ -984,6 +1006,20 @@ async fn send_typed_as<B: Serialize>(
     tracked: TrackedCommand,
     body: B,
 ) -> Result<CanonicalUuid, String> {
+    send_typed_as_classified(principal, writer, actions, tracked, body)
+        .await
+        .map_err(Into::into)
+}
+
+async fn send_typed_as_classified<B: Serialize>(
+    principal: &Principal,
+    writer: &mut SocketWriter,
+    actions: &ActionQueue,
+    tracked: TrackedCommand,
+    body: B,
+) -> Result<CanonicalUuid, crate::client_action::CommandSendError> {
+    use crate::client_action::CommandSendError;
+
     let TrackedCommand {
         id,
         pending_kind,
@@ -991,18 +1027,21 @@ async fn send_typed_as<B: Serialize>(
         expected,
     } = tracked;
     if actions.pending_contains(id) {
-        return Err(format!("command identity {id} is already pending"));
+        return Err(CommandSendError::Rejected(format!(
+            "command identity {id} is already pending"
+        )));
     }
     let command = SteerPane::over(principal)
         .command(id, kind, expected, body)
-        .map_err(|error| error.to_string())?;
-    let bytes = wire::encode(&command).map_err(|error| error.to_string())?;
+        .map_err(|error| CommandSendError::Rejected(error.to_string()))?;
+    let bytes =
+        wire::encode(&command).map_err(|error| CommandSendError::Rejected(error.to_string()))?;
     actions
         .reserve_pending(id, pending_kind, bytes.len())
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| CommandSendError::Rejected(error.to_string()))?;
     if let Err(error) = writer.send(Message::Bytes(bytes)).await {
         actions.cancel_pending(id);
-        return Err(websocket_error(error));
+        return Err(CommandSendError::Transport(websocket_error(error)));
     }
     Ok(id)
 }

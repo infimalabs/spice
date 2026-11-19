@@ -137,6 +137,16 @@ pub struct DirectiveRef {
     pub directive: CanonicalUuid,
 }
 
+impl DirectiveRef {
+    /// The exact failed directive authority required to recover this reference.
+    #[must_use]
+    pub fn recovery_witness(&self) -> crate::Witness {
+        crate::Witness::Recoverable {
+            steer: self.directive,
+        }
+    }
+}
+
 /// Decide one pending consent request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

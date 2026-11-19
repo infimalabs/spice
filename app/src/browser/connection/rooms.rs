@@ -38,8 +38,8 @@ pub(super) async fn send_room_post(
     .await
 }
 
-/// Submit one principal line control or recovery. Both commands guard their
-/// exact steering input, so the app supplies no independent witness.
+/// Submit one principal line control or recovery. Recovery carries the exact
+/// lapsed directive witness that the resident must still observe.
 pub(super) async fn send_steer_control(
     principal: &Principal,
     writer: &mut SocketWriter,
@@ -47,10 +47,10 @@ pub(super) async fn send_steer_control(
     request: &crate::client_action::SteerControlRequest,
     line_respond: &crate::client_action::SteerLineResponse,
     directive_respond: &crate::client_action::DirectiveResponse,
-) -> Result<CanonicalUuid, String> {
+) -> Result<Option<CanonicalUuid>, String> {
     match request {
         crate::client_action::SteerControlRequest::Line(control) => {
-            send_typed(
+            match send_typed_classified(
                 principal,
                 writer,
                 actions,
@@ -58,13 +58,17 @@ pub(super) async fn send_steer_control(
                     respond: line_respond.clone(),
                 },
                 CommandKind::SteerLineControl,
-                Vec::new(),
+                request.expected(),
                 control.clone(),
             )
             .await
+            {
+                Ok(id) => Ok(Some(id)),
+                Err(error) => error.settle(line_respond),
+            }
         }
         crate::client_action::SteerControlRequest::Recover(reference) => {
-            send_typed(
+            match send_typed_classified(
                 principal,
                 writer,
                 actions,
@@ -72,10 +76,14 @@ pub(super) async fn send_steer_control(
                     respond: directive_respond.clone(),
                 },
                 CommandKind::SteerRecover,
-                Vec::new(),
+                request.expected(),
                 reference.clone(),
             )
             .await
+            {
+                Ok(id) => Ok(Some(id)),
+                Err(error) => error.settle(directive_respond),
+            }
         }
     }
 }
