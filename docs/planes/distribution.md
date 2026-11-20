@@ -374,6 +374,10 @@ read-only for the isolated guest. No platform depends on another native run,
 discovers a Linux canvas, pushes a temporary source ref, or uses an alternate
 source route.
 
+The Windows image admits the configured major, minor, and OS build as its hard
+release boundary. Its cumulative-update revision may move independently; the
+signed hosted result still records the complete observed build.
+
 Each successful native stage executes its staged binary's supported version
 smoke before publishing it. The reported product version must equal the exact
 release-input version. The stage then records and signs its result and staged

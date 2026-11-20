@@ -8,7 +8,7 @@ branch = "main"
 label = "windows-2025"
 provider_os = "win25-vs2026"
 version = "20261103.298.1" # provenance baseline; the observed provider revision is recorded, not gated
-os_version = "10.0.26100.33828"
+os_version = "10.0.26100.33828" # provenance baseline; the observed update revision is recorded, not gated
 architecture = "X64"
 
 [toolchain]
