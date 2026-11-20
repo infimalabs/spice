@@ -71,6 +71,10 @@ const SECTIONS: &[Section] = &[
                 action: "Open this help, outside text fields",
             },
             Row {
+                keys: &[&["a"], &["t"], &["p"], &["d"]],
+                action: "Open the global composer in Agent/Ask, Task, Plan, or Design mode",
+            },
+            Row {
                 keys: &[&["Esc"]],
                 action: "Close the topmost sheet, panel, or menu; open Help at the top level",
             },

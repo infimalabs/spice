@@ -32,6 +32,21 @@ enum Mode {
 impl Mode {
     const ALL: [Self; 4] = [Self::Message, Self::Task, Self::Plan, Self::Design];
 
+    const fn shortcut(self) -> &'static str {
+        match self {
+            Self::Message => "a",
+            Self::Task => "t",
+            Self::Plan => "p",
+            Self::Design => "d",
+        }
+    }
+
+    fn from_shortcut(key: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.shortcut() == key)
+    }
+
     const fn label(self) -> &'static str {
         match self {
             Self::Message => "Ask",
@@ -140,6 +155,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     let close = presentation.close.clone();
     let expand = presentation.open.clone();
     use_summons(props, &mode, &expanded, busy);
+    use_mode_shortcuts(&mode, &expand, busy);
     // Whether a press would submit something, read again on every edit and
     // whenever quotes or images come or go without raising input.
     let form = use_node_ref();
@@ -171,7 +187,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     } else {
         available(CommandKind::TaskAdd) && (*draft || available(CommandKind::TaskFile))
     };
-    let created = created(props, &presentation, &mode);
+    let created = created(props, &presentation);
     let accepted_ask = use_accepted_ask(
         props,
         close.clone(),
@@ -244,18 +260,62 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     }
 }
 
-/// Opening created work resets the composer to Ask and closes it first.
-fn created(
-    props: &Props,
-    presentation: &presentation::Presentation,
-    mode: &UseStateHandle<Mode>,
-) -> Callback<TaskStamp> {
+/// Bare mode keys outside text entry open the global composer at that
+/// destination. The same modal guard as Help leaves every active sheet in
+/// control of its own keyboard.
+#[hook]
+fn use_mode_shortcuts(mode: &UseStateHandle<Mode>, open: &Callback<()>, busy: bool) {
+    let current = use_mut_ref(|| (mode.clone(), open.clone(), busy));
+    *current.borrow_mut() = (mode.clone(), open.clone(), busy);
+    use_effect_with((), move |()| {
+        let registration = web_sys::window().and_then(|window| {
+            let document = window.document()?;
+            let observed = document.clone();
+            let key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
+                move |event: web_sys::KeyboardEvent| {
+                    let Some(choice) = Mode::from_shortcut(&event.key()) else {
+                        return;
+                    };
+                    let (mode, open, busy) = {
+                        let current = current.borrow();
+                        (current.0.clone(), current.1.clone(), current.2)
+                    };
+                    if busy
+                        || event.ctrl_key()
+                        || event.meta_key()
+                        || event.alt_key()
+                        || event.is_composing()
+                        || event.repeat()
+                        || event.default_prevented()
+                        || crate::browser::overlay::typing(&event)
+                        || crate::browser::overlay::native_modal_open(&observed)
+                    {
+                        return;
+                    }
+                    event.prevent_default();
+                    mode.set(choice);
+                    open.emit(());
+                },
+            );
+            let _ =
+                window.add_event_listener_with_callback("keydown", key.as_ref().unchecked_ref());
+            Some((window, key))
+        });
+        move || {
+            if let Some((window, key)) = registration {
+                let _ = window
+                    .remove_event_listener_with_callback("keydown", key.as_ref().unchecked_ref());
+            }
+        }
+    });
+}
+
+/// Opening created work closes the composer without changing its destination.
+fn created(props: &Props, presentation: &presentation::Presentation) -> Callback<TaskStamp> {
     let open = props.open_task.clone();
     let close = presentation.close.clone();
     let finish = presentation.finish.clone();
-    let mode = mode.clone();
     Callback::from(move |task| {
-        mode.set(Mode::Message);
         close.emit(());
         finish.emit(());
         open.emit(task);
@@ -571,6 +631,7 @@ fn mode_controls(mode: &UseStateHandle<Mode>, sending: bool) -> Html {
                 html! {
                     <button type="button" class="app-choice-chip" disabled={sending}
                         aria-pressed={(*mode == choice).to_string()}
+                        aria-keyshortcuts={choice.shortcut()}
                         onclick={Callback::from(move |_| mode.set(choice))}>{choice.label()}</button>
                 }
             })}
