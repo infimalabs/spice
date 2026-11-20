@@ -2,6 +2,8 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+mod history_faults;
+
 const HISTORY_LENGTH: u64 = 300;
 const QUIET_HISTORY_LENGTH: u64 = 40;
 const FIRST_RETAINED_BOUNDARY: u64 = 80;

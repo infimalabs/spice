@@ -645,6 +645,9 @@ pub struct AppRuntime {
     /// Lanes whose older history ended under the current snapshot; a live
     /// generation still reporting their retained edge cannot reopen them.
     message_history_exhausted: BTreeSet<CanonicalUuid>,
+    /// Why each lane's last history page could not be read; its cursor stays
+    /// so fresh viewport demand reads that page again.
+    message_history_faults: BTreeMap<CanonicalUuid, String>,
     /// Last transcript generation admitted atomically.
     message_generation: Option<u64>,
     /// A same-scope subscription snapshot merges into retained hydrated cards.
@@ -698,6 +701,7 @@ impl AppRuntime {
             message_history: BTreeMap::new(),
             message_history_completions: BTreeMap::new(),
             message_history_exhausted: BTreeSet::new(),
+            message_history_faults: BTreeMap::new(),
             message_generation: None,
             message_reconnect_pending: false,
             message_history_revision: 0,
@@ -783,6 +787,13 @@ impl AppRuntime {
             .get(&lane)
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Why this lane's last history page could not be read, until a later
+    /// page or subscription reads it.
+    #[must_use]
+    pub fn message_history_fault(&self, lane: CanonicalUuid) -> Option<&str> {
+        self.message_history_faults.get(&lane).map(String::as_str)
     }
 
     /// Subscription generation owning the current member-local frontiers.

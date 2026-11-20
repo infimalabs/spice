@@ -1111,6 +1111,10 @@ fn stream_data_samples(
                         event: 2,
                     }),
                 }],
+                faults: vec![wire::TranscriptLaneFault {
+                    lane: first_id,
+                    reason: "transcript history is unavailable: source unreadable".to_owned(),
+                }],
             },
         },
         StreamFrame::Fact {

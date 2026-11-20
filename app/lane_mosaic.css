@@ -429,3 +429,10 @@ a.relative-age {
   padding: 16px 6px;
   font-size: var(--app-type-sm);
 }
+.mosaic-history-unavailable {
+  padding: 6px 12px;
+  border-top: var(--app-edge);
+  color: var(--muted);
+  font-size: var(--app-type-sm);
+  overflow-wrap: anywhere;
+}

@@ -415,6 +415,7 @@ impl AppRuntime {
         self.message_history_completions
             .retain(|lane, _| next_history.contains_key(lane));
         self.message_history_exhausted.clear();
+        self.message_history_faults.clear();
         self.message_history = next_history;
         self.message_generation = Some(generation.generation);
         if reconnect {
@@ -462,6 +463,8 @@ impl AppRuntime {
         }
         self.message_history_completions
             .retain(|lane, _| next_history.contains_key(lane));
+        self.message_history_faults
+            .retain(|lane, _| next_history.contains_key(lane));
         changed |= self.message_history != next_history;
         self.message_history = next_history;
         self.message_generation = Some(generation.generation);
@@ -482,17 +485,27 @@ impl AppRuntime {
             .iter()
             .map(|frontier| frontier.lane)
             .collect::<BTreeSet<_>>();
+        let fault_lanes = generation
+            .faults
+            .iter()
+            .map(|fault| fault.lane)
+            .collect::<BTreeSet<_>>();
+        let unavailable_lanes = generation
+            .frontiers
+            .iter()
+            .filter(|frontier| frontier.state == wire::TranscriptLaneState::Unavailable)
+            .map(|frontier| frontier.lane)
+            .collect::<BTreeSet<_>>();
+        // Only a lane whose read failure the interval names may answer
+        // unavailable, and it carries no cards.
         let invalid_interval = requested_lanes.len() != requested.len()
             || generation.frontiers.len() != requested.len()
             || response_lanes != requested_lanes
-            || generation
-                .frontiers
-                .iter()
-                .any(|frontier| frontier.state == wire::TranscriptLaneState::Unavailable)
-            || generation
-                .messages
-                .iter()
-                .any(|message| !requested_lanes.contains(&message.lane));
+            || fault_lanes.len() != generation.faults.len()
+            || fault_lanes != unavailable_lanes
+            || generation.messages.iter().any(|message| {
+                !requested_lanes.contains(&message.lane) || fault_lanes.contains(&message.lane)
+            });
         if invalid_interval
             || requested.iter().any(|cursor| {
                 self.message_history
@@ -525,6 +538,24 @@ impl AppRuntime {
         changed |= self.release_delivered_direction_media();
         for frontier in &generation.frontiers {
             let previous = self.message_history.get(&frontier.lane).copied();
+            if let Some(fault) = generation
+                .faults
+                .iter()
+                .find(|fault| fault.lane == frontier.lane)
+            {
+                // The lane keeps its cursor. Counting the answered request
+                // lets fresh viewport demand read the same page again.
+                self.message_history_faults
+                    .insert(frontier.lane, fault.reason.clone());
+                let completion = self
+                    .message_history_completions
+                    .entry(frontier.lane)
+                    .or_default();
+                *completion = completion.saturating_add(1);
+                changed = true;
+                continue;
+            }
+            changed |= self.message_history_faults.remove(&frontier.lane).is_some();
             if frontier.state == wire::TranscriptLaneState::Truncated {
                 self.message_history.insert(
                     frontier.lane,
