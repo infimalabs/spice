@@ -107,6 +107,34 @@ message = "Prefer the third letter."
 }
 
 #[test]
+fn tracked_terminology_taste_redirects_every_exclusionary_list_inflection() {
+    let bag = configured(include_str!("../../spice.toml")).expect("tracked policy decodes");
+    let expected = [
+        ("whitelist", "allowlist"),
+        ("whitelists", "allowlists"),
+        ("whitelisted", "allowlisted"),
+        ("whitelisting", "allowlisting"),
+        ("blacklist", "blocklist"),
+        ("blacklists", "blocklists"),
+        ("blacklisted", "blocklisted"),
+        ("blacklisting", "blocklisting"),
+    ];
+
+    for (word, replacement) in expected {
+        let hit = matching_hits(&bag, &prose(&word.to_uppercase()))
+            .into_iter()
+            .find(|hit| hit.taste().as_str() == "terminology")
+            .unwrap_or_else(|| panic!("{word:?} must select the tracked terminology taste"));
+
+        assert_eq!(hit.trigger(), word);
+        assert!(
+            hit.message().contains(replacement),
+            "{word:?} must direct the author to {replacement:?}",
+        );
+    }
+}
+
+#[test]
 fn a_vendor_and_model_scoped_bag_only_fires_in_its_shared_applicability_context() {
     let bag = configured(
         r#"

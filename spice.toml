@@ -145,3 +145,7 @@ message = "Rename in place, update every reference in one change, and leave exac
 [taste.legacy]
 words = ["legacy", "legacies"]
 message = "Treat old implementations as evidence, never as executable arms. Migrate retained data forward once or refuse naming its owning release."
+
+[taste.terminology]
+words = ["whitelist", "whitelists", "whitelisted", "whitelisting", "blacklist", "blacklists", "blacklisted", "blacklisting"]
+message = "Replace whitelist, whitelists, whitelisted, and whitelisting with allowlist, allowlists, allowlisted, and allowlisting; replace blacklist, blacklists, blacklisted, and blacklisting with blocklist, blocklists, blocklisted, and blocklisting."
