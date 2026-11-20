@@ -463,13 +463,7 @@ fn landing_message_matches(message: &str, meta: Metadata<'_>) -> Result<bool, Er
         return Ok(false);
     };
     let body = &narrative[body_separator + 1..];
-    let pitch = crate::commit_message::fold_prose(meta.pitch);
-    if body.len() != pitch.len()
-        || body
-            .iter()
-            .zip(&pitch)
-            .any(|(line, folded)| line.strip_suffix('\r').unwrap_or(line) != folded)
-    {
+    if body.len() != 1 || body[0].strip_suffix('\r').unwrap_or(body[0]) != meta.pitch {
         return Ok(false);
     }
     let mut fields = BTreeMap::new();
@@ -548,10 +542,11 @@ pub(super) fn compose_message(meta: Metadata<'_>) -> Result<String, Error> {
         .map(|(name, value)| format!("{name}: {value}"))
         .collect::<Vec<_>>()
         .join("\n");
+    // A pitch is admitted as one content line. Presentation, not durable Git
+    // history, owns wrapping it to the reader's viewport.
     Ok(format!(
         "{prefix}{title} {}{phase}\n\n{}\n\n{trailers}",
-        meta.label,
-        crate::commit_message::fold_prose(meta.pitch).join("\n")
+        meta.label, meta.pitch
     ))
 }
 
@@ -882,46 +877,28 @@ mod tests {
     }
 
     #[test]
-    fn a_long_landing_pitch_folds_within_the_wrap_limit_and_reads_back() {
-        let pitch = concat!(
+    fn admitted_pitches_remain_one_verbatim_body_line_and_read_back() {
+        let prose = concat!(
             "Design pass operations belong beside the task lifecycle they inspect and settle, ",
             "not in a two-command top-level namespace."
         );
-        let meta = Metadata {
-            pitch,
-            ..landing_metadata()
-        };
-        let message = compose_message(meta).expect("admitted pitch");
-        let lines = message.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), 8, "the pitch paragraph spans two lines");
-        assert!(
-            lines
-                .iter()
-                .all(|line| line.chars().count() <= crate::commit_message::WRAP_LIMIT)
-        );
-        assert!(landing_message_matches(&message, meta).unwrap());
-        let truncated = message.replace(" namespace.", "");
-        assert!(!landing_message_matches(&truncated, meta).unwrap());
-    }
-
-    #[test]
-    fn an_unbroken_admitted_pitch_splits_within_the_wrap_limit_and_reads_back() {
-        for width in [101, wire::pitch::PITCH_CHARS] {
-            let pitch = "é".repeat(width);
-            wire::pitch::admit(&pitch).expect("admitted pitch");
+        let unbroken = "é".repeat(wire::pitch::PITCH_CHARS);
+        for pitch in [prose, unbroken.as_str()] {
+            wire::pitch::admit(pitch).expect("admitted pitch");
             let meta = Metadata {
-                pitch: &pitch,
+                pitch,
                 ..landing_metadata()
             };
             let message = compose_message(meta).expect("admitted pitch");
             let lines = message.lines().collect::<Vec<_>>();
-            assert!(
-                lines
-                    .iter()
-                    .all(|line| line.chars().count() <= crate::commit_message::WRAP_LIMIT)
-            );
-            assert_eq!(lines[2..lines.len() - 4].concat(), pitch);
+            assert_eq!(lines.len(), 7, "the pitch stays one body line");
+            assert_eq!(lines[2], pitch);
+            assert!(lines[2].chars().count() > crate::commit_message::WRAP_LIMIT);
             assert!(landing_message_matches(&message, meta).unwrap());
+
+            let folded =
+                message.replace(pitch, &crate::commit_message::fold_prose(pitch).join("\n"));
+            assert!(!landing_message_matches(&folded, meta).unwrap());
         }
     }
 
