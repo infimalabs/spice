@@ -517,16 +517,20 @@ fn publish(path: &Path, state: &SessionFile) -> Result<(), SessionError> {
 }
 
 /// Whether this error proves the provider run itself reached failure, or that
-/// its finished result can never be admitted by this client.
+/// its finished result can never be admitted by this client. An observed run
+/// left whole after it concluded in failure is still a failed run.
 pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
-    matches!(
-        error,
-        WindowsHostedError::Command {
-            operation: "workflow execution",
-            ..
-        } | WindowsHostedError::Cancelled { run_id: Some(_) }
-            | WindowsHostedError::ResultSchema(_)
-    )
+    match error {
+        WindowsHostedError::Detached { reason, .. } => terminal_provider_failure(reason),
+        _ => matches!(
+            error,
+            WindowsHostedError::Command {
+                operation: "workflow execution",
+                ..
+            } | WindowsHostedError::Cancelled { run_id: Some(_) }
+                | WindowsHostedError::ResultSchema(_)
+        ),
+    }
 }
 
 pub(crate) fn schema_provider_failure(error: &WindowsHostedError) -> bool {
@@ -646,6 +650,56 @@ mod tests {
             session.target(NativeTarget::Windows).attachment(),
             Some(Attach::Run(103))
         );
+    }
+
+    #[test]
+    fn an_observed_run_that_concluded_in_failure_is_redispatched() {
+        let workflows = workflows("a");
+        let mut session = SessionFile::new(41, workflows.clone(), identity("inputs"));
+        session
+            .record(
+                NativeTarget::Windows,
+                &binding(103, &workflows.windows, false),
+            )
+            .unwrap();
+        let interrupted = WindowsHostedError::Detached {
+            run_id: 103,
+            reason: Box::new(WindowsHostedError::Interrupted),
+        };
+        session
+            .targets
+            .windows
+            .failed(
+                terminal_provider_failure(&interrupted),
+                schema_provider_failure(&interrupted),
+                interrupted.to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Windows).attachment(),
+            Some(Attach::Run(103)),
+            "a run merely left unobserved is reattached",
+        );
+
+        let concluded = WindowsHostedError::Detached {
+            run_id: 103,
+            reason: Box::new(WindowsHostedError::Command {
+                operation: "workflow execution",
+                code: Some(1),
+                stdout: String::new(),
+                stderr: "provider run concluded \"failure\"".to_owned(),
+            }),
+        };
+        session
+            .targets
+            .windows
+            .failed(
+                terminal_provider_failure(&concluded),
+                schema_provider_failure(&concluded),
+                concluded.to_string(),
+            )
+            .unwrap();
+        assert_eq!(session.target(NativeTarget::Windows).attachment(), None);
     }
 
     #[test]
