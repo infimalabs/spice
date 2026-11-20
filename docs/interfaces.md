@@ -387,12 +387,14 @@ token or by `navigator.maxTouchPoints` above one, which a Mac reports as zero.
 Other browsers spread roster agents across published macOS premium voices
 first: Safari's `com.apple.voice.premium.` identifier or Chromium's exact
 ` (Premium)` name suffix, served locally. The pool keeps the default premium
-voice's language, or the browser's language when none is default; within it the
-pool is the premium voices, else the enhanced voices
-(`com.apple.voice.enhanced.` or ` (Enhanced)`), else every speaking voice the
-browser serves locally in that language, never a macOS novelty voice
-(`com.apple.speech.synthesis.voice.`: Bells, Bubbles, Zarvox, ...), and the
-browser default speaks only when the language has no such voice.
+voice's language, otherwise the browser's language. If that language names
+none of the published speaking voices, the default speaking voice supplies the
+browser's own compatible tag instead. Within that language the pool is the
+premium voices, else the enhanced voices (`com.apple.voice.enhanced.` or
+` (Enhanced)`), else every speaking voice the browser serves locally, never a
+macOS novelty voice (`com.apple.speech.synthesis.voice.`: Bells, Bubbles,
+Zarvox, ...), and the browser default speaks only when the language has no such
+voice.
 
 An agent keeps the voice its lane hashes to unless a teammate already holds
 it, so teammates sound different until a team outnumbers the voices, and
