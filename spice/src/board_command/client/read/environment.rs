@@ -103,11 +103,11 @@ pub(super) fn environment_status(
             wire::EnvironmentRequirement::JournalSchema { value } => schemas.push(value.get()),
             wire::EnvironmentRequirement::TrustGrant { value } => {
                 trust.push(value.to_string());
-                let head = environment.trust_head(value);
-                let standing = head.map_or("absent", |head| head.state.as_str());
+                let standing = environment
+                    .trust_head(value)
+                    .map_or("missing", |head| head.state.as_str());
                 trust_observed.push(format!("{value}:{standing}"));
-                let satisfied = head.is_some_and(|head| head.state == wire::TrustState::Granted);
-                trust_satisfied.push(format!("{value}:{satisfied}"));
+                trust_satisfied.push(format!("{value}:{}", environment.satisfies(requirement)));
             }
             wire::EnvironmentRequirement::ApplianceVersion { value } => appliance.push(value),
             wire::EnvironmentRequirement::ResourcePool { name, shards } => {

@@ -524,7 +524,7 @@ fn assert_trust_transition(
     )));
     let status = task_status(&trust_blocked).expect("blocked trust status renders");
     assert!(status.contains(&format!(
-        "trust-grant required={digest} observed={digest}:absent satisfied={digest}:false"
+        "trust-grant required={digest} observed={digest}:missing satisfied={digest}:false"
     )));
     pend_trust(bus, &digest);
     assert!(allocated(bus, epoch, &Actor::TEST_PRINCIPAL).is_none());

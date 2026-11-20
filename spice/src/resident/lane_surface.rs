@@ -110,15 +110,13 @@ pub(super) fn held_claim_trust(
         .as_slice()
         .iter()
         .find_map(|requirement| match requirement {
-            wire::EnvironmentRequirement::TrustGrant { value } => Some((
-                value.clone(),
-                environment
-                    .trust_head(value)
-                    .is_some_and(|head| head.state == wire::TrustState::Granted),
-            )),
+            wire::EnvironmentRequirement::TrustGrant { value } => {
+                Some((value.clone(), environment.satisfies(requirement)))
+            }
             _ => None,
         }))
 }
+
 const REAP: Duration = Duration::from_secs(2);
 /// How long an occupant may take to end itself before the resident kills it.
 ///
