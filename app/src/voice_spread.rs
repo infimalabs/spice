@@ -190,14 +190,15 @@ pub struct Spread {
 
 /// The spread pool over `offered`.
 ///
-/// The language is that of the default premium voice, or `device_language`
-/// when no premium voice is marked default. Within it the pool is the premium
-/// voices, else the enhanced voices, else every speaking voice the device
-/// serves (a macOS novelty voice never speaks for an agent); a
-/// name published twice enters once. With no language known, or no voice in
-/// the language, the device default speaks. A pool below premium carries the
-/// gap only when `premium_expected`: a platform without a premium tier has
-/// nothing to download.
+/// The language is that of the default premium voice, then `device_language`.
+/// When the device language names none of the published speaking voices, the
+/// default speaking voice supplies the browser's own compatible tag instead.
+/// Within the language, the pool is the premium voices, else the enhanced
+/// voices, else every speaking voice the device serves (a macOS novelty voice
+/// never speaks for an agent); a name published twice enters once. With no
+/// language known, or no voice in the language, the device default speaks. A
+/// pool below premium carries the gap only when `premium_expected`: a platform
+/// without a premium tier has nothing to download.
 #[must_use]
 pub fn pool(
     offered: &[OfferedVoice<'_>],
@@ -207,11 +208,26 @@ pub fn pool(
     let premium: Vec<usize> = (0..offered.len())
         .filter(|&index| is_premium(&offered[index]))
         .collect();
-    let Some(language) = premium
+    let default_premium = premium
         .iter()
         .map(|&index| offered[index])
         .find(|voice| voice.default)
-        .map(|voice| voice.lang)
+        .map(|voice| voice.lang);
+    let device_matches = device_language.is_some_and(|language| {
+        offered
+            .iter()
+            .any(|voice| is_speaking(voice) && same_primary_language(voice.lang, language))
+    });
+    let Some(language) = default_premium
+        .or_else(|| device_language.filter(|_| device_matches))
+        .or_else(|| {
+            device_language.and_then(|_| {
+                offered
+                    .iter()
+                    .find(|voice| voice.default && is_speaking(voice))
+                    .map(|voice| voice.lang)
+            })
+        })
         .or(device_language)
         .map(primary_language)
     else {
@@ -257,17 +273,23 @@ fn in_language(
 ) -> Vec<usize> {
     (0..offered.len())
         .filter(|&index| {
-            admits(&offered[index]) && primary_language(offered[index].lang) == language
+            admits(&offered[index]) && same_primary_language(offered[index].lang, language)
         })
         .collect()
 }
 
+/// Whether two tags name the same primary language.
+fn same_primary_language(left: &str, right: &str) -> bool {
+    primary_language_subtag(left).eq_ignore_ascii_case(primary_language_subtag(right))
+}
+
+fn primary_language_subtag(tag: &str) -> &str {
+    tag.split(['-', '_']).next().unwrap_or_default()
+}
+
 /// The primary language subtag, so `en-GB`, `en_US`, and `EN` all read `en`.
 fn primary_language(tag: &str) -> String {
-    tag.split(['-', '_'])
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
+    primary_language_subtag(tag).to_ascii_lowercase()
 }
 
 /// The pool slot `member` speaks with among `teams`, given `size` voices.
@@ -740,39 +762,42 @@ mod tests {
     }
 
     #[test]
-    fn a_platform_without_premium_voices_spreads_its_local_voices_silently() {
-        // Firefox on Android publishes the engine's voices under their
-        // engine identifiers; none carries macOS tier evidence.
+    fn firefox_android_uses_its_published_default_language_for_the_local_pool() {
+        // Firefox Android publishes non-BCP-47 three-letter language tags.
+        // The browser's ordinary `en-US` navigator language cannot match them.
         let android = [
             safari(
                 "English United States",
-                "urn:moz-tts:android:en-us-x-sfg",
-                "en-US",
+                "urn:moz-tts:android:eng-us-x-sfg",
+                "eng-US-f000",
                 true,
             ),
             safari(
                 "English United Kingdom",
-                "urn:moz-tts:android:en-gb-x-gba",
-                "en-GB",
+                "urn:moz-tts:android:eng-gb-x-gba",
+                "eng-GB-f001",
                 false,
             ),
-            safari("Deutsch", "urn:moz-tts:android:de-de-x-nfh", "de-DE", false),
+            safari(
+                "Deutsch",
+                "urn:moz-tts:android:deu-de-x-nfh",
+                "deu-DE-f000",
+                false,
+            ),
             OfferedVoice {
                 name: "English (Cloud)",
-                uri: "urn:moz-tts:android:en-us-cloud",
-                lang: "en-US",
+                uri: "urn:moz-tts:android:eng-us-cloud",
+                lang: "eng-US-cloud",
                 local: false,
                 default: false,
             },
         ];
-        assert_eq!(
-            pool(&android, Some("en-US"), false),
-            Spread {
-                pool: vec![1, 0],
-                tier: Tier::Local,
-                gap: None,
-            }
-        );
+        let spread = Spread {
+            pool: vec![1, 0],
+            tier: Tier::Local,
+            gap: None,
+        };
+        assert_eq!(pool(&android, Some("en-US"), false), spread);
         assert_eq!(
             pool(&android, None, false),
             Spread {
