@@ -75,6 +75,8 @@ pub(super) struct EnvironmentStatus {
     pub(super) blocked: usize,
     pub(super) schemas: String,
     pub(super) trust: String,
+    pub(super) trust_observed: String,
+    pub(super) trust_satisfied: String,
     pub(super) appliance: String,
     pub(super) resources: String,
 }
@@ -89,6 +91,8 @@ pub(super) fn environment_status(
         .count();
     let mut schemas = Vec::new();
     let mut trust = Vec::new();
+    let mut trust_observed = Vec::new();
+    let mut trust_satisfied = Vec::new();
     let mut appliance = Vec::new();
     let mut resources = Vec::new();
     for requirement in rows
@@ -97,7 +101,14 @@ pub(super) fn environment_status(
     {
         match requirement {
             wire::EnvironmentRequirement::JournalSchema { value } => schemas.push(value.get()),
-            wire::EnvironmentRequirement::TrustGrant { value } => trust.push(value.to_string()),
+            wire::EnvironmentRequirement::TrustGrant { value } => {
+                trust.push(value.to_string());
+                let head = environment.trust_head(value);
+                let standing = head.map_or("absent", |head| head.state.as_str());
+                trust_observed.push(format!("{value}:{standing}"));
+                let satisfied = head.is_some_and(|head| head.state == wire::TrustState::Granted);
+                trust_satisfied.push(format!("{value}:{satisfied}"));
+            }
             wire::EnvironmentRequirement::ApplianceVersion { value } => appliance.push(value),
             wire::EnvironmentRequirement::ResourcePool { name, shards } => {
                 resources.push(format!("{name}:{}", shards.get()));
@@ -108,6 +119,10 @@ pub(super) fn environment_status(
     schemas.dedup();
     trust.sort();
     trust.dedup();
+    trust_observed.sort();
+    trust_observed.dedup();
+    trust_satisfied.sort();
+    trust_satisfied.dedup();
     appliance.sort_by(|left, right| {
         left.precedence(right)
             .then_with(|| left.as_str().cmp(right.as_str()))
@@ -120,6 +135,8 @@ pub(super) fn environment_status(
         blocked,
         schemas: listed(schemas.into_iter().map(|value| value.to_string())),
         trust: listed(trust.into_iter()),
+        trust_observed: listed(trust_observed.into_iter()),
+        trust_satisfied: listed(trust_satisfied.into_iter()),
         appliance: listed(appliance.into_iter().map(ToString::to_string)),
         resources: listed(resources.into_iter()),
     }

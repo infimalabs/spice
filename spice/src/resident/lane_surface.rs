@@ -92,6 +92,33 @@ const RECALL_LIMIT: usize = 16;
 /// Bytes one captured record may carry; capture truncates the rest.
 pub(in crate::resident) const CAPTURE_LIMIT: usize = 1024 * 1024;
 const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
+
+/// Required trust standing on the exact held claim currently owned by `lane`.
+pub(super) fn held_claim_trust(
+    bus: &Bus,
+    snapshot: &bus::TaskSnapshot,
+    lane: CanonicalUuid,
+) -> CommandResult<Option<(wire::Digest, bool)>> {
+    let Some(authority) = automatic::held_claim_authority(bus, Some(snapshot), lane)? else {
+        return Ok(None);
+    };
+    let environment = snapshot.environment();
+    Ok(authority
+        .statement
+        .body()
+        .requirements
+        .as_slice()
+        .iter()
+        .find_map(|requirement| match requirement {
+            wire::EnvironmentRequirement::TrustGrant { value } => Some((
+                value.clone(),
+                environment
+                    .trust_head(value)
+                    .is_some_and(|head| head.state == wire::TrustState::Granted),
+            )),
+            _ => None,
+        }))
+}
 const REAP: Duration = Duration::from_secs(2);
 /// How long an occupant may take to end itself before the resident kills it.
 ///
