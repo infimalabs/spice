@@ -33,5 +33,9 @@ sill = { path = "../sill" }
 tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "process", "rt", "sync", "time"] }
 tokio-util = { version = "0.7.14", default-features = false, features = ["rt"] }
 
+# Hardware SHA-256 on aarch64; see wire/Cargo.toml.
+[target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]
+sha2 = { version = "0.10.9", features = ["asm"] }
+
 [lints]
 workspace = true
