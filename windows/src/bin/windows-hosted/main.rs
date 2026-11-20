@@ -311,7 +311,7 @@ mod windows {
         eprintln!("[windows-hosted] guest identity admitted");
         let request = read_request(request_path)?;
         request.admit().map_err(|error| error.to_string())?;
-        admit_machine(&request)?;
+        let observed_os = admit_machine(&request)?;
         let GuestEnvironment {
             workspace,
             temp,
@@ -385,6 +385,7 @@ mod windows {
         grant_tree_contents_access(&stage, &provider_identity, 0o400, 0o500)?;
         let mut observed_image = request.image.clone();
         observed_image.version = image_version;
+        observed_image.os_version = observed_os;
         let result = ResultDocument {
             version: windows_execution::hosted::PROTOCOL_VERSION,
             challenge: request.challenge.clone(),
@@ -452,7 +453,7 @@ mod windows {
         std::process::exit(exit);
     }
 
-    fn admit_machine(request: &Request) -> Result<(), String> {
+    fn admit_machine(request: &Request) -> Result<String, String> {
         if env::consts::ARCH != "x86_64" || env::consts::OS != "windows" {
             return Err(format!(
                 "unsupported guest {}-{}",
@@ -461,13 +462,16 @@ mod windows {
             ));
         }
         let observed_os = windows_version()?;
-        if observed_os != request.image.os_version {
+        if !windows_execution::hosted::windows_release_admits(
+            &request.image.os_version,
+            &observed_os,
+        ) {
             return Err(format!(
-                "Windows build drifted: expected {}, observed {observed_os}",
+                "Windows release drifted: expected {}, observed {observed_os}",
                 request.image.os_version
             ));
         }
-        Ok(())
+        Ok(observed_os)
     }
 
     fn windows_version() -> Result<String, String> {

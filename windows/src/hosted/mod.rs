@@ -158,7 +158,7 @@ impl Request {
         if self.image.label.is_empty()
             || self.image.provider_os.is_empty()
             || self.image.version.is_empty()
-            || self.image.os_version.is_empty()
+            || windows_release(&self.image.os_version).is_none()
         {
             return Err(AdmissionError::Image);
         }
@@ -289,7 +289,7 @@ pub fn admit_result(
     if identity.run_id == 0 || identity.run_attempt == 0 {
         return Err(AdmissionError::RunIdentity);
     }
-    if !image_admits(&request.image, &mut identity.image) {
+    if !image_admits(&request.image, &identity.image) {
         return Err(AdmissionError::Image);
     }
     if identity.source != request.source {
@@ -309,14 +309,52 @@ pub fn admit_result(
     Ok(identity)
 }
 
-fn image_admits(expected: &ImagePin, observed: &mut ImagePin) -> bool {
-    if observed.version.is_empty() {
-        return false;
+fn image_admits(expected: &ImagePin, observed: &ImagePin) -> bool {
+    let ImagePin {
+        label: expected_label,
+        provider_os: expected_provider_os,
+        version: _,
+        os_version: expected_os_version,
+        architecture: expected_architecture,
+    } = expected;
+    let ImagePin {
+        label,
+        provider_os,
+        version,
+        os_version,
+        architecture,
+    } = observed;
+    !version.is_empty()
+        && label == expected_label
+        && provider_os == expected_provider_os
+        && windows_release_admits(expected_os_version, os_version)
+        && architecture == expected_architecture
+}
+
+/// Whether two full Windows builds name the same major, minor, and build
+/// release, regardless of their cumulative-update revisions.
+pub fn windows_release_admits(expected: &str, observed: &str) -> bool {
+    windows_release(expected)
+        .zip(windows_release(observed))
+        .is_some_and(|(expected, observed)| expected == observed)
+}
+
+fn windows_release(version: &str) -> Option<[u32; 3]> {
+    let mut components = version.split('.');
+    let release = [
+        windows_version_component(components.next()?)?,
+        windows_version_component(components.next()?)?,
+        windows_version_component(components.next()?)?,
+    ];
+    windows_version_component(components.next()?)?;
+    components.next().is_none().then_some(release)
+}
+
+fn windows_version_component(component: &str) -> Option<u32> {
+    if component.is_empty() || component.len() > 1 && component.starts_with('0') {
+        return None;
     }
-    let version = std::mem::replace(&mut observed.version, expected.version.clone());
-    let admits = observed == expected;
-    observed.version = version;
-    admits
+    component.parse().ok()
 }
 
 fn toolchain_admits(expected: &ToolchainPins, observed: &mut ToolchainPins) -> bool {
@@ -585,23 +623,32 @@ mod tests {
     }
 
     #[test]
-    fn provider_image_revision_and_bundled_git_are_evidence_not_gates() {
+    fn provider_and_update_revisions_are_evidence_not_gates() {
         let request = request();
         let mut result = result(&request);
         result.identity.image.version = "20261115.999.1".to_owned();
+        result.identity.image.os_version = "10.0.26100.99999".to_owned();
         result.identity.toolchain.git = "git version 2.56.0.windows.99".to_owned();
 
         let identity = admit_result(&request, &result, &result.identity.runner)
             .expect("provider-only revisions admit");
         assert_eq!(identity.image.version, "20261115.999.1");
+        assert_eq!(identity.image.os_version, "10.0.26100.99999");
         assert_eq!(identity.toolchain.git, "git version 2.56.0.windows.99");
 
-        let mut changed_os = result.clone();
-        changed_os.identity.image.os_version = "10.0.26100.99999".to_owned();
-        assert_eq!(
-            admit_result(&request, &changed_os, &changed_os.identity.runner),
-            Err(AdmissionError::Image)
-        );
+        for changed_release in [
+            "11.0.26100.99999",
+            "10.1.26100.99999",
+            "10.0.26000.99999",
+            "10.0.26100",
+        ] {
+            let mut changed_os = result.clone();
+            changed_os.identity.image.os_version = changed_release.to_owned();
+            assert_eq!(
+                admit_result(&request, &changed_os, &changed_os.identity.runner),
+                Err(AdmissionError::Image)
+            );
+        }
 
         let mut changed_compiler = result;
         changed_compiler.identity.toolchain.msvc = "19.45.99999".to_owned();
