@@ -148,4 +148,4 @@ message = "Treat old implementations as evidence, never as executable arms. Migr
 
 [taste.terminology]
 words = ["whitelist", "whitelists", "whitelisted", "whitelisting", "blacklist", "blacklists", "blacklisted", "blacklisting"]
-message = "Replace whitelist, whitelists, whitelisted, and whitelisting with allowlist, allowlists, allowlisted, and allowlisting; replace blacklist, blacklists, blacklisted, and blacklisting with blocklist, blocklists, blocklisted, and blocklisting."
+message = "Use allowlist for permitted sets and blocklist for denied sets."
