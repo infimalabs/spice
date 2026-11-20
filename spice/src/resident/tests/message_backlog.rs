@@ -454,7 +454,7 @@ fn repeated_backlog_read_resumes_at_its_source_checkpoint_without_missing_an_app
 }
 
 #[test]
-fn history_refuses_a_cursor_after_the_durable_tape_source_is_replaced() {
+fn history_reports_a_cursor_unavailable_after_the_durable_tape_source_is_replaced() {
     let (root, paths) = resident_fixture("message-history-source-replaced");
     let bus = Bus::start(journal::Journal::in_memory().expect("backlog authority opens"))
         .expect("backlog bus starts");
@@ -547,10 +547,10 @@ fn history_refuses_a_cursor_after_the_durable_tape_source_is_replaced() {
         "the cached page preserves the durable frontier",
     );
     let next = history_cursors(&interval)[0];
-    let error = history_page(69, next).expect_err("a missing authenticated source is refused");
+    let reason = lane_history_fault(history_page(69, next), lane);
     assert!(
-        format!("{error:?}").contains("transcript source disappeared"),
-        "source disappearance remains explicit: {error:?}",
+        reason.contains("transcript source disappeared"),
+        "source disappearance remains explicit: {reason}",
     );
 
     let replacement = tape::Tape::open(&tape_path).expect("replacement tape opens");
@@ -558,15 +558,37 @@ fn history_refuses_a_cursor_after_the_durable_tape_source_is_replaced() {
         .tee(history.as_bytes())
         .expect("replacement history is captured");
 
-    let error = history_page(70, next).expect_err("a stale source cursor is refused");
+    let reason = lane_history_fault(history_page(70, next), lane);
     assert!(
-        format!("{error:?}").contains("transcript source changed"),
-        "replacement diagnosis preserves the source mismatch: {error:?}",
+        reason.contains("transcript source changed"),
+        "replacement diagnosis preserves the source mismatch: {reason}",
     );
 
     drop(source);
     bus.shutdown().expect("backlog bus stops");
     fs::remove_dir_all(root).expect("backlog fixture cleanup");
+}
+
+/// The failure one lane's history interval names for that lane alone.
+fn lane_history_fault(
+    answer: Result<wire::StreamFrame, serve::stream::Failure>,
+    lane: wire::CanonicalUuid,
+) -> String {
+    let frame = answer.expect("a lane's source failure answers that lane");
+    let wire::StreamFrame::MessageHistory { generation, .. } = frame else {
+        panic!("expected history interval");
+    };
+    assert_eq!(
+        generation.frontiers[0].state,
+        wire::TranscriptLaneState::Unavailable,
+        "a failed read is neither complete nor truncated history",
+    );
+    assert!(generation.messages.is_empty());
+    let [fault] = generation.faults.as_slice() else {
+        panic!("the unavailable lane names its failure");
+    };
+    assert_eq!(fault.lane, lane);
+    fault.reason.clone()
 }
 
 #[test]

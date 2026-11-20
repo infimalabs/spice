@@ -41,6 +41,7 @@ fn every_source_ready() -> ReadySources {
                 horizon: seq(1),
                 messages: vec![agent_message(0xe9, offset, "ready message")],
                 frontiers: Vec::new(),
+                faults: Vec::new(),
             })
             .expect("the retained receiver holds the channel open");
     }

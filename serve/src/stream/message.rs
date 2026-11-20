@@ -140,6 +140,7 @@ impl MessageFeed {
             horizon,
             messages,
             frontiers,
+            faults: Vec::new(),
         })
     }
 
@@ -151,10 +152,33 @@ impl MessageFeed {
         let read = self.prepare_history(requested)?;
         let mut messages = Vec::new();
         let mut frontiers = Vec::with_capacity(requested.len());
+        let mut faults = Vec::new();
         for cursor in requested {
-            let lane = self.read_history_lane(&read, cursor)?;
-            messages.extend(lane.messages);
-            frontiers.push(lane.frontier);
+            match self.read_history_lane(&read, cursor) {
+                Ok(lane) => {
+                    messages.extend(lane.messages);
+                    frontiers.push(lane.frontier);
+                }
+                // One lane's source failure answers that lane alone. Its
+                // cursor issues no new frontier, so a later page reads again.
+                Err(
+                    error @ (MessagePublishError::History(_) | MessagePublishError::InvalidHistory),
+                ) => {
+                    frontiers.push(wire::TranscriptLaneFrontier {
+                        lane: cursor.lane,
+                        state: wire::TranscriptLaneState::Unavailable,
+                        before: None,
+                    });
+                    faults.push(wire::TranscriptLaneFault {
+                        lane: cursor.lane,
+                        reason: match error {
+                            MessagePublishError::History(detail) => detail,
+                            error => error.to_string(),
+                        },
+                    });
+                }
+                Err(error) => return Err(error),
+            }
         }
         messages.sort_by_key(AgentMessage::chronology_key);
         if messages
@@ -179,6 +203,7 @@ impl MessageFeed {
             horizon,
             messages,
             frontiers,
+            faults,
         })
     }
 
@@ -840,6 +865,7 @@ impl MessageBatch {
             horizon,
             messages,
             frontiers,
+            faults: Vec::new(),
         };
         let _ = self.publisher.feed.updates.send(generation);
         Ok(true)

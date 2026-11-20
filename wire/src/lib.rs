@@ -159,10 +159,10 @@ pub use stream::{
     MessageHistoryCursor, MessageLocus, MessageProseOrigin, MessageRecipient, MessageReview,
     MessageSend, PEER_REPLY_CONTROL_PREFIX, PeerAnswer, REVIEW_FEEDBACK_CONTROL_PREFIX,
     REVIEW_FEEDBACK_GUIDANCE, StreamAdmissionError, StreamCursor, StreamFact, StreamFrame,
-    StreamLaneSeated, StreamRequest, TranscriptGeneration, TranscriptLaneFrontier,
-    TranscriptLaneState, TrustView, ViewSubject, parse_peer_line_control, parse_peer_reply_control,
-    parse_review_feedback_control, peer_line_control, peer_reply_control, review_feedback_control,
-    superseded_prose, valid_message_directives, valid_message_sends,
+    StreamLaneSeated, StreamRequest, TranscriptGeneration, TranscriptLaneFault,
+    TranscriptLaneFrontier, TranscriptLaneState, TrustView, ViewSubject, parse_peer_line_control,
+    parse_peer_reply_control, parse_review_feedback_control, peer_line_control, peer_reply_control,
+    review_feedback_control, superseded_prose, valid_message_directives, valid_message_sends,
 };
 pub use witness::{
     Answer, Disposition, Name, NameError, Phase, PhaseError, TaskHandle, TaskHandleError,

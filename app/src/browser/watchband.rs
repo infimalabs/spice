@@ -388,6 +388,20 @@ fn team_history_targets(
         .collect()
 }
 
+/// Each member whose last history page could not be read, and why.
+fn team_history_faults(runtime: &AppRuntime, team: &crate::runtime::LaneRow) -> Vec<String> {
+    team.members
+        .iter()
+        .filter_map(|member| {
+            runtime.message_history_fault(member.lane).map(|reason| {
+                let label =
+                    crate::watchband::agent_message_label(&member.worktree, member.name.as_deref());
+                format!("Older history for {label} is unavailable: {reason}. Scroll to retry.")
+            })
+        })
+        .collect()
+}
+
 fn broadcast_targets(
     members: &[crate::runtime::LaneMember],
     epoch: CanonicalUuid,
@@ -729,6 +743,9 @@ fn render_activity(
                 history={history_sender}
                 {composer_slot}
             />
+            {for history.faults.into_iter().map(|notice| html! {
+                <div class="mosaic-history-unavailable" role="status">{notice}</div>
+            })}
         </div>
     }
 }
@@ -737,6 +754,7 @@ struct HistoryPaging<'a> {
     sender: &'a SenderHandle,
     targets: BTreeMap<CanonicalUuid, (wire::MessageHistoryCursor, u64)>,
     revision: u64,
+    faults: Vec<String>,
 }
 
 impl<'a> HistoryPaging<'a> {
@@ -745,6 +763,7 @@ impl<'a> HistoryPaging<'a> {
             sender,
             targets: team_history_targets(runtime, team),
             revision: runtime.message_history_revision(),
+            faults: team_history_faults(runtime, team),
         }
     }
 }

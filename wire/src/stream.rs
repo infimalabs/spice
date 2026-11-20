@@ -318,7 +318,9 @@ pub enum TranscriptLaneState {
     Complete,
     /// Older durable cards remain behind this lane's cursor.
     Truncated,
-    /// The bounded source walk could not hydrate this lane.
+    /// The source could not hydrate this lane: the bounded startup walk did
+    /// not reach it, or a history interval names its read failure in
+    /// [`TranscriptGeneration::faults`].
     Unavailable,
 }
 
@@ -351,6 +353,22 @@ pub struct TranscriptGeneration {
     pub messages: Vec<AgentMessage>,
     /// Explicit state for every lane covered by this publication.
     pub frontiers: Vec<TranscriptLaneFrontier>,
+    /// Why each lane a history interval marks unavailable could not be read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub faults: Vec<TranscriptLaneFault>,
+}
+
+/// One requested lane whose older history could not be read for an interval.
+///
+/// The failure is confined to that lane: the interval still answers every
+/// other requested lane, and a later request for the same cursor reads again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TranscriptLaneFault {
+    /// Lane whose history read failed.
+    pub lane: CanonicalUuid,
+    /// Source failure the read reported.
+    pub reason: String,
 }
 
 /// Visible kind of one agent-authored transcript activity.

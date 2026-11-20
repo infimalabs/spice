@@ -721,3 +721,67 @@ fn three_member_frontiers_progress_independently_across_live_work_and_reconnect(
     interleave_live_work_and_member_pages(&mut runtime, &session);
     reconnect_and_replay_overlap(&mut runtime, &session, &accepted);
 }
+
+fn failed_history_page(lane: &str, before: u64, faults: serde_json::Value) -> Vec<u8> {
+    let mut generation = transcript_generation(
+        1,
+        Vec::new(),
+        vec![serde_json::json!({"lane": lane, "state": "unavailable"})],
+    );
+    generation["faults"] = faults;
+    serde_json::to_vec(&serde_json::json!({
+        "stream": "message-history",
+        "v": 1,
+        "id": REQUEST,
+        "epoch": EPOCH,
+        "requested": [{
+            "generation": 1,
+            "lane": lane,
+            "before": {"member": 1, "offset": before, "length": 20, "event": 0},
+        }],
+        "generation": generation,
+    }))
+    .expect("failed message history serializes")
+}
+
+#[test]
+fn a_failed_history_page_keeps_the_lane_cursor_and_names_why_until_a_read_succeeds() {
+    let session = session(OPERATOR, EPOCH);
+    let accepted = acceptance(&session, OWNER_ACTOR, EPOCH);
+    let mut runtime = AppRuntime::new(&accepted);
+    let snapshot = message_snapshot(
+        vec![agent_message(LANE, 100, T10, "newest prose", None)],
+        &[LANE],
+    );
+    apply(&mut runtime, &session, &snapshot);
+
+    let unexplained = failed_history_page(LANE, 100, serde_json::json!([]));
+    assert!(!apply(&mut runtime, &session, &unexplained));
+    assert_eq!(runtime.message_history_fault(uuid(LANE)), None);
+
+    let failed = failed_history_page(
+        LANE,
+        100,
+        serde_json::json!([{"lane": LANE, "reason": "tape member 8 is unreadable"}]),
+    );
+    assert!(apply(&mut runtime, &session, &failed));
+    assert_eq!(
+        runtime.message_history_fault(uuid(LANE)),
+        Some("tape member 8 is unreadable"),
+    );
+    assert_eq!(
+        target_offset(&runtime, LANE),
+        Some(100),
+        "a failed read is neither complete history nor a moved frontier",
+    );
+
+    let recovered = history_page(
+        LANE,
+        100,
+        vec![agent_message(LANE, 50, T09, "older prose", None)],
+        true,
+    );
+    assert!(apply(&mut runtime, &session, &recovered));
+    assert_eq!(runtime.message_history_fault(uuid(LANE)), None);
+    assert_eq!(target_offset(&runtime, LANE), Some(50));
+}
