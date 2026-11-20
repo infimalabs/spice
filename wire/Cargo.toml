@@ -22,5 +22,12 @@ uuid = { version = "1.24.0", features = ["serde"] }
 [dev-dependencies]
 toml = "1.1.4"
 
+# sha2 compiles its ARMv8 SHA-256 backend only under `asm`; without it every
+# aarch64 build hashes in software, about a quarter as fast. The assembly
+# crate the feature brings does not build with MSVC. Each crate that names
+# sha2 repeats this so a build of any one of them selects the same sha2.
+[target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]
+sha2 = { version = "0.10.9", features = ["asm"] }
+
 [lints]
 workspace = true
