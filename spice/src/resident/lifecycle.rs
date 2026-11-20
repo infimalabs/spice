@@ -639,7 +639,7 @@ impl Runtime {
                 if reconcile_retained_trust(bus, snapshot, lane, diagnostic) {
                     return Ok(Attempted::TrustReconciled);
                 }
-                continue_retained(paths, snapshot, lane, &mut self.continuations)
+                continue_retained(bus, paths, snapshot, lane, &mut self.continuations)
             }
             // A claim minted ahead of a launch that never seated it keeps its
             // reservation: it launches under its own occupant and a refused
@@ -717,6 +717,7 @@ fn reconcile_retained_trust(
 /// Deliver one held-claim continuation to the exact idle owner. Its
 /// per-settlement repetition is the contract (see `project_retained_targets`).
 fn continue_retained(
+    bus: &Bus,
     paths: &RuntimePaths,
     snapshot: &bus::TaskSnapshot,
     lane: CanonicalUuid,
@@ -744,10 +745,14 @@ fn continue_retained(
         .facts()
         .latest_claim(&Actor::Lane(lane))
         .map(|(claim, _)| claim);
+    let trust = lane_surface::held_claim_trust(bus, snapshot, lane)?;
+    let notice_trust = trust
+        .as_ref()
+        .map(|(digest, satisfied)| (digest, *satisfied));
     let notice = super::design_input::BackgroundNotice {
         occupant,
         purpose: "retained-claim".to_owned(),
-        text: retained_notice(continuations.next(lane, claim)),
+        text: retained_notice(continuations.next(lane, claim), notice_trust),
     };
     match supervisor::command::confirmed_background_notice(paths, lane, notice, Some(owner)) {
         Ok(true) => Ok(Attempted::Started),
@@ -784,17 +789,28 @@ const EXIT_GUIDANCE_FROM: u32 = 4;
 
 /// The held-claim continuation, escalating from a bare resume to every exit
 /// as the same claim keeps stopping.
-fn retained_notice(ordinal: u32) -> String {
-    let mut text = String::from(
-        "<system-notice>\nYou still hold a claim; continue it now (`spice task next` shows its guidance).",
-    );
+fn retained_notice(ordinal: u32, trust: Option<(&wire::Digest, bool)>) -> String {
+    let mut text = if let Some((digest, true)) = trust {
+        format!(
+            "<system-notice>\nRequired trust grant {digest} is satisfied; resume the held claim \
+             now (`spice task next` shows its guidance)."
+        )
+    } else {
+        String::from(
+            "<system-notice>\nYou still hold a claim; continue it now (`spice task next` shows its guidance).",
+        )
+    };
     if ordinal >= REPEAT_GUIDANCE_FROM {
         text.push_str(
             " This repeats after each turn while you hold it. Waiting on other work: \
-             `spice task depends` on it, then `spice task free`. Waiting on an operator \
-             grant: keep the claim, `spice task require HANDLE --trust-grant DIGEST`, and \
-             end the turn; the claim parks until the grant lands.",
+             `spice task depends` on it, then `spice task free`.",
         );
+        if !matches!(trust, Some((_, true))) {
+            text.push_str(
+                " Waiting on an operator grant: keep the claim, `spice task require HANDLE \
+                 --trust-grant DIGEST`, and end the turn; the claim parks until the grant lands.",
+            );
+        }
     }
     if ordinal >= EXIT_GUIDANCE_FROM {
         text.push_str(
@@ -1385,6 +1401,34 @@ mod tests {
         assert_eq!(continuations.next(lane(1), first), 5);
         assert_eq!(continuations.next(lane(1), second), 1);
         assert_eq!(continuations.next(lane(1), second), 2);
+    }
+
+    #[test]
+    fn satisfied_trust_continuation_resumes_without_reparking_guidance() {
+        let digest: wire::Digest =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .parse()
+                .expect("fixture digest");
+
+        let notice = retained_notice(REPEAT_GUIDANCE_FROM, Some((&digest, true)));
+
+        assert!(notice.contains(&digest.to_string()));
+        assert!(notice.contains("is satisfied"));
+        assert!(!notice.contains("end the turn"));
+        assert!(!notice.contains("task require"));
+    }
+
+    #[test]
+    fn unsatisfied_trust_continuation_keeps_parking_guidance() {
+        let digest: wire::Digest =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .parse()
+                .expect("fixture digest");
+
+        let notice = retained_notice(REPEAT_GUIDANCE_FROM, Some((&digest, false)));
+
+        assert!(notice.contains("task require"));
+        assert!(notice.contains("end the turn"));
     }
 
     fn instant_after_minutes(minutes: u8) -> Instant {

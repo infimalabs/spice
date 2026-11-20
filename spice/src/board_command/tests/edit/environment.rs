@@ -522,6 +522,10 @@ fn assert_trust_transition(
     assert!(shown.contains(&format!(
         "trust-grant required={digest} standing=missing producer=- satisfied=false"
     )));
+    let status = task_status(&trust_blocked).expect("blocked trust status renders");
+    assert!(status.contains(&format!(
+        "trust-grant required={digest} observed={digest}:absent satisfied={digest}:false"
+    )));
     pend_trust(bus, &digest);
     assert!(allocated(bus, epoch, &Actor::TEST_PRINCIPAL).is_none());
     grant_trust(bus, &digest);
@@ -542,7 +546,9 @@ fn assert_trust_transition(
         "trust-grant required={digest} standing=granted producer=/producer/worktree satisfied=true"
     )));
     let status = task_status(&trust_satisfied).expect("trust status renders");
-    assert!(status.contains(&format!("trust-grant required={digest}")));
+    assert!(status.contains(&format!(
+        "trust-grant required={digest} observed={digest}:granted satisfied={digest}:true"
+    )));
     assert!(status.contains("satisfied=1 blocked=0"));
 }
 fn pend_trust(bus: &Bus, digest: &wire::Digest) {

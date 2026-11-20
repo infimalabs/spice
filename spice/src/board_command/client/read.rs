@@ -1367,7 +1367,7 @@ pub(in crate::board_command) fn task_status(
          waiting {workflow_waiting}\ndeferred {deferred}\n\
          designs{designs}\n\
          environment journal-schema required={} observed={} \
-         trust-grant required={} \
+         trust-grant required={} observed={} satisfied={} \
          appliance-version after={} observed={} \
          resource-pool required={} \
          satisfied={} blocked={}\n\
@@ -1376,6 +1376,8 @@ pub(in crate::board_command) fn task_status(
         status.schemas,
         board.schema,
         status.trust,
+        status.trust_observed,
+        status.trust_satisfied,
         status.appliance,
         board.appliance,
         status.resources,
