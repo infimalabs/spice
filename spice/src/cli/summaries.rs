@@ -38,6 +38,10 @@ const SUMMARIES: &[(&str, &str)] = &[
         "Read one topic node and a page of durable routing history",
     ),
     (
+        "topic preview",
+        "Preview a topic from title and pitch without applying the automatic filing minimum",
+    ),
+    (
         "topic describe",
         "Preview a node description; apply its digest to record it",
     ),
@@ -47,7 +51,7 @@ const SUMMARIES: &[(&str, &str)] = &[
     ),
     (
         "task place",
-        "Preview the router's pick; apply its digest to move the saved topic",
+        "Preview the tree’s proposed filing; apply its digest to move the saved topic",
     ),
     ("app", "Open the console in a native window"),
     (

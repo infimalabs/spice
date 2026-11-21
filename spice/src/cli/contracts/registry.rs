@@ -1034,6 +1034,14 @@ pub(super) const CONTRACTS: &[Contract] = &[
         Reply,
         "topic::read"
     ),
+    operator!(
+        ["topic", "preview"],
+        "topic preview TITLE PITCH",
+        Read,
+        [],
+        Reply,
+        "topic::read"
+    ),
     row!(
         ["topic", "move"],
         "topic move FROM TO [--apply DIGEST]",

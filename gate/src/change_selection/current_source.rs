@@ -278,6 +278,7 @@ fn known_workspace_package_root(root: &str) -> bool {
             | "steer"
             | "tape"
             | "taste"
+            | "topic"
             | "vendor"
             | "wire"
             | "windows"

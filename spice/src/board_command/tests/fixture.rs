@@ -4,6 +4,15 @@ use std::collections::BTreeSet;
 pub(super) static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 pub(super) static NEXT_COMMAND: AtomicU64 = AtomicU64::new(100);
 
+/// Complete one real worker pass before exercising a command that needs a
+/// ready generation. No background scheduling or sleeps in board tests.
+pub(super) fn warm_topics(root: &Path, bus: &Bus) -> std::sync::Arc<topic_tree::TopicTree> {
+    let repo = Repository::discover(root).unwrap();
+    let tree = topic_tree::TopicTree::shared(repo.admit_state().unwrap().data().to_owned());
+    tree.update(&bus.task_snapshot().unwrap());
+    tree
+}
+
 /// One occupied fixture seat, placed on a team of its own.
 ///
 /// The team carries an identity distinct from the lane, the way an operator's

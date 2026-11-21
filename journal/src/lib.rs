@@ -94,6 +94,7 @@ pub mod crossing {
         TaskHandle, TaskHead, TaskProvenance, TaskStamp, Topic, TranscriptSourceHead,
         TranscriptStreamKey, TrustHead, TrustState, WireVersion, Witness, WorkflowCompletionReview,
         WorkflowConclusion, WorkflowHead, WorkflowNegative, WorkflowReview, WorkflowStatus,
+        is_oops_topic,
     };
 }
 

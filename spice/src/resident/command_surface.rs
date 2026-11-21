@@ -77,6 +77,7 @@ pub(super) struct Surface<'a> {
     recovery: lane_recovery::Runtime,
     pub(super) config: &'a SurfaceConfig,
     reads: &'a CurrentReads,
+    topic_tree: Arc<crate::board_command::topic_tree::TopicTree>,
     resources: &'a crate::board_command::resources::ResourceClaims,
     /// Retained session profiles a nudge scores, once message startup
     /// restores them.
@@ -127,6 +128,7 @@ impl<'a> Surface<'a> {
             recovery,
             config,
             reads,
+            topic_tree: crate::board_command::topic_tree::TopicTree::shared(paths.data.clone()),
             resources,
             profiles: OnceLock::new(),
         }
@@ -173,12 +175,20 @@ impl<'a> Surface<'a> {
     }
 
     pub(super) fn refresh_reads(&self) -> super::CommandResult<()> {
+        self.topic_tree.notify();
         self.reads
             .refresh()
             .map_err(|error| super::store_fault("resident::read-materializer-unavailable", &error))
     }
 
+    /// Start the sole topic writer without waiting for any replay.
     pub(super) fn synchronize_reads_before_publish(&self) -> super::CommandResult<()> {
+        let reader = self.bus.reader();
+        self.topic_tree
+            .start(move || reader.task_snapshot().ok())
+            .map_err(|error| {
+                super::environment_fault("resident::topic-regrow-unavailable", &error.to_string())
+            })?;
         self.reads
             .synchronize_before_publish()
             .map_err(|error| super::store_fault("resident::read-materialization-failed", &error))
@@ -221,8 +231,20 @@ impl<'a> Surface<'a> {
         command: &wire::AdmittedCommand,
     ) -> CommandDispatch {
         match command.body() {
-            Intent::TopicRead(request) => {
-                return CommandDispatch::ordinary(super::topic_surface::read(self.bus, request));
+            Intent::TopicRead(wire::topic::TopicRead::Preview { title, pitch }) => {
+                return CommandDispatch::ordinary(crate::board_command::topic_tree::preview(
+                    self.bus,
+                    self.repository,
+                    command.actor(),
+                    &self.topic_tree,
+                    title,
+                    pitch,
+                ));
+            }
+            Intent::TopicRead(wire::topic::TopicRead::Show { topic, after }) => {
+                return CommandDispatch::ordinary(super::topic_surface::read(
+                    self.bus, topic, *after,
+                ));
             }
             Intent::TopicEdit(request) => {
                 return CommandDispatch::ordinary(super::topic_surface::edit(

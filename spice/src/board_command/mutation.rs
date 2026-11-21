@@ -392,11 +392,8 @@ struct AdmittedAdd {
     dependency_witnesses: Vec<Witness>,
 }
 
-/// Read the actor's board against the tasks the request names; resolve the
-/// creation's origin; then place it, with that origin as the router's
-/// secondary evidence. A creation without `--draft` routes at creation; an
-/// author-held draft with no topic rests unplaced without consulting the
-/// router.
+/// Forecast every unnamed creation. An author-held or controlled draft reports
+/// the proposal without binding it until filing.
 fn admit_add_topic(
     bus: &Bus,
     command: &wire::AdmittedCommand,
@@ -416,19 +413,18 @@ fn admit_add_topic(
     let (flow, dependency_witnesses) =
         task_flow_for_dependencies(command, add, &snapshot, &origin)?;
     let controlled = planning::preparation_parent(&snapshot.answer, add)?.is_some();
-    let placement = if (add.draft || controlled) && add.topic.is_none() {
-        placement::unplaced_creation()
-    } else {
-        place_creation(
-            bus,
-            &snapshot,
-            command.actor(),
-            add.topic.as_ref(),
-            task_add_statement(add, &flow[1]),
-            super::routing::OriginView::of(bus, &origin.provenance)?,
-            None,
-        )?
-    };
+    let mut placement = place_creation(
+        bus,
+        &snapshot,
+        command.actor(),
+        add.topic.as_ref(),
+        task_add_statement(add, &flow[1]),
+        super::routing::OriginView::of(bus, &origin.provenance)?,
+        None,
+    )?;
+    if (add.draft || controlled) && add.topic.is_none() {
+        placement.topic = wire::TaskTopic::unplaced(None);
+    }
     Ok(AdmittedAdd {
         placement,
         origin,

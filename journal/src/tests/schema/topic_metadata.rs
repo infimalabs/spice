@@ -70,19 +70,6 @@ fn topic_exists(journal: &Journal, path: &str) -> bool {
         .is_some()
 }
 
-fn authored_task_path(journal: &Journal, task: &TaskStamp) -> wire::Topic {
-    let snapshot = journal.fact_snapshot().unwrap();
-    snapshot
-        .facts()
-        .iter()
-        .filter_map(|row| row.fact.read::<wire::body::TaskAdded>())
-        .find(|added| added.task == *task)
-        .unwrap()
-        .topic
-        .path
-        .unwrap()
-}
-
 fn set_workflow_status(
     journal: &mut Journal,
     task: &TaskStamp,
@@ -505,44 +492,19 @@ fn live_references_pin_nodes_while_historical_records_keep_only_authored_paths()
 }
 
 #[test]
-fn routing_targets_keep_authored_text_and_identity_without_structural_only_nodes() {
+fn routing_topology_reserves_empty_paths_and_tracks_node_identity_across_moves() {
     let mut journal = authority_fixture();
     describe(
         &mut journal,
-        "/structure/described",
-        "compiler syntax diagnostics",
+        "/structure/empty/leaf",
+        "retains its otherwise empty parent",
     );
-    describe(&mut journal, "/structure/empty", "");
-    let task: TaskStamp = "1kKRRsDPx".parse().unwrap();
-    let head = journal
-        .read(|read| read.task_head(&task))
-        .unwrap()
-        .unwrap()
-        .into_body();
-    let original_path = head.topic.path.clone().unwrap();
-    let original_title = head.title.clone();
-    let before = journal.read(|read| read.topic_routing_nodes()).unwrap();
-    assert!(
-        !before
-            .iter()
-            .any(|node| matches!(node.path.as_str(), "/structure" | "/structure/empty"))
-    );
-    let described = before
+    let nodes = journal.read(|read| read.topic_routing_nodes()).unwrap();
+    let id = nodes
         .iter()
-        .find(|node| node.path.as_str() == "/structure/described")
-        .unwrap();
-    assert_eq!(described.description, "compiler syntax diagnostics");
-    let id = described.id;
-    let task_node = before
-        .iter()
-        .find(|node| node.path == original_path)
-        .unwrap();
-    assert!(
-        task_node
-            .documents
-            .iter()
-            .any(|text| text.lines().next() == Some(original_title.as_str()))
-    );
+        .find(|node| node.path.as_str() == "/structure/empty")
+        .unwrap()
+        .id;
     publish(
         &mut journal,
         TopicMoved {
@@ -550,128 +512,14 @@ fn routing_targets_keep_authored_text_and_identity_without_structural_only_nodes
             to: "/renamed".parse().unwrap(),
         },
     );
-    let after = journal.read(|read| read.topic_routing_nodes()).unwrap();
+    let moved = journal.read(|read| read.topic_routing_nodes()).unwrap();
     assert_eq!(
-        after
+        moved
             .iter()
             .find(|node| node.id == id)
             .unwrap()
             .path
             .as_str(),
-        "/renamed/described"
-    );
-
-    let mut write = JournalWrite::new(
-        Actor::TEST_PRINCIPAL,
-        "topic:routing".parse().unwrap(),
-        instant(),
-        wire::Producer::CommandDoor,
-    );
-    let fact = write
-        .fact(
-            wire::body::TaskEdited {
-                task: task.clone(),
-                revision: 2,
-                dependencies: None,
-                flow: None,
-                intent: None,
-            },
-            FactCause::Root,
-        )
-        .unwrap();
-    write.task_head(fact, move |revision| wire::TaskHead {
-        topic: wire::TaskTopic::from("/destination".parse::<wire::Topic>().unwrap()),
-        title: "current parser statement".to_owned(),
-        revision,
-        ..head
-    });
-    journal.apply(write).unwrap();
-    let moved = journal.read(|read| read.topic_routing_nodes()).unwrap();
-    assert!(
-        !moved.iter().any(|node| node.path == original_path),
-        "historical use does not retain an active routing target"
-    );
-    let destination = moved
-        .iter()
-        .find(|node| node.path.as_str() == "/destination")
-        .unwrap();
-    assert!(
-        destination
-            .documents
-            .iter()
-            .any(|text| text.lines().next() == Some("current parser statement"))
-    );
-    describe(&mut journal, "/destination", "current destination");
-    set_workflow_status(
-        &mut journal,
-        &task,
-        wire::WorkflowStatus::completed(instant()),
-    );
-    let settled = journal.read(|read| read.topic_routing_nodes()).unwrap();
-    let destination = settled
-        .iter()
-        .find(|node| node.path.as_str() == "/destination")
-        .expect("description retains the settled task's former node");
-    assert_eq!(destination.description, "current destination");
-    assert!(
-        destination.documents.is_empty(),
-        "settled task text supplies no routing flavor"
-    );
-    assert_eq!(authored_task_path(&journal, &task), original_path);
-}
-
-#[test]
-fn unmatched_routed_statements_do_not_flavor_their_shared_topic() {
-    let mut journal = authority_fixture();
-    let task: TaskStamp = "1kKRRsDPx".parse().unwrap();
-    let mut head = journal
-        .read(|read| read.task_head(&task))
-        .unwrap()
-        .unwrap()
-        .into_body();
-    head.title = "fallback glimmerquark statement".to_owned();
-    let unmatched = edit_topic(
-        &mut journal,
-        &task,
-        head,
-        wire::TaskTopic {
-            path: Some("/destination".parse().unwrap()),
-            placed: Some("/destination".parse().unwrap()),
-            named: None,
-            unmatched: true,
-            nodes: None,
-        },
-        2,
-    );
-    let nodes = journal.read(|read| read.topic_routing_nodes()).unwrap();
-    let destination = nodes
-        .iter()
-        .find(|node| node.path.as_str() == "/destination")
-        .expect("a live unmatched task retains its topic path");
-    assert!(
-        destination.documents.is_empty(),
-        "an unmatched-routed statement supplies no routing flavor"
-    );
-
-    let mut head = unmatched;
-    head.title = "current parser statement".to_owned();
-    edit_topic(
-        &mut journal,
-        &task,
-        head,
-        wire::TaskTopic::from("/destination".parse::<wire::Topic>().unwrap()),
-        3,
-    );
-    let nodes = journal.read(|read| read.topic_routing_nodes()).unwrap();
-    let destination = nodes
-        .iter()
-        .find(|node| node.path.as_str() == "/destination")
-        .unwrap();
-    assert!(
-        destination
-            .documents
-            .iter()
-            .any(|text| text.lines().next() == Some("current parser statement")),
-        "deliberate placement in the same topic contributes routing flavor"
+        "/renamed/empty"
     );
 }
