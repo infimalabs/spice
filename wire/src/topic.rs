@@ -14,6 +14,11 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod operations;
 pub use operations::{TopicAnswer, TopicChange, TopicDescribed, TopicEdit, TopicNode, TopicRead};
+mod grouping;
+pub use grouping::{
+    Group, GroupMember, Grouping, GroupingFreshness, GroupingRebuild, GroupingRecovery, NextSeat,
+    TreeLag,
+};
 
 /// UUID-shaped roots carry 32 hexadecimal digits with or without separators.
 const UUID_HEX_DIGITS: usize = 32;

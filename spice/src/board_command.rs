@@ -140,6 +140,7 @@ mod mutation;
 mod placement;
 pub(crate) mod resources;
 mod routing;
+pub(crate) mod topic_tree;
 pub(crate) use mutation::task_defer;
 pub(crate) use mutation::{accept_invitation, task_invite, task_join};
 

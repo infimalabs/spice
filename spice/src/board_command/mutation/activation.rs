@@ -134,15 +134,12 @@ impl Destination {
 
     /// The placement a receipt reports for this destination.
     pub(in crate::board_command) fn placement(&self) -> Option<wire::intent::TaskPlacement> {
-        self.topic
-            .path
-            .clone()
-            .map(|topic| wire::intent::TaskPlacement {
-                topic,
-                router: self.route.clone(),
-                drive_refusal: None,
-                next: None,
-            })
+        (self.topic.path.is_some() || self.route.is_some()).then(|| wire::intent::TaskPlacement {
+            topic: self.topic.path.clone(),
+            router: self.route.clone(),
+            drive_refusal: None,
+            next: None,
+        })
     }
 }
 

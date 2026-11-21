@@ -3,7 +3,7 @@
 use bus::Bus;
 use journal::{FactCause, GuardError, JournalGuard};
 use wire::intent::CommandAnswer;
-use wire::topic::{TopicAnswer, TopicChange, TopicDescribed, TopicEdit, TopicMoved, TopicRead};
+use wire::topic::{TopicAnswer, TopicChange, TopicDescribed, TopicEdit, TopicMoved};
 use wire::{Digest, Domain, Outcome, Producer, Refusal, Reply, ReplyPosition, SeqRange};
 
 use super::{CommandResult, commit, seq, store_fault, typed_command, typed_outcome, write};
@@ -33,19 +33,18 @@ fn refuse_reserved_oops_move(request: &TopicEdit) -> CommandResult<()> {
     )))
 }
 
-pub(super) fn read(bus: &Bus, request: &TopicRead) -> Outcome<CommandAnswer> {
-    let selected = request.clone();
-    match bus.read(move |read| {
-        Ok((
-            read.cursor()?,
-            read.topic_read(&selected.topic, selected.after)?,
-        ))
-    }) {
+pub(super) fn read(
+    bus: &Bus,
+    topic: &wire::Topic,
+    after: Option<wire::Seq>,
+) -> Outcome<CommandAnswer> {
+    let selected = topic.clone();
+    match bus.read(move |read| Ok((read.cursor()?, read.topic_read(&selected, after)?))) {
         Ok((Some(cursor), answer)) if answer.node.is_some() => Outcome::Reply(Reply {
             position: ReplyPosition::Snapshot(cursor),
             body: CommandAnswer::Topic(Box::new(answer)),
         }),
-        Ok(_) => refused(format!("topic {} does not exist", request.topic)),
+        Ok(_) => refused(format!("topic {topic} does not exist")),
         Err(error) => store_fault("topic::read-failed", &error.to_string()),
     }
 }

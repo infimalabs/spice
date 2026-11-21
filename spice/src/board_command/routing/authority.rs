@@ -1,12 +1,12 @@
 //! Choose final destinations using the same captured team policy.
 
-use board::routing::{Decision, RouteError, RoutingRoots, Scope, Scored};
+use board::routing::{RouteError, RoutingRoots};
 use board::team_policy::{Policy, Resolver, Task, Team};
 use wire::{CanonicalUuid, Phase, Topic};
 
 use super::ValidatedSnapshot;
 
-pub(super) struct Authority<'a> {
+pub(in crate::board_command) struct Authority<'a> {
     snapshot: &'a ValidatedSnapshot,
     policy: &'a Policy,
     teams: &'a [Team],
@@ -16,7 +16,7 @@ pub(super) struct Authority<'a> {
 }
 
 impl<'a> Authority<'a> {
-    pub(super) fn new(
+    pub(in crate::board_command) fn new(
         snapshot: &'a ValidatedSnapshot,
         creator: Option<CanonicalUuid>,
         phase: &'a Phase,
@@ -45,7 +45,7 @@ impl<'a> Authority<'a> {
         })
     }
 
-    pub(super) fn roots(&self) -> Result<RoutingRoots, RouteError> {
+    pub(in crate::board_command) fn roots(&self) -> Result<RoutingRoots, RouteError> {
         if self.live_creator.is_some() {
             self.policy.drive.routing_roots()
         } else {
@@ -57,32 +57,13 @@ impl<'a> Authority<'a> {
         self.policy.unmatched.as_ref()
     }
 
-    /// The admitted destination, or `None` when the router cannot decide and
-    /// no admitted unmatched topic receives the work.
-    pub(super) fn pick(
-        &self,
-        scored: &Scored,
-        roots: RoutingRoots,
-        require_admission: bool,
-    ) -> Option<Decision> {
-        let unmatched = self
-            .unmatched()
-            .filter(|configured| self.admits(&scored.unmatched_at(configured).destination));
-        let scope = Scope {
-            roots,
-            unmatched: unmatched.cloned(),
-        };
-        let decision = scored.pick(&scope)?;
-        if require_admission && !self.admits(&decision.destination) {
-            unmatched.map(|topic| scored.unmatched_at(topic))
-        } else {
-            Some(decision)
-        }
+    pub(super) fn placement_min_lead(&self) -> u8 {
+        self.policy.placement_min_lead
     }
 
     /// Ignore switches only while selecting a destination. Actual filing and
     /// allocation still enforce them, so a paused team is not routed around.
-    fn admits(&self, topic: &Topic) -> bool {
+    pub(super) fn admits(&self, topic: &Topic) -> bool {
         let resolver = Resolver::new(self.snapshot.policy.config(), self.teams);
         let task = Task {
             topic: Some(topic),

@@ -46,6 +46,29 @@ pub(super) fn place_oops_creation(
     origin: Option<super::super::routing::OriginView>,
     held_dependency_topic: Option<&wire::TaskTopic>,
 ) -> Result<CreationPlacement, Outcome<CommandAnswer>> {
+    let explicit = match (named, held_dependency_topic) {
+        (Some(wire::TopicInput::Absolute(topic) | wire::TopicInput::Private(topic)), _) => {
+            Some(wire::TaskTopic::from(topic.clone()))
+        }
+        (None, Some(parent)) => Some(wire::TaskTopic {
+            path: parent.path.clone(),
+            placed: None,
+            named: parent.tail().cloned().map(wire::TopicInput::Tail),
+            unmatched: parent.unmatched,
+            nodes: parent.nodes.map(|nodes| wire::topic::TopicNodes {
+                node: nodes.node,
+                placed: None,
+            }),
+        }),
+        _ => None,
+    };
+    if let Some(topic) = explicit {
+        return Ok(CreationPlacement {
+            topic,
+            route: None,
+            capture: None,
+        });
+    }
     let capture = super::super::routing::Capture::new(
         bus,
         snapshot,
@@ -61,46 +84,16 @@ pub(super) fn place_oops_creation(
             detail: error.to_string(),
         },
     };
-    let topic = if named.is_none()
-        && let Some(parent) = held_dependency_topic
-    {
-        wire::TaskTopic {
-            path: parent.path.clone(),
-            placed: None,
-            named: parent.tail().cloned().map(wire::TopicInput::Tail),
-            unmatched: parent.unmatched,
-            nodes: parent.nodes.as_ref().map(|nodes| wire::topic::TopicNodes {
-                node: nodes.node,
-                placed: None,
-            }),
-        }
-    } else {
-        match named {
-            Some(wire::TopicInput::Absolute(topic) | wire::TopicInput::Private(topic)) => {
-                wire::TaskTopic::from(topic.clone())
-            }
-            _ => routed.map(|routed| routed.topic).map_err(|error| {
-                refusal(
-                    error.reason(),
-                    Some(error.to_string()),
-                    "correct the named team policy or name an explicitly admitted topic",
-                )
-            })?,
-        }
-    };
+    let topic = routed.map(|routed| routed.topic).map_err(|error| {
+        refusal(
+            error.reason(),
+            Some(error.to_string()),
+            "correct the named team policy or name an explicitly admitted topic",
+        )
+    })?;
     Ok(CreationPlacement {
         topic,
         route: Some(route),
         capture: Some(capture),
     })
-}
-
-/// A task added with no topic outside a held claim: unplaced through its
-/// first phase, without consulting the router.
-pub(in crate::board_command) fn unplaced_creation() -> CreationPlacement {
-    CreationPlacement {
-        topic: wire::TaskTopic::unplaced(None),
-        route: None,
-        capture: None,
-    }
 }

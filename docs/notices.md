@@ -28,7 +28,7 @@ records none for it. It ships under the MIT License, whose text is its own
 
 ## English stop-word vocabulary
 
-The shared matching vocabulary in `board/src/similarity.rs` incorporates the
+The shared matching vocabulary in `topic/src/stop_words.rs` incorporates the
 318-word English stop list from scikit-learn's
 [`sklearn/feature_extraction/_stop_words.py`](https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/feature_extraction/_stop_words.py).
 The source attributes this list to the Glasgow Information Retrieval Group.

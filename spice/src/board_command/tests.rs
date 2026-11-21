@@ -46,6 +46,7 @@ mod creation_context;
 mod drive;
 mod placement;
 mod routing_capture;
+mod topic_lineage;
 
 /// The process environment every board test's Git host borrows.
 static AMBIENT: std::sync::LazyLock<Ambient> = std::sync::LazyLock::new(spice::ambient::capture);

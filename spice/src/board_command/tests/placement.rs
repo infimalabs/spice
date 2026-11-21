@@ -1,5 +1,5 @@
 use super::*;
-use wire::intent::{RouteConfidence, RouteStop, TaskPlace, TaskPlaceAnswer, TaskRoute};
+use wire::intent::{TaskPlace, TaskPlaceAnswer, TaskRoute};
 
 fn picked(route: &TaskRoute) -> &str {
     match route {
@@ -87,6 +87,7 @@ fn create(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, draft: bool) -> TaskHand
         Some("todo"),
         &["the parser work is verified"],
     );
+    add.pitch = "Make the parser reject malformed input".to_owned();
     add.draft = draft;
     let born = stamp("router-command-source");
     let CommandAnswer::Task(answer) = assert_committed(issue(
@@ -103,58 +104,14 @@ fn create(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, draft: bool) -> TaskHand
 }
 
 #[test]
-fn pitch_routes_placement_without_overriding_an_explicit_topic() {
+fn an_explicit_topic_bypasses_forecast_even_when_public_roots_are_ambiguous() {
     let (root, bus, epoch, seats) = fixture("placement-pitch", 1);
     let seat = &seats[0];
     authorize_lane_creation(&bus, epoch, seat);
     describe(&bus, epoch, "/compiler", "compiler parser syntax");
     describe(&bus, epoch, "/storage", "durable storage records");
 
-    let mut automatic = authored_add("Maintain neutral operation", "/unused", Some("todo"), &[]);
-    automatic.pitch = "Compiler parser syntax needs ownership.".to_owned();
-    automatic.topic = None;
-    let automatic_born = stamp("pitch-routed-creation");
-    let CommandAnswer::Task(automatic_answer) = assert_committed(issue(
-        &bus,
-        epoch,
-        Actor::Lane(seat.lane),
-        CommandKind::TaskAdd,
-        vec![Witness::Absence {
-            task: automatic_born,
-        }],
-        &automatic,
-    )) else {
-        panic!("automatic creation returns a task receipt")
-    };
-    let automatic_placement = automatic_answer
-        .placement
-        .as_ref()
-        .expect("a blank creation routes at creation");
-    assert_eq!(automatic_placement.topic.as_str(), "/compiler");
-    assert!(
-        automatic_answer.task.as_str().starts_with("DRAFT-"),
-        "without acceptance the routed row rests submitted in draft: {}",
-        automatic_answer.task
-    );
-    assert_eq!(
-        topic_of(&bus, epoch, &automatic_answer.task).as_deref(),
-        Some("/compiler")
-    );
-    let shown = preview(command(
-        &bus,
-        epoch,
-        Actor::TEST_PRINCIPAL,
-        &automatic_answer.task,
-        None,
-    ));
-    assert_eq!(
-        picked(&shown.route),
-        "/compiler",
-        "task place scores the saved statement pitch"
-    );
-
-    let mut explicit = automatic;
-    explicit.topic = Some("/storage".parse().unwrap());
+    let explicit = authored_add("Compiler parser syntax", "/storage", Some("todo"), &[]);
     let explicit_born = stamp("pitch-explicit-creation");
     let CommandAnswer::Task(explicit_answer) = assert_committed(issue(
         &bus,
@@ -171,26 +128,8 @@ fn pitch_routes_placement_without_overriding_an_explicit_topic() {
     let explicit_placement = explicit_answer
         .placement
         .expect("explicit creation describes its placement");
-    assert_eq!(explicit_placement.topic.as_str(), "/storage");
-    assert_eq!(
-        picked(explicit_placement.router.as_ref().unwrap()),
-        "/compiler",
-        "the router is counterfactual when an explicit destination is named"
-    );
-    assert_eq!(
-        picked(
-            &preview(command(
-                &bus,
-                epoch,
-                Actor::TEST_PRINCIPAL,
-                &explicit_answer.task,
-                None,
-            ))
-            .route
-        ),
-        "/compiler",
-        "task place scores the saved statement pitch"
-    );
+    assert_eq!(explicit_placement.topic.unwrap().as_str(), "/storage");
+    assert_eq!(explicit_placement.router, None);
 
     clean(&root, bus);
 }
@@ -200,17 +139,15 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
     let (root, bus, epoch, seats) = fixture("placement-draft", 1);
     fs::write(
         root.join("spice.toml"),
-        "[team.default]\ndrive=[{topic=['/allowed']}]\n",
+        "[team.default]\ndrive=[{topic=['/parser']}]\n",
     )
     .unwrap();
-    describe(&bus, epoch, "/allowed", "durable storage records");
-    describe(&bus, epoch, "/preferred", "compiler parser syntax");
     let task = create(&bus, epoch, &seats[0], true);
+    let tree = warm_topics(&root, &bus);
     let before = bus.cursor().unwrap();
     let first = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
     assert_eq!(bus.cursor().unwrap(), before, "preview is read-only");
-    assert_eq!(picked(&first.route), "/allowed");
-    assert_eq!(picked(first.unrestricted.as_ref().unwrap()), "/preferred");
+    assert_eq!(picked(&first.route), "/parser");
     assert_eq!(first.ownership.as_ref().unwrap().teams, vec![seats[0].team]);
     assert_eq!(first.phase, wire::Phase::Draft);
 
@@ -219,6 +156,12 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
     let stale = command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, first.preview);
     assert!(matches!(stale, Outcome::Refusal(_)), "{stale:?}");
     assert_eq!(bus.cursor().unwrap(), before);
+    let waiting = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
+    assert!(
+        matches!(waiting.route, TaskRoute::Unavailable { reason, .. } if reason == "topic::preview-catching-up")
+    );
+    assert!(waiting.preview.is_none());
+    tree.update(&bus.task_snapshot().unwrap());
     let current = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
     let CommandAnswer::TaskPlace(applied) = assert_committed(command(
         &bus,
@@ -245,7 +188,7 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
             .path
             .as_ref()
             .map(wire::Topic::as_str),
-        Some("/allowed")
+        Some("/parser")
     );
     assert!(placed.workflow.body.is_draft());
     assert!(placed.claims.is_empty());
@@ -253,9 +196,8 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
 }
 
 #[test]
-fn an_unfileable_routing_root_offers_no_placement_and_leaves_the_task_in_place() {
+fn a_proposal_the_creator_team_may_not_use_offers_no_placement_and_leaves_the_task_in_place() {
     let (root, bus, epoch, seats) = fixture("placement-filed-denial", 1);
-    describe(&bus, epoch, "/allowed", "compiler parser syntax");
     let task = create(&bus, epoch, &seats[0], false);
     fs::write(
         root.join("spice.toml"),
@@ -263,9 +205,14 @@ fn an_unfileable_routing_root_offers_no_placement_and_leaves_the_task_in_place()
     )
     .unwrap();
     let actor = Actor::Lane(seats[0].lane);
+    let _trees = warm_topics(&root, &bus);
     let before = topic_of(&bus, epoch, &task);
     let shown = preview(command(&bus, epoch, actor, &task, None));
-    assert!(undecided(&shown.route), "{:?}", shown.route);
+    assert!(
+        matches!(&shown.route, TaskRoute::Unavailable { reason, .. } if reason == "task::route-not-admitted"),
+        "{:?}",
+        shown.route
+    );
     assert_eq!(shown.preview, None);
     assert_eq!(shown.phase, wire::Phase::Todo);
     assert_eq!(topic_of(&bus, epoch, &task), before);
@@ -273,14 +220,12 @@ fn an_unfileable_routing_root_offers_no_placement_and_leaves_the_task_in_place()
     clean(&root, bus);
 }
 
+/// The reserved topic's own word: the one statement no word can name.
+const NAMELESS: &str = "Oops";
+
 fn sparse_add(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, born: &str) -> Outcome<CommandAnswer> {
-    let mut add = authored_add(
-        "Maintain neutral operation",
-        "/unused",
-        Some("todo"),
-        &["neutral operation is maintained"],
-    );
-    add.pitch = "Nothing here names a subject.".to_owned();
+    let mut add = authored_add(NAMELESS, "/unused", Some("todo"), &[NAMELESS]);
+    add.pitch = NAMELESS.to_owned();
     add.topic = None;
     issue(
         bus,
@@ -297,14 +242,19 @@ fn undecided_creation_rests_in_draft_until_task_place_lands_it_on_the_declared_u
     let (root, bus, epoch, seats) = fixture("placement-unmatched", 1);
     let seat = &seats[0];
     authorize_lane_creation(&bus, epoch, seat);
-    describe(&bus, epoch, "/compiler", "compiler parser syntax");
-    describe(&bus, epoch, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     let CommandAnswer::Task(answer) =
         assert_committed(sparse_add(&bus, epoch, seat, "sparse-undeclared"))
     else {
         panic!("an undecided creation lands submitted in draft")
     };
-    assert_eq!(answer.placement, None);
+    assert!(
+        answer
+            .placement
+            .as_ref()
+            .and_then(|p| p.router.as_ref())
+            .is_some_and(undecided)
+    );
     assert!(
         answer
             .diagnostic
@@ -338,25 +288,15 @@ fn undecided_creation_rests_in_draft_until_task_place_lands_it_on_the_declared_u
         &answer.task,
         None,
     ));
-    let TaskRoute::Pick { topic, evidence } = &shown.route else {
+    let TaskRoute::Pick {
+        topic,
+        unmatched: true,
+        ..
+    } = &shown.route
+    else {
         panic!("a declared unmatched topic receives unresolved work")
     };
     assert_eq!(topic.as_str(), "/triage");
-    assert_eq!(evidence.stop, RouteStop::Unmatched);
-    assert_eq!(evidence.confidence, RouteConfidence::Low);
-    assert_eq!(evidence.overlap, 0);
-    assert!(
-        evidence.residual.contains(&"neutral".to_owned()),
-        "{:?}",
-        evidence.residual
-    );
-    let suffix = evidence
-        .suffix
-        .as_ref()
-        .expect("residual terms recommend a suffix");
-    assert_eq!(suffix.parent.as_str(), "/triage");
-    assert_eq!(suffix.components, evidence.residual);
-    assert!(suffix.topic_revision.is_some());
     assert_committed(command(
         &bus,
         epoch,
@@ -369,43 +309,6 @@ fn undecided_creation_rests_in_draft_until_task_place_lands_it_on_the_declared_u
         Some("/triage")
     );
 
-    let mut evidenced = authored_add("Parser syntax", "/unused", Some("todo"), &[]);
-    evidenced.pitch = "Compiler parser syntax needs ownership.".to_owned();
-    evidenced.topic = None;
-    let CommandAnswer::Task(answer) = assert_committed(issue(
-        &bus,
-        epoch,
-        Actor::Lane(seat.lane),
-        CommandKind::TaskAdd,
-        vec![Witness::Absence {
-            task: stamp("evidenced-after-sparse"),
-        }],
-        &evidenced,
-    )) else {
-        panic!("evidenced creation returns a task receipt")
-    };
-    assert_eq!(
-        answer
-            .placement
-            .as_ref()
-            .map(|placement| placement.topic.as_str()),
-        Some("/compiler"),
-        "evidence routes creation"
-    );
-    let shown = preview(command(
-        &bus,
-        epoch,
-        Actor::TEST_PRINCIPAL,
-        &answer.task,
-        None,
-    ));
-    let TaskRoute::Pick { topic, evidence } = &shown.route else {
-        panic!("evidenced placement picks")
-    };
-    assert_eq!(topic.as_str(), "/compiler");
-    assert_eq!(evidence.confidence, RouteConfidence::Evidenced);
-    assert_eq!(evidence.stop, RouteStop::Leaf);
-    assert!(evidence.overlap > 0);
     clean(&root, bus);
 }
 
@@ -419,8 +322,9 @@ fn tail_creation_can_start_with_only_the_policy_declared_destination() {
         "[team.default]\nunmatched = \"/triage\"\n",
     )
     .unwrap();
-    let mut add = authored_add("Maintain neutral operation", "/unused", Some("todo"), &[]);
-    add.pitch = "Nothing here names a subject.".to_owned();
+    let _trees = warm_topics(&root, &bus);
+    let mut add = authored_add(NAMELESS, "/unused", Some("todo"), &[]);
+    add.pitch = NAMELESS.to_owned();
     add.topic = Some("intake".parse().unwrap());
     let CommandAnswer::Task(answer) = assert_committed(issue(
         &bus,
@@ -435,12 +339,14 @@ fn tail_creation_can_start_with_only_the_policy_declared_destination() {
         panic!("tail creation returns a task receipt")
     };
     let placement = answer.placement.unwrap();
-    assert_eq!(placement.topic.as_str(), "/triage/intake");
-    let TaskRoute::Pick { evidence, .. } = placement.router.unwrap() else {
-        panic!("a declared unmatched destination remains available")
-    };
-    assert_eq!(evidence.confidence, RouteConfidence::Low);
-    assert_eq!(evidence.stop, RouteStop::Unmatched);
+    assert_eq!(placement.topic.unwrap().as_str(), "/triage/intake");
+    assert!(matches!(
+        placement.router,
+        Some(TaskRoute::Pick {
+            unmatched: true,
+            ..
+        })
+    ));
     assert_eq!(
         topic_of(&bus, epoch, &answer.task).as_deref(),
         Some("/triage/intake")
@@ -449,13 +355,13 @@ fn tail_creation_can_start_with_only_the_policy_declared_destination() {
 }
 
 #[test]
-fn tail_creation_recaptures_a_changed_corpus_without_changing_authored_input() {
+fn tail_creation_recaptures_a_changed_topic_snapshot_without_changing_authored_input() {
     let (root, bus, epoch, seats) = fixture("placement-corpus-race", 1);
     let seat = &seats[0];
     authorize_lane_creation(&bus, epoch, seat);
-    describe(&bus, epoch, "/compiler", "compiler parser syntax");
-    describe(&bus, epoch, "/storage", "durable storage records");
+    let tree = warm_topics(&root, &bus);
     let mut add = authored_add("Compiler parser syntax", "/unused", Some("todo"), &[]);
+    add.pitch = "Make the compiler reject malformed input".to_owned();
     add.topic = Some("notes".parse().unwrap());
     let born = stamp("automatic-corpus-race");
     let request = fixture_command(
@@ -467,21 +373,31 @@ fn tail_creation_recaptures_a_changed_corpus_without_changing_authored_input() {
     );
     let CommandAnswer::Task(answer) =
         assert_committed(mutation::task_add_with(&bus, &request, &add, None, || {
-            describe(&bus, epoch, "/compiler", "durable storage records");
-            describe(&bus, epoch, "/storage", "compiler parser syntax");
+            describe(&bus, epoch, "/storage", "durable storage records");
         }))
     else {
         panic!("automatic creation returns a committed task")
     };
-    assert_eq!(answer.placement.unwrap().topic.as_str(), "/storage/notes");
+    let placement = answer.placement.unwrap();
+    assert!(placement.topic.is_none());
+    assert!(
+        matches!(placement.router, Some(TaskRoute::Unavailable { reason, .. }) if reason == "topic::preview-catching-up")
+    );
     let saved = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let saved = &at(&saved, &answer.task).statement.body;
     assert_eq!(saved.born, born);
     assert_eq!(saved.pitch, add.pitch);
-    assert_eq!(
-        saved.topic.path.as_ref().map(wire::Topic::as_str),
-        Some("/storage/notes")
-    );
+    assert!(saved.topic.path.is_none());
+    assert_eq!(saved.topic.named, add.topic);
+    tree.update(&bus.task_snapshot().unwrap());
+    let current = preview(command(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &answer.task,
+        None,
+    ));
+    assert_eq!(picked(&current.route), "/compiler/notes");
     clean(&root, bus);
 }
 
@@ -490,11 +406,10 @@ fn an_undecided_tail_creation_stays_unplaced_and_placement_composes_the_tail() {
     let (root, bus, epoch, seats) = fixture("placement-stored-tail", 1);
     let seat = &seats[0];
     authorize_lane_creation(&bus, epoch, seat);
-    describe(&bus, epoch, "/compiler", "compiler parser syntax");
-    describe(&bus, epoch, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     let tail: wire::TopicInput = "render/css".parse().unwrap();
-    let mut add = authored_add("Maintain neutral operation", "/unused", Some("todo"), &[]);
-    add.pitch = "Nothing here names a subject.".to_owned();
+    let mut add = authored_add(NAMELESS, "/unused", Some("todo"), &[]);
+    add.pitch = NAMELESS.to_owned();
     add.topic = Some(tail.clone());
     let CommandAnswer::Task(created) = assert_committed(issue(
         &bus,
@@ -508,16 +423,23 @@ fn an_undecided_tail_creation_stays_unplaced_and_placement_composes_the_tail() {
     )) else {
         panic!("sparse creation returns a task receipt")
     };
-    assert_eq!(
-        created.placement, None,
-        "an undecided tail leaves creation unplaced"
+    assert!(
+        created
+            .placement
+            .as_ref()
+            .and_then(|p| p.router.as_ref())
+            .is_some_and(undecided)
     );
     let visible = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let unplaced = &at(&visible, &created.task).statement.body.topic;
     assert_eq!(unplaced.path, None);
     assert_eq!(unplaced.named.as_ref(), Some(&tail));
 
-    describe(&bus, epoch, "/storage", "neutral operation subject records");
+    fs::write(
+        root.join("spice.toml"),
+        "[team.default]\nunmatched = \"/storage\"\n",
+    )
+    .unwrap();
     let shown = preview(command(
         &bus,
         epoch,

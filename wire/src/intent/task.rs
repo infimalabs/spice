@@ -439,16 +439,20 @@ pub struct TaskPlace {
 
 /// One router result, including an explicit refusal instead of a fallback topic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskRoute {
-    /// A public destination selected by the router, with the evidence that
-    /// chose it; a declared unmatched destination is a pick that stopped at
-    /// [`RouteStop::Unmatched`].
+    /// The exact canonical filing destination, including any authored tail.
     Pick {
-        /// Router destination before an optional relative tail.
+        /// Durable path proposed for filing.
         topic: crate::Topic,
-        /// How the destination was chosen and what the statement left unsaid.
-        evidence: RouteEvidence,
+        /// Prior tasks in the same forecast seat.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        companions: Vec<TaskStamp>,
+        /// Present when the grouping evidence precedes the authorized source.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tree_lag: Option<crate::topic::TreeLag>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        unmatched: bool,
     },
     /// No destination is admitted by the routing authority.
     Unavailable {
@@ -459,165 +463,13 @@ pub enum TaskRoute {
     },
 }
 
-/// The weakest evidence tier needed to choose or stop a route, in the
-/// order the resolver consults them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RouteTier {
-    /// The authored statement against topic descriptions and the live corpus.
-    Statement,
-    /// The statement plus a bounded view of its immutable origin.
-    Origin,
-    /// Public path components as the final weak discriminator.
-    Path,
-}
-
-/// How much the chosen destination is explained by the routing evidence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RouteConfidence {
-    /// The statement alone chose and stopped every step.
-    Evidenced,
-    /// Origin or path evidence was needed to choose or stop.
-    Secondary,
-    /// Zero overlap, an undecided child tie, or the declared unmatched topic.
-    Low,
-}
-
-/// Why descent stopped at the chosen destination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RouteStop {
-    /// The destination has no routable children.
-    Leaf,
-    /// Every child scored below its parent.
-    ChildrenBelow,
-    /// No child improved on its parent through every tier.
-    ChildrenEqual,
-    /// Improving children stayed tied through every tier.
-    ChildrenTied,
-    /// No semantic candidate remained, or disjoint roots stayed unresolved,
-    /// so the declared unmatched topic received the work outside scoring.
-    Unmatched,
-}
-
-/// The decision record one route carries alongside its destination.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteEvidence {
-    /// Confidence class of the whole decision.
-    pub confidence: RouteConfidence,
-    /// Weakest tier any step of the decision needed.
-    pub tier: RouteTier,
-    /// Why descent stopped where it did.
-    pub stop: RouteStop,
-    /// Strongest consulted cosine overlap with the destination, in thousandths.
-    pub overlap: u16,
-    /// Strongest statement terms the destination's corpus does not cover,
-    /// strongest first.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub residual: Vec<String>,
-    /// Read-only suffix recommendation below the destination; it creates no
-    /// node.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub suffix: Option<RouteSuffix>,
-    /// How an authored relative tail met the tree; absent without a tail.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub structure: Option<Box<RouteStructure>>,
-}
-
-/// Structural comparison of the root-down semantic prefix with the leaf-up
-/// match of an authored relative tail, reported apart from every cosine.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteStructure {
-    /// The relative tail exactly as authored.
-    pub tail: String,
-    /// Deepest topic the statement or origin tiers chose; absent when nothing
-    /// semantic decided.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub prefix: Option<crate::Topic>,
-    /// Existing topic the tail matched leaf-up inside the decided subtree.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub matched: Option<crate::Topic>,
-    /// Leading tail components that match covered; the rest were appended.
-    pub matched_components: usize,
-    /// How the semantic prefix and the leaf-up match connect.
-    pub connection: RouteConnection,
-    /// Boundary components folded when the tail composed below the prefix
-    /// without a match.
-    pub composed_overlap: usize,
-    /// An existing root-anchored path spelled exactly like the tail that the
-    /// decision did not choose.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub alternative: Option<crate::Topic>,
-}
-
-/// How the root-down semantic prefix meets the leaf-up tail match.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RouteConnection {
-    /// The prefix and the match share `overlap` components at their boundary.
-    Overlap { overlap: usize },
-    /// The match begins directly below the prefix.
-    Meet,
-    /// Known components of an existing path lie between the prefix and the
-    /// match; they are reused, never guessed.
-    Gap { components: Vec<String> },
-    /// Nothing in the decided subtree matched; the tail composed below the
-    /// prefix.
-    Unresolved,
-    /// Several equally supported matches; the tail composed below the
-    /// prefix instead of choosing one.
-    Ambiguous { candidates: Vec<crate::Topic> },
-}
-
-/// Residual terms spelled as components a later leaf could take below the
-/// existing destination, bound to the topic revision that was scored.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteSuffix {
-    /// Existing destination the suffix would hang below.
-    pub parent: crate::Topic,
-    /// Candidate components, strongest residual term first.
-    pub components: Vec<String>,
-    /// Topic revision the recommendation was computed against.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub topic_revision: Option<u64>,
-}
-
 /// Placement and drive disposition captured by a task creation or filing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskPlacement {
-    /// Final saved topic, including any explicit destination or relative tail.
-    pub topic: crate::Topic,
-    /// Counterfactual router choice; it never overrides explicit placement.
-    /// Absent when the operation does not consult the router.
+    /// Saved topic; absent when inference missed or a draft keeps only the proposal.
+    pub topic: Option<crate::Topic>,
+    /// The inferred proposal or its refusal. Explicit destinations bypass inference.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -671,13 +523,6 @@ pub struct TaskPlaceAnswer {
     pub from: Option<crate::Topic>,
     /// Pick restricted to the creator team's drive roots.
     pub route: TaskRoute,
-    /// Pick without drive-root restrictions, only when it differs.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::optional::present"
-    )]
-    pub unrestricted: Option<TaskRoute>,
     /// Owners at the proposed destination; absent when there is no pick.
     #[serde(
         default,

@@ -1,19 +1,17 @@
-//! Routing uses the validated command policy and one complete public-node corpus.
+//! A source-bound forecast of where the board's topic tree seats a statement.
 
 use std::sync::Arc;
 
-use board::routing::{Decision, Node, Query, RouteError, RoutingRoots, Scored, Target};
-use board::similarity::{TermCounts, utf8_prefix};
+use board::routing::{RouteError, RoutingRoots};
+use topic::evidence::Prepared;
 use wire::Phase;
-use wire::intent::{RouteEvidence, RouteStructure, RouteSuffix, TaskRoute};
+use wire::intent::TaskRoute;
 
 use super::mutation::ValidatedSnapshot;
 use super::*;
 
-mod authority;
-
-/// Most bytes of an origin's statement or directive that join the query.
-const ORIGIN_VIEW_BYTES: usize = 2048;
+pub(super) mod authority;
+pub(super) mod proposal;
 
 /// Recapture only a disposable routing observation for an automatic creation.
 /// The unchanged request still carries every caller-authored witness. Explicit
@@ -42,6 +40,7 @@ pub(super) struct Statement<'a> {
     term: &'a [String],
     phase: &'a Phase,
     tail: Option<&'a wire::TopicTail>,
+    for_approval: bool,
 }
 
 impl<'a> Statement<'a> {
@@ -59,6 +58,7 @@ impl<'a> Statement<'a> {
             term,
             phase,
             tail: None,
+            for_approval: false,
         }
     }
 
@@ -81,78 +81,53 @@ impl<'a> Statement<'a> {
         self
     }
 
-    fn terms(&self) -> TermCounts {
-        TermCounts::statement(self.title, self.pitch, self.description, self.term)
+    /// Manual approval still checks scope and freshness, but not the automatic filing floor.
+    pub(super) fn for_approval(mut self) -> Self {
+        self.for_approval = true;
+        self
+    }
+
+    fn prepare(&self) -> Prepared {
+        topic::evidence::prepare_statement("", self.title, self.pitch, self.description, self.term)
+    }
+
+    /// Every authored field as written, for naming a topic nobody else seeded.
+    fn authored(&self) -> Vec<&'a str> {
+        let mut texts = vec![self.title, self.pitch];
+        texts.extend(self.description);
+        texts.extend(self.term.iter().map(String::as_str));
+        texts
     }
 }
 
-/// The bounded immutable origin a creation names, consulted only after the
-/// statement alone cannot choose.
+/// Revision-bound origin of a filing.
 #[derive(Clone, serde::Serialize)]
 pub(super) struct OriginView {
     source: wire::TaskProvenance,
     revision: Option<Seq>,
-    text: String,
 }
 
 impl OriginView {
-    /// A parent task's statement or a steering directive's text; document and
-    /// operator-Draft provenance carry no origin view.
+    /// Capture a task or steering revision so approval cannot outlive its origin.
     pub(super) fn of(
         bus: &Bus,
         provenance: &wire::TaskProvenance,
     ) -> Result<Option<Self>, Outcome<CommandAnswer>> {
-        let observed = match provenance {
+        let revision = match provenance {
             wire::TaskProvenance::Task(stamp) => {
                 let stamp = stamp.clone();
-                bus.read(move |read| {
-                    Ok(read.task_head(&stamp)?.map(|head| {
-                        let statement = head.body();
-                        let mut text = String::with_capacity(ORIGIN_VIEW_BYTES);
-                        for field in std::iter::once(statement.title.as_str())
-                            .chain(std::iter::once(statement.pitch.as_str()))
-                            .chain(statement.description.as_deref())
-                        {
-                            if text.len() == ORIGIN_VIEW_BYTES {
-                                break;
-                            }
-                            if !text.is_empty() {
-                                text.push('\n');
-                            }
-                            let prefix = utf8_prefix(field, ORIGIN_VIEW_BYTES - text.len());
-                            text.push_str(prefix);
-                            if prefix.len() != field.len() {
-                                break;
-                            }
-                        }
-                        (head.position(), text)
-                    }))
-                })
+                bus.read(move |read| Ok(read.task_head(&stamp)?.map(|head| head.position())))
             }
             wire::TaskProvenance::Steering(key) => {
                 let key = key.clone();
-                bus.read(move |read| {
-                    Ok(read.steering_key(&key)?.map(|head| {
-                        (
-                            head.position(),
-                            utf8_prefix(&head.body().text, ORIGIN_VIEW_BYTES).to_owned(),
-                        )
-                    }))
-                })
+                bus.read(move |read| Ok(read.steering_key(&key)?.map(|head| head.position())))
             }
-            wire::TaskProvenance::Document(_) | wire::TaskProvenance::OperatorDraft => {
-                return Ok(None);
-            }
+            _ => return Ok(None),
         }
         .map_err(|error| store_fault("task::routing-origin-unreadable", error.to_string()))?;
-        let (revision, text) = observed.map_or_else(
-            || (None, String::new()),
-            |(revision, text)| (Some(revision), text),
-        );
         Ok(Some(Self {
             source: provenance.clone(),
             revision,
-            text,
         }))
     }
 }
@@ -184,7 +159,27 @@ pub(super) struct Capture {
     fingerprint: Digest,
     origin: Option<(wire::TaskProvenance, Option<Seq>)>,
     restricted: Result<Routed, RouteError>,
-    unrestricted: Result<Routed, RouteError>,
+    barrier: Digest,
+}
+
+pub(super) fn creator(
+    snapshot: &ValidatedSnapshot,
+    actor: &Actor,
+) -> Result<Option<wire::CanonicalUuid>, Outcome<CommandAnswer>> {
+    match actor {
+        Actor::Lane(lane) => snapshot
+            .answer
+            .residency
+            .body
+            .lanes
+            .iter()
+            .find(|row| row.lane == *lane)
+            .map(|row| Some(row.team))
+            .ok_or_else(|| {
+                protocol_fault("team::lane-missing", "the acting lane has no current team")
+            }),
+        _ => Ok(None),
+    }
 }
 
 impl Capture {
@@ -195,23 +190,8 @@ impl Capture {
         statement: Statement<'_>,
         origin: Option<OriginView>,
     ) -> Result<Self, Outcome<CommandAnswer>> {
-        let creator = match actor {
-            Actor::Lane(lane) => Some(
-                snapshot
-                    .answer
-                    .residency
-                    .body
-                    .lanes
-                    .iter()
-                    .find(|row| row.lane == *lane)
-                    .ok_or_else(|| {
-                        protocol_fault("team::lane-missing", "the acting lane has no current team")
-                    })?
-                    .team,
-            ),
-            _ => None,
-        };
-        Self::new_for_team(bus, snapshot, creator, statement, origin)
+        let creator = creator(snapshot, actor)?;
+        Self::with_team(bus, snapshot, creator, statement, origin)
     }
 
     /// Existing tasks route under their immutable creator team, not the invoker.
@@ -222,80 +202,54 @@ impl Capture {
         statement: Statement<'_>,
         origin: Option<OriginView>,
     ) -> Result<Self, Outcome<CommandAnswer>> {
+        Self::with_team(bus, snapshot, creator, statement, origin)
+    }
+
+    pub(super) fn topology(
+        bus: &Bus,
+        snapshot: &ValidatedSnapshot,
+    ) -> Result<(Vec<journal::TopicRoutingNode>, Option<u64>), Outcome<CommandAnswer>> {
         let cursor = snapshot.cursor;
         let policy = Arc::clone(&snapshot.policy);
         let residency = snapshot.answer.residency.position;
-        let (nodes, generation) = bus
-            .read(move |read| {
-                policy.require_current()?;
-                if !read
-                    .residency_head()?
-                    .is_some_and(|head| head.position() == residency)
-                {
-                    return Err(GuardError::refused("team::membership-moved"));
-                }
-                if read.cursor()? != Some(cursor) {
-                    return Err(GuardError::refused("task::routing-snapshot-moved"));
-                }
-                Ok((read.topic_routing_nodes()?, read.topic_revision()?))
-            })
-            .map_err(|error| match error {
-                bus::BusReadError::Head(GuardError::Refused(refusal)) => {
-                    Outcome::Refusal(Refusal::bare(refusal.into_diagnostic().0))
-                }
-                error => store_fault("task::routing-read-failed", error.to_string()),
-            })?;
+        bus.read(move |read| {
+            policy.require_current()?;
+            if !read
+                .residency_head()?
+                .is_some_and(|head| head.position() == residency)
+            {
+                return Err(GuardError::refused("team::membership-moved"));
+            }
+            if read.cursor()? != Some(cursor) {
+                return Err(GuardError::refused("task::routing-snapshot-moved"));
+            }
+            Ok((read.topic_routing_nodes()?, read.topic_revision()?))
+        })
+        .map_err(|error| match error {
+            bus::BusReadError::Head(GuardError::Refused(refusal)) => {
+                Outcome::Refusal(Refusal::bare(refusal.into_diagnostic().0))
+            }
+            error => store_fault("task::routing-read-failed", error.to_string()),
+        })
+    }
+
+    fn with_team(
+        bus: &Bus,
+        snapshot: &ValidatedSnapshot,
+        creator: Option<wire::CanonicalUuid>,
+        statement: Statement<'_>,
+        origin: Option<OriginView>,
+    ) -> Result<Self, Outcome<CommandAnswer>> {
+        let (nodes, generation) = Self::topology(bus, snapshot)?;
         let authority = authority::Authority::new(snapshot, creator, statement.phase);
-        let unmatched = authority
-            .as_ref()
-            .ok()
-            .and_then(authority::Authority::unmatched);
-        // The unmatched topic collects heterogeneous work and must never
-        // attract later work.
-        let query = Query {
-            statement: statement.terms(),
-            origin: origin
-                .as_ref()
-                .map(|origin| TermCounts::from_texts([origin.text.as_str()])),
-            tail: statement.tail.cloned(),
+        let restricted = match authority
+            .and_then(|authority| authority.roots().map(|roots| (authority, roots)))
+        {
+            Err(error) => Err(error),
+            Ok((authority, roots)) => Ok(proposal::choose(
+                bus, snapshot, &authority, &roots, &nodes, &statement,
+            )?),
         };
-        let scored = Scored::new(
-            nodes
-                .into_iter()
-                .filter(|node| {
-                    !wire::is_oops_topic(&node.path)
-                        && unmatched.is_none_or(|unmatched| !unmatched.contains(&node.path))
-                })
-                .map(|node| {
-                    let terms = TermCounts::from_texts(
-                        std::iter::once(node.description.as_str())
-                            .chain(node.documents.iter().map(|document| document.as_str())),
-                    );
-                    Node {
-                        id: node.id,
-                        path: node.path,
-                        terms,
-                    }
-                })
-                .collect(),
-            &query,
-        );
-        let translate = |decision: Option<Decision>| match decision {
-            Some(decision) => routed(decision, generation, statement.tail),
-            None => undecided(statement.tail),
-        };
-        let restricted = authority
-            .as_ref()
-            .map_err(Clone::clone)
-            .and_then(|authority| {
-                authority
-                    .roots()
-                    .map(|roots| translate(authority.pick(&scored, roots, true)))
-            });
-        let unrestricted = authority
-            .as_ref()
-            .map_err(Clone::clone)
-            .map(|authority| translate(authority.pick(&scored, RoutingRoots::All, false)));
         let binding = serde_json::to_string(&(
             snapshot.policy.config(),
             snapshot.answer.residency.position,
@@ -304,6 +258,7 @@ impl Capture {
             (
                 statement.title,
                 statement.pitch,
+                &snapshot.answer.task_barrier,
                 statement.description,
                 statement.term,
                 statement.phase,
@@ -311,7 +266,6 @@ impl Capture {
             ),
             &origin,
             restricted.as_ref().ok().map(|routed| &routed.route),
-            unrestricted.as_ref().ok().map(|routed| &routed.route),
         ))
         .map_err(|error| protocol_fault("task::routing-binding-invalid", error.to_string()))?;
         Ok(Self {
@@ -321,16 +275,12 @@ impl Capture {
             fingerprint: board::digest_of(&binding),
             origin: origin.map(|origin| (origin.source, origin.revision)),
             restricted,
-            unrestricted,
+            barrier: snapshot.answer.task_barrier.clone(),
         })
     }
 
     pub(super) fn restricted(&self) -> Result<Routed, RouteError> {
         self.restricted.clone()
-    }
-
-    pub(super) fn unrestricted(&self) -> Result<Routed, RouteError> {
-        self.unrestricted.clone()
     }
 
     pub(super) fn fingerprint(&self) -> &Digest {
@@ -360,18 +310,26 @@ impl Capture {
             }
             Ok(())
         }));
+        read_guard::guard_task_projection(write, self.barrier.clone());
     }
 }
 
 /// The router could not decide and no admitted unmatched topic receives the
 /// work: the task stays unplaced, keeping any authored tail for its placement.
-fn undecided(tail: Option<&wire::TopicTail>) -> Routed {
+pub(super) fn undecided(tail: Option<&wire::TopicTail>) -> Routed {
+    unavailable(
+        tail,
+        UNDECIDED_ROUTE,
+        "no unique admitted filing destination; choose a topic with --topic",
+    )
+}
+
+fn unavailable(tail: Option<&wire::TopicTail>, reason: &str, detail: &str) -> Routed {
     Routed {
         topic: wire::TaskTopic::unplaced(tail.cloned()),
         route: TaskRoute::Unavailable {
-            reason: UNDECIDED_ROUTE.to_owned(),
-            detail: "no admitted topic explains the statement and no unmatched topic is declared"
-                .to_owned(),
+            reason: reason.to_owned(),
+            detail: detail.to_owned(),
         },
     }
 }
@@ -379,68 +337,42 @@ fn undecided(tail: Option<&wire::TopicTail>) -> Routed {
 /// Diagnostic of a route that left its task unplaced.
 pub(super) const UNDECIDED_ROUTE: &str = "task::route-undecided";
 
-/// Bind a decision to its destination: a scored node by stable identity, the
-/// unmatched topic by path for the commit to resolve.
-fn routed(decision: Decision, generation: Option<u64>, tail: Option<&wire::TopicTail>) -> Routed {
-    let parent = decision.target.topic().clone();
-    let placed_node = match &decision.target {
-        Target::Node(pick) => Some(pick.node),
-        Target::Unmatched(_) => None,
+/// Bind the composed path to the observed stable node when one exists.
+pub(super) fn routed(
+    parent: wire::Topic,
+    companions: Vec<wire::TaskStamp>,
+    tree_lag: Option<wire::topic::TreeLag>,
+    unmatched: bool,
+    tail: Option<&wire::TopicTail>,
+    nodes: &[journal::TopicRoutingNode],
+) -> Routed {
+    let path = tail.map_or_else(
+        || parent.clone(),
+        |tail| board::routing::compose(&parent, tail),
+    );
+    let id = |topic: &wire::Topic| {
+        nodes
+            .iter()
+            .find(|node| &node.path == topic)
+            .map(|node| node.id)
     };
-    let final_node = decision.destination_node;
-    let unmatched = decision.stop == wire::intent::RouteStop::Unmatched;
     let topic = wire::TaskTopic {
-        path: Some(decision.destination.clone()),
+        nodes: Some(wire::topic::TopicNodes {
+            node: id(&path),
+            placed: id(&parent),
+        }),
+        path: Some(path.clone()),
         placed: Some(parent),
         named: tail.cloned().map(wire::TopicInput::Tail),
         unmatched,
-        nodes: (placed_node.is_some() || final_node.is_some()).then_some(wire::topic::TopicNodes {
-            node: final_node,
-            placed: placed_node,
-        }),
     };
-    let components = decision
-        .residual
-        .iter()
-        .filter(|term| decision.destination.child(term).is_ok())
-        .cloned()
-        .collect::<Vec<_>>();
-    let confidence = decision.confidence();
-    let structure = decision.structure.map(|structure| {
-        Box::new(RouteStructure {
-            tail: tail
-                .expect("structural routing requires an authored tail")
-                .as_str()
-                .to_owned(),
-            prefix: structure.prefix,
-            matched: structure.matched.map(|matched| matched.topic),
-            matched_components: structure.matched_components,
-            connection: structure.connection,
-            composed_overlap: structure.composed_overlap,
-            alternative: structure.alternative,
-        })
-    });
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "a cosine lies in [0, 1], so its thousandths fit"
-    )]
-    let overlap = (decision.overlap * 1000.0).round() as u16;
-    let route = TaskRoute::Pick {
-        topic: decision.destination.clone(),
-        evidence: RouteEvidence {
-            confidence,
-            tier: decision.tier,
-            stop: decision.stop,
-            overlap,
-            residual: decision.residual,
-            structure,
-            suffix: (!components.is_empty()).then_some(RouteSuffix {
-                parent: decision.destination,
-                components,
-                topic_revision: generation,
-            }),
+    Routed {
+        topic,
+        route: TaskRoute::Pick {
+            topic: path,
+            companions,
+            tree_lag,
+            unmatched,
         },
-    };
-    Routed { topic, route }
+    }
 }

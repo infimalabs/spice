@@ -129,8 +129,10 @@ fn held_review_corrections_inherit_topic_while_unrelated_claim_origin_routes() {
         Some("todo"),
         &["Document tasks remain independent of the held review"],
     );
+    unrelated.pitch = "Document the plan.".to_owned();
     unrelated.topic = None;
     unrelated.origin = None;
+    let _trees = warm_topics(&root, &bus);
     let CommandAnswer::Task(unrelated) = assert_committed(issue(
         &bus,
         epoch,
@@ -144,8 +146,15 @@ fn held_review_corrections_inherit_topic_while_unrelated_claim_origin_routes() {
         panic!("ordinary creation returns a task receipt")
     };
     assert_eq!(
-        unrelated.placement.as_ref().unwrap().topic.as_str(),
-        "/documents/contracts"
+        unrelated
+            .placement
+            .as_ref()
+            .unwrap()
+            .topic
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "/documents"
     );
     let assigned = board(&bus, epoch, lane_two.clone());
     let proposed: TaskHandle = "PLAN-1kLGp005x".parse().expect("follow-up handle");
