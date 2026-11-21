@@ -56,7 +56,7 @@ fn counted(row: &Prepared) -> impl Iterator<Item = (&String, &u32)> {
 }
 
 fn number<'a>(row: &'a Prepared, mut slot: impl FnMut(&'a str) -> usize) -> Numbered {
-    let admitted: Vec<usize> = row.admitted.keys().map(|word| slot(word)).collect();
+    let admitted: Vec<usize> = row.admitted.iter().map(|word| slot(word)).collect();
     let fields = std::array::from_fn(|field| {
         (row.fields[field].iter())
             .filter(|&(_, &count)| count > 0)
@@ -101,7 +101,7 @@ impl Words {
     /// Forget the evicted row, releasing slots no other row needs.
     pub(crate) fn remove(&mut self, index: usize, row: &Prepared) {
         self.rows.remove(index);
-        for word in (row.admitted.keys()).chain(counted(row).map(|(word, _)| word)) {
+        for word in (row.admitted.iter()).chain(counted(row).map(|(word, _)| word)) {
             let slot = self.slots[word.as_str()];
             self.uses[slot] -= 1;
             if self.uses[slot] == 0 {

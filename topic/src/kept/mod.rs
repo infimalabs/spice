@@ -988,7 +988,7 @@ fn heaviest<'a>(fits: &mut Fits, set: &[Fitted<'_, 'a>]) -> Vec<&'a str> {
     let fitted = fits.graph(&tasks);
     let mut weights = BTreeMap::new();
     for (task, fitted) in set.iter().zip(&fitted).filter(|(task, _)| task.counted) {
-        for (word, (_, weight)) in task.row.admitted.keys().zip(fitted.entries()) {
+        for (word, (_, weight)) in task.row.admitted.iter().zip(fitted.entries()) {
             *weights.entry(word.as_str()).or_default() += weight;
         }
     }

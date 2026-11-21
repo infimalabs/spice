@@ -198,8 +198,8 @@ fn likeness_follows_the_fit_where_shared_word_counts_point_elsewhere() {
         (tree.rows().iter().enumerate())
             .filter(|(at, _)| at % 3 == subject)
             .map(|(_, held)| {
-                (held.admitted.keys())
-                    .filter(|&word| signing.admitted.contains_key(word))
+                (held.admitted.iter())
+                    .filter(|&word| signing.admitted.contains(word))
                     .count()
             })
             .max()
