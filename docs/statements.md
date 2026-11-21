@@ -15,18 +15,11 @@ phases, claims, and release; this file owns only the statement.
   The UUID root has no leading slash and the entire private namespace is never
   a router target. Empty values, `.`, `..`, repeated separators, invalid
   components, and noncanonical UUID roots refuse and name the offending input.
-- Each node has a stable ID, a parent, and a component. A pending task references
-  its final node and records the head node the router placed it under and the
-  exact input its author named. Renaming or moving a node re-parents that one
-  node: its subtree and every pending task under it move without rewriting task
-  rows. A move under the node's own descendant refuses.
-  Pending task reads carry the final and router-selected node bindings through
-  publication. A stale path that no longer names its observed node refuses the
-  whole write, even if that spelling has been reused for a new node. Read the
-  current statement before retrying; an explicit topic reassignment chooses a
-  new placement rather than retaining the old bindings.
-  Parent walks detect cycles by repeated node identity, not by path depth;
-  deep acyclic topics remain readable after creation and subtree moves.
+- Pending tasks bind to stable node IDs (final and router-selected) and keep
+  the author's exact topic input. Renaming or reparenting a node moves its
+  subtree without rewriting tasks. Parent walks detect cycles by repeated ID,
+  not depth. A write refuses if its observed path now names another node or no
+  node; reread before retrying. Explicit reassignment chooses new bindings.
 - A public handle's stem is the last topic component uppercased; every private
   descendant and unplaced task uses `TASK`. A stale stem resolves with a notice
   naming the current handle. `task list --topic /a` lists the `/a` subtree; a
@@ -36,31 +29,20 @@ phases, claims, and release; this file owns only the statement.
   Reads only look up existing nodes and never create them.
   `spice topic describe /a/b "description"` creates or describes a node when
   the description is nonempty; clearing a missing path leaves it absent.
-  Only an operator may preview or apply
-  `spice topic move /a/b /destination/name`, which renames or moves the entire
-  subtree and creates missing destination ancestors. Topic creation through
-  the draft advance and every task statement or placement command retain their
-  ordinary actor policy. A move cannot enter the reserved `/oops` intake.
-  Topic descriptions and moves first return a plan; repeat the exact command
-  with `--apply DIGEST` to commit it. A changed topic authority invalidates
-  that plan. Missing sources, occupied destinations, reserved OOPS
-  destinations, and cycles refuse without publication. These commands take
-  complete public or UUID-owned private paths. Public and private subtrees may
-  move within or across namespaces; every descendant keeps its stable node ID,
-  while destination ownership applies to the moved paths. Routing, description
-  and subtree-move history belongs to stable node IDs, not spellings.
-  An anonymous leaf is pruned in the same transaction that removes its last
-  live association, and pruning repeats through newly empty ancestors. Only
-  pending work is live: settlement snapshots the final and router-selected
-  rendered paths, releases their node bindings, and prunes in that same guarded
-  transaction. Reopening resolves those paths against the current tree and
-  allocates a new identity when the old spelling was fully pruned; it never
-  resurrects the retired identity.
-  A node remains only while it has a nonempty description, a child, or a pending
-  task's final or router-selected reference. Task facts keep their authored
-  topic text, terminal task heads keep their rendered paths, and release
-  landings keep their rendered topic path without retaining or independently
-  targeting a node. Pruning removes only projection rows, never immutable facts.
+  Only operators move or rename subtrees with
+  `spice topic move /a/b /destination/name`.
+  Describe and move take complete public or private paths: preview, then repeat
+  with `--apply DIGEST`. Changed topic authority invalidates the plan. Moves
+  create missing ancestors but refuse missing sources, occupied destinations,
+  cycles and reserved `/oops` destinations. Across namespaces, destination
+  ownership applies; descendants keep their IDs and history. Task commands
+  retain their ordinary actor policy.
+  A node survives while described, parenting a child, or referenced by a
+  pending task's final or router-selected binding. Settlement snapshots both
+  rendered paths, releases the bindings and recursively prunes newly empty
+  leaves in one guarded transaction. Reopening resolves today's paths; it does
+  not resurrect a pruned ID. Authored task facts and release landing paths
+  remain history, not live references. Pruning deletes projection rows only.
 - Default reads (`task list`, `task status`, dry `task next` counts) use the
   actor route: every activated row plus the reader's own origin-thread rows, so an
   authored topic is never invisible to a lane that may be allocated it. This
@@ -71,131 +53,129 @@ phases, claims, and release; this file owns only the statement.
 Creation first honors an absolute or private topic exactly. An unnamed
 dependency created by the holder of its parent inherits that parent's exact
 topic; claim-origin provenance alone does not make unrelated work a dependency.
-Otherwise a relative tail asks the router for a public node and appends that
-tail; omitted topics route as the draft section below describes. Ownership
-never redirects that destination. Creation receipts report the placed topic,
-its owners, and the informational router pick (or why no pick is available),
-including when an explicit destination differs. See
-[team policy](#team-policy) for drive-denied creation.
+Complete topics and inherited destinations bypass inference. Any other
+creation, including one with a relative tail, asks the board's topic tree for
+a public destination.
 
-The router scores every described or pending-task-referenced public topic in one
-TF-IDF fit. A task query contains its authored title, pitch, description and
-acceptance or questions; creation and `task place` use the same field set.
-Topic documents contain the node description and those same fields from at most
-the 64 newest pending tasks for that node, without adding the pitch again.
-Settled tasks and statements moved away from a node remain inspectable history
-but supply no routing target or lexical weight. UUID-owned private namespaces
-are never targets, and source code supplies no descriptions.
-Routing uses the shared [matching vocabulary](rooms.md): short technical terms
-such as `CSS/css`, `LSP/lsp`, `x86` and `p95` can distinguish public targets,
-but rejected short flags and numeric fragments contribute no routing signal.
-Private documents cannot supply a target or break a public tie. Empty queries
-follow the same zero-overlap rules as other statements.
+The board has one tree. It holds the newest 256 eligible statements on the
+whole board, each read as its authored title, pitch, description and
+acceptance terms. Where a statement was filed never decides which statements
+are compared, how they group or what a group is called: a recorded topic
+decides only eligibility. Activated pending work and positively settled work
+are eligible. Drafts, withdrawals, private topics and `/oops` are not, so they
+never attract, name or appear beside another statement.
 
-Routing is one source-bound hierarchical decision. The authority filter comes
-first: the reserved `/oops` subtree, the policy's declared unmatched topic and
-every node outside the creator team's drive roots are not candidates. Roots are
-the literal public prefixes of the creator team's drive topic rules. An
-unrestricted drive rule or a glob without a literal prefix (such as `**`)
-starts at the public roots; an empty rule list supplies none.
-Structural nodes need not be targets: eligible descendants remain reachable
-across structural gaps. Final composition must satisfy exact drive and ownership
-policy for the task's phase, not merely its routing root. Runtime switches still
-govern actual activation and allocation; pausing an owner does not route around it.
-Existing tasks retain their immutable creator team for `task place`; an invoking
-operator does not replace it. Each new resolution rechecks whether that creator
-team is live. Teamless and departed creators use unrestricted public roots
-and the default policy's optional unmatched destination.
+The fit normalizes each field on its own, then combines title at 2, pitch
+at 1.5, and description at 0.5. Acceptance weighs `ln(1 + n)`, where `n` is
+the number of nonblank acceptance items: one outweighs description, four
+outweigh the pitch and seven the title. Media is not scored. At the term
+cap, title words come first, then pitch and acceptance words, then words
+found only in the description.
 
-Evidence tiers then decide each level of the tree in a fixed order. The
-`statement` tier scores the authored statement against topic descriptions and
-the current task corpus. Only when that pass leaves a tie does the `origin`
-tier add a bounded view (2048 bytes) of the task's origin: the parent task's
-title, pitch and description, or the steering directive's text. The view
-records its exact source revision and bytes; publication refuses a changed
-origin rather than reusing its earlier evidence. Document and operator-Draft
-provenance add nothing. Only after both tiers tie does the `path` tier compare
-an authored relative tail against contiguous existing path components, then
-use path cosine for unresolved choices. A full suffix match comes first;
-otherwise the longest existing initial tail segment can locate a parent for a
-new leaf. Earlier statement or origin decisions constrain the subtree: a suffix
-elsewhere cannot override them. Node age, UUID order, popularity, recency and
-room or session prose never break a tie.
+`spice topic preview 'Title' 'Pitch'` proposes a topic from those two fields
+without creating a task or topic. A description or acceptance terms supplied
+at filing can change the proposal. Preview checks the caller's routing
+authority for `todo`, but not `placement_min_lead`: automatic filing can
+therefore leave a task unplaced even when preview names a topic. The group
+numbers in a preview are local to the lineage, not durable topic IDs.
 
-Roots: the unique maximum at the earliest deciding tier wins. Unresolved roots,
-an empty candidate forest, or a composed destination without drive/ownership
-admission use an ordinarily admitted configured `unmatched` destination;
-without one the router is undecided and names none. No topic is built in. An
-authored tail composes under `unmatched` too.
+The proposal is read from the seat the tree forecasts and carries one topic
+segment for each group on the seat's path, outermost first. A group is named
+by the word that carries the most weight for it in the fit that formed it: the
+seat's first-level group in the fit over the whole window, and every group
+below in the fit within the group directly above it. No word names two
+segments of one topic, and a group no written word can name ends the topic at
+the segment above it. The arriving statement is a member of every one of
+these fits, and a statement its arrival pushes out of the window is in none.
+The engine
+matches plural forms as one word, so a name is spelled as a member wrote it; a
+form nobody wrote names nothing. Where the spelling a group wrote names no
+topic at that place but another spelling of the same word does, the proposal
+is that existing topic, so one group is not split across `/window` and
+`/windows`. This also applies to acronyms: an authored `API` can reuse
+`/apis`, without making lowercase `api` in prose count as evidence. A name
+already in use is that topic, and no numbered variant is ever proposed.
+A statement that resembles nothing held is
+named by its own heaviest word, which is how an empty board starts. A relative
+tail consumes the longest exact overlap with the end of the proposal, once:
+`/app/render` plus `render/css` becomes `/app/render/css`.
 
-Descent: a child must strictly improve on its parent at the deciding tier; a
-unique best improving child is entered,
-children that tie after improving stop at the parent with `children_tied`,
-children equal to the parent through every tier stop with `children_equal`,
-children all below their parent stop with `children_below`, and a node
-without routable children is a `leaf`. No score floor or routing-driven phase
-is added. Explicit complete destinations retain their authored path; their
-counterfactual router result is informational.
+A topic with an authored description (`spice topic describe`) is a fixed
+point. The worker seats every public description before replaying statements.
+These fixed seats do not consume the 256 statement seats, and rolling the
+window never evicts them. A statement seated with a description is proposed
+that topic. If several descriptions share the seat, the one most similar
+in the fit over its parent wins; equal likeness is resolved in topic path order.
+After a description changes, preview reports
+`topic::preview-catching-up` and inference makes no pick until the worker
+publishes the new tree. A decision captured before the change cannot commit
+after it.
 
-Relative tails preserve their exact order and remain separate from the inferred
-prefix. A unique existing match is reused; ambiguous matches compose at the
-explained prefix rather than selecting a branch. Composition consumes the
-largest exact overlap between the prefix's final components and the tail's first
-components: `/app/render` plus `render/css` becomes `/app/render/css`;
-`/app/css` plus `css/css` becomes `/app/css/css`; `UUID/app` plus `app/css`
-becomes `UUID/app/css`. The owner UUID is never consumed. `/app` plus `app`
-remains `/app`, recording overlap one and zero remainder.
+Authority is checked on the proposal, last. The reserved `/oops` subtree,
+private topics and every topic outside the creator team's drive and ownership
+policy for the task's phase are not usable. A proposal the filer may not use
+is reported as `task::route-not-admitted` with its topic and leaves the task
+unplaced; the agent can choose with `--topic`. A team's `unmatched` topic
+receives only a statement the tree could not name, or one it would seat at or
+beneath that topic. Runtime switches still govern actual activation and
+allocation; pausing an owner does not route around it. Existing tasks retain
+their immutable creator team for `task place`; an invoking operator does not
+replace it. Each new resolution rechecks whether that creator team is live.
+Teamless and departed creators use unrestricted public topics and the default
+policy's optional unmatched destination.
 
-The separate `structure` receipt records the authored tail, inferred prefix,
-matched path and component count, composition overlap, and an overlap, meet,
-known gap, unresolved or ambiguous connection. Gap components come only from
-an existing connecting path; no middle names are guessed. An unslashed
-`app/render` remains relative even if `/app/render` exists; an earlier-tier
-choice elsewhere reports that root-anchored alternative. Structural evidence
-does not fabricate statement cosine.
+The tree lives in resident memory, not on disk. At startup the worker replays
+at most 1,024 eligible arrivals from one board-wide arrival index. Without a
+completed tree, preview returns `topic::preview-catching-up` and inferred
+placement returns no pick. Explicit filing does not wait. Later journal
+changes are batched by the worker; a reader keeps its complete tree until its
+decision finishes, even when the worker publishes a replacement. Restart
+changes no durable filing. A stale projection cannot authorize a filing.
 
-Every pick carries its evidence: `confidence` (`evidenced` when the statement
-alone chose and stopped every step; `secondary` when origin or path was
-needed to choose or stop; `low` for zero consulted overlap, an undecided child
-stop or the unmatched topic), the weakest consulted `tier`, the `stop` reason,
-the strongest consulted `overlap` in thousandths, the strongest `residual`
-statement terms the destination's corpus lacks (at most 8), and a read-only
-`suffix` recommendation naming the existing parent, those residual terms
-spelled as candidate components, and the topic revision it was computed
-against. The recommendation creates, renames, moves, merges, splits and prunes
-nothing; topology remains an explicit operator action.
+A forecast can reuse the last complete tree. The resident checks the journal
+delta, not elapsed seconds. It examines at most one window (256 positions
+and 256 task references). Within that budget it accepts unrelated changes
+and at most one new arrival or changed prepared row among at least three
+retained rows. If an earlier member stops being eligible, a retained arrival
+changes identity, or a topic subtree moves, the tree cannot supply a pick.
+Earlier groups describe the displayed tree projection; member titles,
+destination node and permissions come from the current journal. A pick made
+this way includes `tree_lag` with the lineage and both projection positions.
+An approval digest for that pick cannot silently switch generations.
 
-Restricted and unrestricted picks use the same scored node set after authority
-removes only the current creator's configured unmatched subtree. A task placed
-on an unmatched destination never contributes semantic corpus for any creator,
-but the shared topic's description, path and deliberately placed work remain
-available to other teams. The routing observation binds the chosen node or
-unmatched path, topic revision, configured policy and team membership, exact
-authored statement fields and relative tail, actual phase, bounded origin bytes
-and source revision, and both decisions. Nothing is cached across observations.
+An edit keeps the lineage unless it changes the task's prepared statement,
+arrival identity, or eligibility. Editing dependencies or refiling a task
+between public topics keeps the lineage; previews show its current title.
 
-Publication guards the captured tree, descriptions, task corpus, configured
-policy, team membership and origin revision. Automatic creation recaptures a
-stale routing snapshot or corpus generation internally from the unchanged
-request; it never rewrites caller witnesses or retries violated source,
-membership or policy assumptions. Explicit `task place --apply` still refuses
-a stale preview. Later corpus, usage or topology changes affect only future
-routing; activated tasks move only through explicit guarded `task place`.
-Re-placement preserves a stored relative `TaskTopic.named` tail and composes it
-once under the newly inferred prefix without changing phase. Editing the task
-to an explicit complete topic can replace that tail.
+`placement_min_lead` in `[team.default]` or `[team.NAME]` gates automatic
+filing (integer 0–100, default 0/off). It compares fitted cosine likeness
+within the proposed seat's immediate parent. At the first level this is
+the whole window. Deeper down, the parent is fitted with the arrival and
+all rows it holds, directly or in descendants. Rows in other branches
+neither affect word weights nor compete. The strongest match in the direct
+seat minus the strongest elsewhere in that parent is the lead, in whole
+percentage points. A missing match counts as zero. A lead below the setting
+leaves the task unplaced with `task::placement-weak-match`. A value of 1
+requires the seat to hold the
+nearer neighbour, so a statement that joined no group, which would start a
+topic of its own, is not filed automatically; this is not a probability or
+a quota. Explicit topics, parent inheritance, configured unmatched intake
+and manual `task place --apply` retain their existing rules.
+
+Approval stores journal node identities, not group numbers. Rebuilding the
+tree changes no existing filing. Moving a durable topic remains an explicit
+operator operation. An automatic route uses its existing command authority;
+it does not waive membership, drive or source checks.
+
 
 Board replies carry the authoritative projection barrier captured before row
 filtering, covering task statements, workflows and topic metadata.
 
-`spice task place HANDLE` previews the restricted router pick and, when it
-differs, the unrestricted pick from that same corpus. The receipt names the
-destination's owners, current phase and any drive refusal. An available
-`--apply=DIGEST` moves the saved topic without changing phase or releasing
-claims. A draft stays in draft; `spice task file` is the separate advance.
-An activated task cannot move to a drive-denied destination. The digest binds the
-task, actor, destination, policy, membership and corpus observation; changed
-inputs require a fresh preview, and a refused apply writes nothing.
+`spice task place HANDLE` previews the exact destination, its owners and any
+drive refusal without filing or creating a node. Repeat with `--apply DIGEST`
+to accept. A changed task, source, actor, policy, membership or destination
+invalidates the digest. Applying
+changes no phase or claim; `spice task file` advances a placed draft.
 
 An undecided creation preserves its authored tail in a submitted draft, with
 `task::placement-required` in its receipt. In draft, `task modify --topic`

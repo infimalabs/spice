@@ -1,0 +1,17 @@
+[package]
+name = "topic"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2 = "0.10.9"
+
+# Hardware SHA-256 on aarch64; see wire/Cargo.toml.
+[target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]
+sha2 = { version = "0.10.9", features = ["asm"] }
+
+[lints]
+workspace = true

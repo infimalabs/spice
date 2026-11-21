@@ -33,7 +33,7 @@ pub(super) fn project_task_rows(
         claim_contexts: &claim_contexts,
         git_contexts: &git_contexts,
     };
-    let capacity = selected.map_or(observed.tasks().len(), std::collections::BTreeSet::len);
+    let capacity = selected.map_or_else(|| observed.tasks().len(), std::collections::BTreeSet::len);
     let mut tasks = Vec::with_capacity(capacity);
     let mut entries = Vec::with_capacity(capacity);
     let mut project = |heads: &journal::TaskHeads| -> Result<(), Outcome<CommandAnswer>> {

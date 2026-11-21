@@ -61,7 +61,7 @@ fn drive_admission_uses_final_topic_and_phase_but_drafts_confer_no_exemption() {
             panic!("creation returns its task receipt")
         };
         let placement = answer.placement.expect("creation describes its placement");
-        assert_eq!(placement.topic.as_str(), topic);
+        assert_eq!(placement.topic.as_ref().unwrap().as_str(), topic);
         assert!(placement.drive_refusal.is_some());
         assert_eq!(
             answer.next.as_deref(),

@@ -10,6 +10,9 @@ mod disposition;
 mod persistent_index;
 mod review_authors;
 mod store;
+mod topic_inputs;
+
+pub use topic_inputs::TopicInputs;
 
 pub use review_authors::{AuthorshipFault, ClaimAuthor, FindingAuthors};
 pub(super) use store::{

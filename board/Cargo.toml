@@ -12,6 +12,7 @@ dialect = { path = "../dialect" }
 globset = "0.4"
 journal = { path = "../journal" }
 serde = { version = "1.0.229", features = ["derive"] }
+topic = { path = "../topic" }
 wire = { path = "../wire" }
 
 [lints]

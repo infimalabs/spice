@@ -15,13 +15,21 @@ use crate::environment_fault;
 
 #[derive(Serialize)]
 pub(crate) struct View {
-    topic: wire::Topic,
+    /// Absent for a filing preview, which names no topic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    topic: Option<wire::Topic>,
     #[serde(flatten)]
     answer: TopicAnswer,
 }
 
 impl fmt::Display for View {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(groups) = &self.answer.grouping {
+            return groups.fmt(f);
+        }
+        let Some(topic) = &self.topic else {
+            return Ok(());
+        };
         if let Some(node) = &self.answer.node {
             writeln!(
                 f,
@@ -44,7 +52,7 @@ impl fmt::Display for View {
             writeln!(
                 f,
                 "next: spice topic show {} --after {}",
-                self.topic,
+                topic,
                 after.get()
             )?;
         }
@@ -55,9 +63,9 @@ impl fmt::Display for View {
                 "applied"
             };
             match change {
-                TopicChange::Move { to } => writeln!(f, "{state}: move {} to {to}", self.topic)?,
+                TopicChange::Move { to } => writeln!(f, "{state}: move {topic} to {to}")?,
                 TopicChange::Describe { description } => {
-                    writeln!(f, "{state}: describe {}: {description}", self.topic)?
+                    writeln!(f, "{state}: describe {topic}: {description}")?
                 }
             }
         }
@@ -75,16 +83,87 @@ fn refused(detail: impl Into<String>) -> Outcome<View> {
     ))
 }
 
-pub(crate) fn run(matches: &ArgMatches, contract: &Contract, ambient: &Ambient) -> Outcome<View> {
-    let path_key = if contract.path == ["topic", "move"] {
-        "FROM"
-    } else {
-        "TOPIC"
+fn history_cursor(matches: &ArgMatches) -> Result<Option<wire::Seq>, String> {
+    matches
+        .get_one::<String>("after")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|error| error.to_string())
+                .and_then(|value| {
+                    wire::Seq::new(value)
+                        .ok_or_else(|| "history cursor must be positive".to_owned())
+                })
+        })
+        .transpose()
+}
+
+fn read_request(matches: &ArgMatches, topic: Option<&wire::Topic>) -> Result<TopicRead, String> {
+    let text = |name| {
+        matches
+            .get_one::<String>(name)
+            .expect("registered preview argument")
+            .clone()
     };
-    let spelling = matches
-        .get_one::<String>(path_key)
-        .expect("registered topic argument");
-    let topic: wire::Topic = match spelling.parse() {
+    Ok(match topic {
+        Some(topic) => TopicRead::Show {
+            topic: topic.clone(),
+            after: history_cursor(matches)?,
+        },
+        None => TopicRead::Preview {
+            title: text("TITLE"),
+            pitch: text("PITCH"),
+        },
+    })
+}
+
+fn edit_request(
+    matches: &ArgMatches,
+    contract: &Contract,
+    topic: wire::Topic,
+) -> Result<TopicEdit, String> {
+    let change = match contract.path {
+        ["topic", "move"] => {
+            let to = matches.get_one::<String>("TO").expect("registered target");
+            TopicChange::Move {
+                to: to.parse().map_err(|error| format!("{error}"))?,
+            }
+        }
+        ["topic", "describe"] => TopicChange::Describe {
+            description: matches
+                .get_one::<String>("DESCRIPTION")
+                .expect("registered description")
+                .clone(),
+        },
+        _ => unreachable!("topic CLI dispatch is closed"),
+    };
+    let apply = matches
+        .get_one::<String>("apply")
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|error| format!("{error}"))?;
+    Ok(TopicEdit {
+        topic,
+        change,
+        apply,
+    })
+}
+
+pub(crate) fn run(matches: &ArgMatches, contract: &Contract, ambient: &Ambient) -> Outcome<View> {
+    let path_key = match contract.path {
+        ["topic", "preview"] => None,
+        ["topic", "move"] => Some("FROM"),
+        _ => Some("TOPIC"),
+    };
+    let topic: Option<wire::Topic> = match path_key
+        .map(|key| {
+            matches
+                .get_one::<String>(key)
+                .expect("registered topic argument")
+                .parse()
+        })
+        .transpose()
+    {
         Ok(topic) => topic,
         Err(error) => return refused(format!("{error}")),
     };
@@ -100,69 +179,29 @@ pub(crate) fn run(matches: &ArgMatches, contract: &Contract, ambient: &Ambient) 
         Ok(paths) => paths,
         Err(error) => return crate::state_failure(&error).outcome(),
     };
-    let outcome = if contract.path == ["topic", "show"] {
-        let after = match matches
-            .get_one::<String>("after")
-            .map(|value| {
-                value
-                    .parse::<u64>()
-                    .map_err(|error| error.to_string())
-                    .and_then(|value| {
-                        wire::Seq::new(value)
-                            .ok_or_else(|| "history cursor must be positive".to_owned())
-                    })
-            })
-            .transpose()
-        {
-            Ok(after) => after,
+    let outcome = if let Some(named) = topic
+        .as_ref()
+        .filter(|_| contract.path != ["topic", "show"])
+    {
+        let body = match edit_request(matches, contract, named.clone()) {
+            Ok(body) => body,
             Err(error) => return refused(error),
         };
         command_client::execute(
             paths.serve(),
             contract,
-            SelectedCommand::TopicRead {
-                body: &TopicRead {
-                    topic: topic.clone(),
-                    after,
-                },
-            },
+            SelectedCommand::TopicEdit { body: &body },
             ambient,
         )
     } else {
-        let change = match contract.path {
-            ["topic", "move"] => {
-                let to = matches.get_one::<String>("TO").expect("registered target");
-                match to.parse() {
-                    Ok(to) => TopicChange::Move { to },
-                    Err(error) => return refused(format!("{error}")),
-                }
-            }
-            ["topic", "describe"] => TopicChange::Describe {
-                description: matches
-                    .get_one::<String>("DESCRIPTION")
-                    .expect("registered description")
-                    .clone(),
-            },
-            _ => unreachable!("topic CLI dispatch is closed"),
-        };
-        let apply = match matches
-            .get_one::<String>("apply")
-            .map(|value| value.parse())
-            .transpose()
-        {
-            Ok(apply) => apply,
-            Err(error) => return refused(format!("{error}")),
+        let body = match read_request(matches, topic.as_ref()) {
+            Ok(body) => body,
+            Err(error) => return refused(error),
         };
         command_client::execute(
             paths.serve(),
             contract,
-            SelectedCommand::TopicEdit {
-                body: &TopicEdit {
-                    topic: topic.clone(),
-                    change,
-                    apply,
-                },
-            },
+            SelectedCommand::TopicRead { body: &body },
             ambient,
         )
     };

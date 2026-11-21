@@ -4,13 +4,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AnyFact, Digest, Envelope, Seq, Topic};
 
-/// Inspect one absolute topic and a page of its durable routing history.
+/// Inspect one absolute topic and a page of its durable routing history, or
+/// forecast where a fresh statement would be filed without writing anything.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TopicRead {
-    pub topic: Topic,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<Seq>,
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TopicRead {
+    Show {
+        topic: Topic,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<Seq>,
+    },
+    Preview {
+        title: String,
+        pitch: String,
+    },
 }
 
 /// One durable topic description or operator-authored topology change.
@@ -49,6 +56,8 @@ pub struct TopicAnswer {
     pub next: Option<Seq>,
     pub preview: Option<Digest>,
     pub change: Option<TopicChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grouping: Option<super::Grouping>,
 }
 
 /// The description of a topic node was authored; missing nodes are created.

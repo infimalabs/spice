@@ -383,6 +383,7 @@ fn coordination_landed(path: &[&str]) -> bool {
             | ["inbox"]
             | ["quote"]
             | ["topic", "show"]
+            | ["topic", "preview"]
             | ["topic", "move"]
             | ["topic", "describe"]
             | ["consent"]

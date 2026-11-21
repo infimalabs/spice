@@ -172,6 +172,8 @@ impl LaunchProbes for InertProbes {
 
     fn variable(&self, name: &str) -> Option<std::ffi::OsString> {
         match name {
+            #[cfg(unix)]
+            "SHELL" => Some("/bin/sh".into()),
             "HOME" => self.home.clone().map(PathBuf::into_os_string),
             "USERPROFILE" | "HOMEDRIVE" | "HOMEPATH" => None,
             _ if name == vendor::OMP.transcript_layout().home_environment => None,
