@@ -57,6 +57,23 @@ pub(super) fn validated_snapshot(
     validated_snapshot_from_with_occupant(&observed, repository, principal, None, None, true)
 }
 
+/// Reuse the command's authority projection without materializing any board
+/// rows. The caller will read its own projection from the same snapshot.
+pub(super) fn routing_snapshot(
+    observed: &bus::TaskSnapshot,
+    repository: Option<&Repository>,
+    principal: Actor,
+) -> Result<ValidatedSnapshot, Outcome<CommandAnswer>> {
+    validated_snapshot_from_with_occupant(
+        observed,
+        repository,
+        principal,
+        None,
+        Some(&Default::default()),
+        false,
+    )
+}
+
 fn validated_snapshot_from_with_occupant(
     observed: &bus::TaskSnapshot,
     repository: Option<&Repository>,

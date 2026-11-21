@@ -22,6 +22,7 @@ members = [
     "steer",
     "tape",
     "taste",
+    "topic",
     "vendor",
     "wire",
     "windows",
@@ -89,6 +90,12 @@ opt-level = 3
 [profile.dev.package.wire]
 opt-level = 3
 
+# The topic engine refits and regroups a window of tasks on every arrival.
+# Unoptimized, growing the board's topic tree takes about eight times as long, and
+# the self-hosted appliance is a development build.
+[profile.dev.package.topic]
+opt-level = 3
+
 [profile.dev.package.spice]
 strip = "symbols"
 
@@ -110,6 +117,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.test.package.wire]
+opt-level = 0
+
+[profile.test.package.topic]
 opt-level = 0
 
 [profile.test.package.spice]

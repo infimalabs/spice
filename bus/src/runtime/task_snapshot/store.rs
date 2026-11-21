@@ -65,6 +65,25 @@ impl TaskHeadStore {
         self.len
     }
 
+    pub(crate) fn get(&self, task: &journal::crossing::TaskStamp) -> Option<&journal::TaskHeads> {
+        fn search<'a>(
+            rows: &'a [journal::TaskHeads],
+            task: &journal::crossing::TaskStamp,
+        ) -> Option<&'a journal::TaskHeads> {
+            rows.binary_search_by(|heads| heads.statement().body().born.cmp(task))
+                .ok()
+                .map(|index| &rows[index])
+        }
+        if let Some(rows) = self.materialized.get() {
+            return search(rows, task);
+        }
+        self.deltas
+            .iter()
+            .rev()
+            .find_map(|rows| search(rows, task))
+            .or_else(|| search(&self.base, task))
+    }
+
     pub(in crate::runtime) fn tasks(&self) -> &[journal::TaskHeads] {
         self.materialized
             .get_or_init(|| {
@@ -510,17 +529,28 @@ fn advance_trust(
         }
         .map_err(BusReadError::Head)?;
         build.facts.retain_allocation_origins(&allocation.frontier);
+        let mut topic_inputs = build
+            .prior
+            .as_ref()
+            .map(|prior| prior.topic_inputs.clone())
+            .unwrap_or_default();
+        for heads in &build.tasks {
+            topic_inputs.update(heads);
+        }
         let tasks = match &build.prior {
             Some(prior) => prior
                 .tasks
                 .advanced(std::mem::take(&mut build.tasks), task_count),
             None => TaskHeadStore::from_base(std::mem::take(&mut build.tasks)),
         };
+        let described_topics = descriptions(read, &build)?;
         Ok(BuildStep::Ready(TaskSnapshot {
             cursor: build.cursor,
             task_projection_cursor,
             facts: build.facts,
             tasks,
+            topic_inputs,
+            described_topics,
             allocation_frontier: allocation.frontier,
             dependency_standing: allocation.standing,
             dependency_references: allocation.references,
@@ -532,6 +562,24 @@ fn advance_trust(
             task_head_update_visits,
         }))
     })
+}
+
+fn descriptions(
+    read: &journal::JournalRead<'_>,
+    build: &TaskSnapshotBuild,
+) -> Result<Arc<[journal::TopicRoutingNode]>, BusReadError> {
+    use journal::crossing::FactKind::{TopicDescribed, TopicMoved};
+    if let Some(prior) = &build.prior
+        && !build
+            .facts
+            .after(prior.cursor())
+            .any(|row| matches!(row.fact.kind(), TopicDescribed | TopicMoved))
+    {
+        return Ok(Arc::clone(prior.described_topics()));
+    }
+    let mut nodes = read.described_topics().map_err(BusReadError::Head)?;
+    nodes.retain(|node| !node.description.trim().is_empty());
+    Ok(nodes.into())
 }
 
 enum BuildStep {

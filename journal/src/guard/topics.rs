@@ -5,9 +5,14 @@ use wire::topic::{TopicAnswer, TopicNode};
 use super::{GuardError, JournalRead};
 
 impl JournalRead<'_> {
-    /// Public targets with descriptions and a bounded corpus of live tasks.
+    /// Current public filing paths and stable identities, including empty nodes.
     pub fn topic_routing_nodes(&self) -> Result<Vec<crate::TopicRoutingNode>, GuardError> {
         crate::topic::routing::nodes(self.connection).map_err(GuardError::Invalid)
+    }
+
+    /// Current publicly visible described topics, ordered by stable node ID.
+    pub fn described_topics(&self) -> Result<Vec<crate::TopicRoutingNode>, GuardError> {
+        crate::topic::routing::described(self.connection).map_err(GuardError::Invalid)
     }
 
     /// Inspect a stable node through its current absolute path.
@@ -38,6 +43,7 @@ impl JournalRead<'_> {
             next,
             preview: None,
             change: None,
+            grouping: None,
         })
     }
 }

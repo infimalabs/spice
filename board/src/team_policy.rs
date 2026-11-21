@@ -27,7 +27,13 @@ pub struct Policy {
     /// own tasks never score as a destination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unmatched: Option<wire::Topic>,
+    /// Minimum lead (percentage points of likeness in the tree's fit) for an
+    /// automatic topic filing.
+    pub placement_min_lead: u8,
 }
+
+/// Scale for the minimum lead and the likeness it is compared to.
+pub const FULL_PLACEMENT_LEAD: u8 = 100;
 
 impl Policy {
     /// Omitted drain uses this table's drive rules, not another table.
@@ -63,6 +69,7 @@ static DEFAULT_POLICY: Policy = Policy {
     drive: Rules::All,
     drain: None,
     unmatched: None,
+    placement_min_lead: 0,
 };
 
 /// The `[team]` map, admitted with topic matchers already compiled.
@@ -74,6 +81,11 @@ impl<'de> Deserialize<'de> for Config {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let tables = BTreeMap::<String, Policy>::deserialize(deserializer)?;
         for (name, policy) in &tables {
+            if policy.placement_min_lead > FULL_PLACEMENT_LEAD {
+                return Err(serde::de::Error::custom(format!(
+                    "team.{name}.placement_min_lead must be between 0 and 100"
+                )));
+            }
             if name == "default" {
                 if policy.drive.declares_exclusive() || policy.drain().declares_exclusive() {
                     return Err(serde::de::Error::custom(

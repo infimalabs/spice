@@ -51,13 +51,7 @@ impl MappedCommand {
             SelectedCommand::LaneRenewal { body } => Self::lane_renewal(contract, body),
             SelectedCommand::LaneRecall { body } => Self::lane_recall(contract, body),
             SelectedCommand::QuoteRead { body } => Self::quote_read(contract, body),
-            SelectedCommand::TopicRead { body } => Self::new(
-                contract,
-                &["topic", "show"],
-                CommandKind::TopicRead,
-                Vec::new(),
-                body,
-            ),
+            SelectedCommand::TopicRead { body } => Self::topic_read(contract, body),
             SelectedCommand::TopicEdit { body } => {
                 let path = match &body.change {
                     wire::topic::TopicChange::Move { .. } => &["topic", "move"],
@@ -258,6 +252,14 @@ impl MappedCommand {
             Vec::new(),
             body,
         )
+    }
+
+    fn topic_read(contract: &Contract, body: &wire::topic::TopicRead) -> ClientResult<Self> {
+        let path: &[&str] = match body {
+            wire::topic::TopicRead::Preview { .. } => &["topic", "preview"],
+            wire::topic::TopicRead::Show { .. } => &["topic", "show"],
+        };
+        Self::new(contract, path, CommandKind::TopicRead, Vec::new(), body)
     }
 
     fn steer_cancel(contract: &Contract, directive: CanonicalUuid) -> ClientResult<Self> {

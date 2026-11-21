@@ -51,6 +51,7 @@ steer = { path = "../steer" }
 tape = { path = "../tape" }
 taste = { path = "../taste" }
 toml = { version = "1.1.4", features = ["preserve_order"] }
+topic = { path = "../topic" }
 vendor = { path = "../vendor" }
 wire = { path = "../wire" }
 

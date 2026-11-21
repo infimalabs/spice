@@ -43,7 +43,7 @@ pub(super) fn terms(text: &str) -> impl Iterator<Item = String> + '_ {
         // Every admitted spelling, including folded longer words, uses this
         // authority. Session-control markers do not describe a task's subject.
         .filter(|word| {
-            !super::STOP.contains(&word.as_str())
+            super::STOP.binary_search(&word.as_str()).is_err()
                 && !matches!(word.as_str(), "syn" | "ack" | "nak" | "fin")
         })
 }

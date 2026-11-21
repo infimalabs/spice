@@ -2,31 +2,8 @@
 //! same transaction, and a router that cannot decide refuses and moves nothing.
 
 use super::*;
-use wire::topic::TopicDescribed;
 
 const UNMATCHED_PITCH: &str = "Quixotic vexation needs judgment.";
-
-fn describe(bus: &Bus, topic: &str, text: &str) {
-    let mut write = JournalWrite::new(
-        Actor::TEST_PRINCIPAL,
-        "routing:contract".parse().unwrap(),
-        current_instant().unwrap(),
-        Producer::CommandDoor,
-    );
-    write
-        .fact(
-            TopicDescribed {
-                topic: topic.parse().unwrap(),
-                description: text.to_owned(),
-            },
-            FactCause::Root,
-        )
-        .unwrap();
-    assert!(matches!(
-        bus.commit(write).unwrap(),
-        CommitOutcome::Committed(_)
-    ));
-}
 
 /// A creation the router cannot place: no topic, or a relative tail nothing
 /// on the empty corpus explains. It rests submitted in draft, the one phase
@@ -191,12 +168,12 @@ fn a_sole_done_composes_the_stored_tail_under_the_router_prefix() {
         "an undecided tail creation keeps the tail"
     );
     claim_task(&bus, epoch, &seats[0], &Actor::Lane(seats[0].lane), &task);
-    describe(&bus, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     let CommandAnswer::Task(answer) = assert_committed(done(&bus, epoch, &seats[0], &task, None))
     else {
         panic!("done returns a task answer")
     };
-    let placed = placed_handle("/storage/render", &task);
+    let placed = placed_handle("/durable/render", &task);
     assert_eq!(answer.task, placed, "the answer names the placed handle");
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let row = at(&view, &task);
@@ -207,7 +184,7 @@ fn a_sole_done_composes_the_stored_tail_under_the_router_prefix() {
             .path
             .as_ref()
             .map(wire::Topic::as_str),
-        Some("/storage/render")
+        Some("/durable/render")
     );
     assert_eq!(
         row.statement
@@ -216,7 +193,7 @@ fn a_sole_done_composes_the_stored_tail_under_the_router_prefix() {
             .placed
             .as_ref()
             .map(wire::Topic::as_str),
-        Some("/storage")
+        Some("/durable")
     );
     assert_eq!(row.statement.body.handle, placed);
     assert_eq!(row.workflow.body.phase.as_str(), "todo");
@@ -245,10 +222,10 @@ fn an_undecided_done_refuses_until_the_router_can_place_the_statement() {
         "a refused close publishes nothing"
     );
 
-    describe(&bus, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     assert_committed(done(&bus, epoch, &seats[0], &task, None));
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
-    assert_eq!(topic(&view, &task).as_deref(), Some("/storage"));
+    assert_eq!(topic(&view, &task).as_deref(), Some("/durable"));
     assert_eq!(at(&view, &task).workflow.body.phase.as_str(), "todo");
     clean(&root, bus);
 }
@@ -266,12 +243,12 @@ fn a_draft_close_places_before_plan_and_carries_the_placed_claim() {
         "plan,todo,review",
     );
     claim_task(&bus, epoch, &seats[0], &lane, &task);
-    describe(&bus, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     let CommandAnswer::Task(answer) = assert_committed(done(&bus, epoch, &seats[0], &task, None))
     else {
         panic!("done returns a task answer")
     };
-    let placed = placed_handle("/storage", &task);
+    let placed = placed_handle("/durable", &task);
     assert_eq!(answer.task, placed);
     let carried = answer
         .claim
@@ -287,13 +264,13 @@ fn a_draft_close_places_before_plan_and_carries_the_placed_claim() {
     );
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let row = at(&view, &task);
-    assert_eq!(topic(&view, &task).as_deref(), Some("/storage"));
+    assert_eq!(topic(&view, &task).as_deref(), Some("/durable"));
     assert_eq!(row.workflow.body.phase.as_str(), "plan");
     let claim = &row.latest_claim().expect("the carried claim").claim.body;
     assert_eq!(claim.disposition, ClaimDisposition::Active);
     assert_eq!(
         claim.cell.topic.as_ref().map(wire::Topic::as_str),
-        Some("/storage"),
+        Some("/durable"),
         "the carried claim records the placed topic"
     );
 
@@ -301,7 +278,7 @@ fn a_draft_close_places_before_plan_and_carries_the_placed_claim() {
     assert_committed(done(&bus, epoch, &seats[0], &task, None));
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     assert_eq!(at(&view, &task).workflow.body.phase.as_str(), "todo");
-    assert_eq!(topic(&view, &task).as_deref(), Some("/storage"));
+    assert_eq!(topic(&view, &task).as_deref(), Some("/durable"));
     clean(&root, bus);
 }
 
@@ -326,14 +303,14 @@ fn a_disposition_never_leaves_draft_but_settles_the_placed_plan() {
     let after = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     assert_eq!(at(&after, &plan).workflow, at(&before, &plan).workflow);
 
-    describe(&bus, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     assert_committed(done(&bus, epoch, &seats[0], &plan, None));
     let placed = board(&bus, epoch, Actor::TEST_PRINCIPAL);
-    assert_eq!(topic(&placed, &plan).as_deref(), Some("/storage"));
+    assert_eq!(topic(&placed, &plan).as_deref(), Some("/durable"));
     assert_eq!(at(&placed, &plan).workflow.body.phase.as_str(), "plan");
     assert_committed(done(&bus, epoch, &seats[0], &plan, no_work()));
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
-    assert_eq!(topic(&view, &plan).as_deref(), Some("/storage"));
+    assert_eq!(topic(&view, &plan).as_deref(), Some("/durable"));
     assert!(!at(&view, &plan).workflow.body.status.is_pending());
     clean(&root, bus);
 }
@@ -353,10 +330,10 @@ fn a_draft_entering_review_places_or_refuses_before_any_verdict() {
     let refused = done(&bus, epoch, &seats[0], &task, None);
     assert_placement_required(&bus, epoch, refused, &before, &task);
 
-    describe(&bus, "/storage", "durable storage records");
+    let _trees = warm_topics(&root, &bus);
     assert_committed(done(&bus, epoch, &seats[0], &task, None));
     let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
-    assert_eq!(topic(&view, &task).as_deref(), Some("/storage"));
+    assert_eq!(topic(&view, &task).as_deref(), Some("/durable"));
     assert_eq!(at(&view, &task).workflow.body.phase.as_str(), "review");
     assert!(
         at(&view, &task)

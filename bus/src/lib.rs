@@ -31,7 +31,7 @@ mod runtime {
     mod task_snapshot;
     pub use task_snapshot::{
         AllocationFault, AllocationRead, AllocationWork, AuthorshipFault, ClaimAuthor,
-        FindingAuthors, TaskFacts, TaskOrigin, context_opening,
+        FindingAuthors, TaskFacts, TaskOrigin, TopicInputs, context_opening,
     };
     use task_snapshot::{
         TaskHeadStore, TaskSnapshotState, advance_task_snapshot, invalidate_task_snapshot,
@@ -151,6 +151,8 @@ mod runtime {
         task_projection_cursor: Option<journal::crossing::Seq>,
         facts: TaskFacts,
         tasks: TaskHeadStore,
+        topic_inputs: TopicInputs,
+        described_topics: Arc<[journal::TopicRoutingNode]>,
         allocation_frontier: Arc<[TaskHeads]>,
         dependency_standing:
             Arc<std::collections::HashMap<journal::crossing::TaskStamp, DependencyStanding>>,
@@ -228,6 +230,16 @@ mod runtime {
             self.tasks.tasks()
         }
 
+        /// Ordered eligible topic inputs at the same barrier as the task heads.
+        pub fn topic_inputs(&self) -> &TopicInputs {
+            &self.topic_inputs
+        }
+
+        /// Shared while no description or topic path changes.
+        pub fn described_topics(&self) -> &Arc<[journal::TopicRoutingNode]> {
+            &self.described_topics
+        }
+
         /// Heads in the live allocation graph.
         ///
         /// The resident updates this compact slice only from moved heads. A
@@ -245,10 +257,7 @@ mod runtime {
         /// One exact current head bundle by durable task identity.
         #[must_use]
         pub fn task_heads(&self, task: &journal::crossing::TaskStamp) -> Option<&TaskHeads> {
-            self.tasks()
-                .binary_search_by(|heads| heads.statement().body().born.cmp(task))
-                .ok()
-                .map(|index| &self.tasks()[index])
+            self.tasks.get(task)
         }
 
         /// Known standing for one dependency identity. `None` means the stamp
@@ -1368,6 +1377,6 @@ pub use runtime::{
     ClaimAuthor, CommitOutcome, CommitSubscriber, DependencyStanding, FindingAuthors,
     JournalCommit, JournalTransaction, LaneCodeRefusal, MAX_STEERING_PRESENTATION_KEYS,
     OccupantBirth, OutboxQuery, OutboxSubmission, SteeringPresentation, SteeringPublication,
-    SteeringSnapshot, TaskFacts, TaskOrigin, TaskSnapshot, TranscriptSession, TranscriptSessions,
-    context_opening, journal_seat_addresses,
+    SteeringSnapshot, TaskFacts, TaskOrigin, TaskSnapshot, TopicInputs, TranscriptSession,
+    TranscriptSessions, context_opening, journal_seat_addresses,
 };

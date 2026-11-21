@@ -98,7 +98,7 @@ fn crude_intake_is_triage_for_unconstrained_teams_and_moves_only_through_the_val
     fs::write(
         root.join("spice.toml"),
         "[team.default]\ndrive = true\ndrain = true\n\
-         [team.scoped]\ndrive = true\ndrain = [{ topic = [\"/owned/**\"] }]\n",
+         [team.scoped]\ndrive = true\ndrain = [{ topic = [\"/went\"] }]\n",
     )
     .unwrap();
     authorize_lane_creation(&bus, epoch, global);
@@ -142,7 +142,7 @@ fn crude_intake_is_triage_for_unconstrained_teams_and_moves_only_through_the_val
         CommandKind::TaskEdit,
         vec![statement_witness(at(&current, &task))],
         &TaskEdit {
-            term: Some(vec!["The triaged outcome is verified".to_owned()]),
+            term: Some(vec!["Record what went wrong and verify the fix".to_owned()]),
             ..only(&task)
         },
     ));
@@ -151,19 +151,12 @@ fn crude_intake_is_triage_for_unconstrained_teams_and_moves_only_through_the_val
         done(&bus, epoch, global, &task)
     });
 
-    fs::write(
-        root.join("spice.toml"),
-        "[team.default]\ndrive = true\ndrain = true\nunmatched = \"/owned/triage\"\n\
-         [team.scoped]\ndrive = true\ndrain = [{ topic = [\"/owned/**\"] }]\n",
-    )
-    .unwrap();
+    let _trees = warm_topics(&root, &bus);
     let CommandAnswer::Task(answer) = assert_committed(done(&bus, epoch, global, &task)) else {
         panic!("the advance returns a task receipt")
     };
     let placed = TaskHandle::for_topic(
-        &"/owned/triage"
-            .parse::<wire::Topic>()
-            .expect("unmatched topic"),
+        &"/went".parse::<wire::Topic>().expect("public topic"),
         &task.born().expect("task stamp"),
     );
     assert_eq!(answer.task, placed, "the answer names the placed handle");
@@ -176,7 +169,7 @@ fn crude_intake_is_triage_for_unconstrained_teams_and_moves_only_through_the_val
             .path
             .as_ref()
             .map(wire::Topic::as_str),
-        Some("/owned/triage")
+        Some("/went")
     );
     assert_eq!(row.workflow.body.phase, wire::Phase::Todo);
     assert!(row.workflow.body.submitted, "the mark is never cleared");

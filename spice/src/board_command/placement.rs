@@ -79,16 +79,25 @@ fn prepare(
     entry: &Entry,
     actor: &Actor,
 ) -> Result<Plan, Outcome<CommandAnswer>> {
+    let phase = if entry.is_draft() {
+        entry
+            .workflow()
+            .flow
+            .get(1)
+            .copied()
+            .unwrap_or(entry.workflow().phase)
+    } else {
+        entry.workflow().phase
+    };
     let routing = routing::Capture::new_for_team(
         bus,
         snapshot,
         entry.creator_team(),
-        routing::Statement::task(entry.statement(), &entry.workflow().phase),
+        routing::Statement::task(entry.statement(), &phase).for_approval(),
         routing::OriginView::of(bus, &entry.statement().provenance)?,
     )?;
     let restricted = routing.restricted();
     let route = route_answer(&restricted);
-    let unrestricted = route_answer(&routing.unrestricted());
     let admission = drive::Admission::capture(
         actor,
         &snapshot.answer.residency,
@@ -97,7 +106,6 @@ fn prepare(
     let mut answer = TaskPlaceAnswer {
         task: entry.handle().clone(),
         from: entry.topic().cloned(),
-        unrestricted: (unrestricted != route).then_some(unrestricted),
         route,
         ownership: None,
         phase: entry.workflow().phase,
@@ -111,14 +119,6 @@ fn prepare(
         .map(|routed| routed.topic)
         .filter(|topic| topic.path.is_some());
     if let Some(topic) = &topic {
-        // A draft is judged at the phase it enters when it leaves draft.
-        let phase = entry
-            .workflow()
-            .flow
-            .get(1)
-            .copied()
-            .filter(|_| entry.is_draft())
-            .unwrap_or(entry.workflow().phase);
         let decision = admission.decide(topic.path.as_ref(), &phase, entry.creator_team());
         answer.drive_refusal = decision.refusal;
         let owners = snapshot
