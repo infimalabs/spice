@@ -4,7 +4,7 @@
 //! admitted terms of one statement. A set of prepared tasks is fitted by
 //! [`crate::words`], which yields their graph rows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::lexical::{self, Counts};
 
@@ -16,8 +16,6 @@ pub const FIELDS: usize = 4;
 const ADMISSION_TIERS: [u8; FIELDS] = [3, 2, 1, 2];
 /// Most distinct terms one task contributes.
 pub const TERM_BUDGET: usize = 256;
-/// Greatest count of one term that routing evidence distinguishes.
-pub const COUNT_CEILING: u32 = 255;
 
 /// One statement's fit-independent evidence.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,8 +25,8 @@ pub struct Prepared {
     pub fields: [Counts; crate::evidence::FIELDS],
     /// Number of nonblank authored acceptance items, independent of their words.
     pub(crate) acceptance_items: usize,
-    /// Counts of admitted terms over all fields, held to [`COUNT_CEILING`].
-    pub admitted: Counts,
+    /// Admitted terms in lexical order.
+    pub admitted: BTreeSet<String>,
 }
 
 /// Count the provided fields, admitting terms by strongest field, then by
@@ -81,12 +79,9 @@ fn prepare_counts(id: &str, mut fields: [Counts; FIELDS], terms: &[String]) -> P
         });
         order.truncate(TERM_BUDGET);
     }
-    let admitted: Counts = order
-        .into_iter()
-        .map(|(term, (count, _))| (term.to_owned(), count.min(COUNT_CEILING)))
-        .collect();
+    let admitted: BTreeSet<String> = order.into_iter().map(|(term, _)| term.to_owned()).collect();
     for field in &mut fields {
-        field.retain(|term, _| admitted.contains_key(term));
+        field.retain(|term, _| admitted.contains(term));
     }
     Prepared {
         id: id.to_owned(),
@@ -119,7 +114,7 @@ impl FromIterator<(TermId, f64)> for SparseRow {
 
 #[cfg(test)]
 mod tests {
-    use super::{COUNT_CEILING, TERM_BUDGET, prepare_statement};
+    use super::{TERM_BUDGET, prepare_statement};
 
     #[test]
     fn admission_prefers_stronger_fields_then_frequency_and_drops_own_identity() {
@@ -141,20 +136,20 @@ mod tests {
             &["quokka".into()],
         );
         assert_eq!(prepared.admitted.len(), TERM_BUDGET);
-        assert_eq!(prepared.admitted.get("crossing"), Some(&1));
-        assert_eq!(prepared.admitted.get("aardvark"), Some(&1));
+        assert!(prepared.admitted.contains("crossing"));
+        assert!(prepared.admitted.contains("aardvark"));
         assert!(prepared.fields[1].contains_key("urgency"));
         assert!(prepared.fields[3].contains_key("quokka"));
-        assert_eq!(prepared.admitted.get("lattice"), Some(&COUNT_CEILING));
+        assert!(prepared.admitted.contains("lattice"));
         assert_eq!(prepared.fields[2].get("lattice"), Some(&300));
-        assert!(!prepared.admitted.contains_key("zebra"));
-        assert!(!prepared.admitted.contains_key("gadget"));
+        assert!(!prepared.admitted.contains("zebra"));
+        assert!(!prepared.admitted.contains("gadget"));
         assert!(
             prepared
                 .fields
                 .iter()
                 .flatten()
-                .all(|(term, _)| prepared.admitted.contains_key(term))
+                .all(|(term, _)| prepared.admitted.contains(term))
         );
     }
 }
