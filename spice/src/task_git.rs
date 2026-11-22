@@ -1176,20 +1176,22 @@ fn create_merge_commit(
     message: &str,
 ) -> Result<GitOutput, Error> {
     // A retry over the same immutable parents must name the same commit, so
-    // the date is a function of the parents alone, never the wall clock. It
+    // the instant is a function of the parents alone, never the wall clock. It
     // lands one second past the first parent at least, so main's first-parent
-    // seconds strictly increase and HEAD's second alone orders a build.
-    let seconds = landing_seconds(
+    // seconds strictly increase and HEAD's second alone orders a build. The
+    // zone is the host's local offset at that instant, matching the commits
+    // the operator's tools stamp beside it.
+    let date = landing_seconds(
         commit_seconds(root, first_parent)?,
         commit_seconds(root, second_parent)?,
     )
+    .and_then(|seconds| git_date(seconds, &jiff::tz::TimeZone::system()))
     .ok_or_else(|| {
         Error::fault(
             "git::commit-date-invalid",
-            format!("task merge parent {first_parent} has no later committer second"),
+            format!("task merge parent {first_parent} has no later representable committer second"),
         )
     })?;
-    let date = format!("@{seconds} +0000");
     run_with_environment(
         root,
         &[
@@ -1210,6 +1212,20 @@ fn create_merge_commit(
 /// the first parent's when that is later.
 fn landing_seconds(first_parent: i64, second_parent: i64) -> Option<i64> {
     Some(first_parent.checked_add(1)?.max(second_parent))
+}
+
+/// Git's raw `@SECONDS ±HHMM` date for an epoch second in `zone`.
+fn git_date(seconds: i64, zone: &jiff::tz::TimeZone) -> Option<String> {
+    let offset = zone
+        .to_offset(jiff::Timestamp::from_second(seconds).ok()?)
+        .seconds();
+    let sign = if offset < 0 { '-' } else { '+' };
+    let minutes = offset.unsigned_abs() / 60;
+    Some(format!(
+        "@{seconds} {sign}{:02}{:02}",
+        minutes / 60,
+        minutes % 60
+    ))
 }
 
 fn commit_seconds(root: Worktree<'_>, commit: &str) -> Result<i64, Error> {
