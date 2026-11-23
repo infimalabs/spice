@@ -153,7 +153,8 @@ mod runtime {
         tasks: TaskHeadStore,
         topic_inputs: TopicInputs,
         described_topics: Arc<[journal::TopicRoutingNode]>,
-        allocation_frontier: Arc<[TaskHeads]>,
+        allocation_frontier: imbl::OrdMap<journal::crossing::TaskStamp, TaskHeads>,
+        timer_frontier: imbl::OrdMap<journal::crossing::TaskStamp, TaskHeads>,
         dependency_standing:
             Arc<std::collections::HashMap<journal::crossing::TaskStamp, DependencyStanding>>,
         dependency_references: Arc<std::collections::HashMap<journal::crossing::TaskStamp, usize>>,
@@ -245,7 +246,13 @@ mod runtime {
         /// The resident updates this compact slice only from moved heads. A
         /// request therefore visits no unrelated terminal row.
         pub fn allocation_frontier(&self) -> impl ExactSizeIterator<Item = &TaskHeads> {
-            self.allocation_frontier.iter()
+            self.allocation_frontier.values()
+        }
+
+        /// Heads that can own a process timer: active claims and finite
+        /// pending deferrals.
+        pub fn timer_frontier(&self) -> impl ExactSizeIterator<Item = &TaskHeads> {
+            self.timer_frontier.values()
         }
 
         /// Instrument one bounded next-work traversal.

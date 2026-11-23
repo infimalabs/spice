@@ -88,7 +88,7 @@ fn a_held_task_starts_a_new_lineage_only_when_its_evidence_changes() {
 }
 
 #[test]
-fn an_older_view_can_survive_one_edit_but_not_a_member_withdrawal() {
+fn an_older_view_survives_one_edit_and_rebuilds_on_member_withdrawal() {
     let (root, bus, epoch, _) = fixture("topic-checked-lag", 0);
     let [one, two, _] = [
         ("lag-optics", "Align an optical bench"),
@@ -137,9 +137,16 @@ fn an_older_view_can_survive_one_edit_but_not_a_member_withdrawal() {
         },
     ));
     let observed = bus.task_snapshot().unwrap();
-    let result = tree.with_current(&observed, |_| ());
-    assert!(
-        matches!(result, Err(Outcome::Refusal(r)) if r.reason() == "topic::preview-catching-up")
+    tree.with_current(&observed, |_| ())
+        .expect("the current snapshot regrows stale grouping evidence");
+    let regrown = view(&bus, &repository, &tree);
+    assert_ne!(regrown.lineage, original.lineage);
+    assert_eq!(regrown.projection, observed.task_projection_cursor());
+    assert_eq!(
+        regrown.recovery,
+        GroupingRecovery::Rebuilt {
+            reason: GroupingRebuild::InputChanged,
+        }
     );
     clean(&root, bus);
 }

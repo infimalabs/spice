@@ -401,8 +401,12 @@ fn admit_add_topic(
     repository: Option<&Repository>,
 ) -> Result<AdmittedAdd, Outcome<CommandAnswer>> {
     let roots = task_add_roots(add);
-    let snapshot =
-        validated_working_snapshot_for_tasks(bus, repository, command.actor().clone(), &roots)?;
+    let snapshot = validated_task_creation_snapshot_for_tasks(
+        bus,
+        repository,
+        command.actor().clone(),
+        &roots,
+    )?;
     let origin = resolve_creation_origin(
         add.origin.as_ref(),
         command.actor(),

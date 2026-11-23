@@ -8,7 +8,7 @@ use sill::{HeldShard, LockAttempt, LockAvailability, LockTopology};
 use wire::intent::CommandAnswer;
 use wire::{Actor, Environment, Outcome, TaskStamp};
 
-use super::{environment_fault, refusal};
+use super::{environment_fault, refusal, store_fault};
 
 /// Resident-owned shards retained for as long as their task claim is active.
 pub(crate) struct ResourceClaims {
@@ -30,7 +30,41 @@ impl ResourceClaims {
         bus: &bus::Bus,
         repository: Option<&spice::repository::Repository>,
     ) -> Result<(), Outcome<CommandAnswer>> {
-        let snapshot = super::read_guard::validated_snapshot(bus, repository, Actor::Spice)?;
+        if self.topology.is_empty() {
+            return Ok(());
+        }
+        let observed = bus
+            .task_snapshot()
+            .map_err(|error| store_fault("board::heads-unreadable", error.to_string()))?;
+        let residency = observed.residency().ok_or_else(|| {
+            store_fault(
+                "board::residency-missing",
+                "resource restoration requires current residency",
+            )
+        })?;
+        let active: BTreeSet<_> = residency
+            .body()
+            .lanes
+            .iter()
+            .filter_map(|lane| {
+                let actor = Actor::Lane(lane.lane);
+                let task = observed.facts().latest_claim_task(&actor)?;
+                observed
+                    .task_heads(task)?
+                    .active_claim_of(&actor)
+                    .map(|_| task.clone())
+            })
+            .collect();
+        if active.is_empty() {
+            self.reconcile(&[]);
+            return Ok(());
+        }
+        let snapshot = super::read_guard::validated_snapshot_for_selected_tasks(
+            &observed,
+            repository,
+            Actor::Spice,
+            &active,
+        )?;
         self.reconcile(&snapshot.entries);
         Ok(())
     }

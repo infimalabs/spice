@@ -254,11 +254,14 @@ impl Runtime {
     pub(super) fn synchronize(&mut self, bus: &Bus) -> CommandResult<()> {
         let snapshot = timer_snapshot(bus)?;
         self.horizon = snapshot.horizon;
-        let tasks = snapshot.authority.tasks();
         let residency = snapshot.authority.residency();
-        let desired_deferrals = desired_deferrals(tasks);
-        let desired = desired_claims(tasks, residency)?;
-        let desired_renewals = desired_renewals(tasks, residency, self.records.as_ref())?;
+        let desired_deferrals = desired_deferrals(snapshot.authority.timer_frontier());
+        let desired = desired_claims(snapshot.authority.timer_frontier(), residency)?;
+        let desired_renewals = desired_renewals(
+            snapshot.authority.timer_frontier(),
+            residency,
+            self.records.as_ref(),
+        )?;
         let desired_directives = desired_directives(&snapshot.steering, &self.steering)?;
         self.synchronize_deferrals(desired_deferrals)?;
         let stale = self
@@ -813,7 +816,7 @@ pub(in crate::resident) fn renew_vacated_claim_at(
     };
     let snapshot = timer_snapshot(bus)?;
     let authority = desired_renewals_with_clock(
-        snapshot.authority.tasks(),
+        snapshot.authority.timer_frontier(),
         snapshot.authority.residency(),
         &records,
         || Ok(at),
@@ -862,7 +865,9 @@ impl Drop for Runtime {
 /// The wake each pending deferral is owed. A deferral at the indefinite
 /// horizon is a hold: no timer is armed for it and only an explicit wake
 /// clears it.
-fn desired_deferrals(tasks: &[journal::TaskHeads]) -> BTreeMap<TaskHandle, DeferralAuthority> {
+fn desired_deferrals<'a>(
+    tasks: impl IntoIterator<Item = &'a journal::TaskHeads>,
+) -> BTreeMap<TaskHandle, DeferralAuthority> {
     let mut desired = BTreeMap::new();
     for heads in tasks {
         let workflow = heads.workflow();
@@ -904,8 +909,8 @@ fn deferral_guard(
     Ok(())
 }
 
-fn desired_claims(
-    tasks: &[journal::TaskHeads],
+fn desired_claims<'a>(
+    tasks: impl IntoIterator<Item = &'a journal::TaskHeads>,
     residency: Option<&journal::JournalHead<wire::ResidencyHead>>,
 ) -> CommandResult<BTreeMap<ClaimKey, ClaimAuthority>> {
     let Some(residency) = residency else {
@@ -955,16 +960,16 @@ fn desired_claims(
 /// parked claim lapses on the same schedule with or without retention. An
 /// occupant that ends its turn on a kept job leaves the lease rolling as the
 /// records bound it; a service never qualifies.
-fn desired_renewals(
-    tasks: &[journal::TaskHeads],
+fn desired_renewals<'a>(
+    tasks: impl IntoIterator<Item = &'a journal::TaskHeads>,
     residency: Option<&journal::JournalHead<wire::ResidencyHead>>,
     records: &dyn LaneRecords,
 ) -> CommandResult<BTreeMap<ClaimKey, RenewalAuthority>> {
     desired_renewals_with_clock(tasks, residency, records, current_instant)
 }
 
-fn desired_renewals_with_clock(
-    tasks: &[journal::TaskHeads],
+fn desired_renewals_with_clock<'a>(
+    tasks: impl IntoIterator<Item = &'a journal::TaskHeads>,
     residency: Option<&journal::JournalHead<wire::ResidencyHead>>,
     records: &dyn LaneRecords,
     clock: impl FnOnce() -> CommandResult<Instant>,

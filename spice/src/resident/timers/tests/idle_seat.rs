@@ -14,10 +14,15 @@ fn start_idle_timers(bound: Option<Instant>) -> Runtime {
 
 fn fixture_renewal(fixture: &Fixture, records: &FixedRecords) -> Option<RenewalAuthority> {
     let snapshot = fixture.bus.task_snapshot().expect("seeded snapshot reads");
-    desired_renewals_with_clock(snapshot.tasks(), snapshot.residency(), records, || {
-        Instant::new(jiff::Timestamp::now())
-            .map_err(|error| store_fault("clock", &error.to_string()))
-    })
+    desired_renewals_with_clock(
+        snapshot.timer_frontier(),
+        snapshot.residency(),
+        records,
+        || {
+            Instant::new(jiff::Timestamp::now())
+                .map_err(|error| store_fault("clock", &error.to_string()))
+        },
+    )
     .expect("renewal authority folds")
     .remove(&fixture.key())
 }

@@ -528,7 +528,9 @@ fn advance_trust(
             None => rebuild_allocation_index(&build.tasks),
         }
         .map_err(BusReadError::Head)?;
-        build.facts.retain_allocation_origins(&allocation.frontier);
+        build
+            .facts
+            .retain_allocation_origins(&allocation.frontier, &build.tasks);
         let mut topic_inputs = build
             .prior
             .as_ref()
@@ -552,6 +554,7 @@ fn advance_trust(
             topic_inputs,
             described_topics,
             allocation_frontier: allocation.frontier,
+            timer_frontier: allocation.timers,
             dependency_standing: allocation.standing,
             dependency_references: allocation.references,
             allocation_faults: allocation.faults,
