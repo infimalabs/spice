@@ -143,7 +143,7 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
     )
     .unwrap();
     let task = create(&bus, epoch, &seats[0], true);
-    let tree = warm_topics(&root, &bus);
+    let _tree = warm_topics(&root, &bus);
     let before = bus.cursor().unwrap();
     let first = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
     assert_eq!(bus.cursor().unwrap(), before, "preview is read-only");
@@ -156,13 +156,9 @@ fn preview_uses_creator_roots_and_apply_rejects_changed_corpus_without_advancing
     let stale = command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, first.preview);
     assert!(matches!(stale, Outcome::Refusal(_)), "{stale:?}");
     assert_eq!(bus.cursor().unwrap(), before);
-    let waiting = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
-    assert!(
-        matches!(waiting.route, TaskRoute::Unavailable { reason, .. } if reason == "topic::preview-catching-up")
-    );
-    assert!(waiting.preview.is_none());
-    tree.update(&bus.task_snapshot().unwrap());
     let current = preview(command(&bus, epoch, Actor::TEST_PRINCIPAL, &task, None));
+    assert_eq!(picked(&current.route), "/parser");
+    assert!(current.preview.is_some());
     let CommandAnswer::TaskPlace(applied) = assert_committed(command(
         &bus,
         epoch,
@@ -359,7 +355,7 @@ fn tail_creation_recaptures_a_changed_topic_snapshot_without_changing_authored_i
     let (root, bus, epoch, seats) = fixture("placement-corpus-race", 1);
     let seat = &seats[0];
     authorize_lane_creation(&bus, epoch, seat);
-    let tree = warm_topics(&root, &bus);
+    let _tree = warm_topics(&root, &bus);
     let mut add = authored_add("Compiler parser syntax", "/unused", Some("todo"), &[]);
     add.pitch = "Make the compiler reject malformed input".to_owned();
     add.topic = Some("notes".parse().unwrap());
@@ -379,25 +375,26 @@ fn tail_creation_recaptures_a_changed_topic_snapshot_without_changing_authored_i
         panic!("automatic creation returns a committed task")
     };
     let placement = answer.placement.unwrap();
-    assert!(placement.topic.is_none());
-    assert!(
-        matches!(placement.router, Some(TaskRoute::Unavailable { reason, .. }) if reason == "topic::preview-catching-up")
+    assert_eq!(
+        placement.topic.as_ref().map(wire::Topic::as_str),
+        Some("/compiler/notes")
     );
+    assert!(matches!(
+        placement.router,
+        Some(TaskRoute::Pick {
+            unmatched: false,
+            ..
+        })
+    ));
     let saved = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let saved = &at(&saved, &answer.task).statement.body;
     assert_eq!(saved.born, born);
     assert_eq!(saved.pitch, add.pitch);
-    assert!(saved.topic.path.is_none());
+    assert_eq!(
+        saved.topic.path.as_ref().map(wire::Topic::as_str),
+        Some("/compiler/notes")
+    );
     assert_eq!(saved.topic.named, add.topic);
-    tree.update(&bus.task_snapshot().unwrap());
-    let current = preview(command(
-        &bus,
-        epoch,
-        Actor::TEST_PRINCIPAL,
-        &answer.task,
-        None,
-    ));
-    assert_eq!(picked(&current.route), "/compiler/notes");
     clean(&root, bus);
 }
 

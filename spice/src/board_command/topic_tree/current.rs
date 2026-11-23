@@ -82,10 +82,21 @@ impl TopicTree {
                 "no complete tree is available yet; choose a topic or ask again shortly",
             )
         })?;
-        if let Err(refusal) = state.admit_read(observed) {
-            self.notify();
-            return Err(refusal);
+        if state.admit_read(observed).is_ok() {
+            return Ok(read(&state));
         }
+
+        // The command already holds the exact journal view it must decide
+        // against. Advance from that view instead of making the caller poll
+        // while the background writer batches unrelated commits.
+        self.update(observed);
+        let state = self
+            .published
+            .lock()
+            .expect("topic tree lock")
+            .clone()
+            .expect("an existing topic generation remains published");
+        state.admit_read(observed)?;
         Ok(read(&state))
     }
 }

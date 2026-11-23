@@ -65,13 +65,12 @@ impl TopicTree {
         }
     }
 
-    /// One worker publishes complete generations in journal order, from the
-    /// first snapshot on, so a decision never meets a tree left behind at
-    /// startup. The prior Arc stays live outside the lock until publication
-    /// and retirement finish.
+    /// Publish complete generations in journal order. Background refreshes
+    /// and command-side catch-up share this lock, so an older computation can
+    /// never overwrite a newer generation.
     pub(in crate::board_command) fn update(&self, observed: &TaskSnapshot) {
-        let prior = self.published.lock().expect("topic tree lock").clone();
-        let state = match &prior {
+        let mut published = self.published.lock().expect("topic tree lock");
+        let state = match published.as_ref() {
             Some(prior) if prior.through >= observed.cursor() => return,
             Some(prior) => {
                 let mut state = (**prior).clone();
@@ -80,6 +79,6 @@ impl TopicTree {
             }
             None => Generation::build(observed, GroupingRecovery::Cold),
         };
-        *self.published.lock().expect("topic tree lock") = Some(Arc::new(state));
+        *published = Some(Arc::new(state));
     }
 }
