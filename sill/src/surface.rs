@@ -125,6 +125,12 @@ impl LockTopology {
         }
     }
 
+    /// Whether no lock file or shard pool is configured.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.config.named().next().is_none()
+    }
+
     /// Render every configured path and its availability without creating one.
     ///
     /// Existing shard files are opened only for a nonblocking kernel probe;

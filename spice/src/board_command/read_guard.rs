@@ -38,7 +38,8 @@ use task_selection::{TaskSelection, retain_family, selected_tasks};
 pub(in crate::board_command) use task_selection::{in_family, validate_family};
 pub(super) use working::{
     command_task_snapshot, expand_task_selection, validated_snapshot_for_automatic,
-    validated_working_snapshot, validated_working_snapshot_for_tasks,
+    validated_task_creation_snapshot_for_tasks, validated_working_snapshot,
+    validated_working_snapshot_for_tasks,
 };
 
 pub(super) fn task_projection_barrier(cursor: Option<wire::Seq>) -> Digest {
@@ -55,6 +56,22 @@ pub(super) fn validated_snapshot(
         .task_snapshot()
         .map_err(|error| store_fault("board::heads-unreadable", error.to_string()))?;
     validated_snapshot_from_with_occupant(&observed, repository, principal, None, None, true)
+}
+
+pub(super) fn validated_snapshot_for_selected_tasks(
+    observed: &bus::TaskSnapshot,
+    repository: Option<&Repository>,
+    principal: wire::Actor,
+    selected: &std::collections::BTreeSet<wire::TaskStamp>,
+) -> Result<ValidatedSnapshot, Outcome<CommandAnswer>> {
+    validated_snapshot_from_with_occupant(
+        observed,
+        repository,
+        principal,
+        None,
+        Some(selected),
+        false,
+    )
 }
 
 /// Reuse the command's authority projection without materializing any board

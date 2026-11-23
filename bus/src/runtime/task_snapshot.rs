@@ -48,7 +48,7 @@ impl<'a> AllocationRead<'a> {
 
     /// Visit each live allocation head exactly once.
     pub fn frontier(&self) -> impl ExactSizeIterator<Item = &'a TaskHeads> + '_ {
-        self.snapshot.allocation_frontier.iter().inspect(|_| {
+        self.snapshot.allocation_frontier.values().inspect(|_| {
             self.task_visits
                 .set(self.task_visits.get().saturating_add(1));
         })
@@ -242,8 +242,14 @@ struct LaneLatest {
 struct Indexes {
     trust_surfaces: HashMap<String, journal::crossing::Digest>,
     terminals: TerminalIndex,
-    claims:
-        HashMap<journal::crossing::Actor, (journal::crossing::Seq, journal::crossing::ClaimCell)>,
+    claims: HashMap<
+        journal::crossing::Actor,
+        (
+            journal::crossing::Seq,
+            journal::crossing::TaskStamp,
+            journal::crossing::ClaimCell,
+        ),
+    >,
     held_lanes: HashSet<journal::crossing::CanonicalUuid>,
     parked_lanes: HashMap<journal::crossing::CanonicalUuid, journal::crossing::body::LanePark>,
     /// First durable claim-win instant for every task that has ever been claimed.
@@ -638,7 +644,7 @@ impl Indexes {
                     .original_claims
                     .pushed(HashMap::from([(won.task.clone(), row.at)]));
             }
-            self.claims.insert(won.actor, (row.seq, won.cell));
+            self.claims.insert(won.actor, (row.seq, won.task, won.cell));
         } else if let Some(freed) = row.fact.read::<journal::crossing::body::ClaimFreed>() {
             self.review_authors.release(&freed.task, &freed.actor);
             Arc::make_mut(&mut self.explicit_releases).insert(freed.task, row.seq);
@@ -855,7 +861,19 @@ impl TaskFacts {
         &self,
         actor: &journal::crossing::Actor,
     ) -> Option<(journal::crossing::Seq, journal::crossing::ClaimCell)> {
-        self.indexes.claims.get(actor).cloned()
+        self.indexes
+            .claims
+            .get(actor)
+            .map(|(position, _, cell)| (*position, cell.clone()))
+    }
+
+    /// The task named by one actor's newest claim, active or settled.
+    #[must_use]
+    pub fn latest_claim_task(
+        &self,
+        actor: &journal::crossing::Actor,
+    ) -> Option<&journal::crossing::TaskStamp> {
+        self.indexes.claims.get(actor).map(|(_, task, _)| task)
     }
 
     /// Whether a durable lane hold still awaits a release fact. Passing its
@@ -1206,37 +1224,26 @@ impl TaskFacts {
         self.indexes.collapse_reasons.get(task).map(String::as_str)
     }
 
-    /// Keep only the allocation frontier's tasks in the origin indexes. An
-    /// index naming no retired task stays shared with the prior snapshot.
-    fn retain_allocation_origins(&mut self, frontier: &[journal::TaskHeads]) {
-        let live = frontier
+    /// Forget retired moved tasks without revisiting the unchanged frontier.
+    ///
+    /// An index naming no retired moved task stays shared with the prior snapshot.
+    fn retain_allocation_origins(
+        &mut self,
+        frontier: &imbl::OrdMap<journal::crossing::TaskStamp, journal::TaskHeads>,
+        moved: &[journal::TaskHeads],
+    ) {
+        if moved
             .iter()
-            .map(|heads| heads.statement().body().born.clone())
-            .collect::<HashSet<_>>();
+            .all(|heads| frontier.contains_key(&heads.statement().body().born))
+        {
+            return;
+        }
         let indexes = Arc::make_mut(&mut self.indexes);
-        if indexes.task_origins.keys().any(|task| !live.contains(task)) {
-            Arc::make_mut(&mut indexes.task_origins).retain(|task, _| live.contains(task));
-        }
-        if indexes
-            .duplicate_task_origins
-            .iter()
-            .any(|task| !live.contains(task))
-        {
-            Arc::make_mut(&mut indexes.duplicate_task_origins).retain(|task| live.contains(task));
-        }
-        if indexes
-            .invalid_creator_teams
-            .iter()
-            .any(|task| !live.contains(task))
-        {
-            Arc::make_mut(&mut indexes.invalid_creator_teams).retain(|task| live.contains(task));
-        }
-        if indexes
-            .explicit_releases
-            .keys()
-            .any(|task| !live.contains(task))
-        {
-            Arc::make_mut(&mut indexes.explicit_releases).retain(|task, _| live.contains(task));
+        for heads in moved {
+            let task = &heads.statement().body().born;
+            if !frontier.contains_key(task) {
+                indexes.retire_task(task);
+            }
         }
     }
 }

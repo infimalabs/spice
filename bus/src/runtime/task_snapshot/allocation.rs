@@ -8,14 +8,16 @@ use journal::GuardError;
 use super::{AllocationFault, DependencyStanding, TaskSnapshot};
 
 pub(super) struct AllocationIndex {
-    pub(super) frontier: Arc<[journal::TaskHeads]>,
+    pub(super) frontier: imbl::OrdMap<journal::crossing::TaskStamp, journal::TaskHeads>,
+    pub(super) timers: imbl::OrdMap<journal::crossing::TaskStamp, journal::TaskHeads>,
     pub(super) references: Arc<HashMap<journal::crossing::TaskStamp, usize>>,
     pub(super) standing: Arc<HashMap<journal::crossing::TaskStamp, DependencyStanding>>,
     pub(super) faults: Arc<[AllocationFault]>,
 }
 
 pub(super) fn rebuild(tasks: &[journal::TaskHeads]) -> Result<AllocationIndex, GuardError> {
-    let mut frontier = Vec::new();
+    let mut frontier = imbl::OrdMap::new();
+    let mut timers = imbl::OrdMap::new();
     let mut references = HashMap::new();
     let mut faults = Vec::new();
     let mut prior = None;
@@ -27,10 +29,13 @@ pub(super) fn rebuild(tasks: &[journal::TaskHeads]) -> Result<AllocationIndex, G
             ));
         }
         prior = Some(task.clone());
+        if timer_relevant(heads) {
+            timers.insert(task.clone(), heads.clone());
+        }
         match task_standing(heads) {
             DependencyStanding::Open => {
                 add_dependencies(&mut references, allocation_references(heads));
-                frontier.push(heads.clone());
+                frontier.insert(task, heads.clone());
             }
             DependencyStanding::Completed
             | DependencyStanding::Closed
@@ -49,7 +54,8 @@ pub(super) fn rebuild(tasks: &[journal::TaskHeads]) -> Result<AllocationIndex, G
         }
     }
     Ok(AllocationIndex {
-        frontier: Arc::from(frontier),
+        frontier,
+        timers,
         references: Arc::new(references),
         standing: Arc::new(standing),
         faults: Arc::from(faults),
@@ -63,23 +69,27 @@ pub(super) fn advance(
 ) -> Result<AllocationIndex, GuardError> {
     if moved.is_empty() {
         return Ok(AllocationIndex {
-            frontier: Arc::clone(&prior.allocation_frontier),
+            frontier: prior.allocation_frontier.clone(),
+            timers: prior.timer_frontier.clone(),
             references: Arc::clone(&prior.dependency_references),
             standing: Arc::clone(&prior.dependency_standing),
             faults: Arc::clone(&prior.allocation_faults),
         });
     }
-    let mut frontier = prior.allocation_frontier.to_vec();
+    let mut frontier = prior.allocation_frontier.clone();
+    let mut timers = prior.timer_frontier.clone();
     let mut references = (*prior.dependency_references).clone();
     let mut standing = (*prior.dependency_standing).clone();
     let mut faults = prior.allocation_faults.to_vec();
     let mut resolve = std::collections::HashSet::new();
     for heads in moved {
-        let task = heads.statement().body().born.clone();
-        faults.retain(|fault| fault.task() != &task);
-        if let Ok(index) = frontier.binary_search_by(|kept| kept.statement().body().born.cmp(&task))
-        {
-            let old = frontier.remove(index);
+        let task = &heads.statement().body().born;
+        faults.retain(|fault| fault.task() != task);
+        timers.remove(task);
+        if timer_relevant(heads) {
+            timers.insert(task.clone(), heads.clone());
+        }
+        if let Some(old) = frontier.remove(task) {
             remove_dependencies(&mut references, &mut standing, allocation_references(&old));
         }
         match task_standing(heads) {
@@ -90,10 +100,7 @@ pub(super) fn advance(
                     }
                 }
                 add_dependencies(&mut references, allocation_references(heads));
-                let index = frontier
-                    .binary_search_by(|kept| kept.statement().body().born.cmp(&task))
-                    .unwrap_or_else(|index| index);
-                frontier.insert(index, heads.clone());
+                frontier.insert(task.clone(), heads.clone());
             }
             DependencyStanding::Completed
             | DependencyStanding::Closed
@@ -103,8 +110,8 @@ pub(super) fn advance(
                 }
             }
         }
-        if references.contains_key(&task) {
-            resolve.insert(task);
+        if references.contains_key(task) {
+            resolve.insert(task.clone());
         }
     }
     faults.sort_by(|left, right| left.task().cmp(right.task()));
@@ -127,11 +134,21 @@ pub(super) fn advance(
         }
     }
     Ok(AllocationIndex {
-        frontier: Arc::from(frontier),
+        frontier,
+        timers,
         references: Arc::new(references),
         standing: Arc::new(standing),
         faults: Arc::from(faults),
     })
+}
+
+fn timer_relevant(heads: &journal::TaskHeads) -> bool {
+    let workflow = heads.workflow().body();
+    heads.actively_claimed()
+        || (workflow.status.is_pending()
+            && workflow
+                .deferral
+                .is_some_and(|deadline| !deadline.is_indefinite()))
 }
 
 fn allocation_references(

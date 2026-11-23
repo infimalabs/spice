@@ -36,16 +36,43 @@ pub(in crate::board_command) fn command_task_snapshot(
     )
 }
 
+/// Project only the causal graph for a creation by an intrinsic actor. Such an
+/// actor cannot hold a claim, so unrelated live tasks cannot decide its origin
+/// or next action. Lane creation retains the complete working graph.
+pub(in crate::board_command) fn validated_task_creation_snapshot_for_tasks(
+    bus: &Bus,
+    repository: Option<&Repository>,
+    principal: wire::Actor,
+    roots: &[wire::TaskStamp],
+) -> Result<ValidatedSnapshot, Outcome<CommandAnswer>> {
+    let complete_working_graph = matches!(&principal, wire::Actor::Lane(_));
+    validated_snapshot_for_tasks(bus, repository, principal, roots, complete_working_graph)
+}
+
 pub(in crate::board_command) fn validated_working_snapshot_for_tasks(
     bus: &Bus,
     repository: Option<&Repository>,
     principal: wire::Actor,
     roots: &[wire::TaskStamp],
 ) -> Result<ValidatedSnapshot, Outcome<CommandAnswer>> {
+    validated_snapshot_for_tasks(bus, repository, principal, roots, true)
+}
+
+fn validated_snapshot_for_tasks(
+    bus: &Bus,
+    repository: Option<&Repository>,
+    principal: wire::Actor,
+    roots: &[wire::TaskStamp],
+    complete_working_graph: bool,
+) -> Result<ValidatedSnapshot, Outcome<CommandAnswer>> {
     let observed = bus
         .task_snapshot()
         .map_err(|error| store_fault("board::heads-unreadable", error.to_string()))?;
-    let selected = working_task_selection(&observed, roots);
+    let selected = if complete_working_graph {
+        working_task_selection(&observed, roots)
+    } else {
+        expand_task_selection(&observed, roots.to_vec())
+    };
     validated_snapshot_from_with_occupant(
         &observed,
         repository,
