@@ -116,6 +116,9 @@ fn build(
         resume_after = Some(TrustReportCursor {
             standing: ruling.standing,
             digest: ruling.digest.clone(),
+            excluded: after
+                .map(|cursor| cursor.excluded.clone())
+                .unwrap_or_else(|| ruling.digest.clone()),
         });
         rulings.push(ruling);
     }
