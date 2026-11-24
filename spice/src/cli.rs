@@ -555,6 +555,18 @@ Each --term value states one proposition with an unambiguous positive side;
 participants vote on it, and it passes to answer rather than becoming an
 implementation completion criterion. Put an open-ended research prompt in the
 room with `spice room contribute HANDLE --ask TEXT` instead.";
+/// Portable task definitions deliberately exclude repository authority.
+const TASK_INTERCHANGE_HELP: &str = "\
+Export writes one versioned, bounded document containing recreatable public
+task statements and export-local dependency/preparation references. Its receipt
+counts private, OOPS, priority, and transitively dependent tasks excluded with
+claims, workflow progress, origins, durable identities, taste state, and every
+other repository-specific authority.
+
+Import validates the complete document before creating anything, allocates
+fresh task identities, remaps local references, and submits each definition
+through ordinary task admission. --origin supplies one local causal origin
+for every imported task; lanes must name one unless they already hold work.";
 
 /// Usage notes for a leaf whose bounds its syntax line cannot carry.
 fn leaf_help(path: &[&str]) -> Option<&'static str> {
@@ -568,6 +580,7 @@ fn leaf_help(path: &[&str]) -> Option<&'static str> {
             "Cancel one live steering directive by its UUID. The operator may cancel any directive; a lane may cancel only its own typed task invitation. Cancellation invalidates the invitation key and permits a replacement request immediately.",
         ),
         ["task", "add"] => Some(TASK_ADD_HELP),
+        ["task", "export" | "import"] => Some(TASK_INTERCHANGE_HELP),
         ["task", "artifact", "list"] => Some(ARTIFACT_LIST_HELP),
         ["task", "artifact", "show"] => Some(ARTIFACT_SHOW_HELP),
         _ => None,

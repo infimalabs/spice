@@ -61,6 +61,7 @@ mod ident;
 /// things on the two sides. The module qualifier is what keeps the two
 /// vocabularies apart, so flattening it away would forfeit that.
 pub mod intent;
+pub mod interchange;
 pub mod manifest;
 pub mod media;
 mod optional;

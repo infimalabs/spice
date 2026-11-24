@@ -3,6 +3,9 @@ use super::*;
 mod command_dispatch;
 pub(crate) use command_dispatch::dispatch_with_resources;
 
+mod interchange;
+pub(crate) use interchange::{TaskSetExport, TaskSetImport};
+pub(crate) use interchange::{export as export_task_set, import as import_task_set};
 mod preparation;
 #[cfg(test)]
 pub(in crate::board_command) use preparation::transition_witnesses;

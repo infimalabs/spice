@@ -326,6 +326,10 @@ const SUMMARIES: &[(&str, &str)] = &[
     ),
     ("task done", "Complete the phase your claim holds"),
     (
+        "task export",
+        "Export recreatable task intent to one exact file",
+    ),
+    (
         "task file",
         "File a Draft as ordinary work, optionally claiming it",
     ),
@@ -333,6 +337,10 @@ const SUMMARIES: &[(&str, &str)] = &[
     (
         "task join",
         "Join a task with open capacity or a typed invitation",
+    ),
+    (
+        "task import",
+        "Import a portable task set under fresh identities",
     ),
     ("task list", "Page tasks"),
     ("task modify", "Edit an unsettled task's statement"),
