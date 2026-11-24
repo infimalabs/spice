@@ -42,10 +42,13 @@ an extra asset. A mismatched or duplicate draft refuses.
 release notes --release-commit REV --output FILE` derives the exact historical
 version and first-parent range at `REV`, formats every selected commit, and
 writes a draft whose Highlights must be replaced with an authored overview.
-The same command can target an older release tag when its published notes need
-repair. Publication requires `--notes FILE`, keeps only that authored region,
-regenerates the canonical commit inventory for the pinned source, and retains
-the resulting notes with its exact plan, assets, and checksum document.
+The generated commit inventory groups changes by topic, orders topic paths
+lexically so shared roots remain adjacent, and orders each topic's mentions by
+commit timestamp. The same command can target an older release tag when its
+published notes need repair. Publication requires `--notes FILE`, keeps only
+that authored region, regenerates the canonical commit inventory for the pinned
+source, and retains the resulting notes with its exact plan, assets, and
+checksum document.
 Diagnostic proof and seal commands remain available, but their results never
 gate baseline publication.
 
