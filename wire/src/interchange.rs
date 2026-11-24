@@ -188,6 +188,12 @@ impl TaskSet {
             if task.intent == Some(TaskIntent::OpportunisticDesign) {
                 return Err(TaskSetError::InternalIntent { task: task.id });
             }
+            if task
+                .intent
+                .is_some_and(|intent| !intent.admits_flow(&task.flow))
+            {
+                return Err(TaskSetError::InvalidFlow { task: task.id });
+            }
 
             let mut parents = BTreeSet::new();
             for parent in task.depends.iter().copied().chain(task.preparation) {
@@ -317,6 +323,21 @@ mod tests {
             tasks: vec![task(1, &[2]), task(2, &[1])],
         };
         assert_eq!(set.creation_order(), Err(TaskSetError::Cycle));
+    }
+
+    #[test]
+    fn intent_and_flow_are_validated_before_creation() {
+        let mut invalid = task(2, &[]);
+        invalid.intent = Some(TaskIntent::Design);
+        invalid.flow = vec![Phase::Draft, Phase::Todo];
+        let set = TaskSet {
+            version: TASK_SET_VERSION,
+            tasks: vec![task(1, &[]), invalid],
+        };
+        assert_eq!(
+            set.creation_order(),
+            Err(TaskSetError::InvalidFlow { task: 2 })
+        );
     }
 
     #[test]

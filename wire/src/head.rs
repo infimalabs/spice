@@ -67,6 +67,17 @@ impl TaskIntent {
         matches!(self, Self::Design | Self::OpportunisticDesign)
     }
 
+    /// Whether this intent admits the complete authored workflow.
+    #[must_use]
+    pub fn admits_flow(self, flow: &[Phase]) -> bool {
+        !self.is_design()
+            || matches!(flow, [Phase::Draft, Phase::Design])
+            || matches!(
+                flow,
+                [Phase::Draft, Phase::Plan | Phase::Review, Phase::Design]
+            )
+    }
+
     /// Whether this is the repository-owned opportunistic Design intent.
     #[must_use]
     pub const fn is_opportunistic_design(self) -> bool {

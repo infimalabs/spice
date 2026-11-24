@@ -22,17 +22,7 @@ pub(super) fn admit_design_flow(
     intent: Option<wire::TaskIntent>,
     flow: &[wire::Phase],
 ) -> Result<(), Outcome<CommandAnswer>> {
-    if !intent.is_some_and(wire::TaskIntent::is_design)
-        || matches!(flow, [wire::Phase::Draft, wire::Phase::Design])
-        || matches!(
-            flow,
-            [
-                wire::Phase::Draft,
-                wire::Phase::Plan | wire::Phase::Review,
-                wire::Phase::Design
-            ]
-        )
-    {
+    if intent.is_none_or(|intent| intent.admits_flow(flow)) {
         return Ok(());
     }
     let flow = flow.iter().map(|phase| phase.as_str()).collect::<Vec<_>>();
