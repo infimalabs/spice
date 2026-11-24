@@ -74,6 +74,14 @@ impl Surface {
         &self.digest
     }
 
+    /// The exact documents the digest frames, as a pend records them.
+    pub(crate) fn documents(&self) -> wire::body::TrustDocuments {
+        wire::body::TrustDocuments {
+            tracked: self.tracked.text.clone(),
+            local: self.local.text.clone(),
+        }
+    }
+
     /// Reacquire the named paths and require the exact captured generation.
     pub(crate) fn is_current(&self, repository: &Repository) -> Result<bool, LoadError> {
         Self::load(repository).map(|current| current == *self)
@@ -101,6 +109,12 @@ fn surface_digest(tracked: Option<&str>, local: Option<&str>) -> Digest {
     frame_document(&mut framed, ConfigSource::Tracked, tracked);
     frame_document(&mut framed, ConfigSource::Local, local);
     Digest::compute(Domain::ConfigExecutableSurface, &framed)
+}
+
+/// The digest recorded documents frame, which names their trust identity.
+#[cfg(test)]
+pub(crate) fn documents_digest(documents: &wire::body::TrustDocuments) -> Digest {
+    surface_digest(documents.tracked.as_deref(), documents.local.as_deref())
 }
 
 fn frame_document(framed: &mut Vec<u8>, source: ConfigSource, text: Option<&str>) {
@@ -385,7 +399,34 @@ pub(crate) fn rule(
     let selected = if grant {
         crate::command_client::SelectedCommand::TrustGrant { digest: &digest }
     } else {
-        crate::command_client::SelectedCommand::TrustRevoke { digest: &digest }
+        // Revoke rejects a pended request or withdraws a grant, so it
+        // witnesses whichever standing the digest holds now.
+        let host = crate::command_client::Host {
+            repository: &repository,
+            ambient,
+        };
+        let board = match crate::board_command::current_board(host, wire::intent::BoardRead::Trust)
+        {
+            Ok(board) => board,
+            Err(outcome) => return crate::typed_outcome(outcome),
+        };
+        let Some(standing) = board
+            .trust
+            .iter()
+            .find(|head| head.body.digest == digest)
+            .map(|head| head.body.state)
+        else {
+            return refusal(
+                "trust::digest-unknown",
+                Some(digest.to_string()),
+                None,
+                "copy the exact digest from spice trust output",
+            );
+        };
+        crate::command_client::SelectedCommand::TrustRevoke {
+            digest: &digest,
+            standing,
+        }
     };
     trust_answer(crate::command_client::execute(
         state.serve(),

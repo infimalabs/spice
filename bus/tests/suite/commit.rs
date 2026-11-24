@@ -132,6 +132,7 @@ fn trust_only_commits_refresh_immutable_task_snapshots_at_the_commit_cursor() {
                 digest: digest.clone(),
                 worktree: Some("/producer/worktree".to_owned()),
                 previous: None,
+                documents: None,
             },
             FactCause::Root,
         )
@@ -748,6 +749,7 @@ fn append_trust_fleet(write: &mut JournalWrite) {
                     digest: digest.clone(),
                     worktree: Some("/producer/worktree".to_owned()),
                     previous: None,
+                    documents: None,
                 },
                 FactCause::Root,
             )

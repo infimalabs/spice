@@ -379,9 +379,11 @@ recreates what it needs. Names outside this layout are ignored.
 one digest over the exact bytes of the tracked and local configuration
 documents. `spice --json trust` reports that digest, its standing, and both
 documents' locations. When it refuses with `trust::digest-unknown`, run
-`spice trust pend` from that worktree. Review the documents, then grant only
-that digest with `spice trust grant DIGEST`. Any byte change is a new
-identity; revoke with `spice trust revoke DIGEST`.
+`spice trust pend` from that worktree; the pend records both documents' text.
+Review the documents, then grant only that digest with `spice trust grant
+DIGEST`, or reject it with `spice trust revoke DIGEST`. A ruling names the
+recorded bytes, so it succeeds whatever any worktree holds by then. Any byte
+change is a new identity; withdraw a grant with `spice trust revoke DIGEST`.
 
 **Damaged appliance.** A published file that no longer holds its recorded
 bytes refuses preview, apply, and reversal with `install::drift`, naming the

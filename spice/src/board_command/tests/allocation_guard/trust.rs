@@ -93,6 +93,7 @@ fn grant_trust(bus: &Bus, digest: &Digest) {
                 digest: digest.clone(),
                 worktree: Some("/producer/worktree".to_owned()),
                 previous: None,
+                documents: None,
             },
             FactCause::Root,
         )

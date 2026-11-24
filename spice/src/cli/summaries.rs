@@ -381,7 +381,7 @@ const SUMMARIES: &[(&str, &str)] = &[
     ),
     (
         "trust revoke",
-        "Withdraw approval from one exact executable digest",
+        "Reject or withdraw approval from one exact executable digest",
     ),
     ("up", "Start the resident and print its endpoint"),
     ("version", "Print the appliance and app versions"),

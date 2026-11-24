@@ -4,14 +4,15 @@
 //! The configured gate checks trust only when the worktree's configuration
 //! declares pre-commit commands, and a lane can neither pend nor grant. So
 //! when an occupant's turn ends while its lane holds a live claim, the resident
-//! reads that worktree's current trust-gated digest. An ungranted digest is
-//! pended for the operator when it has no trust head, becomes the held task's
+//! reads that worktree's current trust-gated digest. The worktree originates
+//! the request; the held task carries it. An ungranted digest is pended with
+//! its exact documents when it has no trust head, becomes the held task's
 //! trust requirement, and ices the live lease, exactly as `task require
 //! --trust-grant` records them; the wake projection then leaves the claim
-//! alone until the grant lands. Once the worktree no longer needs an ungranted
-//! digest, for example because the lane backed its change out, a requirement
-//! naming a digest this worktree pended is dropped, and the indefinite lease
-//! thaws on the claim's next wake.
+//! alone until the grant lands. Once the worktree no longer needs that
+//! digest, for example because the lane backed its change out, the request
+//! expires: the requirement is dropped whichever worktree first pended the
+//! digest, and the indefinite lease thaws on the claim's next wake.
 
 use super::automatic::{HeldClaimAuthority, guard_held_claim, held_claim_authority};
 use super::*;
@@ -112,7 +113,7 @@ fn reconcile_observed(
     let (need, surface) = observe()?;
     let requirements = &authority.statement.body().requirements;
     let required = trust_requirement(requirements);
-    let Some(change) = decide(required, snapshot.trust(), worktree, need.as_ref()) else {
+    let Some(change) = decide(required, snapshot.trust(), need.as_ref()) else {
         return Ok(None);
     };
     let observed = TrustObservations::new(snapshot.trust(), required, need.as_ref());
@@ -129,6 +130,9 @@ fn reconcile_observed(
                 .map(|_| PendingTrust {
                     digest: digest.clone(),
                     previous,
+                    documents: surface
+                        .as_ref()
+                        .map(|observation| observation.surface.documents()),
                 });
             (with_trust(requirements, Some(digest))?, pending)
         }
@@ -167,7 +171,7 @@ impl SurfaceObservation {
 enum Change {
     /// Name the worktree's ungranted current digest.
     Park(Digest),
-    /// Remove a digest this worktree pended and no longer needs.
+    /// Expire a request the worktree no longer needs.
     Drop,
 }
 
@@ -175,35 +179,25 @@ enum Change {
 /// current trust-gated digest `need`, or `None` when nothing should change.
 ///
 /// Requirements hold one entry per environmental fact, so the trust slot names
-/// one digest. An ungranted need replaces the worktree's own older digest or a
-/// granted one, but never an ungranted digest another worktree pended, which
-/// already parks the task on a grant this lane did not cause. A need that is
-/// granted or absent drops only a digest this worktree pended.
+/// one digest, and it follows the held task's own worktree: an ungranted need
+/// replaces any other required digest, and a need that is granted or absent
+/// expires any other one. Which worktree first pended a digest is provenance
+/// and never decides.
 fn decide(
     required: Option<&Digest>,
     trust: &[JournalHead<TrustHead>],
-    worktree: &str,
     need: Option<&Digest>,
 ) -> Option<Change> {
-    let head = |digest: &Digest| {
+    let granted = |digest: &Digest| {
         trust
             .iter()
             .map(JournalHead::body)
-            .find(|head| &head.digest == digest)
+            .any(|head| &head.digest == digest && head.state == TrustState::Granted)
     };
-    let ours = |digest: &Digest| {
-        head(digest).is_some_and(|head| head.worktree.as_deref() == Some(worktree))
-    };
-    let granted =
-        |digest: &Digest| head(digest).is_some_and(|head| head.state == TrustState::Granted);
     match need.filter(|digest| !granted(digest)) {
-        Some(blocking) => {
-            let foreign = required
-                .is_some_and(|digest| digest != blocking && !granted(digest) && !ours(digest));
-            (required != Some(blocking) && !foreign).then(|| Change::Park(blocking.clone()))
-        }
+        Some(blocking) => (required != Some(blocking)).then(|| Change::Park(blocking.clone())),
         None => required
-            .filter(|digest| Some(*digest) != need && ours(digest))
+            .filter(|digest| Some(*digest) != need)
             .map(|_| Change::Drop),
     }
 }
@@ -285,6 +279,7 @@ impl TrustObservations {
 struct PendingTrust {
     digest: Digest,
     previous: Option<Digest>,
+    documents: Option<wire::body::TrustDocuments>,
 }
 
 struct RewriteObservation {
@@ -317,7 +312,12 @@ fn rewrite(
     if let Some(surface) = observed.surface {
         surface.guard(&mut write);
     }
-    if let Some(PendingTrust { digest, previous }) = observed.pending {
+    if let Some(PendingTrust {
+        digest,
+        previous,
+        documents,
+    }) = observed.pending
+    {
         let pended = write
             .fact(
                 wire::body::TrustPended {
@@ -325,6 +325,7 @@ fn rewrite(
                     digest: digest.clone(),
                     worktree: Some(worktree.to_owned()),
                     previous,
+                    documents,
                 },
                 FactCause::Root,
             )

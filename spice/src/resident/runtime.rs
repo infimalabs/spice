@@ -1028,6 +1028,7 @@ where
                     digest: digest.clone(),
                     worktree: Some(worktree.clone()),
                     previous,
+                    documents: Some(surface.documents()),
                 },
                 cause,
             )

@@ -916,6 +916,35 @@ pub struct TrustPended {
         deserialize_with = "crate::optional::present"
     )]
     pub previous: Option<Digest>,
+    /// The exact tracked and local configuration text the digest covers, so
+    /// a ruling needs no live producing worktree; absent on pends recorded
+    /// before documents were retained.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub documents: Option<TrustDocuments>,
+}
+
+/// The executable configuration documents one trust digest frames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustDocuments {
+    /// Tracked policy text, absent when the worktree has no tracked document.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub tracked: Option<String>,
+    /// Git-common local configuration text, absent when there is none.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub local: Option<String>,
 }
 
 /// The operator approved the exact executable digest.

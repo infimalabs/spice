@@ -189,7 +189,7 @@ fn render_trust_requirement(
         ),
         Some(head) if head.state == wire::TrustState::Pended => (
             true,
-            "Review this exact executable configuration and choose whether it may run. Its producing worktree is revalidated when the decision lands.".to_owned(),
+            "Review this exact executable configuration and choose whether it may run. The decision rules on the recorded configuration, whatever any worktree holds now.".to_owned(),
             "",
         ),
         Some(head) if head.state == wire::TrustState::Revoked => (

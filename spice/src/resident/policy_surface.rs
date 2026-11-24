@@ -143,6 +143,7 @@ where
         Ok(proposal) => proposal,
         Err(outcome) => return typed_outcome(outcome),
     };
+    let documents = surface.documents();
     let guard_context = TrustRefusalContext::pend(reference).with_worktree(worktree.clone());
     proposal.guard(trust_pend_guard(
         repository.common_dir().to_path_buf(),
@@ -157,6 +158,7 @@ where
             digest: reference.digest.clone(),
             worktree: Some(worktree.clone()),
             previous,
+            documents: Some(documents),
         },
         FactCause::Root,
     ) {
@@ -198,7 +200,7 @@ where
     {
         return native_trust_rule_with(bus, repository, epoch, command, reference, before_commit);
     }
-    let admission = match admit_trust(bus, repository, epoch, command, reference) {
+    let admission = match admit_trust(bus, epoch, command, reference) {
         Ok(admission) => admission,
         Err(outcome) => return outcome,
     };
@@ -210,14 +212,15 @@ where
         Ok(proposal) => proposal,
         Err(outcome) => return typed_outcome(outcome),
     };
-    let guard_context = TrustRefusalContext::rule(command.kind(), reference)
-        .with_worktree(admission.worktree.clone());
+    let context = TrustRefusalContext::rule(command.kind(), reference);
+    let context = match admission.head.body().worktree.as_deref() {
+        Some(worktree) => context.with_worktree(worktree),
+        None => context,
+    };
     proposal.guard(trust_guard(
-        repository.common_dir().to_path_buf(),
-        guard_context,
-        admission.surface,
+        context,
         reference.digest.clone(),
-        admission.from,
+        admission.head.position(),
         epoch,
     ));
     let fact = match trust_fact(
@@ -231,11 +234,12 @@ where
     };
     let digest = reference.digest.clone();
     let standing = admission.to;
-    let worktree = admission.worktree;
+    // The producing worktree stays provenance; no ruling consults it.
+    let worktree = admission.head.body().worktree.clone();
     proposal.trust_head(fact, move |_| TrustHead {
         digest,
         state: standing,
-        worktree: Some(worktree),
+        worktree,
     });
     let answer = TrustAnswer {
         digest: reference.digest.clone(),
@@ -244,7 +248,7 @@ where
     if let Err(error) = trust_receipt(&mut proposal, command, reference, epoch, &answer) {
         return store_fault("trust::receipt-invalid", &error.to_string());
     }
-    // Commit evaluates the surface-generation guard after this deterministic race seam.
+    // Commit evaluates the standing guard after this deterministic race seam.
     before_commit();
     committed_answer(bus, proposal, CommandAnswer::Trust(answer))
 }
@@ -276,29 +280,39 @@ where
             Err(outcome) => return typed_outcome(outcome),
         },
     };
-    let context = TrustRefusalContext::native().with_worktree(admission.worktree.clone());
+    let worktree = match (&admission.capture, admission.head.as_ref()) {
+        (Some(capture), _) => Some(capture.worktree.clone()),
+        (None, Some(head)) => head.body().worktree.clone(),
+        (None, None) => None,
+    };
+    let context = match worktree.as_deref() {
+        Some(worktree) => TrustRefusalContext::native().with_worktree(worktree),
+        None => TrustRefusalContext::native(),
+    };
+    let documents = admission
+        .capture
+        .as_ref()
+        .map(|capture| capture.surface.documents());
     proposal.guard(native_trust_guard(NativeTrustGuard {
         common: repository.common_dir().to_path_buf(),
         context,
-        surface: admission.surface.clone(),
         digest: reference.digest.clone(),
         task: admission.task.clone(),
         statement: admission.statement,
-        claim: admission.claim,
-        residency: admission.residency,
-        lane: admission.lane,
         trust: admission.head.as_ref().map(JournalHead::position),
+        capture: admission.capture,
         epoch,
     }));
-    let cause = match admission.head.as_ref() {
-        Some(head) => FactCause::Existing(head.position()),
-        None => {
+    let cause = match (admission.head.as_ref(), documents) {
+        (Some(head), _) => FactCause::Existing(head.position()),
+        (None, documents) => {
             let pended = match proposal.fact(
                 wire::body::TrustPended {
                     surface: crate::trust_command::SURFACE_NAME.to_owned(),
                     digest: reference.digest.clone(),
-                    worktree: Some(admission.worktree.clone()),
+                    worktree: worktree.clone(),
                     previous: admission.previous,
+                    documents,
                 },
                 FactCause::Root,
             ) {
@@ -316,11 +330,10 @@ where
     };
     let digest = reference.digest.clone();
     let standing = admission.to;
-    let worktree = admission.worktree;
     proposal.trust_head(fact, move |_| TrustHead {
         digest,
         state: standing,
-        worktree: Some(worktree),
+        worktree,
     });
     let answer = TrustAnswer {
         digest: reference.digest.clone(),
@@ -389,12 +402,9 @@ pub(super) fn consent_guard(expected: wire::Seq) -> JournalGuard {
 }
 
 struct TrustAdmission {
-    from: TrustState,
     to: TrustState,
-    surface: crate::trust_command::Surface,
     head: JournalHead<TrustHead>,
     origin: wire::Origin,
-    worktree: String,
 }
 
 struct TrustPendAdmission {
@@ -405,34 +415,36 @@ struct TrustPendAdmission {
 struct NativeTrustAdmission {
     task: wire::TaskStamp,
     statement: wire::Seq,
+    head: Option<JournalHead<TrustHead>>,
+    /// The producing worktree's live surface, captured only when no pend has
+    /// recorded the digest's documents yet.
+    capture: Option<NativeCapture>,
+    previous: Option<wire::Digest>,
+    to: TrustState,
+}
+
+struct NativeCapture {
     claim: wire::Seq,
     residency: wire::Seq,
     lane: CanonicalUuid,
     worktree: String,
     surface: crate::trust_command::Surface,
-    head: Option<JournalHead<TrustHead>>,
-    previous: Option<wire::Digest>,
-    to: TrustState,
 }
+
 struct NativeTrustTaskAuthority {
     snapshot: bus::TaskSnapshot,
     task: wire::TaskStamp,
     statement: wire::Seq,
-    claim: wire::Seq,
-    lane: CanonicalUuid,
 }
 
 struct NativeTrustGuard {
     common: PathBuf,
     context: TrustRefusalContext,
-    surface: crate::trust_command::Surface,
     digest: wire::Digest,
     task: wire::TaskStamp,
     statement: wire::Seq,
-    claim: wire::Seq,
-    residency: wire::Seq,
-    lane: CanonicalUuid,
     trust: Option<wire::Seq>,
+    capture: Option<NativeCapture>,
     epoch: CanonicalUuid,
 }
 
@@ -645,90 +657,100 @@ fn admit_native_trust_task(
     let snapshot = bus
         .task_snapshot()
         .map_err(|error| store_fault("trust::task-snapshot-unreadable", &error.to_string()))?;
-    let (task, statement, claim, lane) = {
-        let heads = snapshot
-            .tasks()
-            .iter()
-            .find(|heads| heads.statement().body().born == **task)
-            .ok_or_else(|| {
-                context.refusal(
-                    "trust::task-missing",
-                    Some(task.to_string()),
-                    None,
-                    "the task disappeared before the trust decision",
-                )
-            })?;
-        if heads.statement().position() != *statement {
-            return Err(context.refusal(
-                "trust::task-moved",
-                Some(statement.to_string()),
-                Some(heads.statement().position().to_string()),
-                "the task statement changed before the trust decision",
-            ));
-        }
-        if !heads
-            .statement()
-            .body()
-            .requirements
-            .as_slice()
-            .iter()
-            .any(|requirement| {
-                matches!(
-                    requirement,
-                    wire::EnvironmentRequirement::TrustGrant { value }
-                        if value == &reference.digest
-                )
-            })
-        {
-            return Err(context.refusal(
-                "trust::requirement-moved",
-                Some(reference.digest.to_string()),
+    let heads = snapshot
+        .tasks()
+        .iter()
+        .find(|heads| heads.statement().body().born == **task)
+        .ok_or_else(|| {
+            context.refusal(
+                "trust::task-missing",
+                Some(task.to_string()),
                 None,
-                "the exact executable trust requirement is no longer current",
-            ));
-        }
-        if heads.claims().is_empty() {
-            return Err(context.refusal(
-                "trust::producer-unavailable",
-                Some("one active producing lane".to_owned()),
-                None,
-                "the task has no active producing worktree",
-            ));
-        }
-        let active = heads
-            .claims()
-            .iter()
-            .map(|held| held.claim().body())
-            .filter(|claim| claim.disposition == wire::ClaimDisposition::Active)
-            .collect::<Vec<_>>();
-        let [claim] = active.as_slice() else {
-            return Err(context.refusal(
-                "trust::producer-moved",
-                Some("one active producing claim".to_owned()),
-                Some(format!("{} active claims", active.len())),
-                "the task no longer has one current producing worktree",
-            ));
-        };
-        (
-            (*task).clone(),
-            *statement,
-            heads
-                .claim_plane()
-                .expect("a task retaining claims has a claim plane"),
-            claim.lane,
-        )
-    };
+                "the task disappeared before the trust decision",
+            )
+        })?;
+    if heads.statement().position() != *statement {
+        return Err(context.refusal(
+            "trust::task-moved",
+            Some(statement.to_string()),
+            Some(heads.statement().position().to_string()),
+            "the task statement changed before the trust decision",
+        ));
+    }
+    if !heads
+        .statement()
+        .body()
+        .requirements
+        .as_slice()
+        .iter()
+        .any(|requirement| {
+            matches!(
+                requirement,
+                wire::EnvironmentRequirement::TrustGrant { value }
+                    if value == &reference.digest
+            )
+        })
+    {
+        return Err(context.refusal(
+            "trust::requirement-moved",
+            Some(reference.digest.to_string()),
+            None,
+            "the exact executable trust requirement is no longer current",
+        ));
+    }
+    let (task, statement) = ((*task).clone(), *statement);
     Ok(NativeTrustTaskAuthority {
         snapshot,
         task,
         statement,
-        claim,
-        lane,
     })
+}
+
+/// The task's one active claim, whose worktree originates a digest no pend
+/// has recorded yet.
+fn native_trust_producer(
+    authority: &NativeTrustTaskAuthority,
+    context: &TrustRefusalContext,
+) -> SurfaceResult<(wire::Seq, CanonicalUuid)> {
+    let heads = authority
+        .snapshot
+        .tasks()
+        .iter()
+        .find(|heads| heads.statement().body().born == authority.task)
+        .expect("admitted native trust task is in its snapshot");
+    if heads.claims().is_empty() {
+        return Err(context.refusal(
+            "trust::producer-unavailable",
+            Some("one active producing lane".to_owned()),
+            None,
+            "the task has no active producing worktree",
+        ));
+    }
+    let active = heads
+        .claims()
+        .iter()
+        .map(|held| held.claim().body())
+        .filter(|claim| claim.disposition == wire::ClaimDisposition::Active)
+        .collect::<Vec<_>>();
+    let [claim] = active.as_slice() else {
+        return Err(context.refusal(
+            "trust::producer-moved",
+            Some("one active producing claim".to_owned()),
+            Some(format!("{} active claims", active.len())),
+            "the task no longer has one current producing worktree",
+        ));
+    };
+    Ok((
+        heads
+            .claim_plane()
+            .expect("a task retaining claims has a claim plane"),
+        claim.lane,
+    ))
 }
 
 fn native_trust_worktree(
     authority: &NativeTrustTaskAuthority,
+    lane: CanonicalUuid,
     epoch: CanonicalUuid,
     context: &TrustRefusalContext,
 ) -> SurfaceResult<(wire::Seq, String)> {
@@ -744,20 +766,49 @@ fn native_trust_worktree(
         .body()
         .lanes
         .iter()
-        .filter(|row| row.lane == authority.lane)
+        .filter(|row| row.lane == lane)
         .collect::<Vec<_>>();
     let [row] = matching_rows.as_slice() else {
         return Err(context.refusal(
             "trust::producer-unavailable",
-            Some(format!(
-                "one current linked worktree for lane {}",
-                authority.lane
-            )),
+            Some(format!("one current linked worktree for lane {lane}")),
             Some(format!("{} matching residency rows", matching_rows.len())),
             "the active claim does not resolve to one current linked worktree",
         ));
     };
     Ok((residency_head.position(), row.worktree.clone()))
+}
+
+/// Capture the documents of a digest no pend has recorded from the worktree
+/// of the task's active claim.
+fn native_trust_capture(
+    repository: &Repository,
+    authority: &NativeTrustTaskAuthority,
+    reference: &TrustRef,
+    epoch: CanonicalUuid,
+    context: &TrustRefusalContext,
+) -> SurfaceResult<NativeCapture> {
+    let (claim, lane) = native_trust_producer(authority, context)?;
+    let (residency, worktree) = native_trust_worktree(authority, lane, epoch, context)?;
+    let context = context.with_worktree(worktree.clone());
+    let producing_repository = admit_trust_worktree(repository, &worktree, &context)?;
+    let surface = crate::trust_command::Surface::load(&producing_repository)
+        .map_err(|error| crate::trust_command::load_failure(&error))?;
+    if reference.digest != *surface.digest() {
+        return Err(context.refusal(
+            "trust::digest-not-current",
+            Some(surface.digest().to_string()),
+            Some(reference.digest.to_string()),
+            "the producing worktree changed; review its current blocker",
+        ));
+    }
+    Ok(NativeCapture {
+        claim,
+        residency,
+        lane,
+        worktree,
+        surface,
+    })
 }
 
 fn admit_native_trust(
@@ -786,40 +837,28 @@ fn admit_native_trust(
     }
     admit_epoch(bus, command, epoch, &context)?;
     let authority = admit_native_trust_task(bus, command, reference, &context)?;
-    let (residency, worktree) = native_trust_worktree(&authority, epoch, &context)?;
-    let context = context.with_worktree(worktree.clone());
-    let producing_repository = admit_trust_worktree(repository, &worktree, &context)?;
-    let surface = crate::trust_command::Surface::load(&producing_repository)
-        .map_err(|error| crate::trust_command::load_failure(&error))?;
-    if reference.digest != *surface.digest() {
-        return Err(context.refusal(
-            "trust::digest-not-current",
-            Some(surface.digest().to_string()),
-            Some(reference.digest.to_string()),
-            "the producing worktree changed; review its current blocker",
-        ));
-    }
     let head = bus
         .trust_head(&reference.digest)
         .map_err(|error| store_fault("trust::head-unreadable", &error.to_string()))?;
-    if let Some(head) = head.as_ref() {
-        if head.body().state != TrustState::Pended {
-            return Err(context.refusal(
-                "trust::standing-moved",
-                Some("pended or uncaptured".to_owned()),
-                Some(format!("{:?}", head.body().state).to_lowercase()),
-                "the exact digest already has a terminal trust ruling",
-            ));
+    // A recorded pend carries the digest's documents, so its ruling needs no
+    // live worktree; only a digest nobody pended is captured from the task's
+    // producing worktree.
+    let capture = match head.as_ref() {
+        Some(head) => {
+            if head.body().state != TrustState::Pended {
+                return Err(context.refusal(
+                    "trust::standing-moved",
+                    Some("pended or uncaptured".to_owned()),
+                    Some(head.body().state.as_str().to_owned()),
+                    "the exact digest already has a terminal trust ruling",
+                ));
+            }
+            None
         }
-        if head.body().worktree.as_deref() != Some(worktree.as_str()) {
-            return Err(context.refusal(
-                "trust::worktree-moved",
-                Some(worktree.clone()),
-                head.body().worktree.clone(),
-                "the captured and current producing worktrees differ",
-            ));
-        }
-    }
+        None => Some(native_trust_capture(
+            repository, &authority, reference, epoch, &context,
+        )?),
+    };
     let mut expected = vec![Witness::Task {
         task: authority.task.clone(),
         head: authority.statement,
@@ -851,12 +890,8 @@ fn admit_native_trust(
     Ok(NativeTrustAdmission {
         task: authority.task,
         statement: authority.statement,
-        claim: authority.claim,
-        residency,
-        lane: authority.lane,
-        worktree,
-        surface,
         head,
+        capture,
         previous,
         to,
     })
@@ -864,7 +899,6 @@ fn admit_native_trust(
 
 fn admit_trust(
     bus: &Bus,
-    repository: &Repository,
     epoch: CanonicalUuid,
     command: &wire::AdmittedCommand,
     reference: &TrustRef,
@@ -880,38 +914,13 @@ fn admit_trust(
     }
     let (from, to) = trust_transition(command.kind());
     let head = admit_trust_head(bus, command, reference, from, &context)?;
-    let worktree = head.body().worktree.clone().ok_or_else(|| {
-        context.pend_again().refusal(
-            "trust::worktree-missing",
-            Some("one producing worktree".to_owned()),
-            None,
-            "pend the current digest from its producing worktree, then retry the unchanged ruling",
-        )
-    })?;
-    let context = context.with_worktree(worktree.clone());
-    let producing_repository = admit_trust_worktree(repository, &worktree, &context)?;
-    let surface = crate::trust_command::Surface::load(&producing_repository)
-        .map_err(|error| crate::trust_command::load_failure(&error))?;
-    if reference.digest != *surface.digest() {
-        return Err(context.pend_again().refusal(
-            "trust::digest-not-current",
-            Some(surface.digest().to_string()),
-            Some(reference.digest.to_string()),
-            &format!(
-                "run spice trust from producing worktree {worktree} and rule on its exact current digest"
-            ),
-        ));
-    }
     let origin = trust_head_origin(bus, &head)?;
+    let context = match head.body().worktree.as_deref() {
+        Some(worktree) => context.with_worktree(worktree),
+        None => context,
+    };
     admit_epoch(bus, command, epoch, &context)?;
-    Ok(TrustAdmission {
-        from,
-        to,
-        surface,
-        head,
-        origin,
-        worktree,
-    })
+    Ok(TrustAdmission { to, head, origin })
 }
 
 fn admit_trust_worktree(
@@ -975,7 +984,7 @@ fn admit_trust_head(
     bus: &Bus,
     command: &wire::AdmittedCommand,
     reference: &TrustRef,
-    from: TrustState,
+    from: &[TrustState],
     context: &TrustRefusalContext,
 ) -> SurfaceResult<JournalHead<TrustHead>> {
     let head = bus
@@ -986,38 +995,43 @@ fn admit_trust_head(
                 "trust::digest-unknown",
                 Some(reference.digest.to_string()),
                 None,
-                "restart the resident to pend the exact current digest before ruling",
+                "pend the digest from a worktree that produces it before ruling",
             )
         })?;
-    if head.body().state != from {
-        let context = match head.body().worktree.as_deref() {
-            Some(worktree) => context.with_worktree(worktree),
-            None => context.clone(),
-        };
+    let context = match head.body().worktree.as_deref() {
+        Some(worktree) => context.with_worktree(worktree),
+        None => context.clone(),
+    };
+    let standing = head.body().state;
+    if !from.contains(&standing) {
         return Err(context.report().refusal(
             "trust::standing-moved",
-            Some(format!("{from:?}").to_lowercase()),
-            Some(format!("{:?}", head.body().state).to_lowercase()),
+            Some(standings(from)),
+            Some(standing.as_str().to_owned()),
             "re-read the current trust report before issuing another ruling",
         ));
     }
     let expected = Witness::Trust {
         digest: reference.digest.clone(),
-        standing: from,
+        standing,
     };
     if command.expected() != [expected] {
-        let context = match head.body().worktree.as_deref() {
-            Some(worktree) => context.with_worktree(worktree),
-            None => context.clone(),
-        };
         return Err(context.refusal(
             "trust::witness-moved",
-            Some(format!("{}:{from:?}", reference.digest).to_lowercase()),
+            Some(format!("{}:{}", reference.digest, standing.as_str())),
             Some(format!("{:?}", command.expected())),
             "re-read the current trust head and retry its exact witness",
         ));
     }
     Ok(head)
+}
+
+fn standings(states: &[TrustState]) -> String {
+    states
+        .iter()
+        .map(|state| state.as_str())
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 fn admit_epoch(
@@ -1050,30 +1064,17 @@ fn native_trust_guard(guard: NativeTrustGuard) -> JournalGuard {
     let NativeTrustGuard {
         common,
         context,
-        surface,
         digest,
         task,
         statement,
-        claim,
-        residency,
-        lane,
         trust,
+        capture,
         epoch,
     } = guard;
-    let worktree = context
-        .worktree
-        .clone()
-        .expect("admitted native trust ruling has a producing worktree");
     JournalGuard::new(move |read| {
-        let repository = guarded_trust_worktree(&common, &worktree, &context)?;
-        super::require_current_surface(&repository, &surface).map_err(|_| {
-            context.guard_refusal(
-                "trust::surface-moved",
-                Some(surface.digest().to_string()),
-                None,
-                "the producing worktree changed before the decision committed",
-            )
-        })?;
+        if let Some(capture) = capture.as_ref() {
+            native_capture_current(read, &common, &context, &task, capture, epoch)?;
+        }
         if read.task_head(&task)?.map(|head| head.position()) != Some(statement) {
             return Err(context.guard_refusal(
                 "trust::task-moved",
@@ -1082,48 +1083,18 @@ fn native_trust_guard(guard: NativeTrustGuard) -> JournalGuard {
                 "the task statement changed before the decision committed",
             ));
         }
-        if read.claim_plane(&task)? != Some(claim) {
-            return Err(context.guard_refusal(
-                "trust::producer-moved",
-                Some(claim.to_string()),
-                None,
-                "the task's producing claim changed before the decision committed",
-            ));
-        }
-        let current_residency = read
-            .residency_head()?
-            .ok_or_else(|| GuardError::refused("resident::head-missing"))?;
-        if current_residency.position() != residency
-            || current_residency.body().epoch != epoch
-            || !current_residency
-                .body()
-                .lanes
-                .iter()
-                .any(|row| row.lane == lane && row.worktree == worktree)
-        {
-            return Err(context.guard_refusal(
-                "trust::producer-moved",
-                Some(format!("{residency} {lane} {worktree}")),
-                Some(format!(
-                    "{} {}",
-                    current_residency.position(),
-                    current_residency.body().epoch
-                )),
-                "the producing lane changed before the decision committed",
-            ));
-        }
         let current_trust = read.trust_head(&digest)?;
         match (trust, current_trust) {
             (None, None) => {}
             (Some(expected), Some(current))
-                if current.position() == expected
-                    && current.body().state == TrustState::Pended
-                    && current.body().worktree.as_deref() == Some(worktree.as_str()) => {}
+                if current.position() == expected && current.body().state == TrustState::Pended => {
+            }
             (expected, observed) => {
                 return Err(context.guard_refusal(
                     "trust::standing-moved",
                     expected.map(|position| position.to_string()),
-                    observed.map(|head| format!("{}:{:?}", head.position(), head.body().state)),
+                    observed
+                        .map(|head| format!("{}:{}", head.position(), head.body().state.as_str())),
                     "the exact digest received another ruling before this decision",
                 ));
             }
@@ -1132,49 +1103,76 @@ fn native_trust_guard(guard: NativeTrustGuard) -> JournalGuard {
     })
 }
 
+/// The captured producer still holds the task and still presents the exact
+/// surface whose documents this decision pends.
+fn native_capture_current(
+    read: &journal::JournalRead<'_>,
+    common: &Path,
+    context: &TrustRefusalContext,
+    task: &wire::TaskStamp,
+    capture: &NativeCapture,
+    epoch: CanonicalUuid,
+) -> Result<(), GuardError> {
+    let repository = guarded_trust_worktree(common, &capture.worktree, context)?;
+    super::require_current_surface(&repository, &capture.surface).map_err(|_| {
+        context.guard_refusal(
+            "trust::surface-moved",
+            Some(capture.surface.digest().to_string()),
+            None,
+            "the producing worktree changed before the decision committed",
+        )
+    })?;
+    if read.claim_plane(task)? != Some(capture.claim) {
+        return Err(context.guard_refusal(
+            "trust::producer-moved",
+            Some(capture.claim.to_string()),
+            None,
+            "the task's producing claim changed before the decision committed",
+        ));
+    }
+    let current_residency = read
+        .residency_head()?
+        .ok_or_else(|| GuardError::refused("resident::head-missing"))?;
+    if current_residency.position() != capture.residency
+        || current_residency.body().epoch != epoch
+        || !current_residency
+            .body()
+            .lanes
+            .iter()
+            .any(|row| row.lane == capture.lane && row.worktree == capture.worktree)
+    {
+        return Err(context.guard_refusal(
+            "trust::producer-moved",
+            Some(format!(
+                "{} {} {}",
+                capture.residency, capture.lane, capture.worktree
+            )),
+            Some(format!(
+                "{} {}",
+                current_residency.position(),
+                current_residency.body().epoch
+            )),
+            "the producing lane changed before the decision committed",
+        ));
+    }
+    Ok(())
+}
+
+/// Hold a ruling to the exact trust head it admitted against: any competing
+/// pend or ruling on the digest moves that head.
 fn trust_guard(
-    common: PathBuf,
     context: TrustRefusalContext,
-    surface: crate::trust_command::Surface,
     digest: wire::Digest,
-    from: TrustState,
+    head: wire::Seq,
     epoch: CanonicalUuid,
 ) -> JournalGuard {
-    let worktree = context
-        .worktree
-        .clone()
-        .expect("admitted trust ruling has a producing worktree");
     JournalGuard::new(move |read| {
-        let repository = guarded_trust_worktree(&common, &worktree, &context)?;
-        super::require_current_surface(&repository, &surface).map_err(|_| {
-            context.pend_again().guard_refusal(
-                "trust::surface-moved",
-                Some(surface.digest().to_string()),
-                None,
-                "recapture and pend the current executable policy before ruling",
-            )
-        })?;
-        let current = read.trust_head(&digest)?.ok_or_else(|| {
-            context.pend_again().guard_refusal(
-                "trust::digest-unknown",
-                Some(digest.to_string()),
-                None,
-                "pend the current executable-policy digest before ruling",
-            )
-        })?;
-        if current.body().state != from {
+        let current = read.trust_head(&digest)?;
+        if current.as_ref().map(JournalHead::position) != Some(head) {
             return Err(context.report().guard_refusal(
                 "trust::standing-moved",
-                Some(format!("{from:?}").to_lowercase()),
-                Some(format!("{:?}", current.body().state).to_lowercase()),
-                "read the current trust report before issuing another ruling",
-            ));
-        }
-        if current.body().worktree.as_deref() != Some(worktree.as_str()) {
-            return Err(context.report().guard_refusal(
-                "trust::worktree-moved",
-                Some(worktree.clone()),
-                current.body().worktree.clone(),
+                Some(head.to_string()),
+                current.map(|head| format!("{}:{}", head.position(), head.body().state.as_str())),
                 "read the current trust report before issuing another ruling",
             ));
         }
@@ -1326,10 +1324,15 @@ fn committed_answer(
     }
 }
 
-fn trust_transition(kind: CommandKind) -> (TrustState, TrustState) {
+/// The standings a ruling may move from, and where it lands. A pended request
+/// is approved by grant or rejected by revoke; a grant is withdrawn by revoke.
+fn trust_transition(kind: CommandKind) -> (&'static [TrustState], TrustState) {
     match kind {
-        CommandKind::TrustGrant => (TrustState::Pended, TrustState::Granted),
-        CommandKind::TrustRevoke => (TrustState::Granted, TrustState::Revoked),
+        CommandKind::TrustGrant => (&[TrustState::Pended], TrustState::Granted),
+        CommandKind::TrustRevoke => (
+            &[TrustState::Pended, TrustState::Granted],
+            TrustState::Revoked,
+        ),
         _ => unreachable!("trust dispatcher receives only grant or revoke"),
     }
 }

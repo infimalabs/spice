@@ -161,9 +161,11 @@ pub(crate) enum SelectedCommand<'a> {
     TrustGrant {
         digest: &'a wire::Digest,
     },
-    /// The operator withdraws approval from one exact granted digest.
+    /// The operator rejects one exact pended digest or withdraws approval from
+    /// one exact granted digest, witnessing the standing it read.
     TrustRevoke {
         digest: &'a wire::Digest,
+        standing: wire::TrustState,
     },
 }
 

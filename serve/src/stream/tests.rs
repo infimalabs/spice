@@ -114,6 +114,7 @@ fn commit_notes(bus: &Bus, notes: usize, trust: bool) -> JournalCommit {
                     digest: digest.clone(),
                     worktree: None,
                     previous: None,
+                    documents: None,
                 },
                 FactCause::Root,
             )
@@ -146,6 +147,7 @@ fn commit_trust_heads(bus: &Bus, surfaces: &[&[u8]]) -> JournalCommit {
                     digest: digest.clone(),
                     worktree: None,
                     previous: None,
+                    documents: None,
                 },
                 FactCause::Root,
             )
