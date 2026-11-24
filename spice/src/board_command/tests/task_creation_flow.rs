@@ -33,19 +33,18 @@ fn claimed_add(title: &str, depends: Vec<TaskHandle>) -> TaskAdd {
     }
 }
 
-/// Issue a create-and-claim of `add` born as `born`, witnessed against the
+/// Admit a create-and-claim of `add` born as `born`, witnessed against the
 /// current board.
-fn issue_claimed_add(
+fn claimed_add_command(
     bus: &Bus,
     epoch: CanonicalUuid,
     seat: &Seat,
     born: TaskStamp,
     add: &TaskAdd,
-) -> Outcome<CommandAnswer> {
+) -> wire::AdmittedCommand {
     let actor = Actor::Lane(seat.lane);
     let current = board(bus, epoch, actor.clone());
-    issue(
-        bus,
+    fixture_command(
         epoch,
         actor,
         CommandKind::TaskAdd,
@@ -58,6 +57,17 @@ fn issue_claimed_add(
         ],
         add,
     )
+}
+
+fn issue_claimed_add(
+    bus: &Bus,
+    epoch: CanonicalUuid,
+    seat: &Seat,
+    born: TaskStamp,
+    add: &TaskAdd,
+) -> Outcome<CommandAnswer> {
+    let command = claimed_add_command(bus, epoch, seat, born, add);
+    dispatch(bus, &command).expect("task add is dispatched")
 }
 
 fn add_with_dependencies(
@@ -783,4 +793,140 @@ fn ambient_plan_authority_movement_refuses_child_creation() {
         );
         clean(&root, bus);
     }
+}
+
+#[test]
+fn create_and_claim_observes_and_guards_a_dormant_trust_grant() {
+    for moving in [false, true] {
+        let label = if moving {
+            "create-claim-dormant-grant-moving"
+        } else {
+            "create-claim-dormant-grant"
+        };
+        let (root, bus, epoch, seats) = fixture(label, 1);
+        let seat = &seats[0];
+        authorize_lane_creation(&bus, epoch, seat);
+        let digest: Digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .parse()
+            .expect("fixture digest");
+        grant_trust(&bus, &digest);
+        let born = stamp(if moving {
+            "CLAIM-trust002"
+        } else {
+            "CLAIM-trust001"
+        });
+        let handle = workflow_handle(&born);
+        let add = TaskAdd {
+            requirements: wire::EnvironmentRequirements::one(
+                wire::EnvironmentRequirement::trust_grant(digest.clone()),
+            ),
+            ..claimed_add("Claim work under a dormant grant", Vec::new())
+        };
+        let command = claimed_add_command(&bus, epoch, seat, born, &add);
+        let outcome = task_add_with(&bus, &command, &add, None, || {
+            if moving {
+                revoke_trust(&bus, &digest);
+            }
+        });
+        if moving {
+            let Outcome::Refusal(refusal) = &outcome else {
+                panic!("moving dormant grant must refuse atomically: {outcome:?}");
+            };
+            assert_eq!(refusal.reason(), "board::witness-moved");
+            assert_eq!(
+                refusal
+                    .diagnostic()
+                    .and_then(wire::RefusalDiagnostic::observed),
+                Some("claim::trust-standing-moved"),
+            );
+            assert!(
+                board(&bus, epoch, Actor::TEST_PRINCIPAL)
+                    .tasks
+                    .iter()
+                    .all(|task| task.statement.body.handle != handle),
+                "refused atomic claim must not create its task",
+            );
+        } else {
+            assert_committed(outcome);
+            let current = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+            assert!(
+                at(&current, &handle).latest_claim().is_some(),
+                "the task is created and held under the dormant grant",
+            );
+        }
+        clean(&root, bus);
+    }
+}
+
+fn grant_trust(bus: &Bus, digest: &Digest) {
+    let mut write = JournalWrite::new(
+        Actor::TEST_PRINCIPAL,
+        "repo:genesis".parse().expect("fixture origin"),
+        Instant::new(jiff::Timestamp::now()).expect("fixture instant"),
+        Producer::CommandDoor,
+    );
+    let pended = write
+        .fact(
+            wire::body::TrustPended {
+                surface: "spice".to_owned(),
+                digest: digest.clone(),
+                worktree: Some("/producer/worktree".to_owned()),
+                previous: None,
+                documents: None,
+            },
+            FactCause::Root,
+        )
+        .expect("trust pend fact builds");
+    let granted = write
+        .fact(
+            wire::body::TrustGranted {
+                surface: "spice".to_owned(),
+                digest: digest.clone(),
+            },
+            FactCause::Pending(pended),
+        )
+        .expect("trust grant fact builds");
+    let digest = digest.clone();
+    write.trust_head(granted, move |_| wire::TrustHead {
+        digest,
+        state: wire::TrustState::Granted,
+        worktree: Some("/producer/worktree".to_owned()),
+    });
+    assert!(matches!(
+        bus.commit(write).expect("trust grant reaches writer"),
+        CommitOutcome::Committed(_)
+    ));
+}
+
+fn revoke_trust(bus: &Bus, digest: &Digest) {
+    let current = bus
+        .trust_head(digest)
+        .expect("granted trust reads")
+        .expect("granted trust exists");
+    let mut write = JournalWrite::new(
+        Actor::TEST_PRINCIPAL,
+        "repo:genesis".parse().expect("fixture origin"),
+        Instant::new(jiff::Timestamp::now()).expect("fixture instant"),
+        Producer::CommandDoor,
+    );
+    let revoked = write
+        .fact(
+            wire::body::TrustRevoked {
+                surface: "spice".to_owned(),
+                digest: digest.clone(),
+            },
+            FactCause::Existing(current.position()),
+        )
+        .expect("trust revoke fact builds");
+    let digest = digest.clone();
+    let worktree = current.body().worktree.clone();
+    write.trust_head(revoked, move |_| wire::TrustHead {
+        digest,
+        state: wire::TrustState::Revoked,
+        worktree,
+    });
+    assert!(matches!(
+        bus.commit(write).expect("trust revoke reaches writer"),
+        CommitOutcome::Committed(_)
+    ));
 }

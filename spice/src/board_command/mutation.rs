@@ -269,7 +269,8 @@ fn prepare_mutation_claim<'a>(
         ));
     }
     let room_context = claim_room(bus, repository, selected)?;
-    let prepared = prepare_capture_claim(bus, command, repository, snapshot, selected, false)?;
+    let prepared =
+        prepare_capture_claim(bus, command, repository, snapshot, selected, false, None)?;
     let origin_context = task_steering_origin_output(bus, &snapshot.facts, selected)?;
     let answer =
         Box::new(prepared.answer(command, snapshot, selected, origin_context, room_context));
@@ -533,14 +534,11 @@ fn create_task(
         );
     }
     let post = prepared_entry(&prepared);
-    let added_claim = if add.claim {
-        match prepare_capture_claim(bus, command, repository, &snapshot, &post, true) {
-            Ok(claim) => Some(claim),
+    let added_claim =
+        match prepare_creation_claim(bus, command, repository, &snapshot, &post, add.claim) {
+            Ok(claim) => claim,
             Err(outcome) => return outcome,
-        }
-    } else {
-        None
-    };
+        };
     after_validation();
     commit_prepared_task(
         bus,
@@ -554,6 +552,34 @@ fn create_task(
             claim: added_claim,
         },
     )
+}
+
+fn prepare_creation_claim<'a>(
+    bus: &Bus,
+    command: &wire::AdmittedCommand,
+    repository: Option<Host<'a>>,
+    snapshot: &ValidatedSnapshot,
+    selected: &Entry,
+    requested: bool,
+) -> Result<Option<PreparedClaim<'a>>, Outcome<CommandAnswer>> {
+    if !requested {
+        return Ok(None);
+    }
+    let environment = requirements::observe_trust_environment(
+        bus,
+        &selected.statement().requirements,
+        snapshot.answer.environment(),
+    )?;
+    prepare_capture_claim(
+        bus,
+        command,
+        repository,
+        snapshot,
+        selected,
+        true,
+        Some(environment),
+    )
+    .map(Some)
 }
 
 /// The operator is the root authority, so a draft it authors needs no further
