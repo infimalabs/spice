@@ -43,6 +43,28 @@ pub(super) struct PublicationAsset {
 }
 
 impl PublicationPlan {
+    /// Refuse a resumed request whose persisted plan names different notes.
+    pub(super) fn admit_existing_notes(
+        operation: &Path,
+        source_commit: &str,
+        notes: &wire::ReleaseNotes,
+    ) -> Result<(), PublishError> {
+        let path = operation.join(PLAN_FILE);
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => return Err(PublishError::Io { path, source }),
+        };
+        let plan: Self = serde_json::from_slice(&bytes).map_err(PublishError::Decode)?;
+        plan.admit()?;
+        if plan.source_commit != source_commit || plan.notes != notes.document {
+            return Err(PublishError::Refused(
+                "publication notes moved from the admitted plan".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Capture the plan for the commit `inputs` signed: its version comes from
     /// the admitted source archive's build record, its bytes from the stage
     /// under `worktree`, never from the checkout's own commit.
@@ -50,6 +72,7 @@ impl PublicationPlan {
         worktree: &Path,
         operation: &Path,
         release_inputs: &ReleaseInputs,
+        notes: &wire::ReleaseNotes,
     ) -> Result<Self, PublishError> {
         let inputs = release_inputs.manifest();
         let build = spice::version::build_info(release_inputs.tree(), dist::Build::Staged)
@@ -62,6 +85,13 @@ impl PublicationPlan {
                 "admitted source archive names {}, not preflight {}",
                 source.commit, inputs.source_commit
             )));
+        }
+        if notes.release_commit != inputs.source_commit
+            || notes.release_version != build.product.to_string()
+        {
+            return Err(PublishError::Refused(
+                "release notes do not name the admitted source commit and version".into(),
+            ));
         }
         let assets_root = operation.join("assets");
         fs::create_dir_all(&assets_root).map_err(|source| PublishError::Io {
@@ -84,10 +114,7 @@ impl PublicationPlan {
         Ok(Self {
             schema: SCHEMA,
             source_commit: inputs.source_commit.clone(),
-            notes: format!(
-                "# Spice {tag}\n\nSource commit: `{}`\n",
-                inputs.source_commit
-            ),
+            notes: notes.document.clone(),
             version,
             tag,
             assets,
@@ -316,6 +343,19 @@ mod tests {
         }
     }
 
+    fn notes(document: &str) -> wire::ReleaseNotes {
+        wire::ReleaseNotes {
+            version: wire::manifest::RELEASE_NOTES_VERSION,
+            identity: Digest::compute(Domain::DistReleaseNotes, document.as_bytes()),
+            release_version: "1.2.3".to_owned(),
+            release_commit: "1".repeat(40),
+            previous_tag: Some("v1.2.2".to_owned()),
+            bounded_recent_window: false,
+            entries: Vec::new(),
+            document: document.to_owned(),
+        }
+    }
+
     #[test]
     fn source_identity_admission_distinguishes_commit_from_archive() {
         let source_commit = "1".repeat(40);
@@ -353,6 +393,24 @@ mod tests {
         moved.assets[0].sha256 = "f".repeat(64);
         assert!(matches!(
             moved.persist(&scratch.0),
+            Err(PublishError::Refused(_))
+        ));
+    }
+
+    #[test]
+    fn retained_plan_refuses_moved_release_notes_before_resumption() {
+        let scratch = Scratch::new();
+        let plan = plan();
+        plan.persist(&scratch.0).expect("first publication plan");
+
+        PublicationPlan::admit_existing_notes(&scratch.0, &plan.source_commit, &notes(&plan.notes))
+            .expect("exact notes resume");
+        assert!(matches!(
+            PublicationPlan::admit_existing_notes(
+                &scratch.0,
+                &plan.source_commit,
+                &notes("## Highlights\n\n- Different overview.\n"),
+            ),
             Err(PublishError::Refused(_))
         ));
     }

@@ -19,13 +19,13 @@ pub use darwin_signing::{
     DarwinSigning, DarwinSigningError, DeveloperIdentity, NotaryProfile, ReleaseConfig,
 };
 pub use notes::{
-    Correction, Landing, NotesError, NotesInput, ReviewStanding, curated_release_notes,
-    release_notes,
+    Correction, Landing, NotesError, NotesInput, ReleaseCommit, ReviewStanding,
+    curated_release_notes, release_notes,
 };
 pub use pins::{PinError, PinName, RequiredPins};
 pub use source::{
-    SourceIdentity, build_info, build_record_bytes, head_build_info, source_archive_identity,
-    source_counter_sum, source_identity, source_version,
+    SourceIdentity, build_info, build_record_bytes, head_build_info, revision_build_info,
+    source_archive_identity, source_counter_sum, source_identity, source_version,
 };
 pub use stage::{
     BuildError, BuildStep, Builder, FinalizedArtifact, FinalizedDarwinStage, Pipeline, StageError,

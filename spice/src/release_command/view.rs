@@ -49,7 +49,7 @@ pub(crate) struct NotesPreview {
     text: String,
 }
 
-/// One task-level change as the preview names it.
+/// One release change as the preview names it.
 #[derive(Debug, Serialize)]
 pub(crate) struct NotesRow {
     pub(crate) topic: String,

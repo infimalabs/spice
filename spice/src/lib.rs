@@ -41,6 +41,8 @@ pub mod placeholder;
 pub mod quote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod rack_admission;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod release_history;
 pub mod repository;
 pub mod resident_lock;
 pub mod rooms;

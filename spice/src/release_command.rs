@@ -89,24 +89,13 @@ pub(crate) fn notes(matches: &clap::ArgMatches) -> Outcome<NotesView> {
             return environment_fault(spice::repository::ResolveError::REASON, error.to_string());
         }
     };
-    let state_paths = match repository.admit_state() {
-        Ok(paths) => paths,
-        Err(error) => return crate::state_failure(&error).outcome(),
-    };
-    let reader = match journal::JournalReader::open(state_paths.journal()) {
-        Ok(reader) => reader,
-        Err(error) => {
-            return environment_fault("release::journal-unavailable", error.to_string());
-        }
-    };
     let release_commit = matches
         .get_one::<String>("release-commit")
         .map(String::as_str);
-    let notes =
-        match crate::release_history::draft(repository.worktree_root(), &reader, release_commit) {
-            Ok(notes) => notes,
-            Err(error) => return notes_refusal("release::history-refused", &error),
-        };
+    let notes = match spice::release_history::draft(repository.worktree_root(), release_commit) {
+        Ok(notes) => notes,
+        Err(error) => return notes_refusal("release::history-refused", &error),
+    };
     let output = matches.get_one::<String>("output").map(String::as_str);
     match view::notes_view(&notes, output, release_commit) {
         Ok(body) => Outcome::Reply(Reply {

@@ -107,13 +107,24 @@ pub fn build_info(root: &Path, build: Build) -> Result<BuildInfo, String> {
 ///
 /// Refuses a root without Git and whatever the Git source refuses.
 pub fn head_build_info(root: &Path, build: Build) -> Result<BuildInfo, String> {
+    revision_build_info(root, "HEAD", build)
+}
+
+/// The build identity of one Git revision at `root`, ignoring the worktree and
+/// any untracked build record.
+///
+/// # Errors
+///
+/// Refuses a root without Git, a revision that is not a commit, and whatever
+/// the selected Git history refuses.
+pub fn revision_build_info(root: &Path, revision: &str, build: Build) -> Result<BuildInfo, String> {
     if !git_present(root) {
         return Err(format!(
-            "{}: HEAD's build record requires Git",
+            "{}: a revision build record requires Git",
             root.display()
         ));
     }
-    let mut git = GitHistory::new(root);
+    let mut git = GitHistory::at(root, revision);
     let tracked = git
         .tracked_version()
         .map_err(|error| format!("{}: {error}", root.display()))?;

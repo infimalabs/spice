@@ -140,8 +140,6 @@ mod read_page;
 #[cfg(not(target_arch = "wasm32"))]
 mod release_command;
 #[cfg(not(target_arch = "wasm32"))]
-mod release_history;
-#[cfg(not(target_arch = "wasm32"))]
 mod release_seal;
 mod render;
 #[cfg(not(target_arch = "wasm32"))]

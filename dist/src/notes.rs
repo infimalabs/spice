@@ -1,4 +1,4 @@
-//! Release-note folding from first-parent Git bounds and typed task authority.
+//! Release-note folding from first-parent Git history and typed task authority.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,6 +50,15 @@ pub struct Correction {
     pub correction: String,
 }
 
+/// One first-parent Git commit selected for the release inventory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReleaseCommit {
+    /// Full object identity.
+    pub commit: String,
+    /// Commit subject exactly as Git stores it.
+    pub subject: String,
+}
+
 /// Complete observations needed to fold one release-note document.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NotesInput {
@@ -60,19 +69,18 @@ pub struct NotesInput {
     /// Highest-versioned reachable prior release tag.
     pub previous_tag: Option<String>,
     /// Ordered first-parent commits in the exact selected release window.
-    pub window: Vec<String>,
+    pub window: Vec<ReleaseCommit>,
     /// Typed landings reachable in the selected first-parent ancestry.
     pub landings: Vec<Landing>,
     /// Typed correction relations among those tasks.
     pub corrections: Vec<Correction>,
 }
 
-/// Fold a release-note draft from Git bounds and typed task authority.
+/// Fold a release-note draft from Git history and typed task authority.
 ///
 /// # Errors
 ///
-/// Refuses a selected commit without exactly one contributing landing, an
-/// ambiguous correction relation, or a correction cycle.
+/// Refuses ambiguous landing or correction authority and correction cycles.
 pub fn release_notes(input: NotesInput) -> Result<ReleaseNotes, NotesError> {
     let entries = fold_entries(&input)?;
     let document = render(&input, &entries);
@@ -171,11 +179,15 @@ fn fold_entries(input: &NotesInput) -> Result<Vec<ReleaseNotesEntry>, NotesError
     let mut entries = Vec::<ReleaseNotesEntry>::new();
     let mut positions = BTreeMap::<String, usize>::new();
     for commit in &input.window {
-        let landing = contributors.get(commit.as_str()).copied().ok_or_else(|| {
-            NotesError::MissingLanding {
-                commit: commit.clone(),
-            }
-        })?;
+        let Some(landing) = contributors.get(commit.commit.as_str()).copied() else {
+            entries.push(ReleaseNotesEntry {
+                topic: "/general".to_owned(),
+                subject: edited_release_highlight(&commit.subject),
+                task: None,
+                references: vec![commit.commit.clone()],
+            });
+            continue;
+        };
         let root = roots
             .get(&landing.task)
             .map(String::as_str)
@@ -194,15 +206,15 @@ fn fold_entries(input: &NotesInput) -> Result<Vec<ReleaseNotesEntry>, NotesError
                     task: root.to_owned(),
                 })?;
         if let Some(position) = positions.get(root).copied() {
-            entries[position].references.push(commit.clone());
+            entries[position].references.push(commit.commit.clone());
             continue;
         }
         positions.insert(root.to_owned(), entries.len());
         entries.push(ReleaseNotesEntry {
             topic: authority.topic.clone(),
-            subject: authority.title.clone(),
+            subject: edited_release_highlight(&authority.title),
             task: Some(root.to_owned()),
-            references: vec![commit.clone()],
+            references: vec![commit.commit.clone()],
         });
     }
     Ok(entries)
@@ -275,7 +287,7 @@ fn render(input: &NotesInput, entries: &[ReleaseNotesEntry]) -> String {
         "> [!IMPORTANT]".to_owned(),
         "> **Draft release notes — curate Highlights before publishing.** Replace".to_owned(),
         "> the placeholder under _Highlights_ with a short summary, then delete this".to_owned(),
-        "> banner. Everything from the collapsed _Task-level changes_ section down".to_owned(),
+        "> banner. Everything from the collapsed _Commit-level changes_ section down".to_owned(),
         "> is regenerated at publication against the real release commit.".to_owned(),
         String::new(),
         "## Highlights".to_owned(),
@@ -283,13 +295,13 @@ fn render(input: &NotesInput, entries: &[ReleaseNotesEntry]) -> String {
         HIGHLIGHTS_PLACEHOLDER.to_owned(),
         String::new(),
         INVENTORY_OPEN.to_owned(),
-        "<summary>Task-level changes</summary>".to_owned(),
+        "<summary>Commit-level changes</summary>".to_owned(),
         String::new(),
         "## Changes by topic".to_owned(),
         String::new(),
     ];
     if groups.is_empty() {
-        lines.extend(["- No task landings found.".to_owned(), String::new()]);
+        lines.extend(["- No selected commits found.".to_owned(), String::new()]);
     } else {
         for TopicGroup { topic, highlights } in groups {
             lines.extend([format!("### {}", topic_heading(&topic)), String::new()]);
@@ -353,6 +365,42 @@ fn carries_highlights(curated: &str) -> bool {
     })
 }
 
+fn edited_release_highlight(subject: &str) -> String {
+    let raw = subject.trim();
+    if raw.is_empty() {
+        return "Updated the release.".to_owned();
+    }
+    for (prefix, replacement) in [
+        ("fix ", "Fixed "),
+        ("prefer ", "Improved "),
+        ("add ", "Added "),
+        ("expose ", "Added "),
+        ("remove ", "Removed "),
+        ("update ", "Updated "),
+        ("track ", "Tracked "),
+        ("document ", "Documented "),
+        ("restore ", "Restored "),
+        ("clean ", "Cleaned "),
+        ("wire ", "Wired "),
+        ("make ", "Made "),
+    ] {
+        if raw
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            return punctuate(format!("{replacement}{}", &raw[prefix.len()..]));
+        }
+    }
+    punctuate(capitalize_first(raw))
+}
+
+fn punctuate(mut text: String) -> String {
+    if !text.ends_with(['.', '!', '?']) {
+        text.push('.');
+    }
+    text
+}
+
 fn topic_heading(topic: &str) -> String {
     let words = topic
         .split(['/', '_'])
@@ -385,9 +433,6 @@ fn short_commit(commit: &str) -> &str {
 /// Why typed landing authority could not become publishable release notes.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum NotesError {
-    /// A selected Git commit has no contributing typed landing.
-    #[error("integrated commit {commit} has no typed release-note landing")]
-    MissingLanding { commit: String },
     /// More than one task claims the same integrated commit.
     #[error("integrated commit {commit} has ambiguous typed release-note landings")]
     AmbiguousLanding { commit: String },
@@ -438,7 +483,7 @@ mod tests {
         assert_eq!(notes.entries.len(), 1);
         assert_eq!(notes.entries[0].task.as_deref(), Some("root"));
         assert_eq!(notes.entries[0].topic, "/spice/app");
-        assert_eq!(notes.entries[0].subject, "Show presence");
+        assert_eq!(notes.entries[0].subject, "Show presence.");
         assert_eq!(
             notes.entries[0].references,
             ["1111111111", "2222222222", "3333333333"]
@@ -495,7 +540,7 @@ mod tests {
 
             assert_eq!(notes.entries.len(), 1);
             assert_eq!(notes.entries[0].topic, "/spice/new");
-            assert_eq!(notes.entries[0].subject, "New title");
+            assert_eq!(notes.entries[0].subject, "New title.");
         }
     }
 
@@ -521,8 +566,8 @@ mod tests {
     }
 
     #[test]
-    fn every_selected_commit_requires_typed_landing_authority() {
-        let error = release_notes(fixture(
+    fn a_selected_commit_without_task_authority_is_formatted_from_git() {
+        let notes = release_notes(fixture(
             vec!["1111111111", "2222222222"],
             vec![landing(
                 1,
@@ -533,14 +578,13 @@ mod tests {
             )],
             Vec::new(),
         ))
-        .expect_err("unclaimed commit refuses");
+        .expect("untyped commit falls back to Git metadata");
 
-        assert_eq!(
-            error,
-            NotesError::MissingLanding {
-                commit: "2222222222".to_owned(),
-            }
-        );
+        assert_eq!(notes.entries.len(), 2);
+        assert_eq!(notes.entries[1].topic, "/general");
+        assert_eq!(notes.entries[1].subject, "Updated 2222222222.");
+        assert_eq!(notes.entries[1].task, None);
+        assert_eq!(notes.entries[1].references, ["2222222222"]);
     }
 
     #[test]
@@ -615,7 +659,13 @@ mod tests {
             release_version: "1.2.4".to_owned(),
             release_commit: "abcdef0123456789".to_owned(),
             previous_tag: None,
-            window: window.into_iter().map(str::to_owned).collect(),
+            window: window
+                .into_iter()
+                .map(|commit| ReleaseCommit {
+                    commit: commit.to_owned(),
+                    subject: format!("Update {commit}"),
+                })
+                .collect(),
             landings,
             corrections,
         }

@@ -22,7 +22,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|publish-hosted-release [COMMIT|--abandon COMMIT]|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE|--abandon COMMIT>|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -446,9 +446,14 @@ fn run_publish_hosted_release(
         .collect::<Option<Vec<_>>>()
         .ok_or_else(usage_error)?;
     let request = match arguments.as_slice() {
-        [] => xtask::PublishRequest::New,
+        ["--notes", notes] => xtask::PublishRequest::New {
+            notes: PathBuf::from(notes),
+        },
+        [commit, "--notes", notes] if !commit.starts_with('-') => xtask::PublishRequest::Resume {
+            commit: (*commit).to_owned(),
+            notes: PathBuf::from(notes),
+        },
         ["--abandon", commit] => xtask::PublishRequest::Abandon((*commit).to_owned()),
-        [commit] if !commit.starts_with('-') => xtask::PublishRequest::Resume((*commit).to_owned()),
         _ => {
             eprintln!("{}", help());
             return Err(usage_error().into());
