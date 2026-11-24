@@ -10,11 +10,49 @@ use crate::{ConfigSource, Digest, SpiceCommand, TrustState};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRead {
-    /// Resume after this exact current ruling.
+    /// Resume after this ruling as the prior page showed it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<Digest>,
+    pub after: Option<TrustReportCursor>,
     /// Already-admitted interactive output limits.
     pub limits: Limits,
+}
+
+/// Resume point after one shown ruling: the standing it had on its page and
+/// its digest, spelled `STANDING:DIGEST`. Carrying the standing keeps the
+/// resume point fixed when that ruling changes standing between pages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustReportCursor {
+    /// Standing the ruling had on the page that showed it.
+    pub standing: TrustState,
+    /// Its exact digest.
+    pub digest: Digest,
+}
+
+impl std::fmt::Display for TrustReportCursor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}:{}", self.standing.as_str(), self.digest)
+    }
+}
+
+impl std::str::FromStr for TrustReportCursor {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let Some((standing, digest)) = text.split_once(':') else {
+            return Err(format!(
+                "trust report cursor {text:?} is not STANDING:DIGEST"
+            ));
+        };
+        let standing = match standing {
+            "pended" => TrustState::Pended,
+            "granted" => TrustState::Granted,
+            "revoked" => TrustState::Revoked,
+            other => return Err(format!("trust report cursor standing {other:?} is unknown")),
+        };
+        let digest = digest.parse().map_err(|error| format!("{error}"))?;
+        Ok(Self { standing, digest })
+    }
 }
 
 /// One current executable-trust ruling in operator-report order.
