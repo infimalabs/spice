@@ -238,6 +238,7 @@ struct TrustObservations {
 }
 
 impl TrustObservations {
+    /// Point-observe only the held and proposed digests; history stays cold.
     fn read(bus: &Bus, required: Option<&Digest>, need: Option<&Digest>) -> CommandResult<Self> {
         let observe = |digest: &Digest| {
             bus.trust_head(digest)

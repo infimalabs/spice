@@ -676,7 +676,7 @@ fn trust_report_pages_only_live_requests_and_stays_exact_when_ruled() {
             "INSERT INTO active_trust_digests(digest, requirements) VALUES (?1, 1)",
             [digest(nibble).as_str()],
         )
-        .expect("project one live trust requirement");
+        .expect("project one distinct live trust digest");
     }
     let budget = FactReadBudget::new(1, 1 << 20).expect("one-ruling report pages");
     let mut shown = Vec::new();

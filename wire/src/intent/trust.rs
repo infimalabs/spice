@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::output::{Exhausted, Limits};
 use crate::{ConfigSource, Digest, SpiceCommand, TrustState};
 
-/// One bounded live trust-request report.
+/// One bounded report over distinct digests required by live tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRead {

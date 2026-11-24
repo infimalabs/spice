@@ -175,7 +175,7 @@ fn trust_only_commits_refresh_immutable_task_snapshots_at_the_commit_cursor() {
     assert_eq!(
         before.trust().len(),
         1,
-        "historical trust heads do not grow the live task snapshot"
+        "retained exact-digest authority does not grow the live task snapshot"
     );
     let before_target = trust_head(&before, &digest);
     assert_eq!(before_target.body().state, TrustState::Pended);

@@ -104,7 +104,7 @@ pub(crate) struct TrustReport(wire::intent::TrustReportAnswer);
 
 impl std::fmt::Display for TrustReport {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("trust configuration requests")?;
+        formatter.write_str("pending trust configuration requests")?;
         for ruling in &self.0.rulings {
             write!(
                 formatter,

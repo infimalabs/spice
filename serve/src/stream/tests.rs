@@ -84,6 +84,7 @@ fn request(last: u8, subjects: Vec<ViewSubject>, after: Option<Seq>) -> StreamRe
     }
 }
 
+/// Attach one trust digest to the distinct live-request frontier without adding a fact.
 fn live_trust_owner(
     write: &mut JournalWrite,
     fact: journal::PendingFact,

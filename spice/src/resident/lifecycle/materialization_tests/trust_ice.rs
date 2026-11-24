@@ -257,7 +257,7 @@ fn a_dormant_grant_admits_new_work_without_joining_the_live_projection() {
             .expect("dormant grant snapshot reads")
             .trust()
             .is_empty(),
-        "history alone does not grow live task authority"
+        "retained equality authority stays outside the live request snapshot"
     );
     committed(
         bus.commit(claim_write_until(&bus, instant(3), instant(40), |_, _| {}))

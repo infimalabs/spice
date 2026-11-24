@@ -385,9 +385,11 @@ when none is granted; a change to a line ending or the final newline is noted
 on its line. Bare `spice trust` is the live task-backed request report: it lists
 only pended digests that current pending tasks still require and includes the
 same differential without reading a worktree. Once no pending task requires a
-digest, its request leaves this live report automatically. `spice trust show
-DIGEST` remains the explicit read for any retained digest, including a resolved
-or no-longer-needed request, and the app's trust blocker shows the same diff.
+digest, its request leaves this live report automatically. This online frontier
+has one row per distinct required digest, independent of the number of tasks
+sharing it or the amount of retained trust history. `spice trust show DIGEST`
+remains the explicit read for any retained digest, including a resolved or
+no-longer-needed request, and the app's trust blocker shows the same diff.
 Review the diff, then grant only that digest with `spice trust grant DIGEST`, or
 reject it with `spice trust revoke DIGEST`. A ruling names the recorded bytes,
 so it succeeds whatever any worktree holds by then. Any byte change is a new

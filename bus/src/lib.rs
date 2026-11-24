@@ -194,7 +194,7 @@ mod runtime {
             self.cursor
         }
 
-        /// Trust heads required by live tasks at this barrier, ordered by digest.
+        /// Distinct trust heads required by live tasks at this barrier, ordered by digest.
         #[must_use]
         pub fn trust(&self) -> &[JournalHead<journal::crossing::TrustHead>] {
             &self.trust

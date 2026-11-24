@@ -140,7 +140,7 @@ impl JournalRead<'_> {
         })
     }
 
-    /// Read one joined page of live-task trust heads in digest order.
+    /// Read one joined page from the distinct live-task digest frontier.
     pub fn trust_head_page(
         &self,
         after: Option<&wire::Digest>,
