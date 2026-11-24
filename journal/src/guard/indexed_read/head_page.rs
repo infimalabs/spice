@@ -216,30 +216,32 @@ impl JournalRead<'_> {
     }
 
     /// Read one bounded page of current trust heads in operator-report order:
-    /// pended, granted, revoked, with digest as the stable tie-breaker.
+    /// pended, granted, revoked, with digest as the stable tie-breaker. A
+    /// cursor resumes from the standing its ruling had on the prior page, so
+    /// ruling that digest in between neither skips nor repeats a row.
     pub fn trust_report_head_page(
         &self,
-        after: Option<&wire::Digest>,
+        after: Option<&wire::intent::TrustReportCursor>,
         budget: FactReadBudget,
     ) -> Result<TrustReportHeadPage, GuardError> {
         let (after_rank, after_digest) = match after {
-            Some(digest) => {
+            Some(cursor) => {
                 read_metrics::observe_query();
-                let rank = self
-                    .connection
+                self.connection
                     .query_row(
-                        "SELECT standing_rank FROM trust_heads WHERE digest = ?1",
-                        [digest.as_str()],
-                        |row| row.get::<_, i64>(0),
+                        "SELECT 1 FROM trust_heads WHERE digest = ?1",
+                        [cursor.digest.as_str()],
+                        |_| Ok(()),
                     )
                     .optional()
                     .map_err(GuardError::Store)?
                     .ok_or_else(|| {
                         GuardError::Invalid(format!(
-                            "trust report cursor digest {digest} is not a current ruling"
+                            "trust report cursor digest {} is not a recorded ruling",
+                            cursor.digest
                         ))
                     })?;
-                (rank, digest.as_str())
+                (standing_rank(cursor.standing), cursor.digest.as_str())
             }
             None => (-1, ""),
         };
@@ -349,11 +351,7 @@ fn validate_trust_index(
             head.body.digest
         )));
     }
-    let expected = match head.body.state {
-        wire::TrustState::Pended => 0,
-        wire::TrustState::Granted => 1,
-        wire::TrustState::Revoked => 2,
-    };
+    let expected = standing_rank(head.body.state);
     if rank != expected {
         return Err(GuardError::Invalid(format!(
             "trust head {digest} standing rank {rank} disagrees with its {} body",
@@ -361,6 +359,15 @@ fn validate_trust_index(
         )));
     }
     Ok(())
+}
+
+/// Report order of one standing, as `trust_heads.standing_rank` stores it.
+const fn standing_rank(standing: wire::TrustState) -> i64 {
+    match standing {
+        wire::TrustState::Pended => 0,
+        wire::TrustState::Granted => 1,
+        wire::TrustState::Revoked => 2,
+    }
 }
 
 const TRUST_REPORT_PAGE_SQL: &str = "SELECT standing_rank, digest, head_seq, length(body), body FROM trust_heads \

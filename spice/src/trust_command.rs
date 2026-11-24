@@ -234,8 +234,8 @@ pub(crate) fn report(
         Err(refusal) => return Outcome::Refusal(refusal),
     };
     let after = match page.after() {
-        Some(after) => match after.parse::<Digest>() {
-            Ok(digest) => Some(digest),
+        Some(after) => match after.parse::<wire::intent::TrustReportCursor>() {
+            Ok(cursor) => Some(cursor),
             Err(error) => return Outcome::Refusal(page.cursor_refusal(error)),
         },
         None => None,

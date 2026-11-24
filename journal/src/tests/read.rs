@@ -633,6 +633,75 @@ fn bounded_current_head_pages_resume_with_exact_work_and_witnesses() {
 }
 
 #[test]
+fn trust_report_pages_resume_from_the_standing_the_prior_page_showed() {
+    let journal = authority_fixture();
+    let db = &journal.connection;
+    let trust = |nibble, state| TrustHead {
+        digest: digest(nibble),
+        state,
+        worktree: None,
+    };
+    for (nibble, state) in [("b", TrustState::Pended), ("c", TrustState::Pended)] {
+        insert_head(
+            db,
+            "trust_heads",
+            "digest",
+            digest(nibble).as_str(),
+            2,
+            &trust(nibble, state),
+        );
+    }
+    insert_head(
+        db,
+        "trust_heads",
+        "digest",
+        digest("0").as_str(),
+        2,
+        &trust("0", TrustState::Granted),
+    );
+    let budget = FactReadBudget::new(2, 1 << 20).expect("trust report budget");
+    let first = journal
+        .read(|read| read.trust_report_head_page(None, budget))
+        .expect("first report page reads");
+    let shown = first.rows.last().expect("first page shows rulings").body();
+    assert_eq!(
+        (&shown.digest, shown.state),
+        (&digest("b"), TrustState::Pended)
+    );
+    let cursor = wire::intent::TrustReportCursor {
+        standing: shown.state,
+        digest: shown.digest.clone(),
+    };
+    // The operator grants the last ruling shown before following the page.
+    db.execute(
+        "DELETE FROM trust_heads WHERE digest = ?1",
+        [digest("b").as_str()],
+    )
+    .expect("retire the pended fixture head");
+    insert_head(
+        db,
+        "trust_heads",
+        "digest",
+        digest("b").as_str(),
+        2,
+        &trust("b", TrustState::Granted),
+    );
+    let second = journal
+        .read(|read| read.trust_report_head_page(Some(&cursor), budget))
+        .expect("report page resumes");
+    let digests = second
+        .rows
+        .iter()
+        .map(|head| head.body().digest.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        digests,
+        [digest("c"), digest("0")],
+        "the remaining pended ruling still precedes every grant"
+    );
+}
+
+#[test]
 fn task_bundle_read_names_every_incomplete_or_malformed_head_class() {
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
