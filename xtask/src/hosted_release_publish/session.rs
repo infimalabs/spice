@@ -102,13 +102,15 @@ impl Publications {
     /// may pin `main`. Any other pairing refuses before a provider call.
     pub(super) fn admit(&self, request: &PublishRequest) -> Result<Option<String>, PublishError> {
         match (self.pending()?, request) {
-            (None, PublishRequest::New) => Ok(None),
-            (Some(pinned), PublishRequest::Resume(commit)) if pinned == *commit => Ok(Some(pinned)),
+            (None, PublishRequest::New { .. }) => Ok(None),
+            (Some(pinned), PublishRequest::Resume { commit, .. }) if pinned == *commit => {
+                Ok(Some(pinned))
+            }
             (Some(pinned), _) => Err(self.pinned_elsewhere(&pinned)?),
-            (None, PublishRequest::Resume(commit) | PublishRequest::Abandon(commit)) => {
+            (None, PublishRequest::Resume { commit, .. } | PublishRequest::Abandon(commit)) => {
                 Err(PublishError::Refused(format!(
                     "no publication request is pending, so {commit} cannot be resumed or \
-                     abandoned; run publish-hosted-release without a commit to pin main"
+                     abandoned; run publish-hosted-release with --notes FILE to pin main"
                 )))
             }
         }
@@ -132,7 +134,7 @@ impl Publications {
             return Err(PublishError::Refused(format!(
                 "the request for {commit} already admitted its publication plan and may have \
                  mutated the release; resume it with `spice dev xtask -- publish-hosted-release \
-                 {commit}`"
+                 {commit} --notes FILE`"
             )));
         }
         match fs::remove_dir_all(&session.root) {
@@ -155,8 +157,8 @@ impl Publications {
         };
         Ok(PublishError::Refused(format!(
             "a publication request is pending for {pinned} ({inputs}); resume it with \
-             `spice dev xtask -- publish-hosted-release {pinned}`, or drop it before any release \
-             mutation with `spice dev xtask -- publish-hosted-release --abandon {pinned}`"
+             `spice dev xtask -- publish-hosted-release {pinned} --notes FILE`, or drop it before \
+             any release mutation with `spice dev xtask -- publish-hosted-release --abandon {pinned}`"
         )))
     }
 
@@ -316,6 +318,19 @@ mod tests {
         }
     }
 
+    fn new_request() -> PublishRequest {
+        PublishRequest::New {
+            notes: PathBuf::from("notes.md"),
+        }
+    }
+
+    fn resume(commit: String) -> PublishRequest {
+        PublishRequest::Resume {
+            commit,
+            notes: PathBuf::from("notes.md"),
+        }
+    }
+
     #[test]
     fn a_pending_request_resumes_only_when_its_commit_is_named() {
         let scratch = Scratch::new();
@@ -323,29 +338,23 @@ mod tests {
         let other = "b".repeat(COMMIT_HEX_LENGTH);
         {
             let publications = scratch.publications().expect("first request");
-            assert_eq!(publications.admit(&PublishRequest::New).expect("new"), None);
+            assert_eq!(publications.admit(&new_request()).expect("new"), None);
             let session = publications.begin(&pinned).expect("pin");
             assert_eq!(session.inputs_run().expect("no preflight yet"), None);
         }
         let publications = scratch.publications().expect("later invocation");
-        refused(publications.admit(&PublishRequest::New), &pinned);
-        refused(
-            publications.admit(&PublishRequest::Resume(other.clone())),
-            &pinned,
-        );
+        refused(publications.admit(&new_request()), &pinned);
+        refused(publications.admit(&resume(other.clone())), &pinned);
         assert_eq!(
             publications
-                .admit(&PublishRequest::Resume(pinned.clone()))
+                .admit(&resume(pinned.clone()))
                 .expect("the named pin resumes"),
             Some(pinned.clone())
         );
         publications.finish().expect("finish");
-        assert_eq!(
-            publications.admit(&PublishRequest::New).expect("released"),
-            None
-        );
+        assert_eq!(publications.admit(&new_request()).expect("released"), None);
         refused(
-            publications.admit(&PublishRequest::Resume(pinned)),
+            publications.admit(&resume(pinned)),
             "no publication request",
         );
     }
@@ -374,10 +383,7 @@ mod tests {
         publications
             .abandon(&pinned)
             .expect("an unplanned pin abandons");
-        assert_eq!(
-            publications.admit(&PublishRequest::New).expect("cleared"),
-            None
-        );
+        assert_eq!(publications.admit(&new_request()).expect("cleared"), None);
         assert!(
             !session.root.exists(),
             "the abandoned preflight record survived"
@@ -388,7 +394,7 @@ mod tests {
         refused(publications.abandon(&pinned), "resume it");
         assert_eq!(
             publications
-                .admit(&PublishRequest::Resume(pinned.clone()))
+                .admit(&resume(pinned.clone()))
                 .expect("a planned pin still resumes"),
             Some(pinned)
         );

@@ -533,13 +533,13 @@ impl fmt::Display for ThreadReport {
     }
 }
 
-/// One task-level change derived from first-parent landing history.
+/// One release change derived from first-parent commit history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReleaseNotesEntry {
-    /// Topic of the landed task, or `/general` when undeclared.
+    /// Task topic, or `/general` when no typed landing names the commit.
     pub topic: String,
-    /// Latest landing wording after structural subject cleanup.
+    /// Consistently formatted task title or Git commit subject.
     pub subject: String,
     /// Stable task identity shared by repeated phase landings, when declared.
     #[serde(
@@ -573,7 +573,7 @@ pub struct ReleaseNotes {
     pub previous_tag: Option<String>,
     /// True when absence of a prior tag forced the explicit recent-history window.
     pub bounded_recent_window: bool,
-    /// Task-level entries in first-landing order.
+    /// Release entries in first-parent order.
     pub entries: Vec<ReleaseNotesEntry>,
     /// Exact Markdown bytes rendered for review or publication.
     pub document: String,

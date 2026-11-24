@@ -6,27 +6,44 @@ use std::fmt;
 use std::path::Path;
 use std::process::Command;
 
-use dist::{Correction, Landing, NotesInput, ReviewStanding};
+use dist::{Correction, Landing, NotesInput, ReleaseCommit, ReviewStanding};
 use wire::ReleaseNotes;
 
 const RECENT_LANDING_LIMIT: usize = 5;
 
+/// Resolve and fold release notes from repository-local Git and journal authority.
+///
+/// # Errors
+///
+/// Refuses an unavailable repository state or any invalid release history.
+pub fn draft(root: &Path, revision: Option<&str>) -> Result<ReleaseNotes, Error> {
+    let repository = crate::repository::Repository::discover(root)
+        .map_err(|error| Error::Journal(error.to_string()))?;
+    let state = repository
+        .admit_state()
+        .map_err(|error| Error::Journal(error.to_string()))?;
+    let reader = journal::JournalReader::open(state.journal())
+        .map_err(|error| Error::Journal(error.to_string()))?;
+    draft_with_reader(repository.worktree_root(), &reader, revision)
+}
+
 /// Resolve and fold release notes at one repository commit.
-pub(crate) fn draft(
+fn draft_with_reader(
     root: &Path,
     reader: &journal::JournalReader,
     revision: Option<&str>,
 ) -> Result<ReleaseNotes, Error> {
     let history_commit = resolve_commit(root, revision.unwrap_or("HEAD"))?;
     let release_commit = history_commit.clone();
-    let release_version = spice::version::source_version(root, dist::Build::Staged)
+    let release_version = dist::revision_build_info(root, &history_commit, dist::Build::Staged)
         .map_err(Error::Encoding)?
+        .product
         .to_string();
     let current_tag = format!("v{release_version}");
     let previous_tag = reachable_tags(root, &history_commit)?
         .into_iter()
         .find(|tag| tag != &current_tag);
-    let mut window = first_parent_commits(root, previous_tag.as_deref(), &history_commit, true)?;
+    let mut window = first_parent_window(root, previous_tag.as_deref(), &history_commit, true)?;
     if previous_tag.is_none() {
         exclude_parentless_root(root, &mut window)?;
     }
@@ -130,6 +147,43 @@ fn first_parent_commits(
     })
 }
 
+fn first_parent_window(
+    root: &Path,
+    previous_tag: Option<&str>,
+    release_commit: &str,
+    bounded_without_tag: bool,
+) -> Result<Vec<ReleaseCommit>, Error> {
+    let mut arguments = vec![
+        "log".to_owned(),
+        "--first-parent".to_owned(),
+        "--reverse".to_owned(),
+        "--format=%H%x00%s".to_owned(),
+    ];
+    arguments.push(previous_tag.map_or_else(
+        || release_commit.to_owned(),
+        |tag| format!("refs/tags/{tag}..{release_commit}"),
+    ));
+    let raw = read(root, &arguments, "read first-parent release notes")?;
+    let commits = raw
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let (commit, subject) = line.split_once('\0').ok_or_else(|| {
+                Error::Encoding("Git release-note row has no subject boundary".to_owned())
+            })?;
+            Ok(ReleaseCommit {
+                commit: commit.to_owned(),
+                subject: subject.to_owned(),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(if bounded_without_tag && previous_tag.is_none() {
+        bound_recent(commits)
+    } else {
+        commits
+    })
+}
+
 fn nonempty_lines(raw: &str) -> Vec<String> {
     raw.lines()
         .map(str::trim)
@@ -138,19 +192,19 @@ fn nonempty_lines(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn bound_recent(mut commits: Vec<String>) -> Vec<String> {
+fn bound_recent<T>(mut commits: Vec<T>) -> Vec<T> {
     let first = commits.len().saturating_sub(RECENT_LANDING_LIMIT);
     drop(commits.drain(..first));
     commits
 }
 
-fn exclude_parentless_root(root: &Path, commits: &mut Vec<String>) -> Result<(), Error> {
+fn exclude_parentless_root(root: &Path, commits: &mut Vec<ReleaseCommit>) -> Result<(), Error> {
     let Some(first) = commits.first() else {
         return Ok(());
     };
     let object = read(
         root,
-        &["cat-file".to_owned(), "-p".to_owned(), first.to_owned()],
+        &["cat-file".to_owned(), "-p".to_owned(), first.commit.clone()],
         "read the first release boundary",
     )?;
     if !commit_object_has_parent(&object) {
@@ -218,7 +272,7 @@ impl GitOutput {
 }
 
 #[derive(Debug)]
-pub(crate) enum Error {
+pub enum Error {
     Launch(String),
     Encoding(String),
     Command(String),

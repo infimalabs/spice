@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::fmt;
+use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
-
+use std::path::{Path, PathBuf};
 use windows_execution::hosted::client::Attach;
 
 use crate::windows_hosted::{
@@ -20,13 +20,22 @@ use session::Publications;
 /// What one `publish-hosted-release` invocation asks of the pinned request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublishRequest {
-    /// Pin landed `main` as a new request; refused while another is pending.
-    New,
-    /// Continue the pending request pinned to exactly this commit.
-    Resume(String),
+    /// Pin landed `main` as a new request using these curated notes.
+    New { notes: PathBuf },
+    /// Continue the pending request using exactly this commit and these notes.
+    Resume { commit: String, notes: PathBuf },
     /// Drop the pending request pinned to exactly this commit before any
     /// release mutation.
     Abandon(String),
+}
+
+impl PublishRequest {
+    fn notes(&self) -> Option<&Path> {
+        match self {
+            Self::New { notes } | Self::Resume { notes, .. } => Some(notes),
+            Self::Abandon(_) => None,
+        }
+    }
 }
 
 /// Create or resume all hosted native stages, publish their exact executables,
@@ -51,11 +60,23 @@ pub fn publish_hosted_release(
         )
         .map_err(PublishError::Output);
     }
+    let candidate_path = request
+        .notes()
+        .expect("only an abandon request carries no release notes");
+    let candidate = fs::read_to_string(candidate_path).map_err(|source| PublishError::Io {
+        path: candidate_path.to_path_buf(),
+        source,
+    })?;
     let source_commit = match publications.admit(request)? {
         Some(commit) => commit,
         None => landed_commit()?,
     };
+    let canonical = spice::release_history::draft(&worktree, Some(&source_commit))
+        .map_err(|error| PublishError::Refused(error.to_string()))?;
+    let notes = dist::curated_release_notes(&candidate, &canonical)
+        .map_err(|error| PublishError::Refused(error.to_string()))?;
     let session = publications.begin(&source_commit)?;
+    PublicationPlan::admit_existing_notes(session.root(), &source_commit, &notes)?;
     let inputs = match session.inputs_run()? {
         Some(run) => hosted_release_inputs(Attach::Run(run))?,
         None => hosted_release_inputs_dispatch(source_commit)?,
@@ -70,7 +91,7 @@ pub fn publish_hosted_release(
     }
     session.record_inputs(inputs.manifest())?;
     hosted_release_stage_with_inputs(inputs.manifest().run_id, &inputs, output, error_output)?;
-    let plan = PublicationPlan::capture(&worktree, session.root(), &inputs)?;
+    let plan = PublicationPlan::capture(&worktree, session.root(), &inputs, &notes)?;
     plan.persist(session.root())?;
     provider::publish_and_verify(&worktree, session.root(), &plan)?;
     publications.finish()?;

@@ -39,10 +39,15 @@ a release, reuploads a matching asset, changes release metadata, or tolerates
 an extra asset. A mismatched or duplicate draft refuses.
 
 **Invariant —** Release documents remain inspectable local files. `spice
-release notes` writes the operator-facing history document, while the
-publication operation retains its exact plan, notes, assets, and canonical
-checksum document. Diagnostic proof and seal commands remain available, but
-their results never gate baseline publication.
+release notes --release-commit REV --output FILE` derives the exact historical
+version and first-parent range at `REV`, formats every selected commit, and
+writes a draft whose Highlights must be replaced with an authored overview.
+The same command can target an older release tag when its published notes need
+repair. Publication requires `--notes FILE`, keeps only that authored region,
+regenerates the canonical commit inventory for the pinned source, and retains
+the resulting notes with its exact plan, assets, and checksum document.
+Diagnostic proof and seal commands remain available, but their results never
+gate baseline publication.
 
 ### A versioned commit is staged before publication
 
@@ -322,17 +327,21 @@ and `xtask/src/proof_image.rs`. A hit is admitted through `proof-image load`
 the preflight rebuilds the image. The preflight re-checks the cached trunk
 version on every run.
 
-**Invariant —** `spice dev xtask -- publish-hosted-release` is the sole
-publication command. A new request reads `main` exactly once and pins that
-commit; the local checkout never selects the release. It creates or resumes
-that commit's `input.yml` preflight, then creates or resumes Linux, macOS, and
-Windows concurrently against the pinned input run. Its Git-common records bind
-the pinned request, the source and input identities, all four workflow blobs
-read from the admitted source archive, every native challenge and run, and each
-last admitted outcome. While a request is pending, a bare invocation or one
-naming another commit refuses before any provider call and names the pinned
-commit and its recorded input run. `publish-hosted-release COMMIT` naming the
-pinned commit resumes it without consulting `main` until it publishes; it
+**Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
+sole publication command. The notes file must carry authored Highlights;
+untouched drafts, placeholders, empty overview scaffolds, and history that
+cannot derive at the pinned commit refuse before provider dispatch. A new
+request reads `main` exactly once and pins that commit; the local checkout
+never selects the release. It creates or resumes that commit's `input.yml`
+preflight, then creates or resumes Linux, macOS, and Windows concurrently
+against the pinned input run. Its Git-common records bind the pinned request,
+the source and input identities, all four workflow blobs read from the
+admitted source archive, every native challenge and run, and each last
+admitted outcome. While a request is pending, a new invocation or one naming
+another commit refuses before any provider call and names the pinned commit
+and its recorded input run. `publish-hosted-release COMMIT --notes FILE`
+naming the pinned commit resumes it without consulting `main` until it
+publishes; it refuses if the composed notes differ from an admitted plan. It
 attaches to recorded healthy or successful runs and dispatches only a missing
 target, a target whose provider run ended in failure, or a target whose
 attested result does not decode under the current client's schema. It reports
@@ -348,7 +357,8 @@ strands a recorded session. Once a target's result proves unadmittable, every
 later fresh dispatch of that target instead binds the blob `main` carries when
 it is requested, and re-entering that run admits the recorded blob; the signed
 source and input identities stay unchanged. The publication plan takes its
-version from the admitted archive's build record.
+version from the admitted archive's build record and its notes from the sole
+canonical history fold plus authored Highlights.
 `stage-hosted-release INPUTS_RUN` remains the staging-only diagnostic; each
 platform is also independently dispatchable with
 `stage-target … --hosted --release-inputs INPUTS_RUN` and may re-enter its own

@@ -13,17 +13,23 @@ use crate::{COUNTERS_FILE, TrackedVersion, VERSION_FILE};
 const ABSENT_MODE: &str = "000000";
 const FILE_MODES: [&str; 2] = ["100644", "100755"];
 
-/// HEAD and its history in the repository at one root.
+/// One selected revision and its first-parent history in the repository at one root.
 pub(super) struct GitHistory<'a> {
     root: &'a Path,
+    revision: &'a str,
     batch: Option<Batch>,
     head: Option<SourceIdentity>,
 }
 
 impl<'a> GitHistory<'a> {
     pub(super) fn new(root: &'a Path) -> Self {
+        Self::at(root, "HEAD")
+    }
+
+    pub(super) fn at(root: &'a Path, revision: &'a str) -> Self {
         Self {
             root,
+            revision,
             batch: None,
             head: None,
         }
@@ -57,7 +63,7 @@ impl<'a> GitHistory<'a> {
             .map_err(|error| format!("{error} at {oid}"))
     }
 
-    /// [`VERSION_FILE`] as HEAD tracks it, ignoring the worktree.
+    /// [`VERSION_FILE`] as the selected revision tracks it, ignoring the worktree.
     pub(super) fn tracked_version(&mut self) -> Result<TrackedVersion, String> {
         let commit = self.head()?.commit().to_owned();
         let object = self.object(&format!("{commit}:{VERSION_FILE}"))?;
@@ -113,13 +119,13 @@ impl History for GitHistory<'_> {
         if let Some(head) = &self.head {
             return Ok(head.clone());
         }
-        let object = self.object("HEAD")?;
+        let object = self.object(self.revision)?;
         if object.kind != "commit" {
-            return Err("Git HEAD is not a commit".to_owned());
+            return Err(format!("Git revision {} is not a commit", self.revision));
         }
         let seconds = parse_commit(&object.body)?.seconds;
         let head = SourceIdentity::parse(&object.oid, &seconds)
-            .map_err(|detail| format!("Git HEAD is malformed: {detail}"))?;
+            .map_err(|detail| format!("Git revision {} is malformed: {detail}", self.revision))?;
         self.head = Some(head.clone());
         Ok(head)
     }
