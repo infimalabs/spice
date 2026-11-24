@@ -124,6 +124,74 @@ fn pended_digests_record_their_documents_and_rule_after_their_producer_moves() {
 }
 
 #[test]
+fn a_pended_digest_shows_its_recorded_text_against_the_latest_other_grant() {
+    use wire::intent::{TrustDiffLine, TrustShowAnswer};
+
+    let show = |fixture: &Fixture, digest: &wire::Digest| -> TrustShowAnswer {
+        match super::trust_show::read(
+            &fixture.bus,
+            &TrustRef {
+                digest: digest.clone(),
+                worktree: None,
+            },
+        ) {
+            Outcome::Reply(reply) => match reply.body {
+                wire::intent::CommandAnswer::TrustShow(answer) => *answer,
+                body => panic!("unexpected answer {body:?}"),
+            },
+            outcome => panic!("trust show failed: {outcome:?}"),
+        }
+    };
+    let fixture = Fixture::new("trust-show");
+    fixture.pend();
+    let first = show(&fixture, &fixture.digest);
+    assert_eq!(first.baseline, None);
+    let documents = first.documents.expect("the pend recorded its documents");
+    assert_eq!(
+        documents[0].lines,
+        [TrustDiffLine::Added {
+            text: "# native trust fixture".to_owned()
+        }],
+        "with nothing else granted the full text reads as added"
+    );
+    let granted = trust_rule(
+        &fixture.bus,
+        &fixture.repository,
+        fixture.epoch,
+        &fixture.cli_command(CommandKind::TrustGrant, TrustState::Pended),
+        &fixture.reference(),
+    );
+    assert!(matches!(granted, Outcome::Reply(_)), "{granted:?}");
+
+    replace_policy(
+        &fixture.root.join(wire::TRACKED_POLICY_FILE),
+        "# native trust fixture\n[gate]\n",
+    );
+    let changed = crate::trust_command::Surface::load(&fixture.repository)
+        .expect("changed surface loads")
+        .digest()
+        .clone();
+    fixture.pend_digest(&changed);
+    let second = show(&fixture, &changed);
+    assert_eq!(second.standing, TrustState::Pended);
+    let baseline = second.baseline.expect("the earlier grant is the baseline");
+    assert_eq!(baseline.digest, fixture.digest);
+    assert!(baseline.recorded);
+    assert_eq!(
+        second.documents.expect("the pend recorded its documents")[0].lines,
+        [
+            TrustDiffLine::Kept {
+                text: "# native trust fixture".to_owned()
+            },
+            TrustDiffLine::Added {
+                text: "[gate]".to_owned()
+            },
+        ]
+    );
+    fixture.finish();
+}
+
+#[test]
 fn native_decisions_refuse_nonoperators_browser_paths_and_commit_time_surface_movement() {
     let fixture = Fixture::new("native-decision-guards");
     let before = fixture
@@ -312,9 +380,13 @@ impl Fixture {
     }
 
     fn pend(&self) {
+        self.pend_digest(&self.digest);
+    }
+
+    fn pend_digest(&self, digest: &wire::Digest) {
         let worktree = self.root.to_str().expect("fixture path is UTF-8");
         let reference = TrustRef {
-            digest: self.digest.clone(),
+            digest: digest.clone(),
             worktree: Some(worktree.to_owned()),
         };
         let command = admitted_command(
@@ -322,7 +394,7 @@ impl Fixture {
             self.epoch,
             Actor::TEST_PRINCIPAL,
             vec![Witness::Trust {
-                digest: self.digest.clone(),
+                digest: digest.clone(),
                 standing: TrustState::Pended,
             }],
             reference.clone(),

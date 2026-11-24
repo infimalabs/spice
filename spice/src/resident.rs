@@ -226,6 +226,7 @@ mod shutdown;
 mod steering;
 mod team_departure;
 mod topic_surface;
+mod trust_show;
 #[cfg(test)]
 pub(crate) use steering::{INVITATION_LIFETIME, dispose_acknowledged, pending_presentations};
 pub(crate) use steering::{

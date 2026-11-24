@@ -70,6 +70,7 @@ impl CommandKind {
         Self::TrustPend,
         Self::TrustGrant,
         Self::TrustRevoke,
+        Self::TrustShow,
         Self::PrincipalDirectoryRead,
         Self::PrincipalRead,
         Self::PrincipalAdmit,
@@ -157,6 +158,7 @@ impl CommandKind {
             Self::TrustPend
             | Self::TrustGrant
             | Self::TrustRevoke
+            | Self::TrustShow
             | Self::LaneRead
             | Self::LaneJobsRead
             | Self::LaneJobRead
@@ -307,6 +309,7 @@ impl CommandKind {
             Self::TrustPend => "trust::pend",
             Self::TrustGrant => "trust::grant",
             Self::TrustRevoke => "trust::revoke",
+            Self::TrustShow => "trust::show",
             Self::LaneRead => "lane::read",
             Self::LaneJobsRead => "lane::jobs-read",
             Self::LaneJobRead => "lane::job-read",
@@ -345,6 +348,7 @@ impl CommandKind {
                 | Self::BoardHandout
                 | Self::DocLedger
                 | Self::RackRead
+                | Self::TrustShow
                 | Self::GlobalSettingsRead
                 | Self::VendorCatalog
                 | Self::SteerInbox

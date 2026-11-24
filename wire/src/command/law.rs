@@ -553,7 +553,8 @@ impl CommandKind {
             | Self::TaskTimeline
             | Self::BoardGraph
             | Self::DocLedger
-            | Self::RoomContributionRead => Law::READ,
+            | Self::RoomContributionRead
+            | Self::TrustShow => Law::READ,
             Self::RackRead
             | Self::GlobalSettingsRead
             | Self::VendorCatalog

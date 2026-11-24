@@ -32,8 +32,8 @@ use super::{
     TaskDone, TaskEdit, TaskFile, TaskInvite, TaskInviteAnswer, TaskJoin, TaskMedia, TaskNote,
     TaskOopsAdd, TaskPlace, TaskPlaceAnswer, TaskRef, TaskRelations, TaskRelationsAnswer,
     TaskReview, TaskSweep, TaskTarget, TaskTimeline, TaskTimelineAnswer, TaskWake, TasteAnswer,
-    TeamArrange, TeamConfigure, TextAnswer, TrustAnswer, TrustRef, UpChange, VendorCatalog,
-    VendorCatalogAnswer,
+    TeamArrange, TeamConfigure, TextAnswer, TrustAnswer, TrustRef, TrustShowAnswer, UpChange,
+    VendorCatalog, VendorCatalogAnswer,
 };
 
 /// Which intent DTO a command kind's body decodes into.
@@ -242,6 +242,8 @@ pub enum AnswerShape {
     VendorCatalog,
     /// [`TrustAnswer`]
     Trust,
+    /// [`TrustShowAnswer`]
+    TrustShow,
     /// [`LaneAnswer`]
     Lane,
     /// [`LaneJobsAnswer`]
@@ -328,6 +330,8 @@ pub enum CommandAnswer {
     VendorCatalog(VendorCatalogAnswer),
     /// [`AnswerShape::Trust`]
     Trust(TrustAnswer),
+    /// [`AnswerShape::TrustShow`]
+    TrustShow(Box<TrustShowAnswer>),
     /// [`AnswerShape::Lane`]
     Lane(Box<LaneAnswer>),
     /// [`AnswerShape::LaneJobs`]
@@ -389,6 +393,7 @@ impl CommandAnswer {
             Self::GlobalSettings(_) => AnswerShape::GlobalSettings,
             Self::VendorCatalog(_) => AnswerShape::VendorCatalog,
             Self::Trust(_) => AnswerShape::Trust,
+            Self::TrustShow(_) => AnswerShape::TrustShow,
             Self::Lane(_)
             | Self::LaneJobs(_)
             | Self::LaneJob(_)
@@ -531,6 +536,7 @@ impl CommandKind {
             | Self::TrustPend
             | Self::TrustGrant
             | Self::TrustRevoke
+            | Self::TrustShow
             | Self::LaneRead
             | Self::LaneSeat
             | Self::LaneState
@@ -659,6 +665,7 @@ impl CommandKind {
             Self::TrustPend | Self::TrustGrant | Self::TrustRevoke => {
                 Binding::of(B::TrustRef, A::Trust)
             }
+            Self::TrustShow => Binding::of(B::TrustRef, A::TrustShow),
             Self::LaneRead => Binding::of(B::LaneRead, A::Lane),
             Self::LaneSeat => Binding::of(B::LaneSeat, A::LaneChange),
             Self::LaneState => Binding::of(B::LaneState, A::LaneChange),

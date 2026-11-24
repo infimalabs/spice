@@ -82,6 +82,7 @@ pub(super) const fn class(kind: CommandKind) -> Class {
         | CommandKind::TrustPend
         | CommandKind::TrustGrant
         | CommandKind::TrustRevoke
+        | CommandKind::TrustShow
         | CommandKind::PrincipalDirectoryRead
         | CommandKind::PrincipalRead
         | CommandKind::PrincipalAdmit

@@ -439,6 +439,11 @@ async fn dispatch_action(
                 .await
                 .map(Some)
         }
+        ClientAction::TrustShow { digest, respond } => {
+            refresh::send_trust_show(principal, writer, actions, digest, respond)
+                .await
+                .map(Some)
+        }
         ClientAction::Jobs { respond } => refresh::send_jobs(principal, writer, actions, respond)
             .await
             .map(Some),

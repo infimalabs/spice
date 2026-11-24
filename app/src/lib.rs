@@ -120,6 +120,9 @@ pub(crate) enum PendingKind {
     Rack {
         respond: client_action::RackResponse,
     },
+    TrustShow {
+        respond: client_action::TrustShowResponse,
+    },
     Jobs {
         respond: client_action::JobsResponse,
     },

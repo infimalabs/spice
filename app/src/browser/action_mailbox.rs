@@ -89,6 +89,9 @@ impl ActionQueue {
                 PendingKind::Rack { respond } => {
                     respond(Err("Connection changed; reload documentation.".to_owned()))
                 }
+                PendingKind::TrustShow { respond } => respond(Err(
+                    "Connection changed; reload the configuration diff.".to_owned(),
+                )),
                 _ => unreachable!("only leaf reads require cancellation"),
             }
         }
@@ -284,6 +287,7 @@ impl PendingKind {
             | Self::Job { .. }
             | Self::Jobs { .. }
             | Self::Rack { .. }
+            | Self::TrustShow { .. }
             | Self::RoomPost { .. }
             | Self::SteerLine { .. }
             | Self::SteerDirective { .. }
@@ -482,6 +486,7 @@ impl ClientAction {
             Self::Job { target, .. } => target.id.len(),
             Self::Jobs { .. } => 0,
             Self::Rack { request, .. } => request.path.len(),
+            Self::TrustShow { .. } => 0,
             Self::RoomPost(post) => room_post_bytes(post),
             Self::SteerControl { request, .. } => steer_control_bytes(request),
             Self::Preparation { request, .. } => preparation_bytes(request),
@@ -585,6 +590,7 @@ impl ClientAction {
                 | Self::MessageHistory { .. }
                 | Self::Jobs { .. }
                 | Self::Rack { .. }
+                | Self::TrustShow { .. }
                 | Self::Job { stop: false, .. }
         )
     }
@@ -1047,7 +1053,10 @@ impl ActionMailbox {
         for pending in std::mem::take(&mut self.pending).into_values() {
             if matches!(
                 pending.kind,
-                PendingKind::Job { .. } | PendingKind::Jobs { .. } | PendingKind::Rack { .. }
+                PendingKind::Job { .. }
+                    | PendingKind::Jobs { .. }
+                    | PendingKind::Rack { .. }
+                    | PendingKind::TrustShow { .. }
             ) {
                 jobs.push(pending.kind);
             }

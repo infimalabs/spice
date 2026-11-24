@@ -255,6 +255,9 @@ fn apply_command_response(
         PendingKind::Rack { respond } => {
             apply_callback_reply(session, bytes, "Documentation read failed", &respond)?
         }
+        PendingKind::TrustShow { respond } => {
+            apply_callback_reply(session, bytes, "Configuration diff read failed", &respond)?
+        }
         kind @ (PendingKind::Board
         | PendingKind::PrincipalDirectory
         | PendingKind::Settings
