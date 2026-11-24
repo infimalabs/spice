@@ -909,13 +909,27 @@ fn insert_head<T: serde::Serialize>(
     seq: u64,
     head: &T,
 ) {
-    let sql = format!("INSERT INTO {table}({key_column}, head_seq, body) VALUES (?1, ?2, ?3)");
+    let body = wire::encode(head).expect("encode head");
     let seq = sql_seq(seq);
+    if table == "trust_heads" {
+        let head: wire::TrustHead = wire::decode(&body).expect("decode trust head fixture");
+        let rank = match head.state {
+            wire::TrustState::Pended => 0,
+            wire::TrustState::Granted => 1,
+            wire::TrustState::Revoked => 2,
+        };
+        connection
+            .execute(
+                "INSERT INTO trust_heads(digest, head_seq, body, standing_rank) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![key, seq, body, rank],
+            )
+            .expect("insert trust head fixture");
+        return;
+    }
+    let sql = format!("INSERT INTO {table}({key_column}, head_seq, body) VALUES (?1, ?2, ?3)");
     connection
-        .execute(
-            &sql,
-            params![key, seq, wire::encode(head).expect("encode head")],
-        )
+        .execute(&sql, params![key, seq, body])
         .expect("insert head fixture");
 }
 

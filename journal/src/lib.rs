@@ -56,7 +56,7 @@ pub use guard::{
     MAX_RETAINED_FACT_PAGE_BYTES, MAX_RETAINED_FACT_PAGE_ROWS, MAX_STEERING_PAGE_ROWS, PendingFact,
     ROOM_AUTHORITY_REFUSED, ReadError, RetiredDirection, SelectedFactPage, SteeringPage,
     TaskBodies, TaskGeneration, TaskHeadPage, TaskHeads, TasteEvidenceFact, TasteEvidencePage,
-    TasteEvidenceSummary, ThreadError, TrustHeadPage,
+    TasteEvidenceSummary, ThreadError, TrustHeadPage, TrustReportHeadPage,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use migrate::{Migration, MigrationError, OpenError};

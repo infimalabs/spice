@@ -74,7 +74,8 @@ mod steering;
 pub use steering::{SteerLineAction, SteerLineAnswer, SteerLineControl};
 mod trust;
 pub use trust::{
-    TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustLineEnding, TrustShowAnswer,
+    TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustLineEnding, TrustReportAnswer,
+    TrustReportNext, TrustReportRead, TrustReportRuling, TrustShowAnswer,
 };
 
 mod task;

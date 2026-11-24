@@ -219,6 +219,7 @@ pub const fn answer_bound(kind: CommandKind) -> Duration {
         | CommandKind::TrustPend
         | CommandKind::TrustGrant
         | CommandKind::TrustRevoke
+        | CommandKind::TrustReport
         | CommandKind::TrustShow
         | CommandKind::PrincipalDirectoryRead
         | CommandKind::PrincipalRead

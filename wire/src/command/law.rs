@@ -554,6 +554,7 @@ impl CommandKind {
             | Self::BoardGraph
             | Self::DocLedger
             | Self::RoomContributionRead
+            | Self::TrustReport
             | Self::TrustShow => Law::READ,
             Self::RackRead
             | Self::GlobalSettingsRead

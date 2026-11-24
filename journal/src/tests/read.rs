@@ -641,6 +641,8 @@ fn task_bundle_read_names_every_incomplete_or_malformed_head_class() {
         let db = &journal.connection;
         db.pragma_update(None, "foreign_keys", false)
             .expect("allow corrupt fixture");
+        db.pragma_update(None, "ignore_check_constraints", true)
+            .expect("allow check corruption fixture");
         db.execute_batch(sql).expect("plant corruption");
         journal
     };

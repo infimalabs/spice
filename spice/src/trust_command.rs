@@ -5,15 +5,14 @@ use serde::Serialize;
 use spice::ambient::Ambient;
 use spice::config::{LoadError, Loaded};
 use spice::repository::Repository;
+use std::path::PathBuf;
 use wire::intent::{CommandAnswer, TrustAnswer, TrustShowAnswer};
-use wire::{
-    ConfigSource, Digest, Domain, FaultClass, Outcome, Refusal, Reply, ReplyPosition, TrustState,
-};
+use wire::output::{Export, INTERACTIVE};
+use wire::{ConfigSource, Digest, Domain, FaultClass, Outcome, Refusal, Reply, SpiceCommand};
 
 use crate::cli::Contract;
 use crate::command_fault as fault;
 use crate::read_page::Page;
-use wire::output::Bounded;
 
 pub(crate) const SURFACE_NAME: &str = "configuration";
 
@@ -98,39 +97,15 @@ fn frame_document(framed: &mut Vec<u8>, source: ConfigSource, text: Option<&str>
     }
 }
 
-/// Bare `spice trust` answer, read from the repository's resident journal
-/// alone: ruling counts, then a bounded page of rulings, pending decisions
-/// first, each pended one carrying its recorded configuration as a
-/// differential.
+/// Bare `spice trust` answer, read and bounded by the repository resident.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub(crate) struct TrustReport {
-    counts: RulingCounts,
-    rulings: Bounded<TrustRuling>,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
-struct RulingCounts {
-    pended: usize,
-    granted: usize,
-    revoked: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct TrustRuling {
-    digest: Digest,
-    standing: TrustState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    differential: Option<TrustShowAnswer>,
-}
+#[serde(transparent)]
+pub(crate) struct TrustReport(wire::intent::TrustReportAnswer);
 
 impl std::fmt::Display for TrustReport {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "trust {SURFACE_NAME} rulings pended={} granted={} revoked={}",
-            self.counts.pended, self.counts.granted, self.counts.revoked
-        )?;
-        for ruling in &self.rulings.rows {
+        formatter.write_str("trust configuration rulings")?;
+        for ruling in &self.0.rulings {
             write!(
                 formatter,
                 "\n{} {}",
@@ -139,30 +114,65 @@ impl std::fmt::Display for TrustReport {
             )?;
             if let Some(differential) = &ruling.differential {
                 write_differential(formatter, differential)?;
+            } else if let Some(show) = &ruling.show {
+                write!(formatter, "\ndifferential withheld; {show}")?;
             }
         }
-        match &self.rulings.omission {
-            Some(omission) => write!(formatter, "\n{omission}"),
-            None => Ok(()),
+        if let Some(next) = &self.0.next {
+            write!(
+                formatter,
+                "\n{} bytes shown; next ruling {} bytes; {}",
+                self.0.shown_bytes, next.next_bytes, next.continuation
+            )?;
         }
+        Ok(())
     }
 }
 
-/// `spice trust show DIGEST` answer: one recorded digest's standing and its
-/// configuration as a differential against the latest other grant.
+/// Bounded terminal presentation or exact file export of one trust differential.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(transparent)]
-pub(crate) struct TrustShowReport(TrustShowAnswer);
+pub(crate) struct TrustShowReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    differential: Option<TrustShowAnswer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    withheld: Option<TrustShowWithheld>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export: Option<Export>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct TrustShowWithheld {
+    digest: Digest,
+    standing: wire::TrustState,
+    encoded_bytes: usize,
+    export: SpiceCommand,
+}
 
 impl std::fmt::Display for TrustShowReport {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "trust {SURFACE_NAME} {} {}",
-            self.0.digest,
-            self.0.standing.as_str()
-        )?;
-        write_differential(formatter, &self.0)
+        if let Some(differential) = &self.differential {
+            write!(
+                formatter,
+                "trust {SURFACE_NAME} {} {}",
+                differential.digest,
+                differential.standing.as_str()
+            )?;
+            write_differential(formatter, differential)?;
+        }
+        if let Some(withheld) = &self.withheld {
+            write!(
+                formatter,
+                "trust {SURFACE_NAME} {} {}; {} differential bytes withheld; {}",
+                withheld.digest,
+                withheld.standing.as_str(),
+                withheld.encoded_bytes,
+                withheld.export
+            )?;
+        }
+        if let Some(export) = &self.export {
+            write!(formatter, "{export}")?;
+        }
+        Ok(())
     }
 }
 
@@ -214,8 +224,6 @@ fn write_differential(
     Ok(())
 }
 
-/// Authenticate through the current resident and render the repository's
-/// durable trust heads; no worktree configuration is read.
 pub(crate) fn report(
     matches: &ArgMatches,
     contract: &Contract,
@@ -225,57 +233,44 @@ pub(crate) fn report(
         Ok(page) => page,
         Err(refusal) => return Outcome::Refusal(refusal),
     };
+    let after = match page.after() {
+        Some(after) => match after.parse::<Digest>() {
+            Ok(digest) => Some(digest),
+            Err(error) => return Outcome::Refusal(page.cursor_refusal(error)),
+        },
+        None => None,
+    };
+    let limits = page.limits();
     let repository = match current_repository() {
         Ok(repository) => repository,
         Err(outcome) => return outcome,
-    };
-    let state = match repository.admit_state() {
-        Ok(state) => state,
-        Err(error) => return crate::state_failure(&error).outcome(),
-    };
-    let epoch = match crate::command_client::authenticate(state.serve(), contract, ambient) {
-        Ok(epoch) => epoch,
-        Err(outcome) => return crate::typed_outcome(outcome),
     };
     let host = crate::command_client::Host {
         repository: &repository,
         ambient,
     };
-    let board = match crate::board_command::current_board(host, wire::intent::BoardRead::Trust) {
-        Ok(board) => board,
-        Err(outcome) => return crate::typed_outcome(outcome),
-    };
-    if board.residency.body.epoch != epoch {
-        return refusal(
-            "trust::epoch-moved",
-            Some(epoch.to_string()),
-            Some(board.residency.body.epoch.to_string()),
-            "reconnect through the current resident discovery and retry",
-        );
-    }
-    let (counts, rulings) = ordered_rulings(board.trust.into_iter().map(|head| head.body));
-    let mut rulings = match page.listed(
-        rulings,
-        |ruling| ruling.digest.to_string(),
-        "DIGEST of a recorded ruling",
+    match crate::command_client::execute_typed(
+        host,
+        contract,
+        wire::CommandKind::TrustReport,
+        Vec::new(),
+        &wire::intent::TrustReportRead { after, limits },
     ) {
-        Ok(rulings) => rulings,
-        Err(refusal) => return Outcome::Refusal(refusal),
-    };
-    let show_contract =
-        crate::cli::contract(&["trust", "show"]).expect("trust show contract is registered");
-    for ruling in &mut rulings.rows {
-        if ruling.standing == TrustState::Pended {
-            match show(host, show_contract, &ruling.digest) {
-                Ok(differential) => ruling.differential = Some(differential.body),
-                Err(outcome) => return outcome,
-            }
-        }
+        Outcome::Reply(Reply {
+            position,
+            body: CommandAnswer::TrustReport(answer),
+        }) => Outcome::Reply(Reply {
+            position,
+            body: TrustReport(*answer),
+        }),
+        Outcome::Reply(reply) => fault(
+            FaultClass::Protocol,
+            "trust::answer-shape",
+            format!("expected a trust report answer, received {:?}", reply.body),
+        ),
+        Outcome::Refusal(refusal) => Outcome::Refusal(refusal),
+        Outcome::Fault(fault) => Outcome::Fault(fault),
     }
-    Outcome::Reply(Reply {
-        position: ReplyPosition::Snapshot(board.cursor),
-        body: TrustReport { counts, rulings },
-    })
 }
 
 /// Render one recorded digest from the repository's resident journal alone.
@@ -288,6 +283,15 @@ pub(crate) fn show_report(
         Ok(digest) => digest,
         Err(outcome) => return outcome,
     };
+    let max_bytes = match show_max_bytes(matches) {
+        Ok(max_bytes) => max_bytes,
+        Err(refusal) => return Outcome::Refusal(refusal),
+    };
+    let export = matches
+        .try_get_one::<String>("export")
+        .ok()
+        .flatten()
+        .map(PathBuf::from);
     let repository = match current_repository() {
         Ok(repository) => repository,
         Err(outcome) => return outcome,
@@ -296,42 +300,84 @@ pub(crate) fn show_report(
         repository: &repository,
         ambient,
     };
-    match show(host, contract, &digest) {
-        Ok(answer) => Outcome::Reply(Reply {
-            position: answer.position,
-            body: TrustShowReport(answer.body),
-        }),
-        Err(outcome) => outcome,
-    }
+    let answer = match show(host, contract, &digest) {
+        Ok(answer) => answer,
+        Err(outcome) => return outcome,
+    };
+    let encoded = match wire::encode(&answer.body) {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            return fault(
+                FaultClass::Protocol,
+                "trust::answer-unencodable",
+                error.to_string(),
+            );
+        }
+    };
+    let body = match export {
+        Some(path) => match spice::export::export(&path, &encoded) {
+            Ok(export) => TrustShowReport {
+                differential: None,
+                withheld: None,
+                export: Some(export),
+            },
+            Err(refusal) => return Outcome::Refusal(refusal),
+        },
+        None if encoded.len() <= max_bytes => TrustShowReport {
+            differential: Some(answer.body),
+            withheld: None,
+            export: None,
+        },
+        None => {
+            let path = format!("spice-trust-show-{digest}.json");
+            let command = SpiceCommand::try_from(vec![
+                "trust".to_owned(),
+                "show".to_owned(),
+                digest.to_string(),
+                "--export".to_owned(),
+                path,
+            ])
+            .expect("trust show export is one canonical command");
+            TrustShowReport {
+                differential: None,
+                withheld: Some(TrustShowWithheld {
+                    digest,
+                    standing: answer.body.standing,
+                    encoded_bytes: encoded.len(),
+                    export: command,
+                }),
+                export: None,
+            }
+        }
+    };
+    Outcome::Reply(Reply {
+        position: answer.position,
+        body,
+    })
 }
 
-/// Count every ruling by standing and order them: decisions awaiting the
-/// operator, then the standing grants and revocations; a digest breaks every
-/// tie.
-fn ordered_rulings(
-    heads: impl Iterator<Item = wire::TrustHead>,
-) -> (RulingCounts, Vec<TrustRuling>) {
-    let mut counts = RulingCounts::default();
-    let mut rulings = heads
-        .map(|head| {
-            *match head.state {
-                TrustState::Pended => &mut counts.pended,
-                TrustState::Granted => &mut counts.granted,
-                TrustState::Revoked => &mut counts.revoked,
-            } += 1;
-            TrustRuling {
-                digest: head.digest,
-                standing: head.state,
-                differential: None,
-            }
-        })
-        .collect::<Vec<_>>();
-    rulings.sort_by(|left, right| {
-        left.standing
-            .cmp(&right.standing)
-            .then_with(|| left.digest.cmp(&right.digest))
-    });
-    (counts, rulings)
+fn show_max_bytes(matches: &ArgMatches) -> Result<usize, Refusal> {
+    let Some(value) = matches.try_get_one::<String>("max-bytes").ok().flatten() else {
+        return Ok(INTERACTIVE.default_limits().bytes);
+    };
+    let parsed = value.parse::<usize>().map_err(|error| {
+        refusal_value(
+            "trust::bound-invalid",
+            Some("a positive byte count".to_owned()),
+            Some(format!("{value}: {error}")),
+            "pass --max-bytes within the interactive trust-show ceiling",
+        )
+    })?;
+    let maximum = INTERACTIVE.maximum().bytes;
+    if parsed == 0 || parsed > maximum {
+        return Err(refusal_value(
+            "trust::bound-exceeded",
+            Some(format!("1..={maximum}")),
+            Some(parsed.to_string()),
+            "pass --max-bytes within the interactive trust-show ceiling",
+        ));
+    }
+    Ok(parsed)
 }
 
 /// Read one digest's recorded documents against the latest other grant.
@@ -542,7 +588,16 @@ fn refusal<B>(
     observed: Option<String>,
     detail: &str,
 ) -> Outcome<B> {
-    Outcome::Refusal(Refusal::bare(
+    Outcome::Refusal(refusal_value(reason, expected, observed, detail))
+}
+
+fn refusal_value(
+    reason: &str,
+    expected: Option<String>,
+    observed: Option<String>,
+    detail: &str,
+) -> Refusal {
+    Refusal::bare(
         wire::RefusalDiagnostic::new(
             reason.to_owned(),
             Some("executable-policy".to_owned()),
@@ -550,7 +605,7 @@ fn refusal<B>(
             observed,
         )
         .with_detail(detail),
-    ))
+    )
 }
 
 #[cfg(test)]

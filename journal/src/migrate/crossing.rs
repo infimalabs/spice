@@ -15,11 +15,12 @@ use super::OpenError;
 use crate::SCHEMA_VERSION;
 
 mod v0;
+mod v1;
 
 type Step = fn(&Transaction<'_>) -> Result<(), OpenError>;
 
 /// Each step crosses authority from its schema to the next one.
-pub(crate) const STEPS: &[(u32, Step)] = &[(0, v0::cross)];
+pub(crate) const STEPS: &[(u32, Step)] = &[(0, v0::cross), (1, v1::cross)];
 
 /// Whether this build crosses stored `version` authority forward.
 pub(super) fn crosses(version: u32) -> bool {

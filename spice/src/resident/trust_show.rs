@@ -14,8 +14,6 @@ use super::store_fault;
 
 /// Rulings a cause walk follows back to a digest's pend before it gives up.
 const PEND_WALK_LIMIT: usize = 64;
-/// Trust heads one page decodes while finding the latest grant.
-const TRUST_PAGE_ROWS: usize = 256;
 /// Unchanged lines kept on each side of a change.
 const CONTEXT_LINES: usize = 3;
 
@@ -62,7 +60,14 @@ pub(super) fn read(bus: &Bus, reference: &TrustRef) -> Outcome<CommandAnswer> {
             );
         }
     }
-    let answer = answer(reference.digest.clone(), standing, documents, baseline);
+    let answer = answer(
+        &reference.digest,
+        standing,
+        documents.as_ref(),
+        baseline
+            .as_ref()
+            .map(|(digest, documents)| (digest, documents.as_ref())),
+    );
     Outcome::Reply(Reply {
         position: ReplyPosition::Snapshot(cursor),
         body: CommandAnswer::TrustShow(Box::new(answer)),
@@ -106,33 +111,13 @@ fn latest_other_grant(
     read: &JournalRead<'_>,
     digest: &Digest,
 ) -> Result<Option<JournalHead<TrustHead>>, GuardError> {
-    let budget = FactReadBudget::new(TRUST_PAGE_ROWS, journal::MAX_RETAINED_FACT_PAGE_BYTES)
-        .expect("a bounded trust head page is a repository budget");
-    let mut latest: Option<JournalHead<TrustHead>> = None;
-    let mut after = None;
-    loop {
-        let page = read.trust_head_page(after.as_ref(), budget)?;
-        for head in page.rows {
-            if head.body().state == TrustState::Granted
-                && head.body().digest != *digest
-                && latest
-                    .as_ref()
-                    .is_none_or(|latest| head.position() > latest.position())
-            {
-                latest = Some(head);
-            }
-        }
-        match page.continuation {
-            Some(next) => after = Some(next),
-            None => return Ok(latest),
-        }
-    }
+    read.latest_other_granted_trust(digest)
 }
 
 /// The documents a digest's pend recorded, found by following its current
 /// head's ruling causes back to that pend; absent for a pend that recorded
 /// none.
-fn recorded_documents(
+pub(super) fn recorded_documents(
     read: &JournalRead<'_>,
     mut position: wire::Seq,
 ) -> Result<Option<TrustDocuments>, GuardError> {
@@ -161,11 +146,11 @@ fn recorded_documents(
     Ok(None)
 }
 
-fn answer(
-    digest: Digest,
+pub(super) fn answer(
+    digest: &Digest,
     standing: TrustState,
-    documents: Option<TrustDocuments>,
-    baseline: Option<(Digest, Option<TrustDocuments>)>,
+    documents: Option<&TrustDocuments>,
+    baseline: Option<(&Digest, Option<&TrustDocuments>)>,
 ) -> TrustShowAnswer {
     let empty = TrustDocuments {
         tracked: None,
@@ -173,8 +158,7 @@ fn answer(
     };
     let documents = documents.map(|documents| {
         let before = baseline
-            .as_ref()
-            .and_then(|(_, documents)| documents.as_ref())
+            .and_then(|(_, documents)| documents)
             .unwrap_or(&empty);
         vec![
             document(
@@ -190,10 +174,10 @@ fn answer(
         ]
     });
     TrustShowAnswer {
-        digest,
+        digest: digest.clone(),
         standing,
         baseline: baseline.map(|(digest, documents)| TrustBaseline {
-            digest,
+            digest: digest.clone(),
             recorded: documents.is_some(),
         }),
         documents,
