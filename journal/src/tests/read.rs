@@ -668,7 +668,8 @@ fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
     loop {
         let page = journal
             .read(|read| read.trust_report_head_page(after.as_ref(), budget))
-            .expect("report page reads");
+            .expect("report page reads")
+            .expect("each cursor names a recorded ruling");
         let last = page.rows.last().expect("each page shows a ruling").body();
         shown.push(last.digest.clone());
         if page.next.is_none() {
@@ -681,13 +682,10 @@ fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
         after = Some(last.digest.clone());
     }
     assert_eq!(shown, ["0", "a", "b", "c", "d"].map(digest));
-    let error = journal
+    let unknown = journal
         .read(|read| read.trust_report_head_page(Some(&digest("e")), budget))
-        .expect_err("a cursor that names no ruling refuses");
-    assert!(
-        error.to_string().contains("is not a recorded ruling"),
-        "{error}"
-    );
+        .expect("an unknown cursor is a readable answer");
+    assert_eq!(unknown, None, "a cursor that names no ruling reads no page");
 }
 
 #[test]
