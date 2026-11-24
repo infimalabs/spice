@@ -240,6 +240,38 @@ fn a_turn_end_parks_held_work_on_its_ungranted_configuration_until_the_grant_lan
     assert_occupant_exit_reconciles_trust_park();
 }
 
+#[test]
+fn a_dormant_grant_admits_new_work_without_joining_the_live_projection() {
+    let digest = digest();
+    let (bus, _) = policy_fixture(true, false);
+    committed(
+        bus.commit(pend_write(&digest, PRODUCER, instant(2)))
+            .expect("trust pend commits"),
+    );
+    committed(
+        bus.commit(grant_write(&digest))
+            .expect("trust grant commits"),
+    );
+    assert!(
+        bus.task_snapshot()
+            .expect("dormant grant snapshot reads")
+            .trust()
+            .is_empty(),
+        "retained equality authority stays outside the live request snapshot"
+    );
+    committed(
+        bus.commit(claim_write_until(&bus, instant(3), instant(40), |_, _| {}))
+            .expect("claim commits"),
+    );
+    assert!(
+        reconcile(&bus, PRODUCER, Some(&digest)).is_none(),
+        "the exact durable grant admits a newly observed need"
+    );
+    assert_eq!(required(&bus), None, "the task does not park on that grant");
+    bus.verify().expect("dormant grant authority verifies");
+    bus.shutdown().expect("parking fixture stops");
+}
+
 /// A retained seat's turn ends without its occupant exiting, so the settlement
 /// that would continue the claim must park it on the ungranted configuration
 /// its worktree needs, and a parked claim's next settlement records nothing.

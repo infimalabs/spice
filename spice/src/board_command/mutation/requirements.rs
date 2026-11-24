@@ -45,7 +45,7 @@ pub(super) fn prepare(
     edit: &TaskEdit,
     requirements: &wire::EnvironmentRequirements,
     resources: &wire::ResourceRequirements,
-    environment: &wire::Environment,
+    environment: wire::Environment,
     at: Instant,
 ) -> Result<Change, Outcome<CommandAnswer>> {
     let Some(_) = edit.requirements else {
@@ -63,7 +63,8 @@ pub(super) fn prepare(
             "release the active claim before replacing its resource map",
         ));
     }
-    let trust_blocked = requirements.has_unsatisfied_trust_grant(environment);
+    // The caller point-observes any proposed digest absent from the live snapshot.
+    let trust_blocked = requirements.has_unsatisfied_trust_grant(&environment);
     let lease = lease_transition(entry, command, trust_blocked, at)?;
     Ok(Change {
         requirements: Some(requirements.clone()),

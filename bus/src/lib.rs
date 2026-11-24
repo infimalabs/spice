@@ -174,10 +174,12 @@ mod runtime {
         pending: journal::SteeringPage,
     }
 
-    /// Cursor, trust, and residency heads observed inside one immutable authority snapshot.
+    /// Cursor, live-task trust, and residency heads observed inside one immutable
+    /// authority snapshot.
     ///
     /// Fact pages are read separately through bounded primary-key ranges at
-    /// this cursor, so opening the app never materializes the complete stream.
+    /// this cursor, so opening the app never materializes the complete stream
+    /// or historical trust rulings.
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct AppHeads {
         cursor: Option<journal::crossing::Seq>,
@@ -192,7 +194,7 @@ mod runtime {
             self.cursor
         }
 
-        /// Current trust heads at this barrier, ordered by digest.
+        /// Distinct trust heads required by live tasks at this barrier, ordered by digest.
         #[must_use]
         pub fn trust(&self) -> &[JournalHead<journal::crossing::TrustHead>] {
             &self.trust
@@ -283,7 +285,7 @@ mod runtime {
             self.allocation_faults.first()
         }
 
-        /// Current trust heads captured at the same board barrier.
+        /// Trust heads required by live tasks at the same board barrier.
         #[must_use]
         pub fn trust(&self) -> &[JournalHead<journal::crossing::TrustHead>] {
             &self.trust

@@ -6,18 +6,18 @@ use serde::{Deserialize, Serialize};
 use crate::output::{Exhausted, Limits};
 use crate::{ConfigSource, Digest, SpiceCommand, TrustState};
 
-/// One bounded repository trust-report request.
+/// One bounded report over distinct digests required by live tasks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRead {
-    /// Resume after the last ruling the prior page showed, by digest.
+    /// Resume after the last request the prior page showed, by digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<Digest>,
     /// Already-admitted interactive output limits.
     pub limits: Limits,
 }
 
-/// One current executable-trust ruling, as the digest-ordered report lists it.
+/// One current pended request, as the digest-ordered live report lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRuling {
@@ -33,7 +33,7 @@ pub struct TrustReportRuling {
     pub show: Option<SpiceCommand>,
 }
 
-/// First ruling withheld from one bounded trust-report page.
+/// First request withheld from one bounded trust-report page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportNext {
@@ -43,19 +43,19 @@ pub struct TrustReportNext {
     pub next_bytes: usize,
     /// Limits this page admitted.
     pub limits: Limits,
-    /// Exact command that resumes at the first withheld ruling.
+    /// Exact command that resumes at the first withheld request.
     pub continuation: SpiceCommand,
 }
 
-/// Successful bounded repository trust report.
+/// Successful bounded live trust-request report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportAnswer {
-    /// Admitted current rulings.
+    /// Admitted current pended requests.
     pub rulings: Vec<TrustReportRuling>,
     /// Encoded row bytes admitted.
     pub shown_bytes: usize,
-    /// First withheld ruling, when this page is incomplete.
+    /// First withheld request, when this page is incomplete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<TrustReportNext>,
 }

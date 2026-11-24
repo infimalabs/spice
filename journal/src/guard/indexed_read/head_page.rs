@@ -140,7 +140,7 @@ impl JournalRead<'_> {
         })
     }
 
-    /// Read one joined page of current trust heads in digest order.
+    /// Read one joined page from the distinct live-task digest frontier.
     pub fn trust_head_page(
         &self,
         after: Option<&wire::Digest>,
@@ -216,9 +216,11 @@ impl JournalRead<'_> {
     }
 
     /// Read one bounded page of current trust heads for the operator report,
-    /// ordered by digest. A digest is the one key a ruling never changes, so a
-    /// ruling made between pages can neither skip nor repeat a row. A cursor
-    /// that names no recorded ruling reads no page.
+    /// ordered by digest. Only pended digests named by current task requirements
+    /// are report rows; durable granted, revoked, and unneeded pended heads remain
+    /// exact-digest authority without growing this live view. A digest is the one
+    /// key a ruling never changes, so a ruling made between pages can neither skip
+    /// nor repeat a row. A cursor that names no recorded ruling reads no page.
     pub fn trust_report_head_page(
         &self,
         after: Option<&wire::Digest>,
@@ -364,8 +366,12 @@ const fn standing_rank(standing: wire::TrustState) -> i64 {
     }
 }
 
-const TRUST_REPORT_PAGE_SQL: &str = "SELECT standing_rank, digest, head_seq, length(body), body FROM trust_heads \
-     WHERE digest > COALESCE(?1, '') ORDER BY digest LIMIT ?2";
+const TRUST_REPORT_PAGE_SQL: &str = "SELECT trust.standing_rank, trust.digest, \
+        trust.head_seq, length(trust.body), trust.body \
+     FROM active_trust_digests AS active \
+     CROSS JOIN trust_heads AS trust ON trust.digest = active.digest \
+     WHERE active.digest > COALESCE(?1, '') AND trust.standing_rank = 0 \
+     ORDER BY active.digest LIMIT ?2";
 
 const LATEST_OTHER_GRANT_SQL: &str = "SELECT digest, head_seq, length(body), body FROM trust_heads \
      WHERE standing_rank = 1 AND digest <> ?1 ORDER BY head_seq DESC LIMIT 1";
@@ -379,8 +385,10 @@ fn query_limit(budget: FactReadBudget) -> Result<i64, GuardError> {
         .map_err(|_| GuardError::Invalid("task head page limit exceeds SQLite".to_owned()))
 }
 
-const TRUST_PAGE_SQL: &str = "SELECT digest, head_seq, length(body), body FROM trust_heads \
-    WHERE digest > COALESCE(?1, '') ORDER BY digest LIMIT ?2";
+const TRUST_PAGE_SQL: &str = "SELECT trust.digest, trust.head_seq, length(trust.body), trust.body \
+    FROM active_trust_digests AS active \
+    CROSS JOIN trust_heads AS trust ON trust.digest = active.digest \
+    WHERE active.digest > COALESCE(?1, '') ORDER BY active.digest LIMIT ?2";
 
 const TASK_PAGE_SQL: &str = "WITH task_stamps(stamp) AS (\
     SELECT stamp FROM (SELECT stamp FROM task_heads \
@@ -438,8 +446,11 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
         trust_plans.push(plan);
     }
     let trust_seeks = trust_plans.iter().all(|plan| {
-        plan.iter().any(|step| step.contains("(digest>?)"))
-            && !plan.iter().any(|step| step.contains("SCAN trust_heads "))
+        plan.iter()
+            .any(|step| step.contains("SEARCH active") && step.contains("(digest>?)"))
+            && !plan
+                .iter()
+                .any(|step| step.contains("SCAN active") || step.contains("SCAN trust"))
     });
     let mut statement = connection
         .prepare(&format!("EXPLAIN QUERY PLAN {TRUST_REPORT_PAGE_SQL}"))
@@ -451,10 +462,12 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let report_seeks = report_plan.iter().any(|step| step.contains("(digest>?)"))
+    let report_seeks = report_plan
+        .iter()
+        .any(|step| step.contains("SEARCH active") && step.contains("(digest>?)"))
         && !report_plan
             .iter()
-            .any(|step| step.contains("SCAN trust_heads "));
+            .any(|step| step.contains("SCAN active") || step.contains("SCAN trust"));
     let mut statement = connection
         .prepare(&format!("EXPLAIN QUERY PLAN {LATEST_OTHER_GRANT_SQL}"))
         .map_err(|error| error.to_string())?;

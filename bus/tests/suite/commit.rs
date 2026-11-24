@@ -143,12 +143,40 @@ fn trust_only_commits_refresh_immutable_task_snapshots_at_the_commit_cursor() {
         state: TrustState::Pended,
         worktree: Some("/producer/worktree".to_owned()),
     });
+    let task = journal::crossing::TaskStamp::for_micros(999).expect("trust task stamp");
+    let task_phase = phase("todo");
+    let added = pended
+        .fact(
+            retained_added(task.clone(), 999, task_phase),
+            FactCause::Root,
+        )
+        .expect("trust task fact builds");
+    let head_task = task.clone();
+    let required = digest.clone();
+    pended.task_head(added, move |seq| {
+        let mut head = retained_task_head(head_task, 999, seq);
+        head.requirements = EnvironmentRequirements::one(
+            journal::crossing::EnvironmentRequirement::trust_grant(required),
+        );
+        head
+    });
+    pended.workflow_head(task, added, move |_| WorkflowHead {
+        flow: vec![Phase::Draft, task_phase],
+        phase: task_phase,
+        status: WorkflowStatus::pending(),
+        deferral: None,
+        submitted: false,
+        generation: 0,
+    });
     append_trust_fleet(&mut pended);
     let first = committed(bus.commit(pended).expect("trust pend commits"));
     let before = bus.task_snapshot().expect("pended snapshot reads");
     assert_eq!(before.cursor(), first.cursor().position());
-    assert_eq!(before.trust().len(), 300);
-    assert!(before.materialization_steps() >= 5);
+    assert_eq!(
+        before.trust().len(),
+        1,
+        "retained exact-digest authority does not grow the live task snapshot"
+    );
     let before_target = trust_head(&before, &digest);
     assert_eq!(before_target.body().state, TrustState::Pended);
     assert_eq!(before.facts().latest_trust_digest("spice"), Some(&digest));

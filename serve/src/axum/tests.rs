@@ -390,10 +390,11 @@ async fn assert_initial_stream(
         wire::FactKind::LANE_OCCUPANCY.contains(&fact.kind()) && fact.seq() <= horizon
     }));
     assert!(packed.overflow.is_none());
+    // A recorded trust head without a live task owner is not an online request.
     assert!(matches!(
         trust,
         wire::StreamFrame::Trust { ref packed, .. }
-            if packed.horizon == horizon && packed.rows.len() == 1
+            if packed.horizon == horizon && packed.rows.is_empty()
     ));
     let returned = [fact_bytes, trust_bytes].concat();
     assert!(!String::from_utf8_lossy(&returned).contains(&operator().to_string()));
