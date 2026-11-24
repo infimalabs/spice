@@ -71,7 +71,7 @@ impl Mode {
     /// optional context.
     const fn placeholder(self, expanded: bool) -> &'static str {
         match self {
-            Self::Message if !expanded => "Ask or task agent(s)...",
+            Self::Message if !expanded => "[A]sk, [T]ask, [P]lan, or [D]esign…",
             Self::Message => "Ask or steer (required)",
             Self::Task => {
                 "Task title (required)\n\nWhy this work matters (required)\n\nLonger context"
