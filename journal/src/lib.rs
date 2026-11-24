@@ -28,6 +28,8 @@ pub const SCHEMA_VERSION: u32 = wire::counter::registry_counter_u32(
 const BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[cfg(not(target_arch = "wasm32"))]
+mod active_trust;
+#[cfg(not(target_arch = "wasm32"))]
 mod guard;
 #[cfg(not(target_arch = "wasm32"))]
 mod migrate;
