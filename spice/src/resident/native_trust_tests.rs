@@ -125,7 +125,7 @@ fn pended_digests_record_their_documents_and_rule_after_their_producer_moves() {
 
 #[test]
 fn a_pended_digest_shows_its_recorded_text_against_the_latest_other_grant() {
-    use wire::intent::{TrustDiffLine, TrustShowAnswer};
+    use wire::intent::{TrustDiffLine, TrustLineEnding, TrustShowAnswer};
 
     let show = |fixture: &Fixture, digest: &wire::Digest| -> TrustShowAnswer {
         match super::trust_show::read(
@@ -150,7 +150,8 @@ fn a_pended_digest_shows_its_recorded_text_against_the_latest_other_grant() {
     assert_eq!(
         documents[0].lines,
         [TrustDiffLine::Added {
-            text: "# native trust fixture".to_owned()
+            text: "# native trust fixture".to_owned(),
+            ending: TrustLineEnding::Lf,
         }],
         "with nothing else granted the full text reads as added"
     );
@@ -181,10 +182,12 @@ fn a_pended_digest_shows_its_recorded_text_against_the_latest_other_grant() {
         second.documents.expect("the pend recorded its documents")[0].lines,
         [
             TrustDiffLine::Kept {
-                text: "# native trust fixture".to_owned()
+                text: "# native trust fixture".to_owned(),
+                ending: TrustLineEnding::Lf,
             },
             TrustDiffLine::Added {
-                text: "[gate]".to_owned()
+                text: "[gate]".to_owned(),
+                ending: TrustLineEnding::Lf,
             },
         ]
     );

@@ -691,10 +691,10 @@ impl NativeInvocation<'_> {
             }
             ["quote"] => deliver_display(&quote_command::run(leaf, contract, ambient), form),
             ["topic", _] => deliver_display(&topic_command::run(leaf, contract, ambient), form),
-            ["trust"] => deliver_display(
-                &trust_command::report(leaf, contract, configuration, ambient),
-                form,
-            ),
+            ["trust"] => deliver_display(&trust_command::report(leaf, contract, ambient), form),
+            ["trust", "show"] => {
+                deliver_display(&trust_command::show_report(leaf, contract, ambient), form)
+            }
             ["trust", "pend"] => {
                 deliver(&trust_command::pend(contract, configuration, ambient), form)
             }

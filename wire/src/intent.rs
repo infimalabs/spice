@@ -73,7 +73,9 @@ pub use rooms::{
 mod steering;
 pub use steering::{SteerLineAction, SteerLineAnswer, SteerLineControl};
 mod trust;
-pub use trust::{TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustShowAnswer};
+pub use trust::{
+    TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustLineEnding, TrustShowAnswer,
+};
 
 mod task;
 pub use task::*;

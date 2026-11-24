@@ -1158,6 +1158,14 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "spice::trust"
     ),
     operator!(
+        ["trust", "show"],
+        "trust show DIGEST",
+        Read,
+        [],
+        Reply,
+        "spice::trust_show"
+    ),
+    operator!(
         ["trust", "pend"],
         "trust pend",
         Command,

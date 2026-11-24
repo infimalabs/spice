@@ -219,6 +219,16 @@ impl BoardView {
     pub fn trust_head(&self, digest: &Digest) -> Option<&wire::TrustHead> {
         self.environment.trust_head(digest)
     }
+
+    /// Every digest this snapshot's environment holds granted, in digest order.
+    #[must_use]
+    pub fn granted_trust(&self) -> Vec<Digest> {
+        self.environment
+            .trust_heads()
+            .filter(|head| head.state == wire::TrustState::Granted)
+            .map(|head| head.digest.clone())
+            .collect()
+    }
 }
 
 /// One agent-authored activity retained for a team status strip.
