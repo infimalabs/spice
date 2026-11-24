@@ -276,11 +276,15 @@ requirements, normal reviewer eligibility, and author-last-resort still apply.
 `/task`, `UUID/task` and their descendants are ordinary paths.
 
 Board rows and current task receipts carry the same owner identities and
-reservation decision used by allocation. An empty owner set blocks automatic
-work; dry `task next` reports it once per topic. Ownership does not revoke a
-held claim or prevent an explicit claim. Reads and receipts bind ownership
-to the admitted configuration, current membership, and observed topic nodes;
-a concurrent topic move cannot seal a receipt for the old path.
+reservation decision used by allocation. Open, unclaimed work no team would
+automatically take is blocked: an empty owner set, or a reservation whose
+owners all have drain off. The board names why: the live teams whose policy
+covers it but whose drain is off, or that no live team's policy covers its
+topic and phase. The app's blocker card for that task names the drain or the
+missing policy. Dry `task next` reports such work once per topic. Ownership
+does not revoke a held claim or prevent an explicit claim. Reads and receipts
+bind ownership to the admitted configuration, current membership, and observed
+topic nodes; a concurrent topic move cannot seal a receipt for the old path.
 
 Every lane-authored activation uses the
 [phase-zero validator](#phases-and-the-draft). A stable drive denial saves a

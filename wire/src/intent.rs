@@ -47,7 +47,7 @@ pub use board::{
     TaskHistoryCursor, TaskHistoryPage, TaskLifecycleKind, TaskRelationEdge, TaskRelationFrontier,
     TaskRelationKind, TaskRelationNode, TaskRelationNodeRef, TaskRelationTruncation, TaskRelations,
     TaskRelationsAnswer, TaskStep, TaskTimeline, TaskTimelineAnswer, TaskTimelineEntry,
-    TaskTimelineEvent, TaskTranscriptRecovery, TextAnswer, is_open_design,
+    TaskTimelineEvent, TaskTranscriptRecovery, TextAnswer, Unallocated, is_open_design,
     released_construction_root,
 };
 pub use jobs::{

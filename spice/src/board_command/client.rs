@@ -563,17 +563,7 @@ fn write_ownership(
 }
 
 fn ownerless_tasks(board: &BoardAnswer) -> std::collections::BTreeSet<&wire::TaskStamp> {
-    board
-        .tasks
-        .iter()
-        .filter(|task| task.workflow.body.is_activated())
-        .filter(|task| {
-            task.ownership
-                .as_ref()
-                .is_some_and(|owners| owners.teams.is_empty())
-        })
-        .map(|task| &task.statement.body.born)
-        .collect()
+    board.unallocated.keys().collect()
 }
 
 fn next_drain_readout(board: &BoardAnswer) -> Option<Reply<DrainReadout>> {

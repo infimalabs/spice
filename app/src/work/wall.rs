@@ -7,7 +7,8 @@
 //! Design gathering input never reads as a wall. A chain is a wall only when
 //! every path forward needs the operator: a deferral, a deferred Design
 //! included, an internal parked row, a cycle, a prerequisite that can never
-//! complete, or an environment requirement only the operator can satisfy.
+//! complete, an environment requirement only the operator can satisfy, or
+//! work no team will automatically take.
 
 use wire::TaskStamp;
 
@@ -31,6 +32,8 @@ pub enum DependencyWall<'a> {
     Environment(&'a TaskStamp),
     /// The task is a Design awaiting the operator's decision on its candidate.
     Selection(&'a TaskStamp),
+    /// No team automatically allocates the task, for the resident's reason.
+    Unallocated(&'a TaskStamp, &'a wire::intent::Unallocated),
 }
 
 /// Memoized wall search over one projection.
@@ -112,6 +115,9 @@ impl<'p, 'a> DependencyWalls<'p, 'a> {
             WorkAvailability::Draft => DependencyWall::Parked(born),
             WorkAvailability::Terminal => DependencyWall::Unreachable(born),
             WorkAvailability::Blocked => {
+                if let Some(reason) = task.unallocated() {
+                    return Some((index, DependencyWall::Unallocated(born, reason)));
+                }
                 self.on_path[index] = true;
                 let wall = task
                     .dependencies()

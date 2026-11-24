@@ -131,14 +131,16 @@ fn validated_snapshot_from_with_occupant(
         .into();
     let (policy, owners) = ownership::capture_required(repository, observed)?;
     let mut blocked = Vec::new();
+    let mut unallocated = std::collections::BTreeMap::new();
     for (entry, task) in entries.iter().zip(&mut tasks) {
         let resolved = owners.owners(entry);
-        if resolved.teams.is_empty()
-            && !entry.is_draft()
+        if !entry.is_draft()
             && entry.workflow().status.is_pending()
             && entry.active_claims().next().is_none()
+            && let Some(reason) = owners.unallocated(entry)
         {
             blocked.push(entry.born().clone());
+            unallocated.insert(entry.born().clone(), reason);
         }
         task.ownership = Some(wire::intent::TaskOwnership {
             teams: resolved.teams.clone(),
@@ -189,6 +191,7 @@ fn validated_snapshot_from_with_occupant(
             finished: Vec::new(),
             offer: Vec::new(),
             blocked,
+            unallocated,
             workflow_waiting: Vec::new(),
             design_cycles: Default::default(),
             origins: Default::default(),
