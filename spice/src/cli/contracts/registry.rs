@@ -1151,7 +1151,7 @@ pub(super) const CONTRACTS: &[Contract] = &[
     ),
     operator!(
         ["trust"],
-        "trust [--limit N] [--max-bytes N] [--max-text N] [--after STANDING:DIGEST]",
+        "trust [--limit N] [--max-bytes N] [--max-text N] [--after DIGEST]",
         Read,
         [],
         Reply,

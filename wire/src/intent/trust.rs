@@ -10,70 +10,14 @@ use crate::{ConfigSource, Digest, SpiceCommand, TrustState};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRead {
-    /// Resume after this ruling as the prior page showed it.
+    /// Resume after the last ruling the prior page showed, by digest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<TrustReportCursor>,
+    pub after: Option<Digest>,
     /// Already-admitted interactive output limits.
     pub limits: Limits,
 }
 
-/// Resume point after one shown ruling: the standing and digest it had on its
-/// page, plus the original cursor digest excluded from every later page,
-/// spelled `STANDING:DIGEST:EXCLUDED`. Carrying the standing keeps the resume
-/// point fixed when a ruling changes standing; carrying the exclusion prevents
-/// that moved ruling from appearing again in a later tier.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TrustReportCursor {
-    /// Standing the ruling had on the page that showed it.
-    pub standing: TrustState,
-    /// Its exact digest.
-    pub digest: Digest,
-    /// Original cursor digest omitted from every continuation page.
-    pub excluded: Digest,
-}
-
-impl std::fmt::Display for TrustReportCursor {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "{}:{}:{}",
-            self.standing.as_str(),
-            self.digest,
-            self.excluded
-        )
-    }
-}
-
-impl std::str::FromStr for TrustReportCursor {
-    type Err = String;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let mut fields = text.split(':');
-        let (Some(standing), Some(digest), Some(excluded), None) =
-            (fields.next(), fields.next(), fields.next(), fields.next())
-        else {
-            return Err(format!(
-                "trust report cursor {text:?} is not STANDING:DIGEST:EXCLUDED"
-            ));
-        };
-        let standing = match standing {
-            "pended" => TrustState::Pended,
-            "granted" => TrustState::Granted,
-            "revoked" => TrustState::Revoked,
-            other => return Err(format!("trust report cursor standing {other:?} is unknown")),
-        };
-        let digest = digest.parse().map_err(|error| format!("{error}"))?;
-        let excluded = excluded.parse().map_err(|error| format!("{error}"))?;
-        Ok(Self {
-            standing,
-            digest,
-            excluded,
-        })
-    }
-}
-
-/// One current executable-trust ruling in operator-report order.
+/// One current executable-trust ruling, as the digest-ordered report lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportRuling {
