@@ -2,7 +2,6 @@
 
 use bus::Bus;
 use journal::{FactReadBudget, GuardError, JournalHead, JournalRead};
-use wire::intent::TrustReportCursor;
 use wire::intent::{
     CommandAnswer, TrustReportAnswer, TrustReportNext, TrustReportRead, TrustReportRuling,
 };
@@ -40,7 +39,7 @@ pub(super) fn read(bus: &Bus, request: &TrustReportRead) -> Outcome<CommandAnswe
 
 fn build(
     read: &JournalRead<'_>,
-    after: Option<&TrustReportCursor>,
+    after: Option<&Digest>,
     limits: wire::output::Limits,
 ) -> Result<(wire::Seq, TrustReportAnswer), GuardError> {
     let cursor = read
@@ -113,13 +112,7 @@ fn build(
         shown_bytes += wire::encoded_len(&ruling).map_err(|error| {
             GuardError::Invalid(format!("trust report ruling cannot be encoded: {error}"))
         })?;
-        resume_after = Some(TrustReportCursor {
-            standing: ruling.standing,
-            digest: ruling.digest.clone(),
-            excluded: after
-                .map(|cursor| cursor.excluded.clone())
-                .unwrap_or_else(|| ruling.digest.clone()),
-        });
+        resume_after = Some(ruling.digest.clone());
         rulings.push(ruling);
     }
 
@@ -177,7 +170,7 @@ fn next(
     ruling: TrustReportRuling,
     exhausted: Exhausted,
     limits: wire::output::Limits,
-    after: Option<&TrustReportCursor>,
+    after: Option<&Digest>,
 ) -> Result<TrustReportNext, GuardError> {
     let next_bytes = wire::encoded_len(&ruling).map_err(|error| {
         GuardError::Invalid(format!("trust report cursor cannot encode: {error}"))

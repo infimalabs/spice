@@ -633,90 +633,61 @@ fn bounded_current_head_pages_resume_with_exact_work_and_witnesses() {
 }
 
 #[test]
-fn trust_report_pages_resume_from_the_standing_the_prior_page_showed() {
-    for moved in [TrustState::Granted, TrustState::Revoked] {
-        let journal = authority_fixture();
-        let db = &journal.connection;
-        let trust = |nibble, state| TrustHead {
+fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
+    let journal = authority_fixture();
+    let db = &journal.connection;
+    // The fixture already pends `a`.
+    let rule = |nibble: &str, state| {
+        db.execute(
+            "DELETE FROM trust_heads WHERE digest = ?1",
+            [digest(nibble).as_str()],
+        )
+        .expect("retire the prior fixture head");
+        let head = TrustHead {
             digest: digest(nibble),
             state,
             worktree: None,
         };
-        for (nibble, state) in [("b", TrustState::Pended), ("c", TrustState::Pended)] {
-            insert_head(
-                db,
-                "trust_heads",
-                "digest",
-                digest(nibble).as_str(),
-                2,
-                &trust(nibble, state),
-            );
-        }
         insert_head(
             db,
             "trust_heads",
             "digest",
-            digest("0").as_str(),
+            digest(nibble).as_str(),
             2,
-            &trust("0", TrustState::Granted),
+            &head,
         );
-        let first_budget = FactReadBudget::new(2, 1 << 20).expect("first report budget");
-        let continuation_budget =
-            FactReadBudget::new(1, 1 << 20).expect("continuation report budget");
-        let first = journal
-            .read(|read| read.trust_report_head_page(None, first_budget))
-            .expect("first report page reads");
-        let shown = first.rows.last().expect("first page shows rulings").body();
-        assert_eq!(
-            (&shown.digest, shown.state),
-            (&digest("b"), TrustState::Pended)
-        );
-        let mut cursor = wire::intent::TrustReportCursor {
-            standing: shown.state,
-            digest: shown.digest.clone(),
-            excluded: shown.digest.clone(),
-        };
-        // The operator rules the last shown request before following the page.
-        db.execute(
-            "DELETE FROM trust_heads WHERE digest = ?1",
-            [digest("b").as_str()],
-        )
-        .expect("retire the pended fixture head");
-        insert_head(
-            db,
-            "trust_heads",
-            "digest",
-            digest("b").as_str(),
-            2,
-            &trust("b", moved),
-        );
-
-        let mut remaining = Vec::new();
-        loop {
-            let page = journal
-                .read(|read| read.trust_report_head_page(Some(&cursor), continuation_budget))
-                .expect("report continuation reads");
-            remaining.extend(page.rows.iter().map(|head| head.body().digest.clone()));
-            if page.next.is_none() {
-                break;
-            }
-            let shown = page
-                .rows
-                .last()
-                .expect("continued page shows a ruling")
-                .body();
-            cursor = wire::intent::TrustReportCursor {
-                standing: shown.state,
-                digest: shown.digest.clone(),
-                excluded: cursor.excluded,
-            };
-        }
-        assert_eq!(
-            remaining,
-            [digest("c"), digest("0")],
-            "every other ruling appears once after the cursor moves to {moved:?}"
-        );
+    };
+    rule("0", TrustState::Granted);
+    for nibble in ["b", "c", "d"] {
+        rule(nibble, TrustState::Pended);
     }
+    let budget = FactReadBudget::new(1, 1 << 20).expect("one-ruling report pages");
+    let mut shown = Vec::new();
+    let mut after = None;
+    let rulings = [TrustState::Granted, TrustState::Revoked];
+    loop {
+        let page = journal
+            .read(|read| read.trust_report_head_page(after.as_ref(), budget))
+            .expect("report page reads");
+        let last = page.rows.last().expect("each page shows a ruling").body();
+        shown.push(last.digest.clone());
+        if page.next.is_none() {
+            break;
+        }
+        // The operator rules the last shown request before following its page.
+        if last.state == TrustState::Pended {
+            rule(&last.digest.as_str()[..1], rulings[shown.len() % 2]);
+        }
+        after = Some(last.digest.clone());
+    }
+    assert_eq!(shown, ["0", "a", "b", "c", "d"].map(digest));
+    let error = journal
+        .read(|read| read.trust_report_head_page(Some(&digest("e")), budget))
+        .expect_err("a cursor that names no ruling refuses");
+    assert!(
+        error.to_string().contains("is not a recorded ruling"),
+        "{error}"
+    );
 }
 
 #[test]

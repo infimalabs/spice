@@ -215,40 +215,31 @@ impl JournalRead<'_> {
         })
     }
 
-    /// Read one bounded page of current trust heads in operator-report order:
-    /// pended, granted, revoked, with digest as the stable tie-breaker. A
-    /// cursor resumes from the standing its ruling had on the prior page, so
-    /// ruling that digest in between neither skips nor repeats a row.
+    /// Read one bounded page of current trust heads for the operator report,
+    /// ordered by digest. A digest is the one key a ruling never changes, so a
+    /// ruling made between pages can neither skip nor repeat a row. A cursor
+    /// must name a recorded ruling.
     pub fn trust_report_head_page(
         &self,
-        after: Option<&wire::intent::TrustReportCursor>,
+        after: Option<&wire::Digest>,
         budget: FactReadBudget,
     ) -> Result<TrustReportHeadPage, GuardError> {
-        let (after_rank, after_digest, excluded_digest) = match after {
-            Some(cursor) => {
-                read_metrics::observe_query();
-                self.connection
-                    .query_row(
-                        "SELECT 1 FROM trust_heads WHERE digest = ?1",
-                        [cursor.digest.as_str()],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .map_err(GuardError::Store)?
-                    .ok_or_else(|| {
-                        GuardError::Invalid(format!(
-                            "trust report cursor digest {} is not a recorded ruling",
-                            cursor.digest
-                        ))
-                    })?;
-                (
-                    standing_rank(cursor.standing),
-                    cursor.digest.as_str(),
-                    cursor.excluded.as_str(),
+        if let Some(after) = after {
+            read_metrics::observe_query();
+            self.connection
+                .query_row(
+                    "SELECT 1 FROM trust_heads WHERE digest = ?1",
+                    [after.as_str()],
+                    |_| Ok(()),
                 )
-            }
-            None => (-1, "", ""),
-        };
+                .optional()
+                .map_err(GuardError::Store)?
+                .ok_or_else(|| {
+                    GuardError::Invalid(format!(
+                        "trust report cursor digest {after} is not a recorded ruling"
+                    ))
+                })?;
+        }
         let query_limit = query_limit(budget)?;
         read_metrics::observe_query();
         let mut statement = self
@@ -256,12 +247,7 @@ impl JournalRead<'_> {
             .prepare(TRUST_REPORT_PAGE_SQL)
             .map_err(GuardError::Store)?;
         let mut rows = statement
-            .query(params![
-                after_rank,
-                after_digest,
-                excluded_digest,
-                query_limit
-            ])
+            .query(params![after.map(wire::Digest::as_str), query_limit])
             .map_err(GuardError::Store)?;
         let mut heads = Vec::with_capacity(budget.rows());
         let mut decoded = 0usize;
@@ -380,8 +366,7 @@ const fn standing_rank(standing: wire::TrustState) -> i64 {
 }
 
 const TRUST_REPORT_PAGE_SQL: &str = "SELECT standing_rank, digest, head_seq, length(body), body FROM trust_heads \
-     WHERE (standing_rank > ?1 OR (standing_rank = ?1 AND digest > ?2)) AND digest <> ?3 \
-     ORDER BY standing_rank, digest LIMIT ?4";
+     WHERE digest > COALESCE(?1, '') ORDER BY digest LIMIT ?2";
 
 const LATEST_OTHER_GRANT_SQL: &str = "SELECT digest, head_seq, length(body), body FROM trust_heads \
      WHERE standing_rank = 1 AND digest <> ?1 ORDER BY head_seq DESC LIMIT 1";
@@ -461,15 +446,13 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
         .prepare(&format!("EXPLAIN QUERY PLAN {TRUST_REPORT_PAGE_SQL}"))
         .map_err(|error| error.to_string())?;
     let report_plan = statement
-        .query_map(params![-1_i64, "", "", 3_i64], |row| {
+        .query_map(params!["spice.test.digest", 3_i64], |row| {
             row.get::<_, String>(3)
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let report_seeks = report_plan
-        .iter()
-        .any(|step| step.contains("trust_heads_standing_digest"))
+    let report_seeks = report_plan.iter().any(|step| step.contains("(digest>?)"))
         && !report_plan
             .iter()
             .any(|step| step.contains("SCAN trust_heads "));
