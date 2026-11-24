@@ -82,6 +82,15 @@ impl<'a> OperatorWaits<'a> {
                 continue;
             }
             let mut explained = false;
+            if let Some(reason) = task.unallocated() {
+                explained = true;
+                waits[index]
+                    .get_or_insert_with(|| OperatorWait::new(index))
+                    .wall = Some(DependencyWall::Unallocated(
+                    &task.row().statement.body.born,
+                    reason,
+                ));
+            }
             for dependency in task.dependencies() {
                 let Some((at, wall)) = walls.wall(index, dependency) else {
                     continue;

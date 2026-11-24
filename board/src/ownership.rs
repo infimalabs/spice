@@ -112,6 +112,54 @@ impl OwnershipSnapshot {
             snapshot: Arc::clone(self),
         }
     }
+
+    /// Why no team would automatically allocate `entry`, or `None` when one
+    /// would. The covering teams are those that would own it were every live
+    /// team draining, narrowed to the ones whose drain is off.
+    #[must_use]
+    pub fn unallocated(&self, entry: &Entry) -> Option<wire::intent::Unallocated> {
+        if self.admits(None, entry) {
+            return None;
+        }
+        let draining = self
+            .teams
+            .iter()
+            .map(|team| Team {
+                drain: true,
+                ..team.clone()
+            })
+            .collect::<Vec<_>>();
+        let covering = Resolver::new(&self.config, &draining).owners(task(entry));
+        let teams = covering
+            .teams
+            .into_iter()
+            .filter(|id| self.teams.iter().any(|team| team.id == *id && !team.drain))
+            .collect::<Vec<_>>();
+        Some(if teams.is_empty() {
+            wire::intent::Unallocated::Uncovered
+        } else {
+            wire::intent::Unallocated::DrainOff { teams }
+        })
+    }
+
+    /// Whether automatic allocation admits `entry` for `team`, or for any
+    /// team when none is named.
+    fn admits(&self, team: Option<CanonicalUuid>, entry: &Entry) -> bool {
+        let owners = self.owners(entry);
+        owners.teams.iter().any(|owner| {
+            team.is_none_or(|requested| requested == *owner)
+                && (!owners.reserved
+                    || Resolver::new(&self.config, &self.teams).drain(*owner, task(entry)))
+        })
+    }
+}
+
+fn task(entry: &Entry) -> Task<'_> {
+    Task {
+        topic: entry.topic(),
+        phase: &entry.workflow().phase,
+        creator: entry.creator_team(),
+    }
 }
 
 /// The actor's automatic allocation scope; explicit claims do not use it.
@@ -124,18 +172,6 @@ pub struct Allocation {
 impl Allocation {
     #[must_use]
     pub fn admits(&self, entry: &Entry) -> bool {
-        let owners = self.snapshot.owners(entry);
-        owners.teams.iter().any(|team| {
-            self.team.is_none_or(|requested| requested == *team)
-                && (!owners.reserved
-                    || Resolver::new(&self.snapshot.config, &self.snapshot.teams).drain(
-                        *team,
-                        Task {
-                            topic: entry.topic(),
-                            phase: &entry.workflow().phase,
-                            creator: entry.creator_team(),
-                        },
-                    ))
-        })
+        self.snapshot.admits(self.team, entry)
     }
 }

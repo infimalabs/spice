@@ -91,9 +91,12 @@ pub struct BoardView {
     pub(crate) finished: Vec<BoardTask>,
     /// Resident allocation order: the task offered next comes first.
     pub offer: Vec<wire::TaskStamp>,
-    /// Rows the allocator holds back for an unsettled prerequisite or an
-    /// unconcluded or unauthorizing controller, judged by the resident.
+    /// Rows the allocator holds back for an unsettled prerequisite, an
+    /// unconcluded or unauthorizing controller, or no allocating team,
+    /// judged by the resident.
     pub blocked: BTreeSet<wire::TaskStamp>,
+    /// Why each blocked row no team automatically allocates stands still.
+    pub unallocated: BTreeMap<wire::TaskStamp, wire::intent::Unallocated>,
     /// Rows held by normal Plan/Design control or a prerequisite chain that
     /// still reaches advancing work, judged by the resident.
     pub workflow_waiting: BTreeSet<wire::TaskStamp>,
@@ -136,6 +139,7 @@ impl From<&BoardAnswer> for BoardView {
             finished,
             offer,
             blocked: answer.blocked.iter().cloned().collect(),
+            unallocated: answer.unallocated.clone(),
             workflow_waiting: answer.workflow_waiting.iter().cloned().collect(),
             design_cycles: answer.design_cycles.clone(),
             quote_tasks: Rc::new(answer.origins.clone()),

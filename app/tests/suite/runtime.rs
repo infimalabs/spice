@@ -358,6 +358,7 @@ fn board_response_with_requirements(
         next: None,
         offer: Vec::new(),
         blocked: Vec::new(),
+        unallocated: Default::default(),
         workflow_waiting: Vec::new(),
         design_cycles: Default::default(),
         oops_generation: None,

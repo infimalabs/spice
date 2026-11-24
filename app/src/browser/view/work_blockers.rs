@@ -55,7 +55,7 @@ pub(super) fn render_operator_act(
                 {for missing_resources.into_iter().flatten()
                     .map(|(name, shards)| render_resource_requirement(name, shards))}
                 if let Some(wall) = wait.wall() {
-                    {render_wall(wall)}
+                    {render_wall(wall, runtime.and_then(AppRuntime::lanes).map_or(&[][..], |lanes| lanes.lanes.as_slice()))}
                 }
             </div>
             if !holds.is_empty() {
@@ -81,9 +81,10 @@ fn requirement_blocked(
 
 /// Say why a waiting task stands still and why only the operator can move it.
 /// Its environment is explained by its requirement cards instead.
-fn render_wall(wall: DependencyWall<'_>) -> Html {
+fn render_wall(wall: DependencyWall<'_>, lanes: &[crate::runtime::LaneRow]) -> Html {
     let (kind, title, reason, state) = match wall {
         DependencyWall::Environment(_) => return Html::default(),
+        DependencyWall::Unallocated(_, reason) => return render_unallocated(reason, lanes),
         DependencyWall::Gate(_) => (
             "blocked",
             "Blocked",
@@ -128,6 +129,49 @@ fn render_wall(wall: DependencyWall<'_>) -> Html {
                 <p>{reason}</p>
             </div>
             <span class="work-blocker-state">{state}</span>
+        </section>
+    }
+}
+
+/// No agent will take this work until the operator turns a drain on or
+/// changes team policy, so name exactly which.
+fn render_unallocated(
+    reason: &wire::intent::Unallocated,
+    lanes: &[crate::runtime::LaneRow],
+) -> Html {
+    let (kind, title, reason) = match reason {
+        wire::intent::Unallocated::DrainOff { teams } => {
+            let names = teams
+                .iter()
+                .map(|team| crate::watchband::team_label_in(lanes, *team))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let (subject, possessive) = if teams.len() == 1 {
+                ("Team", "its")
+            } else {
+                ("Teams", "their")
+            };
+            (
+                "drain-off",
+                "Drain is off",
+                format!(
+                    "{subject} {names} would take it, but {possessive} drain is off, so no agent is offered it. Turn drain on to release it."
+                ),
+            )
+        }
+        wire::intent::Unallocated::Uncovered => (
+            "uncovered",
+            "No team takes it",
+            "No team's policy covers its topic and phase, so no agent is offered it. Move it to a covered topic or change team policy.".to_owned(),
+        ),
+    };
+    html! {
+        <section class="work-blocker-card" data-blocker-kind={kind}>
+            <div>
+                <strong>{title}</strong>
+                <p>{reason}</p>
+            </div>
+            <span class="work-blocker-state">{"Operator required"}</span>
         </section>
     }
 }

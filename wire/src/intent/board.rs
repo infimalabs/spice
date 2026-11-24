@@ -614,6 +614,17 @@ pub enum NextWorkState {
     },
 }
 
+/// Why no team automatically allocates one open, unclaimed row: only the
+/// operator can move it, by turning a drain on or changing team policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Unallocated {
+    /// These live teams' policy covers the row, but their drain is off.
+    DrainOff { teams: Vec<crate::CanonicalUuid> },
+    /// No live team's policy covers the row's topic and phase.
+    Uncovered,
+}
+
 /// Server-resolved default read route for one board principal: activated
 /// rows, plus rows created on the principal's own origin thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -900,6 +911,10 @@ pub struct BoardAnswer {
     /// identity order. Empty for every other read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked: Vec<crate::TaskStamp>,
+    /// Why each open-read row no team automatically allocates stands still.
+    /// Every key also names a row in `blocked`. Empty for every other read.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub unallocated: std::collections::BTreeMap<crate::TaskStamp, Unallocated>,
     /// Open-read rows held by normal Plan/Design control or an unresolved
     /// prerequisite chain that still reaches advancing work. These remain
     /// allocator-ineligible but are not execution trouble. Durable identity

@@ -174,6 +174,7 @@ fn next_answer(
         finished: Vec::new(),
         offer: Vec::new(),
         blocked: Vec::new(),
+        unallocated: Default::default(),
         workflow_waiting: Vec::new(),
         design_cycles: Default::default(),
         origins: Default::default(),
@@ -402,7 +403,7 @@ fn dry_counts(
         entry.is_acquirable_standing() && entry.workflow().status.is_pending()
     });
     for (entry, origin) in pending {
-        let ownerless = !entry.is_held() && owners.owners(entry).teams.is_empty();
+        let ownerless = !entry.is_held() && owners.unallocated(entry).is_some();
         if ownerless {
             counts.blocked += 1;
             unowned_topics.extend(entry.topic());

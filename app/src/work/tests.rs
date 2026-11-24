@@ -124,6 +124,7 @@ pub(crate) fn board(tasks: Vec<BoardTask>) -> BoardView {
         finished: Vec::new(),
         offer: Vec::new(),
         blocked: std::collections::BTreeSet::new(),
+        unallocated: std::collections::BTreeMap::new(),
         workflow_waiting: std::collections::BTreeSet::new(),
         design_cycles: std::collections::BTreeMap::new(),
         quote_tasks: std::rc::Rc::default(),

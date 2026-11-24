@@ -122,6 +122,28 @@ fn ownerless_work_is_blocked_once_per_topic_without_blocking_held_claims() {
         at(&before, &held).statement.body.born
     );
     assert_eq!(task.ownership.unwrap().teams, Vec::new());
+    let open = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let born = &at(&before, &first).statement.body.born;
+    assert!(open.blocked.contains(born));
+    let Some(wire::intent::Unallocated::DrainOff { teams }) = open.unallocated.get(born) else {
+        panic!("covered work no drain takes names the drain, not {open:?}");
+    };
+    let mut teams = teams.clone();
+    teams.sort_unstable();
+    let mut expected = seats.iter().map(|seat| seat.team).collect::<Vec<_>>();
+    expected.sort_unstable();
+    expected.dedup();
+    assert_eq!(teams, expected);
+    fs::write(
+        root.join("spice.toml"),
+        "[team.default]\ndrive = []\ndrain = []\n",
+    )
+    .expect("team policy writes");
+    let uncovered = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    assert_eq!(
+        uncovered.unallocated.get(born),
+        Some(&wire::intent::Unallocated::Uncovered)
+    );
     clean(&root, bus);
 }
 

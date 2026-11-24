@@ -479,6 +479,9 @@ pub struct WorkTask<'a> {
     /// An unsatisfied operator-actionable environment or missing explicitly
     /// declared resource pool is one blocker.
     environment_blocked: bool,
+    /// Why no team automatically allocates this blocked row, judged by the
+    /// resident.
+    unallocated: Option<&'a wire::intent::Unallocated>,
     /// A Design held for the operator's selection of an output it constructed,
     /// whether or not a lane still holds its claim.
     awaiting_selection: bool,
@@ -514,6 +517,11 @@ impl<'a> WorkTask<'a> {
     #[must_use]
     pub const fn environment_blocked(&self) -> bool {
         self.environment_blocked
+    }
+
+    #[must_use]
+    pub const fn unallocated(&self) -> Option<&'a wire::intent::Unallocated> {
+        self.unallocated
     }
 
     #[must_use]
@@ -959,6 +967,7 @@ impl<'a> WorkProjection<'a> {
                     availability: availability[index],
                     topic: topic_by_task[index],
                     environment_blocked: environment_blocked[index],
+                    unallocated: board.unallocated.get(&row.statement.body.born),
                     awaiting_selection: board.awaiting_selection(&row.statement.body.born),
                     pass_ready: pass_ready[index],
                     phase: vocabulary::phase(Some(board), row, &released[index]),

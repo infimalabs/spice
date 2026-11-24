@@ -76,6 +76,44 @@ fn private_creation_and_draft_advance_use_current_owner_not_public_rules() {
 }
 
 #[test]
+fn private_work_whose_owner_stops_draining_is_blocked_on_that_drain() {
+    let (root, bus, epoch, seats) = fixture("private-drain-off", 1);
+    authorize_lane_creation(&bus, epoch, &seats[0]);
+    let repository = policy(&root, "[]");
+    let topic = format!("{}/task/child", seats[0].lane);
+    let add = authored_add(
+        "Keep private work with its team",
+        &topic,
+        Some("todo"),
+        &["Only the owner takes it"],
+    );
+    let born = stamp("private-drain-off");
+    assert_committed(mutation::task_add(
+        &bus,
+        &add_command(epoch, seats[0].lane, &born, &add),
+        &add,
+        Some(host(&repository)),
+    ));
+    let draining = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    assert!(!draining.blocked.contains(&born));
+    assert!(draining.unallocated.is_empty());
+
+    subscription::configure_subscription(&bus, epoch, &seats[0], false);
+    let stopped = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    assert!(
+        stopped.blocked.contains(&born),
+        "reserved work no drain takes is blocked, not ready"
+    );
+    assert_eq!(
+        stopped.unallocated.get(&born),
+        Some(&wire::intent::Unallocated::DrainOff {
+            teams: vec![seats[0].team]
+        })
+    );
+    clean(&root, bus);
+}
+
+#[test]
 fn private_publication_refuses_moved_membership_and_recaptures_the_new_team() {
     let (root, bus, epoch, seats) = fixture("private-membership-race", 1);
     let seat = &seats[0];

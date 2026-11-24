@@ -112,3 +112,42 @@ fn a_claimed_task_the_operator_must_unblock_holds_its_dependents_in_one_wait() {
     assert!(operator_waits.waits()[0].environment());
     assert_eq!(operator_waits.waits()[0].holds(), [1, 2]);
 }
+
+#[test]
+fn work_no_team_takes_is_its_own_wall_and_holds_its_dependents() {
+    let drained = task(1, "/topic/drained");
+    let mut dependent = task(2, "/topic/drained");
+    dependent.statement.body.dependencies = vec![stamp(1)];
+    let uncovered = task(3, "/topic/uncovered");
+    let mut board = board(vec![drained, dependent, uncovered]);
+    board.blocked.extend([stamp(1), stamp(2), stamp(3)]);
+    let drain_off = wire::intent::Unallocated::DrainOff {
+        teams: vec![
+            "00000000-0000-0000-0000-000000000007"
+                .parse()
+                .expect("team identity"),
+        ],
+    };
+    board.unallocated.insert(stamp(1), drain_off.clone());
+    board
+        .unallocated
+        .insert(stamp(3), wire::intent::Unallocated::Uncovered);
+    let work = WorkProjection::from_board_and_lanes(&board, None);
+    let operator_waits = OperatorWaits::new(&work);
+
+    assert_eq!(waiting(&operator_waits), [0, 2]);
+    let waits = operator_waits.waits();
+    assert_eq!(
+        waits[0].wall(),
+        Some(DependencyWall::Unallocated(&stamp(1), &drain_off)),
+        "a drained task names its drain, not a prerequisite gate"
+    );
+    assert_eq!(waits[0].holds(), [1]);
+    assert_eq!(
+        waits[1].wall(),
+        Some(DependencyWall::Unallocated(
+            &stamp(3),
+            &wire::intent::Unallocated::Uncovered
+        ))
+    );
+}
