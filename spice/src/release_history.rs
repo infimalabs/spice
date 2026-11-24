@@ -157,7 +157,7 @@ fn first_parent_window(
         "log".to_owned(),
         "--first-parent".to_owned(),
         "--reverse".to_owned(),
-        "--format=%H%x00%s".to_owned(),
+        "--format=%H%x00%ct%x00%s".to_owned(),
     ];
     arguments.push(previous_tag.map_or_else(
         || release_commit.to_owned(),
@@ -168,11 +168,18 @@ fn first_parent_window(
         .lines()
         .filter(|line| !line.is_empty())
         .map(|line| {
-            let (commit, subject) = line.split_once('\0').ok_or_else(|| {
+            let (commit, remainder) = line.split_once('\0').ok_or_else(|| {
+                Error::Encoding("Git release-note row has no timestamp boundary".to_owned())
+            })?;
+            let (committed_at, subject) = remainder.split_once('\0').ok_or_else(|| {
                 Error::Encoding("Git release-note row has no subject boundary".to_owned())
+            })?;
+            let committed_at = committed_at.parse::<i64>().map_err(|error| {
+                Error::Encoding(format!("Git release-note timestamp is invalid: {error}"))
             })?;
             Ok(ReleaseCommit {
                 commit: commit.to_owned(),
+                committed_at,
                 subject: subject.to_owned(),
             })
         })

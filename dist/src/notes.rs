@@ -55,6 +55,8 @@ pub struct Correction {
 pub struct ReleaseCommit {
     /// Full object identity.
     pub commit: String,
+    /// Committer timestamp in whole Unix seconds.
+    pub committed_at: i64,
     /// Commit subject exactly as Git stores it.
     pub subject: String,
 }
@@ -253,34 +255,55 @@ fn correction_root<'a>(
 }
 
 fn render(input: &NotesInput, entries: &[ReleaseNotesEntry]) -> String {
-    let mut groups: Vec<TopicGroup> = Vec::new();
+    let commits = input
+        .window
+        .iter()
+        .map(|commit| (commit.commit.as_str(), commit))
+        .collect::<BTreeMap<_, _>>();
+    let mut groups: BTreeMap<&str, Vec<TopicHighlight<'_>>> = BTreeMap::new();
     for entry in entries {
-        let group = if let Some(index) = groups.iter().position(|group| group.topic == entry.topic)
-        {
-            &mut groups[index].highlights
-        } else {
-            groups.push(TopicGroup {
-                topic: entry.topic.clone(),
-                highlights: Vec::new(),
-            });
-            &mut groups
-                .last_mut()
-                .expect("group was just inserted")
-                .highlights
-        };
+        let group = groups.entry(&entry.topic).or_default();
+        let references = entry.references.iter().map(|reference| {
+            commits
+                .get(reference.as_str())
+                .copied()
+                .expect("release entry references its input commit")
+        });
         if let Some(highlight) = group
             .iter_mut()
             .find(|highlight| highlight.text == entry.subject)
         {
-            highlight
-                .references
-                .extend(entry.references.iter().cloned());
+            highlight.references.extend(references);
         } else {
             group.push(TopicHighlight {
-                text: entry.subject.clone(),
-                references: entry.references.clone(),
+                text: &entry.subject,
+                references: references.collect(),
             });
         }
+    }
+    for highlights in groups.values_mut() {
+        for highlight in highlights.iter_mut() {
+            highlight.references.sort_by(|left, right| {
+                left.committed_at
+                    .cmp(&right.committed_at)
+                    .then_with(|| left.commit.cmp(&right.commit))
+            });
+        }
+        highlights.sort_by(|left, right| {
+            let left_commit = left
+                .references
+                .first()
+                .expect("release highlight has a contributing commit");
+            let right_commit = right
+                .references
+                .first()
+                .expect("release highlight has a contributing commit");
+            left_commit
+                .committed_at
+                .cmp(&right_commit.committed_at)
+                .then_with(|| left.text.cmp(right.text))
+                .then_with(|| left_commit.commit.cmp(&right_commit.commit))
+        });
     }
 
     let mut lines = vec![
@@ -303,13 +326,13 @@ fn render(input: &NotesInput, entries: &[ReleaseNotesEntry]) -> String {
     if groups.is_empty() {
         lines.extend(["- No selected commits found.".to_owned(), String::new()]);
     } else {
-        for TopicGroup { topic, highlights } in groups {
-            lines.extend([format!("### {}", topic_heading(&topic)), String::new()]);
+        for (topic, highlights) in groups {
+            lines.extend([format!("### {}", topic_heading(topic)), String::new()]);
             for highlight in highlights {
                 let references = highlight
                     .references
                     .iter()
-                    .map(|reference| short_commit(reference))
+                    .map(|reference| short_commit(&reference.commit))
                     .collect::<Vec<_>>()
                     .join(", ");
                 lines.push(format!("- {} ({references})", highlight.text));
@@ -342,14 +365,9 @@ fn render(input: &NotesInput, entries: &[ReleaseNotesEntry]) -> String {
     lines.join("\n")
 }
 
-struct TopicGroup {
-    topic: String,
-    highlights: Vec<TopicHighlight>,
-}
-
-struct TopicHighlight {
-    text: String,
-    references: Vec<String>,
+struct TopicHighlight<'a> {
+    text: &'a str,
+    references: Vec<&'a ReleaseCommit>,
 }
 
 fn curated_region(candidate: &str) -> &str {
@@ -545,6 +563,58 @@ mod tests {
     }
 
     #[test]
+    fn commit_inventory_orders_topics_then_mentions_by_time() {
+        let mut input = fixture(
+            vec![
+                "1111111111",
+                "2222222222",
+                "3333333333",
+                "4444444444",
+                "5555555555",
+            ],
+            vec![
+                landing(1, "1111111111", "zed", "/app/z", "Zed change"),
+                landing(2, "2222222222", "later", "/app/a", "Later change"),
+                landing(3, "3333333333", "deep", "/app/a/deep", "Deep change"),
+                landing(4, "4444444444", "earlier", "/app/a", "Earlier change"),
+                landing(5, "5555555555", "alpha", "/app/a", "Alpha change"),
+            ],
+            Vec::new(),
+        );
+        for (commit, committed_at) in input.window.iter_mut().zip([5, 30, 20, 10, 10]) {
+            commit.committed_at = committed_at;
+        }
+
+        let notes = release_notes(input).expect("ordered history folds");
+        let inventory = notes
+            .document
+            .split_once("<summary>Commit-level changes</summary>")
+            .expect("inventory opens")
+            .1
+            .split_once("</details>")
+            .expect("inventory closes")
+            .0;
+        let headings_and_mentions = inventory
+            .lines()
+            .filter(|line| line.starts_with("### ") || line.starts_with("- "))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            headings_and_mentions,
+            [
+                "### App A",
+                "- Alpha change. (5555555)",
+                "- Earlier change. (4444444)",
+                "- Later change. (2222222)",
+                "### App A Deep",
+                "- Deep change. (3333333)",
+                "### App Z",
+                "- Zed change. (1111111)",
+            ]
+        );
+    }
+
+    #[test]
     fn repeated_identical_correction_authority_is_idempotent() {
         let correction = Correction {
             parent: "root".to_owned(),
@@ -661,8 +731,10 @@ mod tests {
             previous_tag: None,
             window: window
                 .into_iter()
-                .map(|commit| ReleaseCommit {
+                .enumerate()
+                .map(|(index, commit)| ReleaseCommit {
                     commit: commit.to_owned(),
+                    committed_at: i64::try_from(index).expect("fixture index fits in i64"),
                     subject: format!("Update {commit}"),
                 })
                 .collect(),
