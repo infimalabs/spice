@@ -86,6 +86,7 @@ fn stream_write(trust: bool) -> journal::JournalWrite {
                     digest: digest.clone(),
                     worktree: None,
                     previous: None,
+                    documents: None,
                 },
                 journal::FactCause::Root,
             )

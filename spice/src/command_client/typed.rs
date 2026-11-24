@@ -98,6 +98,7 @@ pub(super) fn kind_for(path: &[&str]) -> Option<CommandKind> {
         ["taste", "add"] | ["taste", "drop"] => CommandKind::TaskAdd,
         ["doc", "ledger"] => CommandKind::DocLedger,
         ["sweep"] => CommandKind::TaskSweep,
+        ["trust"] => CommandKind::TrustShow,
         _ => return None,
     })
 }

@@ -25,6 +25,30 @@ pub(super) async fn send_rack(
     .await
 }
 
+pub(super) async fn send_trust_show(
+    principal: &Principal,
+    writer: &mut SocketWriter,
+    actions: &ActionQueue,
+    digest: &wire::Digest,
+    respond: &crate::client_action::TrustShowResponse,
+) -> Result<CanonicalUuid, String> {
+    send_typed(
+        principal,
+        writer,
+        actions,
+        PendingKind::TrustShow {
+            respond: respond.clone(),
+        },
+        CommandKind::TrustShow,
+        Vec::new(),
+        wire::intent::TrustRef {
+            digest: digest.clone(),
+            worktree: None,
+        },
+    )
+    .await
+}
+
 pub(super) async fn send_jobs(
     principal: &Principal,
     writer: &mut SocketWriter,

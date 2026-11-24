@@ -82,13 +82,9 @@ impl MappedCommand {
                 TrustState::Pended,
                 CommandKind::TrustGrant,
             ),
-            SelectedCommand::TrustRevoke { digest } => Self::trust_rule(
-                contract,
-                digest,
-                None,
-                TrustState::Granted,
-                CommandKind::TrustRevoke,
-            ),
+            SelectedCommand::TrustRevoke { digest, standing } => {
+                Self::trust_rule(contract, digest, None, standing, CommandKind::TrustRevoke)
+            }
         }
     }
 

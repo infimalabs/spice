@@ -5,6 +5,8 @@ use wire::{CanonicalUuid, TaskHandle, TaskStamp};
 pub(crate) type JobResponse = std::rc::Rc<dyn Fn(Result<wire::intent::LaneJobAnswer, String>)>;
 pub(crate) type JobsResponse = std::rc::Rc<dyn Fn(Result<wire::intent::LaneJobsAnswer, String>)>;
 pub(crate) type RackResponse = std::rc::Rc<dyn Fn(Result<wire::intent::RackAnswer, String>)>;
+pub(crate) type TrustShowResponse =
+    std::rc::Rc<dyn Fn(Result<wire::intent::TrustShowAnswer, String>)>;
 pub(crate) type ArrangementResponse = std::rc::Rc<dyn Fn(Result<(), String>)>;
 pub(crate) type RoomPostResponse = std::rc::Rc<dyn Fn(Result<wire::rooms::RoomPostAnswer, String>)>;
 pub(crate) type SteerLineResponse =
@@ -242,6 +244,11 @@ pub(crate) enum ClientAction {
     Rack {
         request: wire::intent::RackRead,
         respond: RackResponse,
+    },
+    /// Read one digest's recorded documents against the latest other grant.
+    TrustShow {
+        digest: wire::Digest,
+        respond: TrustShowResponse,
     },
     Jobs {
         respond: JobsResponse,

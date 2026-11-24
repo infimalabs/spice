@@ -69,18 +69,45 @@ fn uncaptured_native_decisions_record_provenance_and_the_requested_terminal_stan
 }
 
 #[test]
-fn native_decisions_accept_both_pended_transitions_without_changing_cli_revoke_semantics() {
-    for (kind, standing) in [
-        (CommandKind::TrustGrant, TrustState::Granted),
-        (CommandKind::TrustRevoke, TrustState::Revoked),
+fn pended_digests_record_their_documents_and_rule_after_their_producer_moves() {
+    for (cli, kind, standing) in [
+        (false, CommandKind::TrustGrant, TrustState::Granted),
+        (false, CommandKind::TrustRevoke, TrustState::Revoked),
+        (true, CommandKind::TrustGrant, TrustState::Granted),
+        (true, CommandKind::TrustRevoke, TrustState::Revoked),
     ] {
-        let fixture = Fixture::new(match kind {
-            CommandKind::TrustGrant => "native-pended-grant",
-            CommandKind::TrustRevoke => "native-pended-revoke",
-            _ => unreachable!(),
+        let fixture = Fixture::new(match (cli, kind) {
+            (false, CommandKind::TrustGrant) => "native-pended-grant",
+            (false, _) => "native-pended-revoke",
+            (true, CommandKind::TrustGrant) => "cli-pended-grant",
+            (true, _) => "cli-pended-revoke",
         });
         fixture.pend();
-        let outcome = fixture.rule(kind, Actor::TEST_PRINCIPAL, true);
+        let documents = fixture.pended_documents();
+        assert_eq!(
+            crate::trust_command::documents_digest(&documents),
+            fixture.digest,
+            "the pend records the exact text its digest names"
+        );
+        assert_eq!(
+            documents.tracked.as_deref(),
+            Some("# native trust fixture\n")
+        );
+        replace_policy(
+            &fixture.root.join(wire::TRACKED_POLICY_FILE),
+            "# the producer moved on\n",
+        );
+        let outcome = if cli {
+            trust_rule(
+                &fixture.bus,
+                &fixture.repository,
+                fixture.epoch,
+                &fixture.cli_command(kind, TrustState::Pended),
+                &fixture.reference(),
+            )
+        } else {
+            fixture.rule(kind, Actor::TEST_PRINCIPAL, true)
+        };
         assert!(matches!(outcome, Outcome::Reply(_)), "{outcome:?}");
         assert_eq!(
             fixture
@@ -94,21 +121,73 @@ fn native_decisions_accept_both_pended_transitions_without_changing_cli_revoke_s
         );
         fixture.finish();
     }
+}
 
-    let fixture = Fixture::new("cli-pended-revoke-refused");
+#[test]
+fn a_pended_digest_shows_its_recorded_text_against_the_latest_other_grant() {
+    use wire::intent::{TrustDiffLine, TrustShowAnswer};
+
+    let show = |fixture: &Fixture, digest: &wire::Digest| -> TrustShowAnswer {
+        match super::trust_show::read(
+            &fixture.bus,
+            &TrustRef {
+                digest: digest.clone(),
+                worktree: None,
+            },
+        ) {
+            Outcome::Reply(reply) => match reply.body {
+                wire::intent::CommandAnswer::TrustShow(answer) => *answer,
+                body => panic!("unexpected answer {body:?}"),
+            },
+            outcome => panic!("trust show failed: {outcome:?}"),
+        }
+    };
+    let fixture = Fixture::new("trust-show");
     fixture.pend();
-    let command = fixture.cli_command(CommandKind::TrustRevoke, TrustState::Pended);
-    let refused = trust_rule(
+    let first = show(&fixture, &fixture.digest);
+    assert_eq!(first.baseline, None);
+    let documents = first.documents.expect("the pend recorded its documents");
+    assert_eq!(
+        documents[0].lines,
+        [TrustDiffLine::Added {
+            text: "# native trust fixture".to_owned()
+        }],
+        "with nothing else granted the full text reads as added"
+    );
+    let granted = trust_rule(
         &fixture.bus,
         &fixture.repository,
         fixture.epoch,
-        &command,
+        &fixture.cli_command(CommandKind::TrustGrant, TrustState::Pended),
         &fixture.reference(),
     );
-    assert!(matches!(
-        refused,
-        Outcome::Refusal(ref refusal) if refusal.reason() == "trust::standing-moved"
-    ));
+    assert!(matches!(granted, Outcome::Reply(_)), "{granted:?}");
+
+    replace_policy(
+        &fixture.root.join(wire::TRACKED_POLICY_FILE),
+        "# native trust fixture\n[gate]\n",
+    );
+    let changed = crate::trust_command::Surface::load(&fixture.repository)
+        .expect("changed surface loads")
+        .digest()
+        .clone();
+    fixture.pend_digest(&changed);
+    let second = show(&fixture, &changed);
+    assert_eq!(second.standing, TrustState::Pended);
+    let baseline = second.baseline.expect("the earlier grant is the baseline");
+    assert_eq!(baseline.digest, fixture.digest);
+    assert!(baseline.recorded);
+    assert_eq!(
+        second.documents.expect("the pend recorded its documents")[0].lines,
+        [
+            TrustDiffLine::Kept {
+                text: "# native trust fixture".to_owned()
+            },
+            TrustDiffLine::Added {
+                text: "[gate]".to_owned()
+            },
+        ]
+    );
     fixture.finish();
 }
 
@@ -301,9 +380,13 @@ impl Fixture {
     }
 
     fn pend(&self) {
+        self.pend_digest(&self.digest);
+    }
+
+    fn pend_digest(&self, digest: &wire::Digest) {
         let worktree = self.root.to_str().expect("fixture path is UTF-8");
         let reference = TrustRef {
-            digest: self.digest.clone(),
+            digest: digest.clone(),
             worktree: Some(worktree.to_owned()),
         };
         let command = admitted_command(
@@ -311,7 +394,7 @@ impl Fixture {
             self.epoch,
             Actor::TEST_PRINCIPAL,
             vec![Witness::Trust {
-                digest: self.digest.clone(),
+                digest: digest.clone(),
                 standing: TrustState::Pended,
             }],
             reference.clone(),
@@ -325,6 +408,33 @@ impl Fixture {
             &reference,
         );
         assert!(matches!(outcome, Outcome::Reply(_)), "{outcome:?}");
+    }
+
+    fn pended_documents(&self) -> wire::body::TrustDocuments {
+        let snapshot = self
+            .bus
+            .transact(|journal| {
+                bus::JournalTransaction::settled(journal.fact_snapshot().expect("journal snapshot"))
+            })
+            .expect("facts read");
+        let pends = snapshot
+            .facts()
+            .iter()
+            .filter(|fact| fact.fact.kind() == wire::FactKind::TrustPended)
+            .map(|envelope| {
+                let bytes = wire::encode(&envelope.fact).expect("trust fact encodes");
+                wire::decode::<wire::Fact<wire::body::TrustPended>>(&bytes)
+                    .expect("trust fact decodes")
+                    .body
+            })
+            .collect::<Vec<_>>();
+        let [pended] = pends.as_slice() else {
+            panic!("one pend, found {}", pends.len());
+        };
+        pended
+            .documents
+            .clone()
+            .expect("the pend records its documents")
     }
 
     fn finish(self) {

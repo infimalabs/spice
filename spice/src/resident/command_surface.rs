@@ -16,7 +16,7 @@ use super::{
     CommandDispatch, CommandEffects, RuntimePaths, SurfaceConfig, consent_surface,
     current_residency, dispatch_proof_recognize, dispatch_up_change, lane_recovery, lane_surface,
     lifecycle, message_surface, policy_surface, principal_surface, rack_surface,
-    read_materializations::CurrentReads, settings_surface, steering, vendor_surface,
+    read_materializations::CurrentReads, settings_surface, steering, trust_show, vendor_surface,
 };
 
 /// Invite a partner, notify the lane the invitation reached, then settle the
@@ -676,6 +676,9 @@ impl<'a> Surface<'a> {
                     command,
                     reference,
                 ))
+            }
+            (CommandKind::TrustShow, Intent::TrustRef(reference)) => {
+                Some(trust_show::read(self.bus, reference))
             }
             (CommandKind::PrincipalDirectoryRead, Intent::PrincipalDirectoryRead(_)) => {
                 Some(principal_surface::directory(self.bus, command.actor()))

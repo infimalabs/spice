@@ -82,6 +82,7 @@ pub(super) async fn dispatch_client_action(
                     ClientAction::Job { .. }
                         | ClientAction::Jobs { .. }
                         | ClientAction::Rack { .. }
+                        | ClientAction::TrustShow { .. }
                 ) {
                     drop(lease.commit());
                 } else {
@@ -94,29 +95,30 @@ pub(super) async fn dispatch_client_action(
                 Ok(())
             }
             Err(error) => {
-                match lease.action() {
-                    ClientAction::Job { respond, .. } => {
-                        respond(Err(error.clone()));
-                        drop(lease.commit());
-                    }
-                    ClientAction::Jobs { respond } => {
-                        respond(Err(error.clone()));
-                        drop(lease.commit());
-                    }
-                    ClientAction::Rack { respond, .. } => {
-                        respond(Err(error.clone()));
-                        drop(lease.commit());
-                    }
-                    ClientAction::ComposeMessage { respond, .. } => {
-                        respond(Err(error.clone()));
-                        drop(lease.commit());
-                    }
-                    _ => lease.restore(),
+                if answer_failed_send(lease.action(), &error) {
+                    drop(lease.commit());
+                } else {
+                    lease.restore();
                 }
                 Err(error)
             }
         }
     }
+}
+
+/// Answer an action whose caller awaits its own reply with the send failure;
+/// false leaves the action for a retry.
+fn answer_failed_send(action: &ClientAction, error: &str) -> bool {
+    let error = error.to_owned();
+    match action {
+        ClientAction::Job { respond, .. } => respond(Err(error)),
+        ClientAction::Jobs { respond } => respond(Err(error)),
+        ClientAction::Rack { respond, .. } => respond(Err(error)),
+        ClientAction::TrustShow { respond, .. } => respond(Err(error)),
+        ClientAction::ComposeMessage { respond, .. } => respond(Err(error)),
+        _ => return false,
+    }
+    true
 }
 
 async fn dispatch_trust_decision(

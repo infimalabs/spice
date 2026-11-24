@@ -351,6 +351,11 @@
   white-space: nowrap;
 }
 .work-blocker-issue { color: var(--danger) !important; }
+.trust-diff, .trust-diff-document { min-width: 0; margin: 6px 0 0; font-size: var(--app-type-label); }
+.trust-diff-document :is(figcaption, [data-change="elided"]) { color: var(--muted); }
+.trust-diff-document pre { display: grid; margin: 3px 0 0; max-height: 22rem; overflow: auto; padding: 6px 8px; border-radius: var(--app-radius-control); background: var(--page); font-size: var(--app-type-state); line-height: 1.45; }
+.trust-diff-document [data-change="added"] { color: var(--accent); background: var(--accent-soft); }
+.trust-diff-document [data-change="removed"] { color: var(--danger); }
 
 /* A relationship clause's ids wear their kind's color. */
 .work-relation-link[data-kind="design"] { color: var(--work-id-design); }

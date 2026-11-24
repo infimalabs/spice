@@ -78,6 +78,7 @@ fn append_granted_trust(
                 digest: digest.clone(),
                 worktree: worktree.clone(),
                 previous: None,
+                documents: None,
             },
             journal::FactCause::Root,
         )

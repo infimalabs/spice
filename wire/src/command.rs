@@ -149,8 +149,12 @@ pub enum CommandKind {
     TrustPend,
     /// Approve the exact executable digest.
     TrustGrant,
-    /// Withdraw approval from the exact executable digest.
+    /// Reject the exact pended digest or withdraw approval from the exact
+    /// granted digest.
     TrustRevoke,
+    /// Read one digest's recorded configuration against the most recently
+    /// granted one.
+    TrustShow,
 
     /// Read every principal's display identity and this principal's roles.
     PrincipalDirectoryRead,

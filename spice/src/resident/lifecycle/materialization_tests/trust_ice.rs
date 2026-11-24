@@ -337,7 +337,7 @@ fn a_turn_end_drops_a_park_its_worktree_no_longer_needs() {
 }
 
 #[test]
-fn a_turn_end_replaces_its_worktrees_older_park_but_never_another_worktrees() {
+fn a_turn_end_moves_its_task_request_whichever_worktree_pended_the_digest() {
     let (older, newer) = (digest(), other_digest());
     let (bus, _) = policy_fixture(true, false);
     committed(
@@ -360,18 +360,28 @@ fn a_turn_end_replaces_its_worktrees_older_park_but_never_another_worktrees() {
             .expect("foreign pend commits"),
     );
     committed(
-        bus.commit(iced_claim_write(&bus, &older, instant(3)))
-            .expect("foreign-parked claim commits"),
+        bus.commit(held_claim_write(&bus, instant(3), |_, _| {}))
+            .expect("claim commits"),
     );
-    assert!(reconcile(&bus, PRODUCER, Some(&newer)).is_none());
-    assert!(reconcile(&bus, PRODUCER, None).is_none());
-    assert_eq!(required(&bus), Some(older));
+    assert!(
+        reconcile(&bus, PRODUCER, Some(&older)).is_some(),
+        "a digest another worktree pended still parks this task"
+    );
+    assert_eq!(required(&bus), Some(older.clone()));
+    assert_eq!(pended_count(&bus), 1, "the shared digest is pended once");
     assert_eq!(
-        trust(&bus, &newer),
-        None,
-        "nothing is pended while another worktree's park stands"
+        trust(&bus, &older),
+        Some((wire::TrustState::Pended, Some("/other/worktree".to_owned()))),
+        "the first producer stays provenance"
     );
-    bus.verify().expect("the foreign park verifies");
+    assert!(reconcile(&bus, PRODUCER, Some(&newer)).is_some());
+    assert_eq!(required(&bus), Some(newer.clone()));
+    assert!(
+        reconcile(&bus, PRODUCER, None).is_some(),
+        "a request the worktree no longer needs expires"
+    );
+    assert_eq!(required(&bus), None);
+    bus.verify().expect("the moved request verifies");
     bus.shutdown().expect("foreign fixture stops");
 }
 
@@ -627,6 +637,7 @@ fn pend_write(digest: &wire::Digest, worktree: &str, at: Instant) -> JournalWrit
                 digest: digest.clone(),
                 worktree: Some(worktree.to_owned()),
                 previous: None,
+                documents: None,
             },
             FactCause::Root,
         )
@@ -897,6 +908,7 @@ fn grant_write(digest: &wire::Digest) -> JournalWrite {
                 digest: digest.clone(),
                 worktree: Some("/producer/worktree".to_owned()),
                 previous: None,
+                documents: None,
             },
             FactCause::Root,
         )

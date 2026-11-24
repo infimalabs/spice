@@ -725,7 +725,7 @@ fn render_row(rows: &Rows<'_, '_, '_>, index: usize) -> Html {
                     onkeydown={task_detail::task_text_chip_keydown(rows.focus_task)}
                 >
                     if let Some(wait) = wait {
-                        {super::work_blockers::render_operator_act(render.work, wait, render.runtime, &render.decide_trust)}
+                        {super::work_blockers::render_operator_act(render.work, wait, render.runtime, &render.decide_trust, render.sender)}
                     }
                     {super::work_detail::render_task(
                         render,

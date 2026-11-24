@@ -11,11 +11,22 @@ pub(super) fn render_operator_act(
     wait: &OperatorWait<'_>,
     runtime: Option<&AppRuntime>,
     decide: &Callback<task_detail::TrustDecisionRequest>,
+    sender: &SenderHandle,
 ) -> Html {
     let can_decide = runtime.is_some_and(|runtime| {
         runtime.offers(wire::CommandKind::TrustGrant)
             && runtime.offers(wire::CommandKind::TrustRevoke)
     });
+    let trust = TrustControls {
+        runtime,
+        can_decide,
+        can_show: runtime.is_some_and(|runtime| runtime.offers(wire::CommandKind::TrustShow)),
+        decide,
+        show: {
+            let sender = sender.clone();
+            Callback::from(move |action| admit_action(&sender, action))
+        },
+    };
     let board = runtime.and_then(AppRuntime::board);
     let tasks = work.tasks();
     let statement = &tasks[wait.task()].row().statement.body;
@@ -40,7 +51,7 @@ pub(super) fn render_operator_act(
         <section class="work-act" aria-label="Waiting on you">
             <div class="work-blocker-list">
                 {for requirements.into_iter().flatten()
-                    .map(|requirement| render_requirement(statement, requirement, runtime, can_decide, decide))}
+                    .map(|requirement| render_requirement(statement, requirement, &trust))}
                 {for missing_resources.into_iter().flatten()
                     .map(|(name, shards)| render_resource_requirement(name, shards))}
                 if let Some(wall) = wait.wall() {
@@ -121,16 +132,23 @@ fn render_wall(wall: DependencyWall<'_>) -> Html {
     }
 }
 
+/// What a trust blocker needs to read its differential and rule on it.
+struct TrustControls<'a> {
+    runtime: Option<&'a AppRuntime>,
+    can_decide: bool,
+    can_show: bool,
+    decide: &'a Callback<task_detail::TrustDecisionRequest>,
+    show: Callback<ClientAction, bool>,
+}
+
 fn render_requirement(
     statement: &wire::intent::BoardStatement,
     requirement: &wire::EnvironmentRequirement,
-    runtime: Option<&AppRuntime>,
-    can_decide: bool,
-    decide: &Callback<task_detail::TrustDecisionRequest>,
+    trust: &TrustControls<'_>,
 ) -> Html {
     match requirement {
         wire::EnvironmentRequirement::TrustGrant { value } => {
-            render_trust_requirement(statement, value, runtime, can_decide, decide)
+            render_trust_requirement(statement, value, trust)
         }
         wire::EnvironmentRequirement::JournalSchema { value } => html! {
             <section class="work-blocker-card" data-blocker-kind="journal-schema">
@@ -171,12 +189,18 @@ fn render_resource_requirement(name: &wire::ResourcePoolName, shards: u32) -> Ht
 fn render_trust_requirement(
     statement: &wire::intent::BoardStatement,
     digest: &wire::Digest,
-    runtime: Option<&AppRuntime>,
-    can_decide: bool,
-    decide: &Callback<task_detail::TrustDecisionRequest>,
+    controls: &TrustControls<'_>,
 ) -> Html {
     use crate::client_action::TrustDecision;
 
+    let TrustControls {
+        runtime,
+        can_decide,
+        can_show,
+        decide,
+        show,
+    } = controls;
+    let (can_decide, decide) = (*can_decide, *decide);
     let action_state = runtime.and_then(|runtime| runtime.blocker_action(digest));
     let trust = runtime
         .and_then(AppRuntime::board)
@@ -189,7 +213,7 @@ fn render_trust_requirement(
         ),
         Some(head) if head.state == wire::TrustState::Pended => (
             true,
-            "Review this exact executable configuration and choose whether it may run. Its producing worktree is revalidated when the decision lands.".to_owned(),
+            "Review this exact executable configuration and choose whether it may run. The decision rules on the recorded configuration, whatever any worktree holds now.".to_owned(),
             "",
         ),
         Some(head) if head.state == wire::TrustState::Revoked => (
@@ -236,6 +260,9 @@ fn render_trust_requirement(
                 <strong>{"Executable trust decision required"}</strong>
                 <p>{explanation}</p>
                 <code title={digest.to_string()}>{digest.to_string()}</code>
+                if trust.is_some() && *can_show {
+                    <TrustDiff digest={digest.clone()} on_action={show.clone()} />
+                }
                 if let Some(BlockerActionState::Failed(_, issue)) = action_state {
                     <p class="work-blocker-issue" role="alert">{issue.clone()}</p>
                 }
@@ -263,4 +290,103 @@ fn render_trust_requirement(
             }
         </section>
     }
+}
+
+#[derive(Properties, PartialEq)]
+struct TrustDiffProps {
+    digest: wire::Digest,
+    on_action: Callback<ClientAction, bool>,
+}
+
+/// The recorded configuration for one digest against the latest other grant,
+/// read once per digest the card shows.
+#[function_component(TrustDiff)]
+fn trust_diff(props: &TrustDiffProps) -> Html {
+    let answer = use_state(|| None::<Result<wire::intent::TrustShowAnswer, String>>);
+    {
+        let answer = answer.clone();
+        let on_action = props.on_action.clone();
+        use_effect_with(props.digest.clone(), move |digest| {
+            answer.set(None);
+            let respond = {
+                let answer = answer.clone();
+                Rc::new(move |result| answer.set(Some(result)))
+            };
+            if !on_action.emit(ClientAction::TrustShow {
+                digest: digest.clone(),
+                respond,
+            }) {
+                answer.set(Some(Err(
+                    "The configuration diff could not be requested.".to_owned()
+                )));
+            }
+        });
+    }
+    let answer = match answer.as_ref() {
+        None => return html! { <p class="trust-diff-status">{"Loading configuration…"}</p> },
+        Some(Err(issue)) => {
+            return html! { <p class="work-blocker-issue" role="alert">{issue.clone()}</p> };
+        }
+        Some(Ok(answer)) => answer,
+    };
+    let basis = match &answer.baseline {
+        Some(baseline) if baseline.recorded => {
+            format!(
+                "Changes against approved {}",
+                short_digest(&baseline.digest)
+            )
+        }
+        Some(baseline) => format!(
+            "Full text; approved {} recorded no text to compare",
+            short_digest(&baseline.digest)
+        ),
+        None => "Full text; no other configuration is approved".to_owned(),
+    };
+    html! {
+        <div class="trust-diff" aria-label="Configuration changes">
+            <p class="trust-diff-status">{basis}</p>
+            if let Some(documents) = &answer.documents {
+                {for documents.iter().map(render_trust_document)}
+            } else {
+                <p class="trust-diff-status">{"This request recorded no configuration text."}</p>
+            }
+        </div>
+    }
+}
+
+fn render_trust_document(document: &wire::intent::TrustDocumentDiff) -> Html {
+    use wire::intent::TrustDiffLine;
+
+    html! {
+        <figure class="trust-diff-document">
+            <figcaption>
+                {document.source.as_str()}
+                if !document.present {
+                    {" (absent)"}
+                }
+            </figcaption>
+            if !document.lines.is_empty() {
+                <pre>
+                    {for document.lines.iter().map(|line| match line {
+                        TrustDiffLine::Kept { text } => html! {
+                            <span data-change="kept">{format!(" {text}")}</span>
+                        },
+                        TrustDiffLine::Added { text } => html! {
+                            <span data-change="added">{format!("+{text}")}</span>
+                        },
+                        TrustDiffLine::Removed { text } => html! {
+                            <span data-change="removed">{format!("-{text}")}</span>
+                        },
+                        TrustDiffLine::Elided { count } => html! {
+                            <span data-change="elided">{format!("⋯ {count} unchanged")}</span>
+                        },
+                    })}
+                </pre>
+            }
+        </figure>
+    }
+}
+
+fn short_digest(digest: &wire::Digest) -> String {
+    digest.to_string().chars().take(19).collect()
 }

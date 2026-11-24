@@ -617,11 +617,10 @@ fn pend_refuses_unresolved_nonroot_and_foreign_worktrees_without_writes() {
 }
 
 #[test]
-fn grant_and_revoke_generation_movement_preserve_facts_heads_and_receipts() {
+fn grant_and_revoke_commit_whatever_the_producing_worktree_holds() {
     let (root, paths) = resident_fixture("trust-ruling-generation");
     let tracked = root.join(wire::TRACKED_POLICY_FILE);
-    let bytes = "# stable ruling policy\n";
-    fs::write(&tracked, bytes).expect("write tracked policy");
+    fs::write(&tracked, "# stable ruling policy\n").expect("write tracked policy");
     let repository = Repository::discover(&root).expect("fixture repository resolves");
     let surface = crate::trust_command::Surface::load(&repository).expect("trust surface loads");
     let digest = surface.digest().clone();
@@ -644,33 +643,22 @@ fn grant_and_revoke_generation_movement_preserve_facts_heads_and_receipts() {
         digest: digest.clone(),
         worktree: None,
     };
-    let before_grant = durable_trust_state(&bus, &paths.journal, &digest);
-    let head_before_grant = before_grant.1.clone();
-    let refused = trust_rule_with(&bus, &repository, ruling_epoch, &grant, &reference, || {
-        replace_policy(&tracked, bytes)
+    let head_before_grant = bus
+        .trust_head(&digest)
+        .expect("pended head reads")
+        .expect("pended head exists");
+    let granted = trust_rule_with(&bus, &repository, ruling_epoch, &grant, &reference, || {
+        replace_policy(&tracked, "# the producer moved on\n")
     });
-    assert_trust_refusal(
-        &refused,
-        "trust::surface-moved",
-        Some(root.to_str().expect("worktree is UTF-8")),
-        &["trust", "pend"],
-    );
-    assert_durable_trust_state(&bus, &paths.journal, &digest, before_grant);
-
-    let current = crate::trust_command::Surface::load(&repository).expect("current surface loads");
-    assert_eq!(current.digest(), &digest);
-    let granted = trust_rule(&bus, &repository, ruling_epoch, &grant, &reference);
-    assert!(matches!(granted, Outcome::Reply(_)));
+    assert!(matches!(granted, Outcome::Reply(_)), "{granted:?}");
     let head_after_grant = bus
         .trust_head(&digest)
         .expect("granted head reads")
         .expect("granted head exists");
+    assert_eq!(head_after_grant.body().state, TrustState::Granted);
     assert_same_origin_cause(
         &durable_trust_state(&bus, &paths.journal, &digest).0,
-        head_before_grant
-            .as_ref()
-            .expect("pended head exists")
-            .position(),
+        head_before_grant.position(),
         head_after_grant.position(),
     );
 
@@ -681,17 +669,19 @@ fn grant_and_revoke_generation_movement_preserve_facts_heads_and_receipts() {
         ruling_epoch,
         test_uuid(22),
     );
-    let before_revoke = durable_trust_state(&bus, &paths.journal, &digest);
-    let refused = trust_rule_with(&bus, &repository, ruling_epoch, &revoke, &reference, || {
+    fs::remove_file(&tracked).expect("the producer drops its tracked policy");
+    let revoked = trust_rule_with(&bus, &repository, ruling_epoch, &revoke, &reference, || {
         publish_local_policy(&root, "# newly published local policy\n")
     });
-    assert_trust_refusal(
-        &refused,
-        "trust::surface-moved",
-        Some(root.to_str().expect("worktree is UTF-8")),
-        &["trust", "pend"],
+    assert!(matches!(revoked, Outcome::Reply(_)), "{revoked:?}");
+    assert_eq!(
+        bus.trust_head(&digest)
+            .expect("revoked head reads")
+            .expect("revoked head exists")
+            .body()
+            .state,
+        TrustState::Revoked
     );
-    assert_durable_trust_state(&bus, &paths.journal, &digest, before_revoke);
     bus.verify().expect("ruling authority verifies");
     bus.shutdown().expect("fixture bus stops");
     fs::remove_dir_all(root).expect("fixture cleanup");
@@ -725,7 +715,6 @@ fn trust_commit_races_retain_competing_authority_and_actionable_diagnostics() {
         worktree,
     };
     assert_duplicate_pend_race(&scenario);
-    assert_worktree_head_race(&scenario);
     assert_standing_race(&scenario);
     assert_epoch_race(&scenario, &current);
 
@@ -775,49 +764,6 @@ fn assert_duplicate_pend_race(scenario: &TrustScenario<'_>) {
         scenario.journal,
         scenario.digest,
         raced.into_inner().expect("duplicate race state captured"),
-    );
-}
-
-fn assert_worktree_head_race(scenario: &TrustScenario<'_>) {
-    let grant = admitted_trust_command(
-        CommandKind::TrustGrant,
-        scenario.digest.clone(),
-        TrustState::Pended,
-        scenario.epoch,
-        test_uuid(62),
-    );
-    let raced = RefCell::new(None);
-    let refused = trust_rule_with(
-        scenario.bus,
-        scenario.repository,
-        scenario.epoch,
-        &grant,
-        &scenario.ruling_reference(),
-        || {
-            commit_competing_pend(
-                scenario.bus,
-                scenario.epoch,
-                scenario.digest,
-                "/replacement-producing-worktree",
-            );
-            raced.replace(Some(durable_trust_state(
-                scenario.bus,
-                scenario.journal,
-                scenario.digest,
-            )));
-        },
-    );
-    assert_trust_refusal(
-        &refused,
-        "trust::worktree-moved",
-        Some(scenario.worktree),
-        &["trust"],
-    );
-    assert_durable_trust_state(
-        scenario.bus,
-        scenario.journal,
-        scenario.digest,
-        raced.into_inner().expect("worktree race state captured"),
     );
 }
 
@@ -1002,6 +948,7 @@ fn commit_competing_pend(bus: &Bus, epoch: CanonicalUuid, digest: &wire::Digest,
                 digest: digest.clone(),
                 worktree: Some(worktree.to_owned()),
                 previous: None,
+                documents: None,
             },
             journal::FactCause::Root,
         )

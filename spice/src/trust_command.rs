@@ -74,6 +74,14 @@ impl Surface {
         &self.digest
     }
 
+    /// The exact documents the digest frames, as a pend records them.
+    pub(crate) fn documents(&self) -> wire::body::TrustDocuments {
+        wire::body::TrustDocuments {
+            tracked: self.tracked.text.clone(),
+            local: self.local.text.clone(),
+        }
+    }
+
     /// Reacquire the named paths and require the exact captured generation.
     pub(crate) fn is_current(&self, repository: &Repository) -> Result<bool, LoadError> {
         Self::load(repository).map(|current| current == *self)
@@ -103,6 +111,11 @@ fn surface_digest(tracked: Option<&str>, local: Option<&str>) -> Digest {
     Digest::compute(Domain::ConfigExecutableSurface, &framed)
 }
 
+/// The digest recorded documents frame, which names their trust identity.
+pub(crate) fn documents_digest(documents: &wire::body::TrustDocuments) -> Digest {
+    surface_digest(documents.tracked.as_deref(), documents.local.as_deref())
+}
+
 fn frame_document(framed: &mut Vec<u8>, source: ConfigSource, text: Option<&str>) {
     framed.extend_from_slice(source.as_str().as_bytes());
     framed.push(0);
@@ -118,6 +131,7 @@ fn frame_document(framed: &mut Vec<u8>, source: ConfigSource, text: Option<&str>
 }
 
 /// Bare `spice trust` answer: the current surface's standing and provenance,
+/// the recorded configuration as a differential while it is not granted,
 /// ruling counts, then a bounded page of rulings, the current digest and
 /// pending decisions first.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -126,6 +140,8 @@ pub(crate) struct TrustReport {
     digest: Digest,
     standing: TrustState,
     provenance: Vec<PolicyProvenance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    differential: Option<wire::intent::TrustShowAnswer>,
     counts: RulingCounts,
     rulings: Bounded<TrustRuling>,
 }
@@ -174,6 +190,9 @@ impl std::fmt::Display for TrustReport {
                     .map_or_else(|| "absent".to_owned(), ToString::to_string)
             )?;
         }
+        if let Some(differential) = &self.differential {
+            write_differential(formatter, differential)?;
+        }
         write!(
             formatter,
             "\nrulings pended={} granted={} revoked={}",
@@ -193,6 +212,49 @@ impl std::fmt::Display for TrustReport {
             None => Ok(()),
         }
     }
+}
+
+/// The recorded documents against the baseline they would replace, one
+/// `+`, `-`, or ` ` marked line each, with elided unchanged runs counted.
+fn write_differential(
+    formatter: &mut std::fmt::Formatter<'_>,
+    differential: &wire::intent::TrustShowAnswer,
+) -> std::fmt::Result {
+    use wire::intent::TrustDiffLine;
+
+    match &differential.baseline {
+        Some(baseline) if baseline.recorded => {
+            write!(formatter, "\ndiff against granted {}", baseline.digest)?;
+        }
+        Some(baseline) => write!(
+            formatter,
+            "\nfull text; granted {} recorded no text to compare",
+            baseline.digest
+        )?,
+        None => write!(formatter, "\nfull text; no other digest is granted")?,
+    }
+    let Some(documents) = &differential.documents else {
+        return write!(formatter, "\nthis digest's pend recorded no document text");
+    };
+    for document in documents {
+        write!(
+            formatter,
+            "\n--- {}{}",
+            document.source.as_str(),
+            if document.present { "" } else { " absent" }
+        )?;
+        for line in &document.lines {
+            match line {
+                TrustDiffLine::Kept { text } => write!(formatter, "\n {text}")?,
+                TrustDiffLine::Added { text } => write!(formatter, "\n+{text}")?,
+                TrustDiffLine::Removed { text } => write!(formatter, "\n-{text}")?,
+                TrustDiffLine::Elided { count } => {
+                    write!(formatter, "\n@@ {count} unchanged")?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Authenticate through the current resident and render its durable trust heads.
@@ -266,32 +328,18 @@ pub(crate) fn report(
             "retry against the current tracked and local policy documents",
         );
     }
-    let mut counts = RulingCounts::default();
-    let mut rulings = board
-        .trust
-        .into_iter()
-        .map(|head| {
-            *match head.body.state {
-                TrustState::Pended => &mut counts.pended,
-                TrustState::Granted => &mut counts.granted,
-                TrustState::Revoked => &mut counts.revoked,
-            } += 1;
-            TrustRuling {
-                current: head.body.digest == *surface.digest(),
-                digest: head.body.digest,
-                standing: head.body.state,
-            }
-        })
-        .collect::<Vec<_>>();
-    // The current digest, then decisions awaiting the operator, then the
-    // standing grants and revocations; a digest breaks every tie.
-    rulings.sort_by(|left, right| {
-        right
-            .current
-            .cmp(&left.current)
-            .then(left.standing.cmp(&right.standing))
-            .then_with(|| left.digest.cmp(&right.digest))
-    });
+    let differential = if standing == TrustState::Granted {
+        None
+    } else {
+        match show(host, contract, surface.digest()) {
+            Ok(differential) => Some(differential),
+            Err(outcome) => return outcome,
+        }
+    };
+    let (counts, rulings) = ordered_rulings(
+        board.trust.into_iter().map(|head| head.body),
+        surface.digest(),
+    );
     let rulings = match page.listed(
         rulings,
         |ruling| ruling.digest.to_string(),
@@ -307,10 +355,73 @@ pub(crate) fn report(
             digest: surface.digest().clone(),
             standing,
             provenance: surface.provenance(),
+            differential,
             counts,
             rulings,
         },
     })
+}
+
+/// Count every ruling by standing and order them: the current digest, then
+/// decisions awaiting the operator, then the standing grants and revocations;
+/// a digest breaks every tie.
+fn ordered_rulings(
+    heads: impl Iterator<Item = wire::TrustHead>,
+    current: &Digest,
+) -> (RulingCounts, Vec<TrustRuling>) {
+    let mut counts = RulingCounts::default();
+    let mut rulings = heads
+        .map(|head| {
+            *match head.state {
+                TrustState::Pended => &mut counts.pended,
+                TrustState::Granted => &mut counts.granted,
+                TrustState::Revoked => &mut counts.revoked,
+            } += 1;
+            TrustRuling {
+                current: head.digest == *current,
+                digest: head.digest,
+                standing: head.state,
+            }
+        })
+        .collect::<Vec<_>>();
+    rulings.sort_by(|left, right| {
+        right
+            .current
+            .cmp(&left.current)
+            .then(left.standing.cmp(&right.standing))
+            .then_with(|| left.digest.cmp(&right.digest))
+    });
+    (counts, rulings)
+}
+
+/// Read one digest's recorded documents against the latest other grant.
+fn show<B>(
+    host: crate::command_client::Host<'_>,
+    contract: &Contract,
+    digest: &Digest,
+) -> Result<wire::intent::TrustShowAnswer, Outcome<B>> {
+    match crate::command_client::execute_typed(
+        host,
+        contract,
+        wire::CommandKind::TrustShow,
+        Vec::new(),
+        &wire::intent::TrustRef {
+            digest: digest.clone(),
+            worktree: None,
+        },
+    ) {
+        Outcome::Reply(Reply {
+            body: CommandAnswer::TrustShow(answer),
+            ..
+        }) => Ok(*answer),
+        Outcome::Reply(reply) => Err(fault(
+            FaultClass::Protocol,
+            "trust::answer-shape",
+            format!("expected a trust show answer, received {:?}", reply.body),
+        )),
+        Outcome::Refusal(refusal) => Err(Outcome::Refusal(refusal)),
+        Outcome::Fault(fault) => Err(Outcome::Fault(fault)),
+    }
 }
 
 /// Pend the exact executable surface currently present in this worktree.
@@ -385,7 +496,34 @@ pub(crate) fn rule(
     let selected = if grant {
         crate::command_client::SelectedCommand::TrustGrant { digest: &digest }
     } else {
-        crate::command_client::SelectedCommand::TrustRevoke { digest: &digest }
+        // Revoke rejects a pended request or withdraws a grant, so it
+        // witnesses whichever standing the digest holds now.
+        let host = crate::command_client::Host {
+            repository: &repository,
+            ambient,
+        };
+        let board = match crate::board_command::current_board(host, wire::intent::BoardRead::Trust)
+        {
+            Ok(board) => board,
+            Err(outcome) => return crate::typed_outcome(outcome),
+        };
+        let Some(standing) = board
+            .trust
+            .iter()
+            .find(|head| head.body.digest == digest)
+            .map(|head| head.body.state)
+        else {
+            return refusal(
+                "trust::digest-unknown",
+                Some(digest.to_string()),
+                None,
+                "copy the exact digest from spice trust output",
+            );
+        };
+        crate::command_client::SelectedCommand::TrustRevoke {
+            digest: &digest,
+            standing,
+        }
     };
     trust_answer(crate::command_client::execute(
         state.serve(),

@@ -62,6 +62,7 @@ impl AnswerShape {
             | Self::GlobalSettings
             | Self::VendorCatalog
             | Self::Trust
+            | Self::TrustShow
             | Self::Lane
             | Self::LaneChange
             | Self::LaneRenewal
@@ -108,6 +109,7 @@ impl AnswerShape {
             Self::GlobalSettings => CommandAnswer::GlobalSettings(body.read()?),
             Self::VendorCatalog => CommandAnswer::VendorCatalog(body.read()?),
             Self::Trust => CommandAnswer::Trust(body.read()?),
+            Self::TrustShow => CommandAnswer::TrustShow(Box::new(body.read()?)),
             Self::Lane => CommandAnswer::Lane(Box::new(body.read()?)),
             Self::LaneChange => CommandAnswer::LaneChange(Box::new(body.read()?)),
             Self::LaneRenewal => CommandAnswer::LaneRenewal(Box::new(body.read()?)),
