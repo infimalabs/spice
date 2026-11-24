@@ -555,16 +555,19 @@ fn bounded_current_head_pages_resume_with_exact_work_and_witnesses() {
     let journal = authority_fixture();
     let db = &journal.connection;
     crate::guard::verify_task_page_plan(db).expect("current-head plans stay engine-bounded");
+    let (first_digest, second_digest) = (digest("a"), digest("b"));
     let mut second = task_head();
     second.born = "1kKRRsDQx".parse().expect("second task stamp");
     second.title = "Second journal task".to_owned();
     second.topic = "/journal/other".parse().expect("fixture topic");
+    second.requirements = wire::EnvironmentRequirements::one(
+        wire::EnvironmentRequirement::trust_grant(second_digest.clone()),
+    );
     insert_task_head(db, "1kKRRsDQx", seq(1), &second);
     let workflow = workflow_head();
     insert_head(db, "workflow_heads", "stamp", "1kKRRsDQx", 2, &workflow);
     let completion = wire::CompletionHead::opened(seq(2));
     insert_head(db, "completion_heads", "stamp", "1kKRRsDQx", 2, &completion);
-    let (first_digest, second_digest) = (digest("a"), digest("b"));
     let second_trust = TrustHead {
         digest: second_digest.clone(),
         state: TrustState::Granted,
@@ -572,6 +575,13 @@ fn bounded_current_head_pages_resume_with_exact_work_and_witnesses() {
     };
     let trust_key = second_digest.as_str();
     insert_head(db, "trust_heads", "digest", trust_key, 2, &second_trust);
+    for digest in [&first_digest, &second_digest] {
+        db.execute(
+            "INSERT INTO active_trust_digests(digest, requirements) VALUES (?1, 1)",
+            [digest.as_str()],
+        )
+        .expect("project active trust fixture");
+    }
     let bytes = |sql| {
         let value = db
             .query_row(sql, [], |row| row.get::<_, i64>(0))
@@ -633,7 +643,7 @@ fn bounded_current_head_pages_resume_with_exact_work_and_witnesses() {
 }
 
 #[test]
-fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
+fn trust_report_pages_only_live_requests_and_stays_exact_when_ruled() {
     let journal = authority_fixture();
     let db = &journal.connection;
     // The fixture already pends `a`.
@@ -658,8 +668,15 @@ fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
         );
     };
     rule("0", TrustState::Granted);
-    for nibble in ["b", "c", "d"] {
+    for nibble in ["b", "c", "d", "e"] {
         rule(nibble, TrustState::Pended);
+    }
+    for nibble in ["a", "b", "c", "d"] {
+        db.execute(
+            "INSERT INTO active_trust_digests(digest, requirements) VALUES (?1, 1)",
+            [digest(nibble).as_str()],
+        )
+        .expect("project one live trust requirement");
     }
     let budget = FactReadBudget::new(1, 1 << 20).expect("one-ruling report pages");
     let mut shown = Vec::new();
@@ -681,9 +698,9 @@ fn trust_report_continuations_stay_exact_when_each_boundary_is_ruled() {
         }
         after = Some(last.digest.clone());
     }
-    assert_eq!(shown, ["0", "a", "b", "c", "d"].map(digest));
+    assert_eq!(shown, ["a", "b", "c", "d"].map(digest));
     let unknown = journal
-        .read(|read| read.trust_report_head_page(Some(&digest("e")), budget))
+        .read(|read| read.trust_report_head_page(Some(&digest("f")), budget))
         .expect("an unknown cursor is a readable answer");
     assert_eq!(unknown, None, "a cursor that names no ruling reads no page");
 }
@@ -730,7 +747,7 @@ fn task_bundle_read_names_every_incomplete_or_malformed_head_class() {
     );
     assert_error(&loose, false, "task 1kKRRsDQx has loose claim head(s)");
     let mismatch = corrupted(&format!(
-        "INSERT INTO task_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM task_heads WHERE stamp='1kKRRsDPx'; INSERT INTO workflow_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM workflow_heads WHERE stamp='1kKRRsDPx'; INSERT INTO completion_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM completion_heads WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET digest='{B}' WHERE digest='{A}';"
+        "INSERT INTO task_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM task_heads WHERE stamp='1kKRRsDPx'; INSERT INTO workflow_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM workflow_heads WHERE stamp='1kKRRsDPx'; INSERT INTO completion_heads(stamp,head_seq,body) SELECT '1kKRRsDQx',head_seq,body FROM completion_heads WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET digest='{B}' WHERE digest='{A}'; INSERT INTO active_trust_digests(digest,requirements) VALUES ('{B}',1);"
     ));
     assert_error(
         &mismatch,
@@ -743,7 +760,7 @@ fn task_bundle_read_names_every_incomplete_or_malformed_head_class() {
         &format!("trust head indexed as {B} carries body digest {A}"),
     );
     let malformed = corrupted(&format!(
-        "UPDATE workflow_heads SET body=X'00' WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET body=X'00' WHERE digest='{A}';"
+        "UPDATE workflow_heads SET body=X'00' WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET body=X'00' WHERE digest='{A}'; INSERT INTO active_trust_digests(digest,requirements) VALUES ('{A}',1);"
     ));
     assert_error(
         &malformed,
@@ -756,7 +773,7 @@ fn task_bundle_read_names_every_incomplete_or_malformed_head_class() {
         &format!("trust_heads digest \"{A}\" is invalid"),
     );
     let beyond = corrupted(&format!(
-        "UPDATE workflow_heads SET head_seq={third} WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET head_seq={third} WHERE digest='{A}';",
+        "UPDATE workflow_heads SET head_seq={third} WHERE stamp='1kKRRsDPx'; UPDATE trust_heads SET head_seq={third} WHERE digest='{A}'; INSERT INTO active_trust_digests(digest,requirements) VALUES ('{A}',1);",
         third = sql_seq(3),
     ));
     assert_error(

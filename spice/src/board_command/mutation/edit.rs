@@ -52,7 +52,7 @@ pub(in crate::board_command) fn task_edit(
         );
     }
     let (statement, publication) =
-        match prepare_correction(&snapshot, entry, command, edit, repository) {
+        match prepare_correction(bus, &snapshot, entry, command, edit, repository) {
             Ok(prepared) => prepared,
             Err(outcome) => return outcome,
         };
@@ -60,6 +60,7 @@ pub(in crate::board_command) fn task_edit(
 }
 
 fn prepare_correction(
+    bus: &Bus,
     snapshot: &ValidatedSnapshot,
     entry: &Entry,
     command: &wire::AdmittedCommand,
@@ -81,13 +82,34 @@ fn prepare_correction(
     if flow.is_some() {
         admit_edit_authority(snapshot, entry, command, at)?;
     }
+    let mut environment = snapshot.answer.environment();
+    if edit.requirements.is_some() {
+        let required_trust = statement
+            .requirements
+            .as_slice()
+            .iter()
+            .find_map(|requirement| match requirement {
+                wire::EnvironmentRequirement::TrustGrant { value } => Some(value),
+                _ => None,
+            });
+        if let Some(digest) = required_trust
+            && environment.trust_head(digest).is_none()
+        {
+            let observed = bus.trust_head(digest).map_err(|error| {
+                store_fault("task::require-trust-unreadable", error.to_string())
+            })?;
+            if let Some(head) = observed {
+                environment = environment.with_trust_heads([head.body().clone()]);
+            }
+        }
+    }
     let requirement_change = requirements::prepare(
         entry,
         command,
         edit,
         &statement.requirements,
         &statement.resources,
-        &snapshot.answer.environment(),
+        environment,
         at,
     )?;
     let route = flow.map(|flow| {

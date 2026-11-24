@@ -113,10 +113,10 @@ fn reconcile_observed(
     let (need, surface) = observe()?;
     let requirements = &authority.statement.body().requirements;
     let required = trust_requirement(requirements);
-    let Some(change) = decide(required, snapshot.trust(), need.as_ref()) else {
+    let observed = TrustObservations::read(bus, required, need.as_ref())?;
+    let Some(change) = decide(required, observed.need.as_ref(), need.as_ref()) else {
         return Ok(None);
     };
-    let observed = TrustObservations::new(snapshot.trust(), required, need.as_ref());
     let previous = snapshot
         .facts()
         .latest_trust_digest(crate::trust_command::SURFACE_NAME)
@@ -185,16 +185,13 @@ enum Change {
 /// and never decides.
 fn decide(
     required: Option<&Digest>,
-    trust: &[JournalHead<TrustHead>],
+    observed_need: Option<&TrustObservation>,
     need: Option<&Digest>,
 ) -> Option<Change> {
-    let granted = |digest: &Digest| {
-        trust
-            .iter()
-            .map(JournalHead::body)
-            .any(|head| &head.digest == digest && head.state == TrustState::Granted)
-    };
-    match need.filter(|digest| !granted(digest)) {
+    let granted = observed_need
+        .and_then(|observation| observation.head.as_ref())
+        .is_some_and(|head| head.body().state == TrustState::Granted);
+    match need.filter(|_| !granted) {
         Some(blocking) => (required != Some(blocking)).then(|| Change::Park(blocking.clone())),
         None => required
             .filter(|digest| Some(*digest) != need)
@@ -241,24 +238,22 @@ struct TrustObservations {
 }
 
 impl TrustObservations {
-    fn new(
-        trust: &[JournalHead<TrustHead>],
-        required: Option<&Digest>,
-        need: Option<&Digest>,
-    ) -> Self {
-        let observe = |digest: &Digest| TrustObservation {
-            digest: digest.clone(),
-            head: trust
-                .iter()
-                .find(|head| head.body().digest == *digest)
-                .cloned(),
+    fn read(bus: &Bus, required: Option<&Digest>, need: Option<&Digest>) -> CommandResult<Self> {
+        let observe = |digest: &Digest| {
+            bus.trust_head(digest)
+                .map(|head| TrustObservation {
+                    digest: digest.clone(),
+                    head,
+                })
+                .map_err(|error| store_fault("trust::head-unreadable", &error.to_string()))
         };
-        Self {
+        Ok(Self {
             required: required
                 .filter(|required| Some(*required) != need)
-                .map(observe),
-            need: need.map(observe),
-        }
+                .map(observe)
+                .transpose()?,
+            need: need.map(observe).transpose()?,
+        })
     }
 
     fn guard(self, write: &mut JournalWrite) {

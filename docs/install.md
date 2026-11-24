@@ -378,16 +378,19 @@ recreates what it needs. Names outside this layout are ignored.
 **Executable-policy refusal.** The resident binds executable configuration to
 one digest over the exact bytes of the tracked and local configuration
 documents. When it refuses with `trust::digest-unknown`, run `spice trust
-pend` from that worktree; the pend records both documents' text in the
-journal. `spice trust` lists every recorded digest's standing, from any
-worktree and without reading one, and shows each pended digest's recorded
-documents as a line diff against the most recently granted other digest, or
-their full text when none is granted; a change to a line ending or the final
-newline is noted on its line. `spice trust show DIGEST` shows the same for any
-recorded digest, and the app's trust blocker shows the same diff. Review the
-diff, then grant only that digest with `spice trust grant DIGEST`, or reject it
-with `spice trust revoke DIGEST`. A ruling names the recorded bytes, so it
-succeeds whatever any worktree holds by then. Any byte change is a new
+pend` from that worktree; the pend records both documents' text and replies
+with their digest. `spice trust show DIGEST` shows those recorded documents as
+a line diff against the most recently granted other digest, or their full text
+when none is granted; a change to a line ending or the final newline is noted
+on its line. Bare `spice trust` is the live task-backed request report: it lists
+only pended digests that current pending tasks still require and includes the
+same differential without reading a worktree. Once no pending task requires a
+digest, its request leaves this live report automatically. `spice trust show
+DIGEST` remains the explicit read for any retained digest, including a resolved
+or no-longer-needed request, and the app's trust blocker shows the same diff.
+Review the diff, then grant only that digest with `spice trust grant DIGEST`, or
+reject it with `spice trust revoke DIGEST`. A ruling names the recorded bytes,
+so it succeeds whatever any worktree holds by then. Any byte change is a new
 identity; withdraw a grant with `spice trust revoke DIGEST`.
 
 **Damaged appliance.** A published file that no longer holds its recorded

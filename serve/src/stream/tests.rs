@@ -84,6 +84,52 @@ fn request(last: u8, subjects: Vec<ViewSubject>, after: Option<Seq>) -> StreamRe
     }
 }
 
+fn live_trust_owner(
+    write: &mut JournalWrite,
+    fact: journal::PendingFact,
+    stamp: &str,
+    digest: wire::Digest,
+) {
+    let task: wire::TaskStamp = stamp.parse().expect("trust owner stamp");
+    let flow = vec![
+        "todo".parse().expect("trust owner phase"),
+        "review".parse().expect("trust review phase"),
+    ];
+    let phase = flow[0];
+    let creation =
+        body::TaskCreationContext::unavailable(body::TaskCreationUnavailable::PrincipalActor);
+    let born = task.clone();
+    write.task_head(fact, move |revision| wire::TaskHead {
+        preparation: None,
+        intent: None,
+        born,
+        topic_origin: revision,
+        title: "Live trust owner".to_owned(),
+        pitch: "The stream fixture needs this executable digest.".to_owned(),
+        description: None,
+        term: Vec::new(),
+        requirements: wire::EnvironmentRequirements::one(
+            wire::EnvironmentRequirement::trust_grant(digest),
+        ),
+        resources: wire::ResourceRequirements::default(),
+        topic: "/trust".parse().expect("trust fixture topic"),
+        priority: None,
+        taste: None,
+        dependencies: Vec::new(),
+        provenance: wire::TaskProvenance::OperatorDraft,
+        creation,
+        revision,
+    });
+    write.workflow_head(task, fact, move |_| wire::WorkflowHead {
+        flow,
+        phase,
+        status: wire::WorkflowStatus::pending(),
+        deferral: None,
+        submitted: false,
+        generation: 0,
+    });
+}
+
 fn fixture(notes: usize) -> Bus {
     let bus = Bus::start(Journal::in_memory().expect("authority opens")).expect("bus starts");
     commit_notes(&bus, notes, true);
@@ -119,6 +165,7 @@ fn commit_notes(bus: &Bus, notes: usize, trust: bool) -> JournalCommit {
                 FactCause::Root,
             )
             .expect("trust fact builds");
+        live_trust_owner(&mut write, fact, "1kKRRsDPx", digest.clone());
         write.trust_head(fact, move |_| TrustHead {
             digest,
             state: TrustState::Pended,
@@ -152,6 +199,10 @@ fn commit_trust_heads(bus: &Bus, surfaces: &[&[u8]]) -> JournalCommit {
                 FactCause::Root,
             )
             .expect("trust fact builds");
+        let stamp = ["1kKRRsDQx", "1kKRRsDRx"]
+            .get(index)
+            .expect("trust fixture has an owner stamp");
+        live_trust_owner(&mut write, fact, stamp, digest.clone());
         write.trust_head(fact, move |_| TrustHead {
             digest,
             state: TrustState::Pended,
