@@ -886,7 +886,16 @@ fn version_outcome() -> Outcome<wire::Version> {
     };
     let reader = match journal::JournalReader::open(state.journal()) {
         Ok(reader) => reader,
-        Err(error) => return journal_version_failure(error),
+        Err(error) => match state.journal().try_exists() {
+            Ok(false) => {
+                return command_refusal(
+                    "version::journal-absent",
+                    Some(state.journal().display().to_string()),
+                    "the repository journal is absent; run `spice up` once to initialize it",
+                );
+            }
+            Ok(true) | Err(_) => return journal_version_failure(error),
+        },
     };
     let journal = match reader.schema_version() {
         Ok(version) => version,
