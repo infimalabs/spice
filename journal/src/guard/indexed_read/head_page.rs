@@ -218,27 +218,26 @@ impl JournalRead<'_> {
     /// Read one bounded page of current trust heads for the operator report,
     /// ordered by digest. A digest is the one key a ruling never changes, so a
     /// ruling made between pages can neither skip nor repeat a row. A cursor
-    /// must name a recorded ruling.
+    /// that names no recorded ruling reads no page.
     pub fn trust_report_head_page(
         &self,
         after: Option<&wire::Digest>,
         budget: FactReadBudget,
-    ) -> Result<TrustReportHeadPage, GuardError> {
+    ) -> Result<Option<TrustReportHeadPage>, GuardError> {
         if let Some(after) = after {
             read_metrics::observe_query();
-            self.connection
+            let recorded = self
+                .connection
                 .query_row(
                     "SELECT 1 FROM trust_heads WHERE digest = ?1",
                     [after.as_str()],
                     |_| Ok(()),
                 )
                 .optional()
-                .map_err(GuardError::Store)?
-                .ok_or_else(|| {
-                    GuardError::Invalid(format!(
-                        "trust report cursor digest {after} is not a recorded ruling"
-                    ))
-                })?;
+                .map_err(GuardError::Store)?;
+            if recorded.is_none() {
+                return Ok(None);
+            }
         }
         let query_limit = query_limit(budget)?;
         read_metrics::observe_query();
@@ -282,13 +281,13 @@ impl JournalRead<'_> {
             }
             heads.push(head);
         }
-        Ok(TrustReportHeadPage {
+        Ok(Some(TrustReportHeadPage {
             rows: heads,
             next,
             witness: CurrentHeadWitness {
                 cursor: self.cursor,
             },
-        })
+        }))
     }
 
     /// Most recently ruled current grant other than `excluded`.

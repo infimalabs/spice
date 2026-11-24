@@ -6,7 +6,7 @@ use wire::intent::{
     CommandAnswer, TrustReportAnswer, TrustReportNext, TrustReportRead, TrustReportRuling,
 };
 use wire::output::{Exhausted, INTERACTIVE, Request};
-use wire::{Digest, Outcome, Reply, ReplyPosition, SpiceCommand, TrustHead, TrustState};
+use wire::{Digest, Outcome, Refusal, Reply, ReplyPosition, SpiceCommand, TrustHead, TrustState};
 
 use super::{store_fault, trust_show};
 
@@ -27,27 +27,39 @@ pub(super) fn read(bus: &Bus, request: &TrustReportRead) -> Outcome<CommandAnswe
         Err(error) => return store_fault("trust::report-bound-invalid", &error.to_string()),
     };
     let after = request.after.clone();
-    let snapshot = bus.read(move |read| build(read, after.as_ref(), budget.limits()));
+    let snapshot = bus.read({
+        let after = after.clone();
+        move |read| build(read, after.as_ref(), budget.limits())
+    });
     match snapshot {
-        Ok((cursor, answer)) => Outcome::Reply(Reply {
+        Ok(Some((cursor, answer))) => Outcome::Reply(Reply {
             position: ReplyPosition::Snapshot(cursor),
             body: CommandAnswer::TrustReport(Box::new(answer)),
         }),
+        Ok(None) => Outcome::Refusal(Refusal::bare(wire::RefusalDiagnostic::new(
+            "trust::cursor-unknown",
+            after.as_ref().map(Digest::to_string),
+            Some("the digest of a recorded ruling".to_owned()),
+            None,
+        ))),
         Err(error) => store_fault("trust::report-unreadable", &error.to_string()),
     }
 }
 
+/// One report page, or `None` when the cursor names no recorded ruling.
 fn build(
     read: &JournalRead<'_>,
     after: Option<&Digest>,
     limits: wire::output::Limits,
-) -> Result<(wire::Seq, TrustReportAnswer), GuardError> {
+) -> Result<Option<(wire::Seq, TrustReportAnswer)>, GuardError> {
     let cursor = read
         .cursor()?
         .ok_or_else(|| GuardError::Invalid("a trust report requires a non-empty journal".into()))?;
     let frontier_budget = FactReadBudget::new(limits.rows, journal::MAX_RETAINED_FACT_PAGE_BYTES)
         .expect("interactive trust limits fit a repository read budget");
-    let page = read.trust_report_head_page(after, frontier_budget)?;
+    let Some(page) = read.trust_report_head_page(after, frontier_budget)? else {
+        return Ok(None);
+    };
     let baseline = match page
         .rows
         .iter()
@@ -125,15 +137,16 @@ fn build(
             .map(|ruling| next(ruling, Exhausted::Rows, limits, resume_after.as_ref()))
             .transpose()?,
     };
-    Ok((
+    Ok(Some((
         cursor,
         TrustReportAnswer {
             rulings,
             shown_bytes,
             next,
         },
-    ))
+    )))
 }
+
 fn differential_fits_text(ruling: &TrustReportRuling, limit: usize) -> bool {
     ruling.differential.as_ref().is_none_or(|differential| {
         differential.documents.as_ref().is_none_or(|documents| {
