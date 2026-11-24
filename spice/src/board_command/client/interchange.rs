@@ -145,19 +145,54 @@ pub(crate) fn import(matches: &ArgMatches, ambient: &Ambient) -> Outcome<TaskSet
         Ok(origin) => origin,
         Err(outcome) => return outcome,
     };
+    let draft = matches.get_flag("draft");
     let repository = match discover_repository() {
         Ok(repository) => repository,
         Err(outcome) => return failure(outcome),
     };
     let host = Host::new(&repository, ambient);
+    if origin.is_none()
+        && !draft
+        && set.tasks.iter().any(|task| !task.draft)
+        && let Err(outcome) = require_held_cause(host)
+    {
+        return outcome;
+    }
     submit_import(
         host,
         &set,
         order,
         origin,
+        draft,
         path.display().to_string(),
         digest,
     )
+}
+
+/// Without `--origin` or `--draft`, a filed task takes its cause from the
+/// importer's one held claim. Refuse before the first creation when none is
+/// held, so a predictable admission refusal never leaves a partial import.
+fn require_held_cause(host: Host<'_>) -> Result<(), Outcome<TaskSetImport>> {
+    let board = current_board(
+        host,
+        BoardRead::Open {
+            recent_finished: 0,
+            after: None,
+        },
+    )
+    .map_err(failure)?;
+    if board
+        .tasks
+        .iter()
+        .any(|task| task.held_by(&board.principal).is_some())
+    {
+        return Ok(());
+    }
+    Err(refuse(
+        "task::origin-required",
+        Some(board.principal.to_string()),
+        "supply --origin ack:<steering-key> or --origin task:<parent-born-stamp>, import while holding one active claim, or as the operator import every task as a Draft with --draft",
+    ))
 }
 
 fn submit_import(
@@ -165,6 +200,7 @@ fn submit_import(
     set: &TaskSet,
     order: Vec<usize>,
     origin: Option<wire::Origin>,
+    draft: bool,
     input: String,
     digest: Digest,
 ) -> Outcome<TaskSetImport> {
@@ -175,7 +211,7 @@ fn submit_import(
     let mut committed: Option<SeqRange> = None;
     for index in order {
         let definition = &set.tasks[index];
-        let add = match imported_add(definition, &handles, origin.clone()) {
+        let add = match imported_add(definition, &handles, origin.clone(), draft) {
             Ok(add) => add,
             Err(outcome) => return outcome,
         };
@@ -218,7 +254,11 @@ fn submit_import(
                         definition.id,
                         refusal.reason()
                     )),
-                    "the created prefix remains durable; inspect it by the import origin before retrying",
+                    if origin.is_some() {
+                        "the created prefix remains durable; inspect it by the import origin before retrying"
+                    } else {
+                        "the created prefix remains durable; inspect the created tasks before retrying"
+                    },
                 );
             }
             Outcome::Fault(fault) if imported.is_empty() => return Outcome::Fault(fault),
@@ -498,6 +538,7 @@ fn imported_add(
     task: &TaskSetTask,
     handles: &BTreeMap<u32, TaskHandle>,
     origin: Option<wire::Origin>,
+    draft: bool,
 ) -> Result<TaskAdd, Outcome<TaskSetImport>> {
     let depends = task
         .depends
@@ -549,7 +590,7 @@ fn imported_add(
         intent: task.intent,
         preparation,
         claim: false,
-        draft: task.draft,
+        draft: task.draft || draft,
     })
 }
 

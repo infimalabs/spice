@@ -156,9 +156,12 @@ Surfaces that refine the contract:
   dependent tasks excluded because ordinary creation cannot recreate them.
   `spice task import FILE` validates the entire regular file before mutation,
   allocates fresh task handles through ordinary `task add` admission, and
-  reports every local-to-fresh identity mapping. Both surfaces are bounded to
-  16,384 tasks and 64 MiB; import refuses private topics, malformed reference
-  graphs, and unsupported versions without creating a task.
+  reports every local-to-fresh identity mapping. Without `--origin` or a held
+  claim, an operator imports with `--draft`: every task arrives as an
+  operator Draft it files with `spice task file DRAFT`. Both surfaces are
+  bounded to 16,384 tasks and 64 MiB; import refuses private topics, malformed
+  reference graphs, unsupported versions, and a filed task with no origin or
+  held claim without creating a task.
 - `spice retro` and `spice watch` show decoded reasoning only as a count of
   withheld bytes, in every form including export. A cursor from a replaced
   tape refuses rather than replaying against the replacement. Bare `watch`

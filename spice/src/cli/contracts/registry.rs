@@ -541,7 +541,7 @@ pub(super) const CONTRACTS: &[Contract] = &[
     ),
     row!(
         ["task", "import"],
-        "task import INPUT [--origin ORIGIN]",
+        "task import INPUT [--origin ORIGIN] [--draft]",
         PrincipalOrLane,
         Command => DirectOrCommitted,
         [TaskAdded, TaskPhased, TaskEdited],
