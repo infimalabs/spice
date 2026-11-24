@@ -815,23 +815,24 @@ fn store_task_head(transaction: &Transaction<'_>, row: &HeadRow) -> Result<Vec<u
     stored.map_err(|detail| CommitError::Refused(GuardRefusal::new(detail)))
 }
 
-/// Match one task head's topic storage to its current workflow liveness.
+/// Match one task head's topic storage and trust-digest ownership to its
+/// current workflow liveness and requirements.
 ///
 /// Settlement snapshots rendered paths and releases node identity. Reopening
 /// resolves those paths through the current namespace, allocating nodes only
 /// inside this guarded transaction.
-fn reconcile_task_topic_liveness(
+fn reconcile_task_liveness(
     transaction: &Transaction<'_>,
     stamp: &str,
     seq: wire::Seq,
 ) -> Result<bool, CommitError> {
-    let (bytes, workflow_body) = transaction
+    let (bytes, workflow_body, owner): (Vec<u8>, Vec<u8>, Option<String>) = transaction
         .query_row(
-            "SELECT t.body, w.body FROM task_heads t
+            "SELECT t.body, w.body, t.trust_digest FROM task_heads t
              JOIN workflow_heads w ON w.stamp = t.stamp
              WHERE t.stamp = ?1",
             [stamp],
-            |row| Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(sqlite_fault)?;
     let workflow = wire::decode::<wire::WorkflowHead>(&workflow_body).map_err(|error| {
@@ -852,6 +853,8 @@ fn reconcile_task_topic_liveness(
             crate::topic::UNPLACED_PAST_FIRST_PHASE
         ))));
     }
+    crate::active_trust::reconcile(transaction, stamp, owner.as_deref(), &head, &workflow)
+        .map_err(sqlite_fault)?;
     if pending == head.topic.nodes.is_some() {
         return Ok(false);
     }
@@ -984,7 +987,7 @@ fn apply_heads(
     }
     ledger.finish(transaction)?;
     for (stamp, seq) in topic_liveness {
-        task_topic_mutation |= reconcile_task_topic_liveness(transaction, &stamp, seq)?;
+        task_topic_mutation |= reconcile_task_liveness(transaction, &stamp, seq)?;
     }
     Ok(task_topic_mutation)
 }

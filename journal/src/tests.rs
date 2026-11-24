@@ -22,6 +22,7 @@ use crate::{
     SCHEMA_VERSION, ViolationClass,
 };
 
+mod active_trust;
 mod boundary;
 mod claim_index;
 mod fact_bounds;
@@ -761,6 +762,10 @@ fn populate_authority(journal: Journal) -> Journal {
 }
 
 fn insert_fact(journal: &Journal, envelope: Envelope<AnyFact>) {
+    insert_fact_into(&journal.connection, envelope);
+}
+
+fn insert_fact_into(connection: &Connection, envelope: Envelope<AnyFact>) {
     let bytes = wire::encode(&envelope).expect("encode fact fixture");
     let kind = envelope.fact.kind().as_str();
     let seq = i64::try_from(envelope.seq.get()).expect("fixture seq fits SQLite");
@@ -768,8 +773,7 @@ fn insert_fact(journal: &Journal, envelope: Envelope<AnyFact>) {
         .cause
         .map(Seq::get)
         .map(|cause| i64::try_from(cause).expect("fixture cause fits SQLite"));
-    journal
-        .connection
+    connection
         .execute(
             "INSERT INTO fact_envelopes(seq, wire_version, instant, actor, origin, cause, kind, envelope) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![

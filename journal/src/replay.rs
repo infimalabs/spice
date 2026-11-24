@@ -635,6 +635,7 @@ fn verify_heads(
         },
     )?;
     crate::topic::verify_task_liveness(connection, violations)?;
+    crate::active_trust::verify(connection, violations)?;
     count += verify_keyed_heads::<wire::CompletionHead>(
         connection,
         "completion_heads",
