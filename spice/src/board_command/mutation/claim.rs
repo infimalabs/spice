@@ -209,11 +209,49 @@ pub(in crate::board_command) fn claim_grant<'a>(
         source,
     })
 }
+#[derive(Clone)]
+struct TrustStanding {
+    requirements: wire::EnvironmentRequirements,
+    blocked: bool,
+}
+
+impl TrustStanding {
+    fn observe(
+        requirements: &wire::EnvironmentRequirements,
+        environment: &wire::Environment,
+    ) -> Option<Self> {
+        requirements
+            .as_slice()
+            .iter()
+            .any(|requirement| {
+                matches!(requirement, wire::EnvironmentRequirement::TrustGrant { .. })
+            })
+            .then(|| Self {
+                requirements: requirements.clone(),
+                blocked: requirements.has_unsatisfied_trust_grant(environment),
+            })
+    }
+
+    fn guard(&self, write: &mut JournalWrite) {
+        let requirements = self.requirements.clone();
+        let blocked = self.blocked;
+        write.guard(JournalGuard::new(move |read| {
+            let environment = read.environment(&requirements)?;
+            if requirements.has_unsatisfied_trust_grant(&environment) == blocked {
+                Ok(())
+            } else {
+                Err(GuardError::refused("claim::trust-standing-moved"))
+            }
+        }));
+    }
+}
+
 /// Claim state prepared for a task made ready in the same transaction.
 pub(super) struct PreparedClaim<'a> {
     grant: ClaimGrant<'a>,
     prepared_git: Option<spice::task_git::ClaimPreparation<'a>>,
     recovery: Option<String>,
+    trust_standing: Option<TrustStanding>,
 }
 
 /// Validate and prepare an atomic mutation-and-claim before the journal opens.
@@ -227,6 +265,7 @@ pub(super) fn prepare_capture_claim<'a>(
     snapshot: &ValidatedSnapshot,
     selected: &Entry,
     creating: bool,
+    environment: Option<wire::Environment>,
 ) -> Result<PreparedClaim<'a>, Outcome<CommandAnswer>> {
     let claim_rule = command.expected().iter().find_map(|witness| match witness {
         Witness::Eligibility { rule }
@@ -252,12 +291,11 @@ pub(super) fn prepare_capture_claim<'a>(
     refuse_if_actor_already_claims(&snapshot.entries, command.actor())?;
     let satisfied = board::resolved_tasks(&snapshot.entries);
     refuse_held_design(selected, &satisfied)?;
-    if !board::capturable_entry(
-        &satisfied,
-        selected,
-        command.actor(),
-        &snapshot.answer.environment(),
-    ) {
+    let trust_standing = environment.as_ref().and_then(|environment| {
+        TrustStanding::observe(&selected.statement().requirements, environment)
+    });
+    let environment = environment.unwrap_or_else(|| snapshot.answer.environment());
+    if !board::capturable_entry(&satisfied, selected, command.actor(), &environment) {
         return Err(if creating {
             new_claim_ineligible()
         } else {
@@ -325,6 +363,7 @@ pub(super) fn prepare_capture_claim<'a>(
         grant,
         prepared_git,
         recovery,
+        trust_standing,
     })
 }
 
@@ -407,6 +446,7 @@ pub(super) fn prepare_join_claim<'a>(
             grant,
             prepared_git,
             recovery: None,
+            trust_standing: None,
         },
         reservation,
     ))
@@ -424,6 +464,9 @@ impl<'a> PreparedClaim<'a> {
         command: &wire::AdmittedCommand,
     ) {
         snapshot.guard_ownership(write);
+        if let Some(trust_standing) = &self.trust_standing {
+            trust_standing.guard(write);
+        }
         guard_capture(
             write,
             command.expected().to_vec(),
@@ -476,6 +519,7 @@ impl<'a> PreparedClaim<'a> {
             grant,
             prepared_git,
             recovery,
+            trust_standing: _,
         } = self;
         if let Err(outcome) = mint_claim(
             write,

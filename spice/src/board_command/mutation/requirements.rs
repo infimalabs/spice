@@ -39,6 +39,32 @@ impl Change {
     }
 }
 
+/// Add only a required trust digest absent from the live-task snapshot.
+pub(super) fn observe_trust_environment(
+    bus: &Bus,
+    requirements: &wire::EnvironmentRequirements,
+    mut environment: wire::Environment,
+) -> Result<wire::Environment, Outcome<CommandAnswer>> {
+    let required_trust = requirements
+        .as_slice()
+        .iter()
+        .find_map(|requirement| match requirement {
+            wire::EnvironmentRequirement::TrustGrant { value } => Some(value),
+            _ => None,
+        });
+    if let Some(digest) = required_trust
+        && environment.trust_head(digest).is_none()
+    {
+        let observed = bus
+            .trust_head(digest)
+            .map_err(|error| store_fault("task::require-trust-unreadable", error.to_string()))?;
+        if let Some(head) = observed {
+            environment = environment.with_trust_heads([head.body().clone()]);
+        }
+    }
+    Ok(environment)
+}
+
 pub(super) fn prepare(
     entry: &Entry,
     command: &wire::AdmittedCommand,
