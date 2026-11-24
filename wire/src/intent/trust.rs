@@ -17,9 +17,11 @@ pub struct TrustReportRead {
     pub limits: Limits,
 }
 
-/// Resume point after one shown ruling: the standing it had on its page and
-/// its digest, spelled `STANDING:DIGEST`. Carrying the standing keeps the
-/// resume point fixed when that ruling changes standing between pages.
+/// Resume point after one shown ruling: the standing and digest it had on its
+/// page, plus the original cursor digest excluded from every later page,
+/// spelled `STANDING:DIGEST:EXCLUDED`. Carrying the standing keeps the resume
+/// point fixed when a ruling changes standing; carrying the exclusion prevents
+/// that moved ruling from appearing again in a later tier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustReportCursor {
@@ -27,11 +29,19 @@ pub struct TrustReportCursor {
     pub standing: TrustState,
     /// Its exact digest.
     pub digest: Digest,
+    /// Original cursor digest omitted from every continuation page.
+    pub excluded: Digest,
 }
 
 impl std::fmt::Display for TrustReportCursor {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}:{}", self.standing.as_str(), self.digest)
+        write!(
+            formatter,
+            "{}:{}:{}",
+            self.standing.as_str(),
+            self.digest,
+            self.excluded
+        )
     }
 }
 
@@ -39,9 +49,12 @@ impl std::str::FromStr for TrustReportCursor {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        let Some((standing, digest)) = text.split_once(':') else {
+        let mut fields = text.split(':');
+        let (Some(standing), Some(digest), Some(excluded), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
             return Err(format!(
-                "trust report cursor {text:?} is not STANDING:DIGEST"
+                "trust report cursor {text:?} is not STANDING:DIGEST:EXCLUDED"
             ));
         };
         let standing = match standing {
@@ -51,7 +64,12 @@ impl std::str::FromStr for TrustReportCursor {
             other => return Err(format!("trust report cursor standing {other:?} is unknown")),
         };
         let digest = digest.parse().map_err(|error| format!("{error}"))?;
-        Ok(Self { standing, digest })
+        let excluded = excluded.parse().map_err(|error| format!("{error}"))?;
+        Ok(Self {
+            standing,
+            digest,
+            excluded,
+        })
     }
 }
 

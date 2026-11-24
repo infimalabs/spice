@@ -224,7 +224,7 @@ impl JournalRead<'_> {
         after: Option<&wire::intent::TrustReportCursor>,
         budget: FactReadBudget,
     ) -> Result<TrustReportHeadPage, GuardError> {
-        let (after_rank, after_digest) = match after {
+        let (after_rank, after_digest, excluded_digest) = match after {
             Some(cursor) => {
                 read_metrics::observe_query();
                 self.connection
@@ -241,9 +241,13 @@ impl JournalRead<'_> {
                             cursor.digest
                         ))
                     })?;
-                (standing_rank(cursor.standing), cursor.digest.as_str())
+                (
+                    standing_rank(cursor.standing),
+                    cursor.digest.as_str(),
+                    cursor.excluded.as_str(),
+                )
             }
-            None => (-1, ""),
+            None => (-1, "", ""),
         };
         let query_limit = query_limit(budget)?;
         read_metrics::observe_query();
@@ -252,7 +256,12 @@ impl JournalRead<'_> {
             .prepare(TRUST_REPORT_PAGE_SQL)
             .map_err(GuardError::Store)?;
         let mut rows = statement
-            .query(params![after_rank, after_digest, query_limit])
+            .query(params![
+                after_rank,
+                after_digest,
+                excluded_digest,
+                query_limit
+            ])
             .map_err(GuardError::Store)?;
         let mut heads = Vec::with_capacity(budget.rows());
         let mut decoded = 0usize;
@@ -371,8 +380,8 @@ const fn standing_rank(standing: wire::TrustState) -> i64 {
 }
 
 const TRUST_REPORT_PAGE_SQL: &str = "SELECT standing_rank, digest, head_seq, length(body), body FROM trust_heads \
-     WHERE standing_rank > ?1 OR (standing_rank = ?1 AND digest > ?2) \
-     ORDER BY standing_rank, digest LIMIT ?3";
+     WHERE (standing_rank > ?1 OR (standing_rank = ?1 AND digest > ?2)) AND digest <> ?3 \
+     ORDER BY standing_rank, digest LIMIT ?4";
 
 const LATEST_OTHER_GRANT_SQL: &str = "SELECT digest, head_seq, length(body), body FROM trust_heads \
      WHERE standing_rank = 1 AND digest <> ?1 ORDER BY head_seq DESC LIMIT 1";
@@ -452,7 +461,9 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
         .prepare(&format!("EXPLAIN QUERY PLAN {TRUST_REPORT_PAGE_SQL}"))
         .map_err(|error| error.to_string())?;
     let report_plan = statement
-        .query_map(params![-1_i64, "", 3_i64], |row| row.get::<_, String>(3))
+        .query_map(params![-1_i64, "", "", 3_i64], |row| {
+            row.get::<_, String>(3)
+        })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
