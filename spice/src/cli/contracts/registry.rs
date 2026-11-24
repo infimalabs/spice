@@ -530,6 +530,27 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "board::task_show"
     ),
     row!(
+        ["task", "export"],
+        "task export OUTPUT",
+        PrincipalOrLane,
+        Read,
+        [],
+        [Resident],
+        Reply,
+        "board::task_export"
+    ),
+    row!(
+        ["task", "import"],
+        "task import INPUT [--origin ORIGIN]",
+        PrincipalOrLane,
+        Command => DirectOrCommitted,
+        [TaskAdded, TaskPhased, TaskEdited],
+        [Resident, Toolful],
+        TASK_GIT_TOOLS,
+        Reply,
+        "board::task_import"
+    ),
+    row!(
         ["task", "next"],
         "task next",
         PrincipalOrLane,

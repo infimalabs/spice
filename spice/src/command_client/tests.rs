@@ -745,9 +745,9 @@ fn mapping_rejects_the_wrong_contract_and_incomplete_body_before_discovery() {
     assert_eq!(fault.reason, "command::body-incomplete");
 }
 
-/// Every resident task command the CLI registers must reach the resident:
-/// a verb without a wire kind faults `command::mapping-unsupported` after its
-/// board preflight, with nothing in the registry naming the gap.
+/// Every single-command resident task CLI the registry names must reach the
+/// resident. `task import` is a bounded client aggregate of ordinary TaskAdd
+/// commands, not a new wire mutation kind.
 #[test]
 fn every_registered_task_command_maps_to_a_wire_kind() {
     let unmapped = crate::cli::contracts()
@@ -756,6 +756,7 @@ fn every_registered_task_command_maps_to_a_wire_kind() {
             matches!(contract.path, ["task", _])
                 && contract.journal == crate::cli::JournalAccess::Command
                 && contract.guards.contains(&crate::cli::Guard::Resident)
+                && contract.path != ["task", "import"]
                 && super::typed::kind_for(contract.path).is_none()
         })
         .map(|contract| contract.path.join(" "))

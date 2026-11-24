@@ -591,6 +591,16 @@ impl NativeInvocation<'_> {
                 form,
                 board_command::GraphView::text,
             ),
+            ["task", "export"] => deliver_with_reply_text(
+                &board_command::export_task_set(leaf, ambient),
+                form,
+                board_command::TaskSetExport::text,
+            ),
+            ["task", "import"] => deliver_with_reply_text(
+                &board_command::import_task_set(leaf, ambient),
+                form,
+                board_command::TaskSetImport::text,
+            ),
             ["room", "post"]
             | ["room", "score"]
             | ["room", "leave"]

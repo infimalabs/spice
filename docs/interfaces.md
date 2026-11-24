@@ -148,6 +148,17 @@ Surfaces that refine the contract:
 - `spice board` is a posture — counts, the reader's own claim outside every
   budget, and the ready, review, and blocked rows on its route — not a dump.
   The complete board is only `spice board [FAMILY] --output FILE`.
+- `spice task export FILE` writes a versioned portable task set from one
+  complete board snapshot. It carries recreatable public authored fields and
+  export-local dependency and preparation references, but no journal
+  positions, task handles, origins, claims, workflow progress, allocation, or
+  residency. The receipt counts private, OOPS, priority, and transitively
+  dependent tasks excluded because ordinary creation cannot recreate them.
+  `spice task import FILE` validates the entire regular file before mutation,
+  allocates fresh task handles through ordinary `task add` admission, and
+  reports every local-to-fresh identity mapping. Both surfaces are bounded to
+  16,384 tasks and 64 MiB; import refuses private topics, malformed reference
+  graphs, and unsupported versions without creating a task.
 - `spice retro` and `spice watch` show decoded reasoning only as a count of
   withheld bytes, in every form including export. A cursor from a replaced
   tape refuses rather than replaying against the replacement. Bare `watch`
