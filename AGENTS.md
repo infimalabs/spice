@@ -47,6 +47,19 @@ authority. A missing, symbolic, non-regular, or non-executable asset is a hard
 stop. Do not substitute another Cargo route or point `CARGO_HOME` at a shared
 mutable cache to work around a stale generation.
 
+## Persisted schema evolution
+
+Before 1.0, persisted schemas may require forward-only migrations; arbitrary
+downgrade operation is not promised. Every publicly released schema remains a
+supported source version for upgrades. Keep crossings sequential and retain
+each historical crossing step so repositories can roll forward through every
+intermediate version.
+
+A migration must preserve all admitted authority and apply deterministically
+and atomically. An unsupported version, corrupt state, or failed crossing
+refuses clearly without destructive reset, partial writes, or inferred
+recovery.
+
 ## Permanent test value
 
 Permanent tests are maintained product contracts. Every permanent test must be
