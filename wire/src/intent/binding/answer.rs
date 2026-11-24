@@ -58,11 +58,10 @@ impl AnswerShape {
             | Self::SteerLine
             | Self::Consent
             | Self::ConsentQueue => self.decode_coordination(source),
+            Self::Trust | Self::TrustReport | Self::TrustShow => self.decode_trust(source),
             Self::ConsentPolicy
             | Self::GlobalSettings
             | Self::VendorCatalog
-            | Self::Trust
-            | Self::TrustShow
             | Self::Lane
             | Self::LaneChange
             | Self::LaneRenewal
@@ -103,13 +102,20 @@ impl AnswerShape {
         })
     }
 
+    fn decode_trust(self, body: impl AnswerSource) -> Result<CommandAnswer, serde_json::Error> {
+        Ok(match self {
+            Self::Trust => CommandAnswer::Trust(body.read()?),
+            Self::TrustReport => CommandAnswer::TrustReport(Box::new(body.read()?)),
+            Self::TrustShow => CommandAnswer::TrustShow(Box::new(body.read()?)),
+            _ => unreachable!("trust answer-shape partition is closed"),
+        })
+    }
+
     fn decode_secondary(self, body: impl AnswerSource) -> Result<CommandAnswer, serde_json::Error> {
         Ok(match self {
             Self::ConsentPolicy => CommandAnswer::ConsentPolicy(body.read()?),
             Self::GlobalSettings => CommandAnswer::GlobalSettings(body.read()?),
             Self::VendorCatalog => CommandAnswer::VendorCatalog(body.read()?),
-            Self::Trust => CommandAnswer::Trust(body.read()?),
-            Self::TrustShow => CommandAnswer::TrustShow(Box::new(body.read()?)),
             Self::Lane => CommandAnswer::Lane(Box::new(body.read()?)),
             Self::LaneChange => CommandAnswer::LaneChange(Box::new(body.read()?)),
             Self::LaneRenewal => CommandAnswer::LaneRenewal(Box::new(body.read()?)),

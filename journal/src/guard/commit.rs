@@ -990,6 +990,22 @@ fn apply_heads(
 }
 
 fn apply_head_row(transaction: &Transaction<'_>, row: &HeadRow) -> Result<(), CommitError> {
+    if let Some(rank) = row.trust_rank {
+        let HeadKey::Text(digest) = &row.key else {
+            unreachable!("trust heads have digest keys")
+        };
+        transaction
+            .execute(
+                "INSERT INTO trust_heads(digest, head_seq, body, standing_rank) \
+                 VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(digest) DO UPDATE SET \
+                    head_seq = excluded.head_seq, body = excluded.body, \
+                    standing_rank = excluded.standing_rank",
+                params![digest, to_sql(row.seq)?, &row.body, rank],
+            )
+            .map_err(sqlite_fault)?;
+        return Ok(());
+    }
     let statement = format!(
         "INSERT INTO {table}({key}, head_seq, body) VALUES ({values}) \
          ON CONFLICT({key}) DO UPDATE SET head_seq = excluded.head_seq, body = excluded.body",

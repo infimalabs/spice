@@ -32,8 +32,8 @@ use super::{
     TaskDone, TaskEdit, TaskFile, TaskInvite, TaskInviteAnswer, TaskJoin, TaskMedia, TaskNote,
     TaskOopsAdd, TaskPlace, TaskPlaceAnswer, TaskRef, TaskRelations, TaskRelationsAnswer,
     TaskReview, TaskSweep, TaskTarget, TaskTimeline, TaskTimelineAnswer, TaskWake, TasteAnswer,
-    TeamArrange, TeamConfigure, TextAnswer, TrustAnswer, TrustRef, TrustShowAnswer, UpChange,
-    VendorCatalog, VendorCatalogAnswer,
+    TeamArrange, TeamConfigure, TextAnswer, TrustAnswer, TrustRef, TrustReportAnswer,
+    TrustReportRead, TrustShowAnswer, UpChange, VendorCatalog, VendorCatalogAnswer,
 };
 
 /// Which intent DTO a command kind's body decodes into.
@@ -143,6 +143,8 @@ pub enum BodyShape {
     ConsentRead,
     /// [`ConsentPolicy`]
     ConsentPolicy,
+    /// [`TrustReportRead`]
+    TrustReportRead,
     /// [`TrustRef`]
     TrustRef,
     /// [`LaneRead`]
@@ -240,6 +242,8 @@ pub enum AnswerShape {
     GlobalSettings,
     /// [`VendorCatalogAnswer`]
     VendorCatalog,
+    /// [`TrustReportAnswer`]
+    TrustReport,
     /// [`TrustAnswer`]
     Trust,
     /// [`TrustShowAnswer`]
@@ -330,6 +334,8 @@ pub enum CommandAnswer {
     VendorCatalog(VendorCatalogAnswer),
     /// [`AnswerShape::Trust`]
     Trust(TrustAnswer),
+    /// [`AnswerShape::TrustReport`]
+    TrustReport(Box<TrustReportAnswer>),
     /// [`AnswerShape::TrustShow`]
     TrustShow(Box<TrustShowAnswer>),
     /// [`AnswerShape::Lane`]
@@ -393,6 +399,7 @@ impl CommandAnswer {
             Self::GlobalSettings(_) => AnswerShape::GlobalSettings,
             Self::VendorCatalog(_) => AnswerShape::VendorCatalog,
             Self::Trust(_) => AnswerShape::Trust,
+            Self::TrustReport(_) => AnswerShape::TrustReport,
             Self::TrustShow(_) => AnswerShape::TrustShow,
             Self::Lane(_)
             | Self::LaneJobs(_)
@@ -536,6 +543,7 @@ impl CommandKind {
             | Self::TrustPend
             | Self::TrustGrant
             | Self::TrustRevoke
+            | Self::TrustReport
             | Self::TrustShow
             | Self::LaneRead
             | Self::LaneSeat
@@ -665,6 +673,7 @@ impl CommandKind {
             Self::TrustPend | Self::TrustGrant | Self::TrustRevoke => {
                 Binding::of(B::TrustRef, A::Trust)
             }
+            Self::TrustReport => Binding::of(B::TrustReportRead, A::TrustReport),
             Self::TrustShow => Binding::of(B::TrustRef, A::TrustShow),
             Self::LaneRead => Binding::of(B::LaneRead, A::Lane),
             Self::LaneSeat => Binding::of(B::LaneSeat, A::LaneChange),
@@ -797,6 +806,8 @@ pub enum Intent {
     ConsentRead(ConsentRead),
     /// [`BodyShape::ConsentPolicy`]
     ConsentPolicy(ConsentPolicy),
+    /// [`BodyShape::TrustReportRead`]
+    TrustReportRead(TrustReportRead),
     /// [`BodyShape::TrustRef`]
     TrustRef(TrustRef),
     /// [`BodyShape::LaneRead`]
@@ -902,6 +913,7 @@ impl Intent {
             | Self::ConsentDecide(_)
             | Self::ConsentRead(_)
             | Self::ConsentPolicy(_)
+            | Self::TrustReportRead(_)
             | Self::TrustRef(_)
             | Self::LaneRead(_)
             | Self::LaneSeat(_)
@@ -996,6 +1008,7 @@ impl Intent {
             Self::ConsentDecide(_) => BodyShape::ConsentDecide,
             Self::ConsentRead(_) => BodyShape::ConsentRead,
             Self::ConsentPolicy(_) => BodyShape::ConsentPolicy,
+            Self::TrustReportRead(_) => BodyShape::TrustReportRead,
             Self::TrustRef(_) => BodyShape::TrustRef,
             Self::LaneRead(_) => BodyShape::LaneRead,
             Self::LaneSeat(_) => BodyShape::LaneSeat,
@@ -1198,6 +1211,7 @@ impl BodyShape {
                 | Self::GlobalSettingsRead
                 | Self::GlobalSettingsSet
                 | Self::VendorCatalog
+                | Self::TrustReportRead
                 | Self::TrustRef
         ) {
             self.decode_coordination_body(bytes)
@@ -1235,6 +1249,7 @@ impl BodyShape {
             Self::GlobalSettingsRead => Intent::GlobalSettingsRead(crate::decode(bytes)?),
             Self::GlobalSettingsSet => Intent::GlobalSettingsSet(crate::decode(bytes)?),
             Self::VendorCatalog => Intent::VendorCatalog(crate::decode(bytes)?),
+            Self::TrustReportRead => Intent::TrustReportRead(crate::decode(bytes)?),
             Self::TrustRef => Intent::TrustRef(crate::decode(bytes)?),
             _ => unreachable!("runtime body partition is closed"),
         })

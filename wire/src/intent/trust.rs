@@ -3,8 +3,62 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ConfigSource, Digest, TrustState};
+use crate::output::{Exhausted, Limits};
+use crate::{ConfigSource, Digest, SpiceCommand, TrustState};
 
+/// One bounded repository trust-report request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustReportRead {
+    /// Resume after this exact current ruling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<Digest>,
+    /// Already-admitted interactive output limits.
+    pub limits: Limits,
+}
+
+/// One current executable-trust ruling in operator-report order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustReportRuling {
+    /// Exact executable configuration digest.
+    pub digest: Digest,
+    /// Current operator standing.
+    pub standing: TrustState,
+    /// Recorded configuration differential when it fit this page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub differential: Option<TrustShowAnswer>,
+    /// Exact explicit read for a differential withheld by the byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<SpiceCommand>,
+}
+
+/// First ruling withheld from one bounded trust-report page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustReportNext {
+    /// Limit that stopped admission.
+    pub exhausted: Exhausted,
+    /// Encoded bytes the first withheld record requires.
+    pub next_bytes: usize,
+    /// Limits this page admitted.
+    pub limits: Limits,
+    /// Exact command that resumes at the first withheld ruling.
+    pub continuation: SpiceCommand,
+}
+
+/// Successful bounded repository trust report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrustReportAnswer {
+    /// Admitted current rulings.
+    pub rulings: Vec<TrustReportRuling>,
+    /// Encoded row bytes admitted.
+    pub shown_bytes: usize,
+    /// First withheld ruling, when this page is incomplete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<TrustReportNext>,
+}
 /// Successful answer to `trust::show`: one digest's recorded documents as a
 /// line differential against the most recently granted other digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

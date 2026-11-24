@@ -1,6 +1,6 @@
 //! Joined, bounded pages over current task and trust authority.
 
-use rusqlite::{Row, params};
+use rusqlite::{OptionalExtension, Row, params};
 
 use super::{
     ClaimHeads, FactReadBudget, GuardError, JournalHead, JournalRead, TaskHeads, read_metrics,
@@ -31,6 +31,17 @@ pub struct TrustHeadPage {
     pub rows: Vec<JournalHead<wire::TrustHead>>,
     /// Last returned digest when more current trust authority remains.
     pub continuation: Option<wire::Digest>,
+    /// Cursor identity of the projection this page observed.
+    pub witness: CurrentHeadWitness,
+}
+
+/// One bounded operator-report frontier over current trust heads.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustReportHeadPage {
+    /// Heads selected for possible differential enrichment.
+    pub rows: Vec<JournalHead<wire::TrustHead>>,
+    /// First head beyond this frontier, without recorded documents loaded.
+    pub next: Option<JournalHead<wire::TrustHead>>,
     /// Cursor identity of the projection this page observed.
     pub witness: CurrentHeadWitness,
 }
@@ -203,7 +214,161 @@ impl JournalRead<'_> {
             },
         })
     }
+
+    /// Read one bounded page of current trust heads in operator-report order:
+    /// pended, granted, revoked, with digest as the stable tie-breaker.
+    pub fn trust_report_head_page(
+        &self,
+        after: Option<&wire::Digest>,
+        budget: FactReadBudget,
+    ) -> Result<TrustReportHeadPage, GuardError> {
+        let (after_rank, after_digest) = match after {
+            Some(digest) => {
+                read_metrics::observe_query();
+                let rank = self
+                    .connection
+                    .query_row(
+                        "SELECT standing_rank FROM trust_heads WHERE digest = ?1",
+                        [digest.as_str()],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()
+                    .map_err(GuardError::Store)?
+                    .ok_or_else(|| {
+                        GuardError::Invalid(format!(
+                            "trust report cursor digest {digest} is not a current ruling"
+                        ))
+                    })?;
+                (rank, digest.as_str())
+            }
+            None => (-1, ""),
+        };
+        let query_limit = query_limit(budget)?;
+        read_metrics::observe_query();
+        let mut statement = self
+            .connection
+            .prepare(TRUST_REPORT_PAGE_SQL)
+            .map_err(GuardError::Store)?;
+        let mut rows = statement
+            .query(params![after_rank, after_digest, query_limit])
+            .map_err(GuardError::Store)?;
+        let mut heads = Vec::with_capacity(budget.rows());
+        let mut decoded = 0usize;
+        let mut next = None;
+        while let Some(row) = rows.next().map_err(GuardError::Store)? {
+            let rank = row.get::<_, i64>(0).map_err(GuardError::Store)?;
+            let indexed = row.get::<_, String>(1).map_err(GuardError::Store)?;
+            read_metrics::observe_row();
+            let length = joined_length(row, 3, "trust head key", &indexed)?;
+            if decoded.saturating_add(length) > budget.decoded_bytes() {
+                return Err(GuardError::Invalid(format!(
+                    "trust report frontier exceeds this call's {}-byte decoded budget",
+                    budget.decoded_bytes(),
+                )));
+            }
+            let position = row.get::<_, i64>(2).map_err(GuardError::Store)?;
+            let head: JournalHead<wire::TrustHead> = decode_joined_head(
+                row,
+                position,
+                4,
+                "trust_heads",
+                ("digest", &indexed),
+                self.cursor,
+                super::decode_head,
+            )?;
+            validate_trust_index(rank, &indexed, &head)?;
+            read_metrics::observe_decode(length);
+            decoded = decoded.saturating_add(length);
+            if heads.len() == budget.rows() {
+                next = Some(head);
+                break;
+            }
+            heads.push(head);
+        }
+        Ok(TrustReportHeadPage {
+            rows: heads,
+            next,
+            witness: CurrentHeadWitness {
+                cursor: self.cursor,
+            },
+        })
+    }
+
+    /// Most recently ruled current grant other than `excluded`.
+    pub fn latest_other_granted_trust(
+        &self,
+        excluded: &wire::Digest,
+    ) -> Result<Option<JournalHead<wire::TrustHead>>, GuardError> {
+        read_metrics::observe_query();
+        self.connection
+            .query_row(LATEST_OTHER_GRANT_SQL, [excluded.as_str()], |row| {
+                let indexed = row.get::<_, String>(0)?;
+                let position = row.get::<_, i64>(1)?;
+                let head = decode_joined_head(
+                    row,
+                    position,
+                    3,
+                    "trust_heads",
+                    ("digest", &indexed),
+                    self.cursor,
+                    super::decode_head,
+                )
+                .map_err(|error| match error {
+                    GuardError::Store(error) => error,
+                    other => rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Blob,
+                        Box::new(other),
+                    ),
+                })?;
+                validate_trust_index(1, &indexed, &head).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Blob,
+                        Box::new(error),
+                    )
+                })?;
+                Ok(head)
+            })
+            .optional()
+            .map_err(GuardError::Store)
+    }
 }
+
+fn validate_trust_index(
+    rank: i64,
+    indexed: &str,
+    head: &JournalHead<wire::TrustHead>,
+) -> Result<(), GuardError> {
+    let digest = indexed.parse::<wire::Digest>().map_err(|error| {
+        GuardError::Invalid(format!("trust head key {indexed:?} is invalid: {error}"))
+    })?;
+    if head.body.digest != digest {
+        return Err(GuardError::Invalid(format!(
+            "trust head indexed as {digest} carries body digest {}",
+            head.body.digest
+        )));
+    }
+    let expected = match head.body.state {
+        wire::TrustState::Pended => 0,
+        wire::TrustState::Granted => 1,
+        wire::TrustState::Revoked => 2,
+    };
+    if rank != expected {
+        return Err(GuardError::Invalid(format!(
+            "trust head {digest} standing rank {rank} disagrees with its {} body",
+            head.body.state.as_str()
+        )));
+    }
+    Ok(())
+}
+
+const TRUST_REPORT_PAGE_SQL: &str = "SELECT standing_rank, digest, head_seq, length(body), body FROM trust_heads \
+     WHERE standing_rank > ?1 OR (standing_rank = ?1 AND digest > ?2) \
+     ORDER BY standing_rank, digest LIMIT ?3";
+
+const LATEST_OTHER_GRANT_SQL: &str = "SELECT digest, head_seq, length(body), body FROM trust_heads \
+     WHERE standing_rank = 1 AND digest <> ?1 ORDER BY head_seq DESC LIMIT 1";
 
 fn query_limit(budget: FactReadBudget) -> Result<i64, GuardError> {
     let limit = budget
@@ -277,6 +442,34 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
             && !plan.iter().any(|step| step.contains("SCAN trust_heads "))
     });
     let mut statement = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {TRUST_REPORT_PAGE_SQL}"))
+        .map_err(|error| error.to_string())?;
+    let report_plan = statement
+        .query_map(params![-1_i64, "", 3_i64], |row| row.get::<_, String>(3))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let report_seeks = report_plan
+        .iter()
+        .any(|step| step.contains("trust_heads_standing_digest"))
+        && !report_plan
+            .iter()
+            .any(|step| step.contains("SCAN trust_heads "));
+    let mut statement = connection
+        .prepare(&format!("EXPLAIN QUERY PLAN {LATEST_OTHER_GRANT_SQL}"))
+        .map_err(|error| error.to_string())?;
+    let grant_plan = statement
+        .query_map(["spice.test.digest"], |row| row.get::<_, String>(3))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let grant_seeks = grant_plan
+        .iter()
+        .any(|step| step.contains("trust_heads_granted_position"))
+        && !grant_plan
+            .iter()
+            .any(|step| step.contains("SCAN trust_heads "));
+    let mut statement = connection
         .prepare(&format!("EXPLAIN QUERY PLAN {TASK_PAGE_SQL}"))
         .map_err(|error| error.to_string())?;
     let plan = statement
@@ -301,11 +494,11 @@ pub(crate) fn verify_task_page_plan(connection: &rusqlite::Connection) -> Result
         .iter()
         .any(|table| step.contains(&format!("SCAN {table} ")))
     });
-    (trust_seeks && seeks == 4 && !full_scan)
+    (trust_seeks && report_seeks && grant_seeks && seeks == 4 && !full_scan)
         .then_some(())
         .ok_or_else(|| {
             format!(
-                "expected bounded trust and global-task seeks, found trust={trust_plans:?} global={plan:?}"
+                "expected bounded trust and global-task seeks, found trust={trust_plans:?} report={report_plan:?} grant={grant_plan:?} global={plan:?}"
             )
         })
 }

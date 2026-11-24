@@ -152,6 +152,8 @@ pub enum CommandKind {
     /// Reject the exact pended digest or withdraw approval from the exact
     /// granted digest.
     TrustRevoke,
+    /// Read one bounded repository page of current trust rulings.
+    TrustReport,
     /// Read one digest's recorded configuration against the most recently
     /// granted one.
     TrustShow,

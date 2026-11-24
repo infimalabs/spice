@@ -24,7 +24,7 @@ pub(crate) use commit::{SteeringIdentity, steering_fact_identity, steering_head_
 pub(crate) use indexed_read::verify_task_page_plan;
 pub use indexed_read::{
     CurrentHeadWitness, LaneCheckpointHead, TaskHeadPage, TasteEvidenceFact, TasteEvidencePage,
-    TasteEvidenceSummary, ThreadError, TrustHeadPage,
+    TasteEvidenceSummary, ThreadError, TrustHeadPage, TrustReportHeadPage,
 };
 #[cfg(test)]
 pub(crate) use read_metrics::{
@@ -846,13 +846,20 @@ impl JournalWrite {
             HeadUpdateKind::Ordinary,
             move |seq| {
                 let head = build(seq);
-                HeadRow::text(
+                let rank = match head.state {
+                    wire::TrustState::Pended => 0,
+                    wire::TrustState::Granted => 1,
+                    wire::TrustState::Revoked => 2,
+                };
+                let mut row = HeadRow::text(
                     "trust_heads",
                     "digest",
                     head.digest.as_str().to_owned(),
                     seq,
                     &head,
-                )
+                )?;
+                row.trust_rank = Some(rank);
+                Ok(row)
             },
         ));
     }
@@ -1037,6 +1044,7 @@ struct HeadRow {
     key: HeadKey,
     seq: wire::Seq,
     body: Vec<u8>,
+    trust_rank: Option<i64>,
     steering: Option<SteeringHeadColumns>,
     claim: Option<ClaimIndexColumns>,
     transcript_lane: Option<String>,
@@ -1074,6 +1082,7 @@ impl HeadRow {
             key: HeadKey::Text(key),
             seq,
             body: wire::encode(body).map_err(|error| error.to_string())?,
+            trust_rank: None,
             steering: None,
             claim: None,
             transcript_lane: None,
@@ -1091,6 +1100,7 @@ impl HeadRow {
             key: HeadKey::Singleton,
             seq,
             body: wire::encode(body).map_err(|error| error.to_string())?,
+            trust_rank: None,
             steering: None,
             claim: None,
             transcript_lane: None,
@@ -1110,6 +1120,7 @@ impl HeadRow {
             },
             seq,
             body: wire::encode(head).map_err(|error| error.to_string())?,
+            trust_rank: None,
             steering: None,
             claim: Some(ClaimIndexColumns {
                 actor: head.actor.to_string(),
@@ -1133,6 +1144,7 @@ impl HeadRow {
             },
             seq,
             body: wire::encode(head).map_err(|error| error.to_string())?,
+            trust_rank: None,
             steering: None,
             claim: None,
             transcript_lane: None,
@@ -1157,6 +1169,7 @@ impl HeadRow {
                 head.attachments = Vec::new();
                 wire::encode(&head).map_err(|error| error.to_string())?
             },
+            trust_rank: None,
             steering: Some(SteeringHeadColumns {
                 key: head.key.clone(),
                 recipient: head.recipient.to_string(),
