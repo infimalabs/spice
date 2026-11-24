@@ -355,6 +355,11 @@ impl Environment {
         self.trust.get(digest)
     }
 
+    /// Every current authority head, in digest order.
+    pub fn trust_heads(&self) -> impl Iterator<Item = &crate::TrustHead> {
+        self.trust.values()
+    }
+
     /// Add the running resident appliance's product version.
     #[must_use]
     pub fn with_appliance(mut self, version: crate::manifest::ProductVersion) -> Self {

@@ -5,7 +5,8 @@ use bus::Bus;
 use journal::{FactPageStart, FactReadBudget, GuardError, JournalHead, JournalRead};
 use wire::body::{TrustDocuments, TrustPended};
 use wire::intent::{
-    CommandAnswer, TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustRef, TrustShowAnswer,
+    CommandAnswer, TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustLineEnding, TrustRef,
+    TrustShowAnswer,
 };
 use wire::{ConfigSource, Digest, Outcome, Refusal, Reply, ReplyPosition, TrustHead, TrustState};
 
@@ -222,11 +223,7 @@ fn differential(before: &str, after: &str) -> Vec<TrustDiffLine> {
 
     let input = InternedInput::new(before, after);
     let diff = diff_with_slider_heuristics(Algorithm::Histogram, &input);
-    let text = |token| {
-        let line: &str = input.interner[token];
-        let line = line.strip_suffix('\n').unwrap_or(line);
-        line.strip_suffix('\r').unwrap_or(line)
-    };
+    let text = |token| TrustLineEnding::split(input.interner[token]);
     let mut changes = Vec::with_capacity(input.before.len().max(input.after.len()));
     let mut kept = 0;
     for hunk in diff.hunks() {
@@ -271,11 +268,11 @@ fn differential(before: &str, after: &str) -> Vec<TrustDiffLine> {
             lines.push(TrustDiffLine::Elided { count: elided });
             elided = 0;
         }
-        let text = (*text).to_owned();
+        let (text, ending) = (text.0.to_owned(), text.1);
         lines.push(match change {
-            Change::Kept => TrustDiffLine::Kept { text },
-            Change::Added => TrustDiffLine::Added { text },
-            Change::Removed => TrustDiffLine::Removed { text },
+            Change::Kept => TrustDiffLine::Kept { text, ending },
+            Change::Added => TrustDiffLine::Added { text, ending },
+            Change::Removed => TrustDiffLine::Removed { text, ending },
         });
     }
     if elided > 0 {
@@ -289,12 +286,16 @@ mod tests {
     use super::*;
 
     fn rendered(lines: &[TrustDiffLine]) -> Vec<String> {
+        let marked = |marker, text, ending: &TrustLineEnding| match ending.note() {
+            Some(note) => format!("{marker}{text} ({note})"),
+            None => format!("{marker}{text}"),
+        };
         lines
             .iter()
             .map(|line| match line {
-                TrustDiffLine::Kept { text } => format!(" {text}"),
-                TrustDiffLine::Added { text } => format!("+{text}"),
-                TrustDiffLine::Removed { text } => format!("-{text}"),
+                TrustDiffLine::Kept { text, ending } => marked(' ', text, ending),
+                TrustDiffLine::Added { text, ending } => marked('+', text, ending),
+                TrustDiffLine::Removed { text, ending } => marked('-', text, ending),
                 TrustDiffLine::Elided { count } => format!("@{count}"),
             })
             .collect()
@@ -325,6 +326,18 @@ mod tests {
         assert_eq!(
             rendered(&differential(before, after)),
             [" keep", "-old one", " shared", "-old two", "+new", " end"]
+        );
+    }
+
+    #[test]
+    fn a_change_to_line_endings_alone_is_marked() {
+        assert_eq!(
+            rendered(&differential("a\nb\n", "a\nb")),
+            [" a", "-b", "+b (no newline at end of file)"]
+        );
+        assert_eq!(
+            rendered(&differential("a\nb\n", "a\r\nb\n")),
+            ["-a", "+a (line ends with CRLF)", " b"]
         );
     }
 }

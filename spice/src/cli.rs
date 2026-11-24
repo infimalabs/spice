@@ -340,6 +340,7 @@ fn repository_landed(path: &[&str]) -> bool {
             | ["down"]
             | ["config"]
             | ["trust"]
+            | ["trust", "show"]
             | ["trust", "pend"]
             | ["trust", "grant"]
             | ["trust", "revoke"]

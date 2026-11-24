@@ -202,9 +202,8 @@ fn render_trust_requirement(
     } = controls;
     let (can_decide, decide) = (*can_decide, *decide);
     let action_state = runtime.and_then(|runtime| runtime.blocker_action(digest));
-    let trust = runtime
-        .and_then(AppRuntime::board)
-        .and_then(|board| board.trust_head(digest));
+    let board = runtime.and_then(AppRuntime::board);
+    let trust = board.and_then(|board| board.trust_head(digest));
     let (ready, explanation, unavailable_label) = match trust {
         None => (
             true,
@@ -261,7 +260,11 @@ fn render_trust_requirement(
                 <p>{explanation}</p>
                 <code title={digest.to_string()}>{digest.to_string()}</code>
                 if trust.is_some() && *can_show {
-                    <TrustDiff digest={digest.clone()} on_action={show.clone()} />
+                    <TrustDiff
+                        digest={digest.clone()}
+                        granted={board.map(crate::runtime::BoardView::granted_trust).unwrap_or_default()}
+                        on_action={show.clone()}
+                    />
                 }
                 if let Some(BlockerActionState::Failed(_, issue)) = action_state {
                     <p class="work-blocker-issue" role="alert">{issue.clone()}</p>
@@ -295,18 +298,22 @@ fn render_trust_requirement(
 #[derive(Properties, PartialEq)]
 struct TrustDiffProps {
     digest: wire::Digest,
+    /// Every granted digest, so the differential is reread whenever the
+    /// grant it compares against may have moved.
+    granted: Vec<wire::Digest>,
     on_action: Callback<ClientAction, bool>,
 }
 
 /// The recorded configuration for one digest against the latest other grant,
-/// read once per digest the card shows.
+/// reread when the digest or the set of grants changes.
 #[function_component(TrustDiff)]
 fn trust_diff(props: &TrustDiffProps) -> Html {
     let answer = use_state(|| None::<Result<wire::intent::TrustShowAnswer, String>>);
     {
         let answer = answer.clone();
         let on_action = props.on_action.clone();
-        use_effect_with(props.digest.clone(), move |digest| {
+        let read = (props.digest.clone(), props.granted.clone());
+        use_effect_with(read, move |(digest, _)| {
             answer.set(None);
             let respond = {
                 let answer = answer.clone();
@@ -357,6 +364,16 @@ fn trust_diff(props: &TrustDiffProps) -> Html {
 fn render_trust_document(document: &wire::intent::TrustDocumentDiff) -> Html {
     use wire::intent::TrustDiffLine;
 
+    let line = |change, marker, text: &str, ending: wire::intent::TrustLineEnding| {
+        html! {
+            <span data-change={change}>
+                {format!("{marker}{text}")}
+                if let Some(note) = ending.note() {
+                    <em class="trust-diff-ending">{format!(" ⏎ {note}")}</em>
+                }
+            </span>
+        }
+    };
     html! {
         <figure class="trust-diff-document">
             <figcaption>
@@ -367,16 +384,12 @@ fn render_trust_document(document: &wire::intent::TrustDocumentDiff) -> Html {
             </figcaption>
             if !document.lines.is_empty() {
                 <pre>
-                    {for document.lines.iter().map(|line| match line {
-                        TrustDiffLine::Kept { text } => html! {
-                            <span data-change="kept">{format!(" {text}")}</span>
-                        },
-                        TrustDiffLine::Added { text } => html! {
-                            <span data-change="added">{format!("+{text}")}</span>
-                        },
-                        TrustDiffLine::Removed { text } => html! {
-                            <span data-change="removed">{format!("-{text}")}</span>
-                        },
+                    {for document.lines.iter().map(|change| match change {
+                        TrustDiffLine::Kept { text, ending } => line("kept", ' ', text, *ending),
+                        TrustDiffLine::Added { text, ending } => line("added", '+', text, *ending),
+                        TrustDiffLine::Removed { text, ending } => {
+                            line("removed", '-', text, *ending)
+                        }
                         TrustDiffLine::Elided { count } => html! {
                             <span data-change="elided">{format!("⋯ {count} unchanged")}</span>
                         },
