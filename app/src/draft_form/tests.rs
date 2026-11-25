@@ -329,6 +329,10 @@ fn quotes_sent_to_the_creator_compose_into_the_draft_description_in_source_order
     let DraftRequest::Create { request, .. } = creation.create else {
         panic!("a new Draft is created");
     };
+    assert_eq!(request.title, "Title");
+    assert_eq!(request.pitch, "It matters.");
+    assert_eq!(request.intent, Some(TaskIntent::Design));
+    assert!(request.term.is_empty());
     assert_eq!(request.description, Some(expected));
 }
 

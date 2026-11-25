@@ -1378,3 +1378,24 @@
   .message-controls:has(.message-actions-drawer[open]) {
   position: relative;
 }
+/* Quote+ panes are ordinary full-size composer shards inside the global
+   watchband. Only their input mechanics need the global form override; shard
+   sizing and removal stay identical to team quote composers. */
+.app-compose-dialog .draft-quote-sections > .composer-shard--quote {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.app-compose-dialog .draft-quote-sections > .composer-shard--quote > textarea {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+  field-sizing: fixed;
+  resize: none;
+}
