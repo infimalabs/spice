@@ -192,7 +192,6 @@
   --work-completed: var(--app-semantic-live);
   --work-deleted: var(--danger);
 }
-
 /* The opened row owns the decision and the one comment shared by resolution
    and return. Only committed authority moves the row. */
 .work-decision { display: grid; gap: 16px; min-width: 0; font-size: var(--app-type-body); }
@@ -203,6 +202,8 @@
 .work-decision-word { display: grid; gap: 8px; min-width: 0; padding: 12px 14px; border-inline-start: 3px solid var(--line); background: var(--page); }
 .work-decision-word-mark { margin: 0; color: var(--work-yours); font-size: var(--app-type-detail); }
 .work-decision-word-validation > span { color: var(--muted); font-size: var(--app-type-detail); }
+.work-decision-word-link { justify-self: start; font-size: var(--app-type-detail); }
+.work-decision-word-post { max-block-size: 8em; overflow: hidden; }
 .work-decision-outputs { min-width: 0; }
 .work-decision-outputs > ol { display: grid; gap: 12px; list-style: none; margin: 10px 0 0; padding: 0; }
 .work-decision .room-output-verdict-all { margin-top: 0; justify-content: flex-start; }

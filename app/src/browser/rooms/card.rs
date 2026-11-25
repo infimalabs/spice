@@ -84,7 +84,12 @@ pub(super) fn render_card(
     event: &RoomEvent,
 ) -> Html {
     html! {
-        <article class="room-card" key={publication.to_string()} tabindex="0">
+        <article
+            class="room-card"
+            key={publication.to_string()}
+            data-room-position={event.position.to_string()}
+            tabindex="0"
+        >
             {render_face(runtime, controls, open_task, room, publication, event, None)}
         </article>
     }

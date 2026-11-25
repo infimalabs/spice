@@ -222,9 +222,9 @@ fn render_term_nets(context: &Context<'_>) -> Html {
 }
 
 /// The finishing lane's final word on the completed pass: its `task done`
-/// validation and its room posts since the pass opened, the posts the
-/// empty-pass gate counted. An empty pass whose nets all share one sign
-/// marks how the charges and the missing outputs relate beside them.
+/// validation and latest room post since the pass opened. An empty pass whose
+/// nets all share one sign marks how the charges and missing outputs relate
+/// beside them.
 fn render_final_word(context: &Context<'_>, empty: bool) -> Html {
     let regime = with_items(context, |items| {
         items.nets(&context.controller.statement.body.term).regime()
@@ -266,19 +266,20 @@ fn render_final_word(context: &Context<'_>, empty: bool) -> Html {
                 <p class="work-decision-word-mark">{mark}</p>
             }
             if let Some(word) = word {
-                {for word.posts.iter().map(|post| html! {
-                    <article class="work-decision-word-post" key={post.position.to_string()}>
+                if let Some(post) = &word.latest {
+                    <a
+                        class="work-decision-word-link"
+                        href={crate::view::design_href(context.design)}
+                        onclick={super::standing::focus_in_place(format!(
+                            "[data-room-position=\"{}\"]",
+                            post.position,
+                        ))}
+                    >
+                        {"Open latest room post"}
+                    </a>
+                    <article class="work-decision-word-post">
                         {text(&post.text)}
                     </article>
-                })}
-                if word.omitted_posts != 0 {
-                    <p class="work-decision-word-mark">
-                        {format!(
-                            "{} earlier final-word {} omitted; open Room for the complete paged history.",
-                            word.omitted_posts,
-                            if word.omitted_posts == 1 { "post" } else { "posts" },
-                        )}
-                    </p>
                 }
                 if let wire::intent::TaskStep::Done { validation, .. } = &word.finish.step {
                     <article class="work-decision-word-validation">

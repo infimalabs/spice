@@ -136,30 +136,21 @@ pub enum TaskStep {
     },
 }
 
-/// Finishing-lane room posts retained inline with one completed Design pass.
-pub const TASK_DETAIL_PASS_POST_LIMIT: usize = 8;
-/// Maximum authored-text bytes retained across those inline posts.
-///
-/// One maximum-size room publication still fits, while the count limit bounds
-/// the fixed metadata around the text.
-pub const TASK_DETAIL_PASS_POST_BYTES_LIMIT: usize = crate::rooms::ROOM_PUBLICATION_BYTES_LIMIT;
-
 /// The final word of the completed Design pass awaiting the operator's
-/// decision: the finishing lane's `task done` validation and its authored
-/// room posts since the pass opened, the posts the empty-pass gate counts.
+/// decision: the finishing lane's `task done` validation and latest authored
+/// room post since the pass opened.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskDetailPass {
     /// The arrival that completed the pass's round.
     pub finish: TaskDetailStep,
-    /// Newest bounded suffix of the finishing lane's authored room posts since
-    /// the pass opened, in journal order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub posts: Vec<TaskDetailPost>,
-    /// Earlier matching posts omitted from the inline suffix. Their complete
-    /// text remains available through paged room history.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub omitted_posts: u64,
+    /// Latest authored room post by the finishing lane since the pass opened.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub latest: Option<TaskDetailPost>,
 }
 
 /// One authored room post on a task's history.
@@ -172,10 +163,6 @@ pub struct TaskDetailPost {
     pub at: crate::Instant,
     /// The post's authored text.
     pub text: String,
-}
-
-const fn is_zero(value: &u64) -> bool {
-    *value == 0
 }
 
 /// One acknowledged steering directive on a task's history: a task or claim
