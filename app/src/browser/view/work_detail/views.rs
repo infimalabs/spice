@@ -270,7 +270,12 @@ fn questions(row: &wire::intent::BoardTask) -> Html {
                             {if answered { "answered" } else { "open" }}
                         </span>
                         <code class="work-question-handle">{item.handle(&items).to_owned()}</code>
-                        <span>{question.clone()}</span>
+                        {crate::browser::task_detail::render_task_text(
+                            question,
+                            &[],
+                            "work-question-text",
+                            |_| false,
+                        )}
                     </li>
                 }
             })}
