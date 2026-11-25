@@ -104,17 +104,133 @@ fn a_pass_ends_only_once_every_current_question_is_covered() {
     clean(&root, bus);
 }
 
-/// A covered pass that constructed no output refuses to end until its
-/// finishing lane posts why in the Design's room; contributions and another
-/// actor's post do not stand in for that statement.
+/// `actor`'s nonzero `charge` on the fixture Design's one question.
+fn charge(
+    bus: &Bus,
+    epoch: CanonicalUuid,
+    root: &FixtureRoot,
+    actor: Actor,
+    design: &TaskHandle,
+    charge: i8,
+) {
+    contributed(contribute(
+        bus,
+        epoch,
+        root.as_ref(),
+        actor,
+        contribution_body(
+            design,
+            RoomContributionKind::charge(charge),
+            "Investigated before ending the pass.",
+            Vec::new(),
+        ),
+    ));
+}
+
+/// Withdraw an offered output, as `spice task delete` does.
+fn withdraw(bus: &Bus, epoch: CanonicalUuid, output: &TaskHandle) {
+    let visible = board(bus, epoch, Actor::TEST_PRINCIPAL);
+    assert_committed(issue(
+        bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        CommandKind::TaskDelete,
+        transition_witnesses(at(&visible, output)),
+        &TaskDelete {
+            task: output.clone(),
+            reason: "The pass's term nets refuse it.".to_owned(),
+            force_claimed: false,
+        },
+    ));
+}
+
+/// The refusal names its regime's deciding net and each output it refuses.
+fn assert_regime_refused(
+    outcome: &Outcome<CommandAnswer>,
+    reason: &str,
+    net: &str,
+    outputs: &[&TaskHandle],
+) {
+    let Outcome::Refusal(refusal) = outcome else {
+        panic!("{reason}: {outcome:?}");
+    };
+    assert_eq!(refusal.reason(), reason);
+    assert!(refusal.explanation().contains(net), "{refusal:?}");
+    let observed = refusal
+        .diagnostic()
+        .and_then(|diagnostic| diagnostic.observed())
+        .unwrap_or_default();
+    for output in outputs {
+        let born = output.born().expect("output stamp").to_string();
+        assert!(observed.contains(&born), "{observed} names {born}");
+    }
+}
+
+/// When every term nets positive the lanes' charges say work should exist,
+/// so an empty pass refuses even after the finishing lane posts why.
 #[test]
-fn an_empty_pass_ends_only_once_its_lane_posts_why() {
-    let (root, bus, epoch, seats) = fixture("preparation-empty-pass", 1);
+fn a_positive_pass_ends_only_with_an_offered_output() {
+    let (root, bus, epoch, seats) = fixture("preparation-positive-pass", 1);
     let lane = Actor::Lane(seats[0].lane);
-    let design = add_controller(&bus, epoch, "Empty Design", wire::TaskIntent::Design, None);
+    let design = add_controller(
+        &bus,
+        epoch,
+        "Positive Design",
+        wire::TaskIntent::Design,
+        None,
+    );
     wake_design(&bus, epoch, &design);
     capture_for(&bus, epoch, &seats[0], &design);
-    cover_questions(&bus, epoch, &seats[0], &design);
+    charge(&bus, epoch, &root, lane.clone(), &design, 1);
+    post_observation(
+        &bus,
+        epoch,
+        lane.clone(),
+        &design,
+        "Purpose delivered elsewhere.",
+    );
+
+    let held = board(&bus, epoch, lane.clone());
+    let empty = complete_share(&bus, epoch, &seats[0], &design);
+    assert_regime_refused(&empty, "preparation::pass-empty", "1+/0- net +1", &[]);
+    let after = board(&bus, epoch, lane.clone());
+    let (before, unmoved) = (at(&held, &design), at(&after, &design));
+    assert_eq!(unmoved.claims, before.claims, "the claim stays active");
+    assert!(unmoved.design_cycle.pass.is_none(), "no pass ends");
+
+    add_output(&bus, epoch, &design, "Positive output");
+    assert_committed(complete_share(&bus, epoch, &seats[0], &design));
+    clean(&root, bus);
+}
+
+/// When every term nets negative no work should exist: the pass refuses while
+/// any output is offered, then still needs the finishing lane's own post that
+/// the premise failed; another actor's post does not stand in for it.
+#[test]
+fn a_negative_pass_withdraws_its_outputs_and_posts_the_failed_premise() {
+    let (root, bus, epoch, seats) = fixture("preparation-negative-pass", 1);
+    let lane = Actor::Lane(seats[0].lane);
+    let design = add_controller(
+        &bus,
+        epoch,
+        "Negative Design",
+        wire::TaskIntent::Design,
+        None,
+    );
+    wake_design(&bus, epoch, &design);
+    capture_for(&bus, epoch, &seats[0], &design);
+    charge(&bus, epoch, &root, lane.clone(), &design, -1);
+    let plan = add_plan_output(&bus, epoch, &design, "Negative plan");
+
+    let offered = complete_share(&bus, epoch, &seats[0], &design);
+    assert_regime_refused(
+        &offered,
+        "preparation::pass-negative-offered",
+        "0+/1- net -1",
+        &[&plan],
+    );
+
+    withdraw(&bus, epoch, &plan);
     post_observation(
         &bus,
         epoch,
@@ -122,19 +238,13 @@ fn an_empty_pass_ends_only_once_its_lane_posts_why() {
         &design,
         "The operator's note.",
     );
-
-    let held = board(&bus, epoch, lane.clone());
-    let empty = complete_share(&bus, epoch, &seats[0], &design);
-    assert_refused(&empty, "preparation::pass-empty");
-    let after = board(&bus, epoch, lane.clone());
-    let (before, unmoved) = (at(&held, &design), at(&after, &design));
-    assert_eq!(unmoved.claims, before.claims, "the claim stays active");
-    assert!(unmoved.design_cycle.pass.is_none(), "no pass ends");
+    let unstated = complete_share(&bus, epoch, &seats[0], &design);
+    assert_regime_refused(&unstated, "preparation::pass-empty", "0+/1- net -1", &[]);
 
     post_observation(
         &bus,
         epoch,
-        lane.clone(),
+        lane,
         &design,
         "Premise failed: the need is already met elsewhere.",
     );
@@ -144,6 +254,45 @@ fn an_empty_pass_ends_only_once_its_lane_posts_why() {
         at(&ended, &design).design_cycle.pass.is_some(),
         "the stated pass ends"
     );
+    clean(&root, bus);
+}
+
+/// While a term nets zero the evidence is unsettled: an empty pass keeps the
+/// room-post rule, and every offered output must be a Plan or a Design.
+#[test]
+fn a_contested_pass_offers_only_plans_or_designs() {
+    let (root, bus, epoch, seats) = fixture("preparation-contested-pass", 2);
+    let lane = Actor::Lane(seats[0].lane);
+    let design = add_controller(
+        &bus,
+        epoch,
+        "Contested Design",
+        wire::TaskIntent::Design,
+        None,
+    );
+    wake_design(&bus, epoch, &design);
+    capture_for(&bus, epoch, &seats[0], &design);
+    charge(&bus, epoch, &root, lane, &design, 1);
+    charge(&bus, epoch, &root, Actor::Lane(seats[1].lane), &design, -1);
+
+    let empty = complete_share(&bus, epoch, &seats[0], &design);
+    assert_regime_refused(&empty, "preparation::pass-empty", "1+/1- net +0", &[]);
+
+    let work = add_output(&bus, epoch, &design, "Contested work");
+    add_plan_output(&bus, epoch, &design, "Contested plan");
+    let ordinary = complete_share(&bus, epoch, &seats[0], &design);
+    assert_regime_refused(
+        &ordinary,
+        "preparation::pass-contested-work",
+        "1+/1- net +0",
+        &[&work],
+    );
+
+    withdraw(&bus, epoch, &work);
+    assert_committed(complete_share(&bus, epoch, &seats[0], &design));
+    let ended = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let ended = at(&ended, &design);
+    assert!(ended.design_cycle.pass.is_some(), "the staged pass ends");
     clean(&root, bus);
 }
 
