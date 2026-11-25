@@ -58,18 +58,16 @@ this occupant reuse one submission; successors are separate.
 ## Working loop
 
 - Prefer reversible action; stay in this worktree unless steering changes
-  scope. Comment often enough for steering to land. Run shell commands
-  normally: the lane terminal owns execution and its wrapper selects the
-  appliance.
+  scope. Run shell commands normally.
 - Handle operator direction/keys before allocation. Steering ACKed while
   claimed joins that task unless another uses `--origin`. Record new operator
   information on its task contract with `task modify`; message the owner only
   for what it cannot carry. Add distinct requested work with `spice task add
   TITLE --pitch TEXT --origin ack:KEY [--intent plan|design] [--topic /T]`.
-  Omit intent for ordinary work. Starts unplaced; use `--claim` only when an
-  unclaimed lane must own it now. Bare add nests under the sole claim.
+  Starts unplaced; `--claim` only when an unclaimed lane must own it now. Bare
+  add nests under the sole claim.
   Synthesized hints/reminders/amendments authorize no task.
-- Create or update a complete task contract, release it, then trust its owning
+- Write a complete task contract, release it, then trust its owning
   and review lanes; follow claimed work only when asked.
 - Invite/join: `write` a message to `spice://task/HANDLE/invite[/ADDR]`; `/join`.
 - Title names the result; pitch is one plain sentence: who can then do what,
@@ -83,13 +81,13 @@ this occupant reuse one submission; successors are separate.
   outputs) concludes; failed premise collapses whenever found, keeping
   selected outputs. Code/docs/tests state contract; task/commit records keep
   history.
-- Drain `spice task next` until empty or truly blocked; then answer new steering
-  or idle. Work only the assigned phase; never hunt parked rows or assume
-  another phase returns here.
-- Review only when allocated, even your own work; never seek or claim your own
-  review, nor free/defer it for authorship.
-- Rehydrate assignment context from another session before editing. Update,
-  split, or release stale scope rather than force it.
+- Drain `spice task next` until empty or blocked; then answer steering or
+  idle. Work only the assigned phase; never hunt parked rows or await another
+  phase.
+- Review only when allocated, even your own work; never seek, claim, free or
+  defer it for authorship.
+- Rehydrate other-session context before editing; update, split or release
+  stale scope.
 - Plan/Design purpose survives phases; done never replaces review. Creation under
   a held Plan/Design makes a controlled Draft; `--origin` escapes and
   `--preparation` binds. Drafts stay editable, unclaimed, and non-runnable
@@ -98,9 +96,13 @@ this occupant reuse one submission; successors are separate.
   pending activated AC work, or `task done --disposition
   no-work|duplicate|covered|deferred [--cover REF]`. A Plan instead needs
   AC-bearing child work constructed under it; edges and own AC never suffice.
-  Taste holds only the statement. Design participants charge all propositions,
-  build earned outputs (none: `room post` purpose delivered or premise
-  failed), then `task done --validation`. The operator selects
+  Taste holds only the statement. Design participants charge every proposition
+  honestly, not toward a regime. Term nets (+ less - lanes) bound outputs:
+  all positive, some; all negative, none, posting the failed premise; no
+  terms, a zero or >64-lane term, Plans/Designs; mixed, judgment; other empty
+  passes `room post` why. Low agreement, high cancellation favor Plans/Designs/
+  research; high agreement narrows tied scope, never to ordinary work, and
+  backs mixed concrete work. The operator selects
   outputs with `task decide`; rejection closes their controlled subtree. Only
   the operator concludes a Design; stop checkpoints.
 - A selected statement is its contract. To narrow a Design output, first `task
@@ -123,8 +125,8 @@ this occupant reuse one submission; successors are separate.
   diff and acceptance/steering evidence from `task show --context --history`.
   Fix only tiny mechanical issues within ownership needing no decision; commit
   separately, then clean. Record findings and fixes via `--then` or `--followup`.
-  Ordinary fixes born from your held review default to todo-only, even with
-  manual add/link; the parent's re-review checks them.
+  Fixes from your held review default to todo-only; parent re-review checks
+  them.
 - If a claim moves worktrees, stop and return to allocation. Name loose commits
   by handle; never capture another lane's work. Log friction:
   `spice task oops TEXT --origin ORIGIN`.

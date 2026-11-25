@@ -256,47 +256,40 @@ owns each rule summarized here.
   claim, and leaves the Design awaiting the operator's decision. Free or lapse
   instead abandons the pass. Arrivals carry no separate justification: lanes
   put their reasoning in room contributions and done validations. A pass
-  starts from no, and its outputs are what the operator decides: when the
-  room's contributions or other cited sources support the Design, its
-  participants construct the outputs that would deliver it, each an
-  acceptance-bearing task of any intent prepared under the Design, such as an
-  ordinary task or a Plan, and build nothing the evidence does not earn. A
-  pass's regime comes from each current term's net of latest positive less
-  negative retained lane signs: all positive refuses an empty pass even after
-  a post; all negative refuses offered outputs; a zero net, no term, or a term
-  over 64 lanes admits only Plan or Design outputs. Any other empty pass needs
-  the finishing participant's own room post since the last pass saying the
-  purpose is delivered, even by settled earlier outputs, or the premise did
-  not hold; else it refuses `preparation::pass-empty`, moving nothing; others'
-  posts and contributions do not count. The operator chooses by outcome, not
-  timing: conclude a delivered purpose and collapse a failed premise whenever
-  found, keeping any output already selected.
+  starts from no: when cited evidence supports the Design, participants
+  construct acceptance-bearing outputs of any intent under it, earning each,
+  for the operator to decide.
 
-  `task show`, `room awareness`, and the pending pass decision card expose the
-  same bounded computation: each current term's positive/negative lane counts,
-  net and standing; the summed net; agreement
-  `Σ|P−N| / Σ(P+N)` (or `n/a`); cancellation; zero-net count; and regime.
-  More than 64 lanes on a term makes its counts and every aggregate visibly
-  inexact. Contested and split readouts give threshold-free guidance: lower
-  agreement and more cancellation favor staging or research; higher agreement
-  narrows contested staging without admitting ordinary work and makes concrete
-  work more credible in a split regime.
+  A term's net is the retained lanes whose latest nonzero charge on it is
+  positive less those negative; the Design's total charge is the sum of nets,
+  and no separate whole-task charge exists. The nets set the regime: all
+  positive needs an offered output, even after a post; all negative offers
+  none and posts that the premise failed; an empty statement, a zero net, or a
+  term over 64 lanes is contested and offers only Plans or Designs; nonzero
+  nets of both signs leave output kind to judgment. Never shape a charge to
+  reach a regime. Agreement `Σ|P−N| / Σ(P+N)` (or `n/a`) and cancellation
+  grade advice without thresholds: lower agreement and more cancellation favor
+  Plans, Designs, or research; higher agreement narrows contested scope
+  without admitting ordinary work and makes split concrete work more credible.
+  `task show`, `room awareness`, and the decision card show these, inexact
+  past 64 lanes.
 
-  Before the final arrival records, the participants investigate every current
-  question until each carries an item-specific nonzero charge, whatever its
-  sign: the resident reads that coverage from the current statement and
-  refuses an uncovered arrival `preparation::questions-uncovered`, naming each
-  gap and moving nothing.
-  Coverage is not concurrence and proves nothing about the research behind a
-  charge; maturity's heard-question steeping cutoff still decides readiness
-  alone, and a statement naming no question is covered. The final arrival
-  also needs an acceptance contract, as any successful completion does.
-  Acquisition, refresh and resumed context for an open Design pass name the
-  current missing questions and direct source-backed item findings before
-  `task done`. Intake phases such as `plan` and `review` keep their own
-  declared deliverables and receive no research-pass advice. Statement edits
-  and new charges recompute that advice; changed guidance reaches the holder
-  through the assignment or claim notice.
+  Any other empty pass needs the finishing participant's own room post since
+  the last pass: purpose delivered, even by settled earlier outputs, or
+  premise failed; else it refuses `preparation::pass-empty`, moving nothing;
+  others' posts and contributions do not count. The operator chooses by
+  outcome, not timing: conclude a delivered purpose and collapse a failed
+  premise whenever found, keeping selected outputs.
+
+  Before the final arrival records, participants charge every current question
+  nonzero, of either sign; an uncovered arrival refuses
+  `preparation::questions-uncovered`, naming each gap and moving nothing.
+  Coverage is not concurrence or proof of research; maturity's heard-question
+  cutoff still decides readiness, and a statement naming no question is
+  covered. The final arrival also needs an acceptance contract. Open-pass
+  acquisition, refresh and resumed context name missing questions and direct
+  source-backed findings; `plan` and `review` keep their own deliverables.
+  Edits and charges refresh that context.
 
   A Design is offered for a pass only when it is
   [ready](invariants/identity.md#work-a-design-schedules-each-pass-from-input-after-its-last-pass):
