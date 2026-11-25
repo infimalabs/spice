@@ -1399,3 +1399,5 @@
   field-sizing: fixed;
   resize: none;
 }
+/* The strip's open principal-input count rides the utility tabs' outer corner. */
+.app-compose-dialog .app-compose-inbox-count { position: absolute; inset-block-start: 4px; inset-inline-start: -2.2em; pointer-events: none; }
