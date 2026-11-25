@@ -355,7 +355,10 @@ fn DraftEditor(props: &EditorProps) -> Html {
         "3",
         Some((described, &description)),
         "Description",
-        "Write here. Paste, drop, or attach images.",
+        (
+            "Write here. Paste, drop, or attach images.",
+            "Why this source matters to the work.",
+        ),
         true,
     );
     let fields = form.borrow();
@@ -583,13 +586,14 @@ fn content_fields(
 /// An editor passes its description field: the handler that hears its text
 /// and the text it holds. Until the store draws `key`, the textarea shows that
 /// text, so its first mount never reports an empty description as an edit.
+/// The placeholder pair guides the primary text, then each quoted source's note.
 fn render_context(
     key: &str,
     composer: &UseReducerHandle<ComposerDrafts>,
     rows: &'static str,
     description: Option<(Callback<InputEvent>, &str)>,
     label: &'static str,
-    placeholder: &str,
+    (placeholder, quote_placeholder): (&str, &str),
     attached: bool,
 ) -> Html {
     let (oninput, described) = description.unzip();
@@ -620,7 +624,7 @@ fn render_context(
                     None,
                     composer,
                     Callback::from(submit_on_command_enter),
-                    "Why this source matters to the work.",
+                    quote_placeholder,
                     false,
                 )}
             }

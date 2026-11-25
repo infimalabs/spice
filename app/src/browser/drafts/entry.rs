@@ -67,21 +67,38 @@ impl Mode {
     }
 
     /// Collapsed Message names both available actions. Expanded work teaches
-    /// the single composer decode: title, blank line, pitch, blank line, then
-    /// optional context.
+    /// the single composer decode, title, blank line, pitch, blank line, then
+    /// optional context, in the terms each intent's statement needs. Each line
+    /// says what belongs there; a field label would be copied or replaced.
     const fn placeholder(self, expanded: bool) -> &'static str {
         match self {
             Self::Message if !expanded => "(A)sk, (T)ask, (P)lan, (D)esign…",
-            Self::Message => "Ask or steer (required)",
+            Self::Message => "A plain question or steering for an agent (required)",
             Self::Task => {
-                "Task title (required)\n\nWhy this work matters (required)\n\nLonger context"
+                "A short name for the finished result (required)\n\nOne plain sentence on \
+                 who can then do what, and why (required)\n\nThe durable need, mechanism, \
+                 and invariants"
             }
             Self::Plan => {
-                "Plan title (required)\n\nWhy this work matters (required)\n\nLonger context"
+                "A short name for the plan's outcome (required)\n\nOne plain sentence on \
+                 what the finished plan lets someone do (required)\n\nIts scope and the \
+                 tasks to construct"
             }
             Self::Design => {
-                "Design title (required)\n\nWhy this work matters (required)\n\nLonger context"
+                "The question to decide, as a short phrase (required)\n\nOne plain sentence \
+                 on the end state if the answer holds (required)\n\nEvidence, options, and \
+                 what would disprove it"
             }
+        }
+    }
+
+    /// A quoted source adds only description context, never a title or pitch.
+    const fn quote_placeholder(self) -> &'static str {
+        match self {
+            Self::Message => "What to ask or say about this source.",
+            Self::Task => "What this source adds to the task's context.",
+            Self::Plan => "What this source adds to the plan's scope.",
+            Self::Design => "Evidence this source adds to the question.",
         }
     }
 
@@ -236,7 +253,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                             {mode_controls(&mode, busy)}
                         </legend>
                         <div id="app-compose-trigger" onfocusin={expand.reform(|_: FocusEvent| ())} onclick={expand.reform(|_: MouseEvent| ())}>
-                            {render_context(NEW_DRAFT_KEY, &props.controls.composer, "10", None, mode.title_label(), mode.placeholder(*expanded), true)}
+                            {render_context(NEW_DRAFT_KEY, &props.controls.composer, "10", None, mode.title_label(), (mode.placeholder(*expanded), mode.quote_placeholder()), true)}
                         </div>
                         {submit_action(*mode, ready, *applicable, busy, full_send, full_broadcast)}
                         {details(runtime, &recipients, *mode)}
