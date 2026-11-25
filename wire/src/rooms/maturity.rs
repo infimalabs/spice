@@ -18,9 +18,11 @@ use crate::{CanonicalUuid, Seq};
 
 mod coverage;
 mod cutoff;
+mod nets;
 
 pub use coverage::DesignCoverage;
 pub use cutoff::design_heard_required;
+pub use nets::{DesignNets, DesignRegime, TermNet};
 
 /// Statement heads retained individually in one maturity projection.
 pub const DESIGN_MATURITY_HEAD_LIMIT: usize = 4;

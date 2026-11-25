@@ -261,20 +261,21 @@ owns each rule summarized here.
   participants construct the outputs that would deliver it, each an
   acceptance-bearing task of any intent prepared under the Design, such as an
   ordinary task or a Plan, and build nothing the evidence does not earn. A
-  pass that constructs no output says why in the room with `spice room post`:
-  the Design's purpose is delivered, including by earlier accepted outputs
-  that have settled, or its premise did not hold. The operator then chooses by
-  outcome, not timing: conclude a delivered purpose and collapse a failed
-  premise, whenever that is found. Collapse remains a normal answer and keeps
-  any output already selected. When the Design offers no pending output and the
-  finishing participant posted no observation in its room since the last pass
-  boundary, the final arrival refuses `preparation::pass-empty`, naming both
-  repairs and moving nothing; contributions and other actors' posts do not
-  stand in for that statement. Before the final arrival records, the
-  participants investigate every current question until each carries an
-  item-specific nonzero charge, whatever its sign: the resident reads that
-  coverage from the current statement and refuses an uncovered arrival
-  `preparation::questions-uncovered`, naming each gap and moving nothing.
+  pass's regime comes from each current term's net of latest positive less
+  negative retained lane signs: all positive refuses an empty pass even after
+  a post; all negative refuses offered outputs; a zero net, no term, or a term
+  over 64 lanes admits only Plan or Design outputs. Any other empty pass needs
+  the finishing participant's own room post since the last pass saying the
+  purpose is delivered, even by settled earlier outputs, or the premise did
+  not hold; else it refuses `preparation::pass-empty`, moving nothing; others'
+  posts and contributions do not count. The operator chooses by outcome, not
+  timing: conclude a delivered purpose and collapse a failed premise whenever
+  found, keeping any output already selected. Before the final arrival
+  records, the participants investigate every current question until each
+  carries an item-specific nonzero charge, whatever its sign: the resident
+  reads that coverage from the current statement and refuses an uncovered
+  arrival `preparation::questions-uncovered`, naming each gap and moving
+  nothing.
   Coverage is not concurrence and proves nothing about the research behind a
   charge; maturity's heard-question steeping cutoff still decides readiness
   alone, and a statement naming no question is covered. The final arrival

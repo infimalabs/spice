@@ -141,23 +141,97 @@ pub(super) fn require_question_coverage(
     ))
 }
 
-/// Refuse ending a pass that leaves the operator nothing to decide: the Design
-/// offers no output and the finishing lane posted no observation in its room
-/// since the last pass boundary saying whether its purpose is delivered or its
-/// premise failed. An empty pass otherwise reads as an unstated collapse.
+/// Refuse ending a pass against the regime its current term nets set. A
+/// positive regime needs an offered output, and a room post cannot excuse an
+/// empty pass; a negative one admits no offered output; a contested one admits
+/// only Plan or Design outputs. Any other empty pass needs the finishing lane's
+/// room observation since the last pass boundary saying whether the Design's
+/// purpose is delivered or its premise failed, else it reads as an unstated
+/// collapse.
 pub(super) fn require_pass_outcome(
     snapshot: &bus::TaskSnapshot,
     controller: &TaskStamp,
     actor: &wire::Actor,
 ) -> Result<(), Outcome<CommandAnswer>> {
-    if decision::offered_outputs(snapshot, controller)
-        .next()
-        .is_some()
-    {
-        return Ok(());
-    }
     let heads = task_heads(snapshot, controller)?;
     let statement = heads.statement().body();
+    let handle = statement.handle(heads.workflow().body().phase);
+    let quiet = wire::rooms::DesignItems::default();
+    let nets = snapshot
+        .facts()
+        .design_items(controller)
+        .unwrap_or(&quiet)
+        .nets(&statement.term);
+    let regime = nets.regime();
+    let offered = decision::offered_outputs(snapshot, controller).collect::<Vec<_>>();
+    let named = |outputs: &[&journal::TaskHeads]| {
+        outputs
+            .iter()
+            .map(|output| {
+                output
+                    .statement()
+                    .body()
+                    .handle(output.workflow().body().phase)
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    match regime {
+        wire::rooms::DesignRegime::Negative if !offered.is_empty() => {
+            return Err(refusal(
+                "preparation::pass-negative-offered",
+                Some(named(&offered)),
+                format!(
+                    "every term of {handle} nets negative ({}), so no work should exist: \
+                     withdraw each offered output with `spice task delete OUTPUT REASON`, then \
+                     post that its premise failed with `spice room post {handle} TEXT`",
+                    nets.deciding()
+                ),
+            ));
+        }
+        wire::rooms::DesignRegime::Contested => {
+            let work = offered
+                .iter()
+                .copied()
+                .filter(|output| {
+                    !output.statement().body().intent.is_some_and(|intent| {
+                        intent == wire::TaskIntent::Plan || intent.is_design()
+                    })
+                })
+                .collect::<Vec<_>>();
+            if !work.is_empty() {
+                return Err(refusal(
+                    "preparation::pass-contested-work",
+                    Some(named(&work)),
+                    format!(
+                        "{handle} is contested ({}), so it offers only Plans or Designs: restage \
+                         each ordinary output with `spice task modify OUTPUT --intent \
+                         plan|design` or withdraw it with `spice task delete OUTPUT REASON`",
+                        nets.deciding()
+                    ),
+                ));
+            }
+        }
+        _ => {}
+    }
+    if !offered.is_empty() {
+        return Ok(());
+    }
+    if regime == wire::rooms::DesignRegime::Positive {
+        return Err(refusal(
+            "preparation::pass-empty",
+            Some(handle.to_string()),
+            format!(
+                "every term of {handle} nets positive ({}), so work should exist and a room post \
+                 cannot excuse an empty pass: construct the outputs the evidence supports with \
+                 `spice task add TITLE --pitch TEXT --term TEXT`, or charge against the terms \
+                 that do not hold with `spice room contribute {handle} --charge=C --question \
+                 HEX TEXT`",
+                nets.deciding()
+            ),
+        ));
+    }
     let horizon = snapshot.facts().design(statement).horizon;
     if snapshot
         .facts()
@@ -165,16 +239,26 @@ pub(super) fn require_pass_outcome(
     {
         return Ok(());
     }
-    let handle = statement.handle(heads.workflow().body().phase);
+    let why = if regime == wire::rooms::DesignRegime::Negative {
+        format!(
+            "every term of {handle} nets negative ({}): say that its premise failed (name the \
+             evidence) with `spice room post {handle} TEXT`",
+            nets.deciding()
+        )
+    } else {
+        format!(
+            "{handle} is {} ({}): construct the outputs this pass's evidence supports under the \
+             held Design with `spice task add TITLE --pitch TEXT --term TEXT`, or say why it \
+             needs none with `spice room post {handle} TEXT`: its purpose is already delivered \
+             (name what delivered it) or its premise failed (name the evidence)",
+            regime.as_str(),
+            nets.deciding()
+        )
+    };
     Err(refusal(
         "preparation::pass-empty",
         Some(handle.to_string()),
-        format!(
-            "construct the outputs this pass's evidence supports under the held Design with \
-             `spice task add TITLE --pitch TEXT --term TEXT`, or say why it needs none with \
-             `spice room post {handle} TEXT`: its purpose is already delivered (name what \
-             delivered it) or its premise failed (name the evidence)"
-        ),
+        why,
     ))
 }
 

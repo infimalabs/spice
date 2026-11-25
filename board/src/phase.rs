@@ -262,9 +262,12 @@ pub fn deliverable(phase: &Phase) -> &'static str {
              evidence supports the Design, construct the outputs that would deliver it under \
              this held Design with `spice task add TITLE --pitch TEXT --term TEXT`, ordinary \
              tasks or a Plan, building only what the room's contributions or other cited \
-             sources earn; those outputs are what the operator decides. A pass that constructs \
-             none posts why with `spice room post HANDLE TEXT`: the Design's purpose is \
-             delivered or its premise failed; ending an empty pass without that post refuses. \
+             sources earn; those outputs are what the operator decides. Each term's net, lanes \
+             whose latest charge is positive less negative, bounds the pass: all positive needs \
+             an output, all negative offers none, and any zero net offers only Plans or Designs. \
+             A pass that constructs none posts why with `spice room post HANDLE TEXT`: the \
+             Design's purpose is delivered or its premise failed; ending an empty pass without \
+             that post refuses. \
              Then record your completed share with `spice task done --validation \"...\"` and \
              run `spice task next`; the final share ends the pass for the operator's decision, \
              and only the operator concludes a Design"
