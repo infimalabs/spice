@@ -142,6 +142,13 @@ pub(in crate::browser) struct Props {
     pub submissions: SubmissionHandle,
     pub open_task: Callback<TaskStamp>,
     pub navigate: Callback<crate::browser::navigation::Intent>,
+    /// The principal section the expanded overlay carries below the
+    /// composition: human messaging lives with the composer.
+    #[prop_or_default]
+    pub inbox: Html,
+    /// Open principal inputs the strip announces while the sheet is closed.
+    #[prop_or_default]
+    pub inbox_waiting: usize,
 }
 
 impl PartialEq for Props {
@@ -154,6 +161,8 @@ impl PartialEq for Props {
             && self.submissions.status == other.submissions.status
             && self.open_task == other.open_task
             && self.navigate == other.navigate
+            && self.inbox == other.inbox
+            && self.inbox_waiting == other.inbox_waiting
     }
 }
 
@@ -236,6 +245,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                 class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge app-closed-edge--block-end"
                 data-expanded={presentation.expanded.to_string()}
                 data-presented={presentation.visible.to_string()}
+                data-inbox-waiting={props.inbox_waiting.to_string()}
                 inert={presentation.closing.then_some("true")}
                 data-admission-state={busy.then_some("pending")}
                 aria-busy={busy.to_string()}
@@ -266,13 +276,10 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                         {"Control or Command plus Shift and Enter broadcasts this message and its direct images to every occupied agent in the fleet."}
                     </span>
                 </form>
-                // Outside the masked form so this layer clears both accents.
-                // Tabs run from the inline end inward; Help remains available
-                // during admission, while Draft explicitly seals itself.
-                <div class="app-compose-utility-tabs">
-                    <crate::browser::help::HelpTrigger />
-                    {draft_control(&mode, &draft, busy)}
-                </div>
+                {utility_tabs(&mode, &draft, busy, props.inbox_waiting)}
+                <section class="app-compose-inbox" aria-label="Principals" hidden={!presentation.expanded}>
+                    {props.inbox.clone()}
+                </section>
             </dialog>
         </div>
     }
@@ -541,6 +548,14 @@ fn command_keys(
 ) -> Callback<KeyboardEvent> {
     Callback::from(move |event: KeyboardEvent| {
         if event.key() != "Enter" || !(event.meta_key() || event.ctrl_key()) {
+            return;
+        }
+        // The principal inbox below the composition keeps its own strokes.
+        if event
+            .target_dyn_into::<web_sys::Element>()
+            .and_then(|target| target.closest(".app-compose-inbox").ok().flatten())
+            .is_some()
+        {
             return;
         }
         if event.shift_key() {
@@ -986,6 +1001,35 @@ fn send_message(
         },
     ) {
         sending.set(true);
+    }
+}
+
+/// Outside the masked form so this layer clears both accents. Tabs run from
+/// the inline end inward; Help remains available during admission, while Draft
+/// explicitly seals itself. The count of open principal inputs rides beside
+/// them so the closed strip announces it.
+fn utility_tabs(
+    mode: &UseStateHandle<Mode>,
+    draft: &UseStateHandle<bool>,
+    busy: bool,
+    waiting: usize,
+) -> Html {
+    let label = match waiting {
+        0 => None,
+        1 => Some("1 message waiting for you".to_owned()),
+        count => Some(format!("{count} messages waiting for you")),
+    };
+    html! {
+        <div class="app-compose-utility-tabs">
+            <crate::browser::help::HelpTrigger />
+            {draft_control(mode, draft, busy)}
+            if let Some(label) = label {
+                <span class="app-count-badge app-compose-inbox-count" role="status"
+                    aria-label={label.clone()} title={label}>
+                    {waiting.to_string()}
+                </span>
+            }
+        </div>
     }
 }
 

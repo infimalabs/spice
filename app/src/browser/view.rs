@@ -126,6 +126,20 @@ pub(super) fn render_app(render: AppRender<'_>, work: Option<&WorkProjection<'_>
         .as_ref()
         .and_then(AppRuntime::lanes)
         .map(|lanes| lanes.topology_revision.to_string());
+    let inbox_waiting = surface.as_ref().map_or(0, chrome::waiting_messages);
+    let inbox = spice_principals::render(
+        render.connection,
+        surface.as_ref(),
+        render.sender,
+        super::rooms::render_inbox(
+            surface.as_ref(),
+            render.room_controls,
+            render.sender,
+            render.composer_drafts,
+            render.agents,
+            &render.open_message_task,
+        ),
+    );
     html! {
         <div
             class="shell"
@@ -150,6 +164,8 @@ pub(super) fn render_app(render: AppRender<'_>, work: Option<&WorkProjection<'_>
                         submissions={render.submissions.clone()}
                         open_task={render.select_task.clone()}
                         navigate={render.navigate.clone()}
+                        inbox={inbox}
+                        inbox_waiting={inbox_waiting}
                     />
                 },
             })}
@@ -242,19 +258,6 @@ fn render_spice_sidebar(render: &AppRender<'_>, runtime: Option<&AppRuntime>) ->
     let body = html! {
         <div class="app-spice-sidebar-content">
             {quota::render_sidebar(runtime)}
-            {spice_principals::render(
-                render.connection,
-                runtime,
-                render.sender,
-                super::rooms::render_inbox(
-                    runtime,
-                    render.room_controls,
-                    render.sender,
-                    render.composer_drafts,
-                    render.agents,
-                    &render.open_message_task,
-                ),
-            )}
             {render_spice_topology(render, runtime, standings.as_deref().map(Vec::as_slice))}
             {spice_jobs::render(standings.clone(), render.connection, runtime, render.sender)}
         </div>
