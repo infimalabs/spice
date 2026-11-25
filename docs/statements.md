@@ -298,11 +298,18 @@ unless it is about to finish or pass it cleanly.
 
 ## Pitch and description
 
-- Every task statement stores a pitch: one plain, unlabeled sentence saying
-  why the task matters, required on `task add` and refused when missing, blank,
-  multi-line, or over 160 characters; a Design's pitch is its problem
-  sentence. The description is the how: durable need, mechanism, and
-  invariants, with no opener to carry.
+- Every task statement stores a pitch: one plain, unlabeled sentence stating
+  who can do what once the work lands and why that matters, never the current
+  defect, required on `task add` and refused when missing, blank, multi-line,
+  or over 160 characters. Board rows, graph nodes, and notices often show only
+  title and pitch, so a title names the result and a pitch reads without its
+  terms. A Design's title stays its question and its pitch states the end
+  state it pursues, never a one-word heading. Each unresolved Design question
+  is its own `term` item, labeled Questions where ordinary tasks show
+  acceptance criteria; it states one proposition with an unambiguous positive
+  side, and an open-ended prompt belongs in a room question instead. The
+  description is the how: durable need (including the current defect),
+  mechanism, and invariants, with no opener to carry.
 - A creation with no author to ask derives its pitch once and never asks again:
   a review follow-up from the first substantive description sentence or else
   the title, a `task oops` report from its title. The appliance never rewrites

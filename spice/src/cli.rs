@@ -553,7 +553,10 @@ Omit --intent for ordinary work. --intent plan declares a Plan whose default
 route is plan,review. --intent design declares a Design with one open design
 phase; plan,design and review,design add an ordinary intake phase.
 
-A Design is itself a question: phrase TITLE as the question under Design.
+TITLE names the result the task delivers, and --pitch says who can do what
+once it lands and why that matters; the current defect belongs in
+--description. A Design is itself a question: phrase TITLE as the question
+under Design, and give its --pitch the end state it pursues.
 Each --term value states one proposition with an unambiguous positive side;
 participants vote on it, and it passes to answer rather than becoming an
 implementation completion criterion. Put an open-ended research prompt in the

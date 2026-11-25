@@ -119,8 +119,8 @@ pub(crate) struct BoardRow {
     #[serde(skip_serializing_if = "is_zero")]
     pub(crate) arrived: usize,
     pub(crate) title: ClippedText,
-    /// One plain sentence saying why the task matters, whole: an admitted
-    /// pitch is one bounded line.
+    /// One plain sentence saying who can do what once the task lands and why,
+    /// whole: an admitted pitch is one bounded line.
     pub(crate) pitch: String,
 }
 

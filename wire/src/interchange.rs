@@ -36,7 +36,7 @@ pub struct TaskSetTask {
     pub id: u32,
     /// One-line statement of the work.
     pub title: String,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// Exact public destination, or an unresolved relative tail.
     #[serde(

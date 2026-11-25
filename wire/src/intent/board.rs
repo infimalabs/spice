@@ -297,7 +297,7 @@ pub struct BoardStatement {
     pub born: crate::TaskStamp,
     /// Fact that first placed this task in the topic.
     pub topic_origin: crate::Seq,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// Longer authored context.
     #[serde(

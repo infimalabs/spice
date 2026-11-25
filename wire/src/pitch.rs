@@ -1,4 +1,5 @@
-//! The pitch: one plain sentence saying why a task matters.
+//! The pitch: one plain sentence saying who can do what once a task lands and
+//! why that matters.
 //!
 //! Every route that writes a task statement admits its pitch through
 //! [`admit`] and reads prose findings through [`findings`]; no reader derives
@@ -42,7 +43,9 @@ impl PitchRefusal {
     pub fn remedy(self) -> String {
         match self {
             Self::Empty => {
-                "give --pitch one plain sentence saying why this task matters".to_owned()
+                "give --pitch one plain sentence saying who can do what once this task lands \
+                 and why that matters"
+                    .to_owned()
             }
             Self::Multiline => "keep the pitch on one line with no line break".to_owned(),
             Self::TooLong { chars } => format!(

@@ -131,7 +131,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     (
         "task add",
         "pitch",
-        "One plain sentence saying why this task matters, at most 160 characters",
+        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 160 characters",
     ),
     (
         "task add",
@@ -164,12 +164,17 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     (
         "task capture",
         "pitch",
-        "One plain sentence saying why this task matters; derived from the title when absent",
+        "One plain sentence saying who can do what once this task lands and why that matters; derived from the title when absent",
+    ),
+    (
+        "task modify",
+        "title",
+        "The result this task delivers, or a Design's question",
     ),
     (
         "task modify",
         "pitch",
-        "One plain sentence saying why this task matters, at most 160 characters",
+        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 160 characters",
     ),
     (
         "task modify",

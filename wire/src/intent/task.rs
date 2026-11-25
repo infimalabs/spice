@@ -16,8 +16,8 @@ use crate::witness::{Name, Phase, TaskHandle, TaskStamp};
 pub struct TaskAdd {
     /// One-line statement of the work.
     pub title: String,
-    /// One plain sentence saying why the task matters; the write refuses an
-    /// absent or empty pitch.
+    /// One plain sentence saying who can do what once the task lands and why;
+    /// the write refuses an absent or empty pitch.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub pitch: String,
     /// Named topic, or absent to let the router place the task.
@@ -214,7 +214,7 @@ impl SweepPreview {
 pub struct SweepText {
     /// One-line statement of the work.
     pub title: String,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// The debt and its provenance.
     pub description: String,
@@ -986,7 +986,7 @@ fn claim_warnings_empty(warnings: &[ClaimWarning]) -> bool {
 pub struct ClaimStatement {
     /// Authored title.
     pub title: String,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// Longer authored context.
     #[serde(

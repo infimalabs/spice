@@ -80,9 +80,7 @@ owns each rule summarized here.
   or `spice room contribute HANDLE --ask TEXT`: a
   [typed](invariants/identity.md#identity-a-lane-contributes-typed-problem-space-records-to-an-open-design)
   vote from -2 to +2 on one proposition stated by a Design question item, or
-  an open research question. A chargeable item states one proposition whose
-  positive side is unambiguous; an open-ended prompt belongs in a room question,
-  not in a charge target. A question item's identity is the digest of its
+  an open research question. A question item's identity is the digest of its
   normalized text, and every surface renders a question as a bullet led by its
   handle: the first six hex digits of that digest, extended only while another
   current question shares it. `--question HEX` takes a prefix of at least
@@ -113,10 +111,6 @@ owns each rule summarized here.
   subscription; the record makes it a participant, not a listener. A
   contribution is problem-space record, never a decision: it changes no task,
   claim, decision, or authorization, and a concluded Design accepts none.
-- **Design statements.** A Design's pitch is the plain sentence that states
-  its problem, not a one-word heading. Each unresolved question is its
-  own item in the statement's `term` list; Design surfaces label that list
-  Questions while ordinary tasks present it as acceptance criteria.
 - **Lane evidence.** Design matching retains one bounded profile per logical
   lane across every occupant and vendor session it hosts, so a renewed or
   vacant lane still matches the work it did; an undeclared occupant
