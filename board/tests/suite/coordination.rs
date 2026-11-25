@@ -378,6 +378,25 @@ fn board_graph_views_render_independent_relations_in_stable_order() {
 }
 
 #[test]
+fn dependency_graph_does_not_project_design_release() {
+    let design = planning(
+        "BOARD-design-graph",
+        wire::TaskIntent::Design,
+        Standing::Open,
+    );
+    let output = released(&named_output(
+        "BOARD-output-graph",
+        "BOARD-design-graph",
+        "BOARD-design-graph",
+    ));
+
+    assert_eq!(
+        graph::render(View::Dependencies, &[design, output], &[]).text(),
+        "graph dependencies\n"
+    );
+}
+
+#[test]
 fn live_graphs_exclude_settled_history_but_name_direct_dependencies() {
     let reviewer = Actor::Lane(uuid("019fbbde-5105-75a3-a76a-722afde1e411"));
     let author = Actor::Lane(uuid("019fbbde-5105-75a3-a76a-722afde1e412"));

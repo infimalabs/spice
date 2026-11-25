@@ -277,16 +277,6 @@ fn relationship_tasks(
         .iter()
         .map(|heads| (heads.statement().body().born.clone(), heads))
         .collect::<BTreeMap<_, _>>();
-    let released = released_roots(tasks.values().map(|heads| {
-        let statement = heads.statement().body();
-        (
-            &statement.born,
-            heads.workflow().body(),
-            statement.preparation.as_ref(),
-            heads.workflow().body().status.is_pending(),
-            wire::intent::is_open_design(statement.intent, heads.workflow().body()),
-        )
-    }));
     let mut reverse_dependencies = BTreeMap::<TaskStamp, BTreeSet<TaskStamp>>::new();
     let reverse = ReverseRelations::new(&tasks, |heads| {
         let statement = heads.statement().body();
@@ -301,14 +291,6 @@ fn relationship_tasks(
                     .or_default()
                     .insert(task.clone());
             }
-        }
-    }
-    for (design, outputs) in &released {
-        for output in outputs {
-            reverse_dependencies
-                .entry(output.clone())
-                .or_default()
-                .insert(design.clone());
         }
     }
     let mut selected = roots.iter().cloned().collect::<BTreeSet<_>>();
@@ -335,7 +317,6 @@ fn relationship_tasks(
                     .filter(|dependency| tasks.contains_key(*dependency))
                     .cloned(),
             );
-            neighbors.extend(released.get(&task).into_iter().flatten().cloned());
             neighbors.extend(
                 reverse_dependencies
                     .get(&task)
@@ -477,12 +458,7 @@ fn candidates(
         }
     }
     if relations.contains(&TaskRelationKind::Dependency) {
-        let prerequisites = row
-            .statement
-            .body
-            .dependencies
-            .iter()
-            .chain(dependencies.released.get(task).into_iter().flatten());
+        let prerequisites = &row.statement.body.dependencies;
         for dependency in prerequisites {
             if let Some(dependency) = tasks.get(dependency) {
                 candidates.push(candidate(
@@ -607,63 +583,13 @@ fn candidate(
     }
 }
 
-/// Each open Design's released construction roots: the pending outputs it
-/// waits on as prerequisites without holding an edge to them. Rows yield
-/// their stamp, workflow, preparation, pending standing and open-Design standing.
-fn released_roots<'a>(
-    rows: impl Iterator<
-        Item = (
-            &'a TaskStamp,
-            &'a wire::WorkflowHead,
-            Option<&'a wire::TaskPreparation>,
-            bool,
-            bool,
-        ),
-    >,
-) -> BTreeMap<TaskStamp, BTreeSet<TaskStamp>> {
-    let rows = rows.collect::<Vec<_>>();
-    let designs = rows
-        .iter()
-        .filter(|(_, _, _, _, design)| *design)
-        .map(|(born, ..)| *born)
-        .collect::<BTreeSet<_>>();
-    let mut released = BTreeMap::<TaskStamp, BTreeSet<TaskStamp>>::new();
-    for (born, workflow, preparation, pending, _) in rows {
-        if !pending {
-            continue;
-        }
-        if let Some(design) = wire::intent::released_construction_root(born, workflow, preparation)
-            .filter(|design| designs.contains(design))
-        {
-            released
-                .entry(design.clone())
-                .or_default()
-                .insert(born.clone());
-        }
-    }
-    released
-}
-
-/// Dependency edges beyond each row's own statement: the released roots an
-/// open Design waits on, and every task's dependents including Designs
-/// waiting on released work.
+/// Reverse ordinary dependency edges for each task.
 struct DependencyIndex {
-    released: BTreeMap<TaskStamp, BTreeSet<TaskStamp>>,
     reverse: BTreeMap<TaskStamp, BTreeSet<TaskStamp>>,
 }
 
 impl DependencyIndex {
     fn new(tasks: &BTreeMap<TaskStamp, &BoardTask>) -> Self {
-        let released = released_roots(tasks.values().map(|row| {
-            let statement = &row.statement.body;
-            (
-                &statement.born,
-                &row.workflow.body,
-                statement.preparation.as_ref(),
-                row.workflow.body.status.is_pending(),
-                wire::intent::is_open_design(statement.intent, &row.workflow.body),
-            )
-        }));
         let mut reverse = BTreeMap::<TaskStamp, BTreeSet<TaskStamp>>::new();
         for (task, row) in tasks {
             for dependency in &row.statement.body.dependencies {
@@ -675,15 +601,7 @@ impl DependencyIndex {
                 }
             }
         }
-        for (design, outputs) in &released {
-            for output in outputs {
-                reverse
-                    .entry(output.clone())
-                    .or_default()
-                    .insert(design.clone());
-            }
-        }
-        Self { released, reverse }
+        Self { reverse }
     }
 }
 

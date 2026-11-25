@@ -1204,7 +1204,7 @@ fn phase_guidance_lines(task: &BoardTask) -> Vec<String> {
             "  phase:plan is this task's entire flow past draft.".to_owned(),
             "  Create an accepted output with spice task add \"...\" --term \"...\". Without an explicit origin it is associated with the ambient planning controller and remains a controlled Draft until positive Plan completion; --preparation HANDLE associates it explicitly. A sub-Plan follows the same controlled release. Origin opts out and creates no lifecycle or dependency edge."
                 .to_owned(),
-            "  Explicit --depends adds ordinary prerequisites. A Design dependency remains an ordinary editable edge. task decide authorizes and releases selected controlled Drafts, closes rejected ones, and then retained preparation state keeps the Design waiting until its released work settles. The derived graph relation is lifecycle presentation, not an editable dependency."
+            "  Explicit --depends adds ordinary prerequisites. A Design dependency remains an ordinary editable edge. task decide authorizes and releases selected controlled Drafts and closes rejected ones. Retained preparation state, not a dependency edge, keeps the Design waiting until released work settles; dependency graphs show only explicit prerequisites, while the controls relation shows construction."
                 .to_owned(),
             "  Planning changes board state, not repository files; do not edit or commit implementation."
                 .to_owned(),
