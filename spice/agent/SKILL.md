@@ -98,9 +98,9 @@ this occupant reuse one submission; successors are separate.
   AC-bearing child work constructed under it; edges and own AC never suffice.
   Taste holds only the statement. Design participants charge every proposition
   honestly, not toward a regime. Term nets (+ less - lanes) bound outputs:
-  all positive, some; all negative, none, posting the failed premise; no
-  terms, a zero or >64-lane term, Plans/Designs; mixed, judgment; other empty
-  passes `room post` why. Low agreement, high cancellation favor Plans/Designs/
+  all positive, some or post what delivered it; all negative, none; no terms,
+  a zero or >64-lane term, Plans/Designs; mixed, judgment; every empty pass
+  `room post`s why. Low agreement, high cancellation favor Plans/Designs/
   research; high agreement narrows tied scope, never to ordinary work, and
   backs mixed concrete work. The operator selects
   outputs with `task decide`; rejection closes their controlled subtree. Only

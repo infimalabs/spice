@@ -149,18 +149,24 @@ impl<'a> Context<'a> {
     }
 }
 
+/// Read the Design's charged items, empty before any charge.
+fn with_items<R>(context: &Context<'_>, read: impl FnOnce(&wire::rooms::DesignItems) -> R) -> R {
+    match context.runtime.room_projection().maturity(context.design) {
+        Some(maturity) => read(&maturity.items),
+        None => read(&wire::rooms::DesignItems::default()),
+    }
+}
+
 /// The exact term-net evidence the pass gate used, rendered before the
 /// operator decides the completed pass.
 fn render_term_nets(context: &Context<'_>) -> Html {
     let statement = &context.controller.statement.body;
-    let empty = wire::rooms::DesignItems::default();
-    let items = context
-        .runtime
-        .room_projection()
-        .maturity(context.design)
-        .map_or(&empty, |maturity| &maturity.items);
-    let nets = items.nets(&statement.term);
-    let standings = items.standings(&statement.term);
+    let (nets, standings) = with_items(context, |items| {
+        (
+            items.nets(&statement.term),
+            items.standings(&statement.term),
+        )
+    });
     let current = nets
         .terms
         .iter()
@@ -210,6 +216,67 @@ fn render_term_nets(context: &Context<'_>) -> Html {
             </p>
             if let Some(advice) = nets.advice() {
                 <p>{advice}</p>
+            }
+        </section>
+    }
+}
+
+/// The finishing lane's final word on the completed pass: its `task done`
+/// validation and its room posts since the pass opened, the posts the
+/// empty-pass gate counted. An empty pass whose nets all share one sign
+/// marks how the charges and the missing outputs relate beside them.
+fn render_final_word(context: &Context<'_>, empty: bool) -> Html {
+    let regime = with_items(context, |items| {
+        items.nets(&context.controller.statement.body.term).regime()
+    });
+    let mark = match regime {
+        wire::rooms::DesignRegime::Positive if empty => {
+            Some("every term nets positive; no output offered")
+        }
+        wire::rooms::DesignRegime::Negative if empty => {
+            Some("every term nets negative; no output offered")
+        }
+        _ => None,
+    };
+    let word = context
+        .runtime
+        .task_detail(context.design)
+        .and_then(crate::runtime::TaskDetailState::answer)
+        .filter(|answer| answer.task.design_cycle.pass == Some(context.pass))
+        .and_then(|answer| answer.pass.as_ref());
+    if mark.is_none() && word.is_none() {
+        return Html::default();
+    }
+    let text = |text: &str| {
+        crate::browser::task_detail::render_task_text(text, &[], "work-decision-word-body", |_| {
+            false
+        })
+    };
+    html! {
+        <section class="work-decision-word" aria-label="Final word">
+            if let Some(word) = word {
+                <strong>
+                    {format!(
+                        "Final word · {}",
+                        super::conversation::actor_label(context.runtime, &word.finish.author)
+                    )}
+                </strong>
+            }
+            if let Some(mark) = mark {
+                <p class="work-decision-word-mark">{mark}</p>
+            }
+            if let Some(word) = word {
+                {for word.posts.iter().map(|post| html! {
+                    <article class="work-decision-word-post" key={post.position.to_string()}>
+                        {text(&post.text)}
+                    </article>
+                })}
+                if let wire::intent::TaskStep::Done { validation, .. } = &word.finish.step {
+                    <article class="work-decision-word-validation">
+                        <span>{"Validation"}</span>
+                        {text(validation)}
+                    </article>
+                }
             }
         </section>
     }

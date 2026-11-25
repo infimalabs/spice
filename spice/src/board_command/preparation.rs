@@ -142,12 +142,12 @@ pub(super) fn require_question_coverage(
 }
 
 /// Refuse ending a pass against the regime its current term nets set. A
-/// positive regime needs an offered output, and a room post cannot excuse an
-/// empty pass; a negative one admits no offered output; a contested one admits
-/// only Plan or Design outputs. Any other empty pass needs the finishing lane's
-/// room observation since the last pass boundary saying whether the Design's
-/// purpose is delivered or its premise failed, else it reads as an unstated
-/// collapse.
+/// negative regime admits no offered output and a contested one admits only
+/// Plan or Design outputs. Every empty pass needs the finishing lane's room
+/// observation since the last pass boundary saying why it offers nothing: in
+/// the positive regime, what already delivered the purpose; otherwise, that
+/// or a failed premise. Without it the pass reads as an unstated collapse, or
+/// in the positive regime as work the lanes agree on but never build.
 pub(super) fn require_pass_outcome(
     snapshot: &bus::TaskSnapshot,
     controller: &TaskStamp,
@@ -218,20 +218,6 @@ pub(super) fn require_pass_outcome(
     if !offered.is_empty() {
         return Ok(());
     }
-    if regime == wire::rooms::DesignRegime::Positive {
-        return Err(refusal(
-            "preparation::pass-empty",
-            Some(handle.to_string()),
-            format!(
-                "every term of {handle} nets positive ({}), so work should exist and a room post \
-                 cannot excuse an empty pass: construct the outputs the evidence supports with \
-                 `spice task add TITLE --pitch TEXT --term TEXT`, or charge against the terms \
-                 that do not hold with `spice room contribute {handle} --charge=C --question \
-                 HEX TEXT`",
-                nets.deciding()
-            ),
-        ));
-    }
     let horizon = snapshot.facts().design(statement).horizon;
     if snapshot
         .facts()
@@ -239,21 +225,28 @@ pub(super) fn require_pass_outcome(
     {
         return Ok(());
     }
-    let why = if regime == wire::rooms::DesignRegime::Negative {
-        format!(
+    let why = match regime {
+        wire::rooms::DesignRegime::Negative => format!(
             "every term of {handle} nets negative ({}): say that its premise failed (name the \
              evidence) with `spice room post {handle} TEXT`",
             nets.deciding()
-        )
-    } else {
-        format!(
+        ),
+        wire::rooms::DesignRegime::Positive => format!(
+            "every term of {handle} nets positive ({}), so work should exist: construct the \
+             outputs the evidence supports with `spice task add TITLE --pitch TEXT --term TEXT`, \
+             say what already delivered its purpose (selected work or research findings) with \
+             `spice room post {handle} TEXT`, or charge against the terms that do not hold with \
+             `spice room contribute {handle} --charge=C --question HEX TEXT`",
+            nets.deciding()
+        ),
+        wire::rooms::DesignRegime::Contested | wire::rooms::DesignRegime::Split => format!(
             "{handle} is {} ({}): construct the outputs this pass's evidence supports under the \
              held Design with `spice task add TITLE --pitch TEXT --term TEXT`, or say why it \
              needs none with `spice room post {handle} TEXT`: its purpose is already delivered \
              (name what delivered it) or its premise failed (name the evidence)",
             regime.as_str(),
             nets.deciding()
-        )
+        ),
     };
     Err(refusal(
         "preparation::pass-empty",

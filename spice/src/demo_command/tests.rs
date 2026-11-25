@@ -292,9 +292,13 @@ fn seed_is_deterministic_quoted_and_reopenable_without_touching_parent_state() {
         .map(|envelope| envelope.fact.kind())
         .collect::<Vec<_>>();
     assert_eq!(
-        kinds
+        facts
+            .facts()
             .iter()
-            .filter(|kind| **kind == wire::FactKind::RoomPublished)
+            .filter(|envelope| {
+                envelope.fact.kind() == wire::FactKind::RoomPublished
+                    && envelope.actor == Actor::Spice
+            })
             .count(),
         CANNED_TRANSCRIPT.len()
     );

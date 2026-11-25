@@ -60,7 +60,9 @@ pub(in crate::board_command) fn read_task_detail(
     let closure = record.closures.remove(&detail.task);
     let deletion = record.deletions.remove(&detail.task);
     let disposition = record.dispositions.remove(&detail.task);
-    let review = record.steps.remove(&detail.task).and_then(latest_review);
+    let steps = record.steps.remove(&detail.task).unwrap_or_default();
+    let pass = pass_final_word(observed.facts(), &task, &steps);
+    let review = latest_review(steps);
     let origin = match &task.statement.body.provenance {
         wire::TaskProvenance::Steering(key) => match steering_origin(bus, repository, key) {
             Ok(origin) => origin,
@@ -77,6 +79,7 @@ pub(in crate::board_command) fn read_task_detail(
             deletion,
             disposition,
             review,
+            pass,
             origin,
             description_quotes,
         })),
@@ -106,6 +109,50 @@ fn latest_review(
             text,
         })
     })
+}
+
+/// The completed Design pass's final word: the `task done` arrival that
+/// completed its round and that lane's authored posts in the Design's room
+/// since the pass opened, the posts its empty-pass gate counted.
+fn pass_final_word(
+    facts: &bus::TaskFacts,
+    task: &wire::intent::BoardTask,
+    steps: &[wire::intent::TaskDetailStep],
+) -> Option<wire::intent::TaskDetailPass> {
+    let cycle = &task.design_cycle;
+    let pass = cycle.pass?;
+    let finish = steps
+        .iter()
+        .rev()
+        .find(|step| {
+            step.position <= pass
+                && matches!(
+                    step.step,
+                    wire::intent::TaskStep::Done {
+                        phase: wire::Phase::Design,
+                        ..
+                    }
+                )
+        })?
+        .clone();
+    let room = &task.statement.body.born;
+    let posts = facts
+        .iter()
+        .filter(|envelope| {
+            envelope.actor == finish.author
+                && envelope.seq <= pass
+                && cycle.opened.is_none_or(|opened| envelope.seq > opened)
+        })
+        .filter_map(|envelope| {
+            let (posted, text) = recorded_note(envelope)?;
+            (posted == *room).then_some(wire::intent::TaskDetailPost {
+                position: envelope.seq,
+                at: envelope.at,
+                text,
+            })
+        })
+        .collect();
+    Some(wire::intent::TaskDetailPass { finish, posts })
 }
 
 /// Durable history on the named tasks, each task's rows in ascending journal

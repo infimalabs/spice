@@ -136,6 +136,32 @@ pub enum TaskStep {
     },
 }
 
+/// The final word of the completed Design pass awaiting the operator's
+/// decision: the finishing lane's `task done` validation and its authored
+/// room posts since the pass opened, the posts the empty-pass gate counts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDetailPass {
+    /// The arrival that completed the pass's round.
+    pub finish: TaskDetailStep,
+    /// The finishing lane's authored room posts since the pass opened, in
+    /// journal order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub posts: Vec<TaskDetailPost>,
+}
+
+/// One authored room post on a task's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskDetailPost {
+    /// Position of the post's fact.
+    pub position: crate::Seq,
+    /// Commit time recorded by the journal.
+    pub at: crate::Instant,
+    /// The post's authored text.
+    pub text: String,
+}
+
 /// One acknowledged steering directive on a task's history: a task or claim
 /// fact whose `ack:` origin names it, or a `steer::acked` fact by which the
 /// task's holder acknowledged operator steering while holding the task.
@@ -210,6 +236,13 @@ pub struct TaskDetailAnswer {
         deserialize_with = "crate::optional::present"
     )]
     pub review: Option<TaskDetailReview>,
+    /// The final word of the completed Design pass awaiting decision.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub pass: Option<TaskDetailPass>,
     /// The steering directive a steering origin names, when its key resolves.
     #[serde(
         default,

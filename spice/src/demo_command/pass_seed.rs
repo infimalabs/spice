@@ -54,7 +54,58 @@ pub(super) fn seed(journal: &mut journal::Journal) -> DemoResult<()> {
         "2026-07-11T05:15:00.000000Z",
     )?;
 
+    final_word(journal, &design, "2026-07-11T05:15:30.000000Z")?;
     complete_pass(journal, &design, statement, "2026-07-11T05:16:00.000000Z")?;
+    Ok(())
+}
+
+/// The demo lane's room post and `task done` share that end `design`'s pass,
+/// so the decision card shows the finishing lane's final word.
+fn final_word(
+    journal: &mut journal::Journal,
+    design: &wire::TaskStamp,
+    at: &str,
+) -> DemoResult<()> {
+    let at = instant(at);
+    let mut write = JournalWrite::new(
+        Actor::Lane(uuid(DEMO_LANE)),
+        format!("task:{design}")
+            .parse()
+            .expect("demo Design origin is valid"),
+        at,
+        Producer::CommandDoor,
+    );
+    write
+        .fact(
+            wire::rooms::RoomPublished {
+                room: design.clone(),
+                publication: wire::rooms::RoomAuthorityStamp::for_micros(at.get().as_microsecond())
+                    .expect("the final word instant names a publication"),
+                content: wire::rooms::RoomPublicationContent::Authored {
+                    text: "Both outputs together deliver the purpose: scripts get one JSON object \
+                           per line, and the compatibility note keeps the text format stable."
+                        .to_owned(),
+                },
+            },
+            FactCause::Root,
+        )
+        .map_err(build_failure)?;
+    write
+        .fact(
+            body::TaskDone {
+                task: design.clone(),
+                validation: "Charged every term, offered both outputs, and posted why they \
+                             deliver the Design."
+                    .to_owned(),
+                terminal: None,
+                git: None,
+                source: body::SourceBoundary::Proven { heads: Vec::new() },
+                disposition: None,
+            },
+            FactCause::Root,
+        )
+        .map_err(build_failure)?;
+    journal.apply(write).map_err(commit_failure)?;
     Ok(())
 }
 

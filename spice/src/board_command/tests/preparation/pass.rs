@@ -167,9 +167,11 @@ fn assert_regime_refused(
 }
 
 /// When every term nets positive the lanes' charges say work should exist,
-/// so an empty pass refuses even after the finishing lane posts why.
+/// but that is pressure, not a gate: an empty pass refuses until the
+/// finishing lane posts what delivered the purpose, naming each remedy,
+/// while an offered output ends the pass without a post.
 #[test]
-fn a_positive_pass_ends_only_with_an_offered_output() {
+fn a_positive_pass_ends_with_an_offered_output_or_a_stated_purpose() {
     let (root, bus, epoch, seats) = fixture("preparation-positive-pass", 1);
     let lane = Actor::Lane(seats[0].lane);
     let design = add_controller(
@@ -182,24 +184,77 @@ fn a_positive_pass_ends_only_with_an_offered_output() {
     wake_design(&bus, epoch, &design);
     capture_for(&bus, epoch, &seats[0], &design);
     charge(&bus, epoch, &root, lane.clone(), &design, 1);
-    post_observation(
-        &bus,
-        epoch,
-        lane.clone(),
-        &design,
-        "Purpose delivered elsewhere.",
-    );
 
     let held = board(&bus, epoch, lane.clone());
     let empty = complete_share(&bus, epoch, &seats[0], &design);
     assert_regime_refused(&empty, "preparation::pass-empty", "1+/0- net +1", &[]);
+    let Outcome::Refusal(refusal) = &empty else {
+        unreachable!("asserted refused");
+    };
+    for remedy in ["spice task add", "spice room post", "spice room contribute"] {
+        assert!(refusal.explanation().contains(remedy), "{refusal:?}");
+    }
     let after = board(&bus, epoch, lane.clone());
     let (before, unmoved) = (at(&held, &design), at(&after, &design));
     assert_eq!(unmoved.claims, before.claims, "the claim stays active");
     assert!(unmoved.design_cycle.pass.is_none(), "no pass ends");
 
-    add_output(&bus, epoch, &design, "Positive output");
+    post_observation(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &design,
+        "The operator's note.",
+    );
+    let stated = "Purpose delivered: the research findings answer every term.";
+    post_observation(&bus, epoch, lane.clone(), &design, stated);
     assert_committed(complete_share(&bus, epoch, &seats[0], &design));
+    let ended = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    assert!(
+        at(&ended, &design).design_cycle.pass.is_some(),
+        "the stated pass ends"
+    );
+    let Outcome::Reply(Reply {
+        body: CommandAnswer::TaskDetail(detail),
+        ..
+    }) = issue(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        CommandKind::TaskDetail,
+        Vec::new(),
+        &wire::intent::TaskDetail {
+            task: design.born().expect("design stamp"),
+        },
+    )
+    else {
+        panic!("the Design's detail reads");
+    };
+    let word = detail
+        .pass
+        .expect("the pending pass carries its final word");
+    assert_eq!(word.finish.author, lane, "the finishing lane spoke last");
+    assert_eq!(
+        word.posts
+            .iter()
+            .map(|post| post.text.as_str())
+            .collect::<Vec<_>>(),
+        [stated],
+        "only the finishing lane's posts since the pass opened"
+    );
+
+    let offering = add_controller(
+        &bus,
+        epoch,
+        "Offering Design",
+        wire::TaskIntent::Design,
+        None,
+    );
+    wake_design(&bus, epoch, &offering);
+    capture_for(&bus, epoch, &seats[0], &offering);
+    charge(&bus, epoch, &root, lane, &offering, 1);
+    add_output(&bus, epoch, &offering, "Positive output");
+    assert_committed(complete_share(&bus, epoch, &seats[0], &offering));
     clean(&root, bus);
 }
 
