@@ -767,6 +767,93 @@ fn a_draft_is_never_offered_or_captured() {
     clean(&root, bus);
 }
 
+/// An explicit capture of a lane's own draft submits and claims it in one
+/// write, leaving the row in draft until its holder's done advances it;
+/// another lane's capture of that draft refuses and writes nothing.
+#[test]
+fn an_author_capture_submits_and_holds_its_own_draft() {
+    let (root, bus, epoch, seats) = fixture("draft-author-capture", 2);
+    let (author, peer) = (&seats[0], &seats[1]);
+    let holder = Actor::Lane(author.lane);
+    authorize_lane_creation(&bus, epoch, author);
+    let draft = add_draft(
+        &bus,
+        epoch,
+        holder.clone(),
+        "DRAFT-own00001",
+        None,
+        &["The captured draft advances"],
+    );
+    let capture = |seat: &Seat| {
+        let actor = Actor::Lane(seat.lane);
+        let current = board(&bus, epoch, actor.clone());
+        let heads = at(&current, &draft);
+        let rule: Name = "capture".parse().expect("capture rule");
+        issue(
+            &bus,
+            epoch,
+            actor,
+            CommandKind::ClaimWin,
+            vec![
+                statement_witness(heads),
+                workflow_witness(heads),
+                claim_witness(heads),
+                Witness::Eligibility { rule: rule.clone() },
+                residency(&current, seat),
+            ],
+            &ClaimWin {
+                rule,
+                recovery: None,
+            },
+        )
+    };
+
+    let facts = fact_count(&bus);
+    let foreign = capture(peer);
+    assert_eq!(refusal_reason(&foreign), "task::draft-capture-refused");
+    assert_eq!(
+        fact_count(&bus),
+        facts,
+        "a foreign draft capture wrote facts"
+    );
+
+    assert_committed(capture(author));
+    let held = board(&bus, epoch, holder.clone());
+    let heads = at(&held, &draft);
+    assert!(heads.workflow.body.is_draft(), "capture advanced the draft");
+    assert!(
+        heads.workflow.body.submitted,
+        "capture left the draft unsubmitted"
+    );
+    assert!(
+        heads.held_by(&holder).is_some(),
+        "the author does not hold it"
+    );
+
+    assert_committed(issue(
+        &bus,
+        epoch,
+        holder,
+        CommandKind::TaskDone,
+        progress_witnesses(&held, heads, author.lane, author.occupant, false)
+            .expect("held draft has progress witnesses"),
+        &TaskDone {
+            operation: Some(completion_operation()),
+            ..finished(&draft, "the draft is complete")
+        },
+    ));
+    let advanced = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let activated = TaskHandle::for_topic(
+        &"/board/test".parse::<wire::Topic>().expect("fixture topic"),
+        &draft.born().expect("draft handle carries a birth stamp"),
+    );
+    assert_eq!(
+        at(&advanced, &activated).workflow.body.phase.as_str(),
+        "todo"
+    );
+    clean(&root, bus);
+}
+
 /// Work may wait on a draft, which is an unfinished prerequisite until it
 /// leaves draft; the draft's own prerequisites stay editable content.
 #[test]

@@ -174,18 +174,9 @@ fn submit_draft(
     if let Err(outcome) = activation::append_submitted(&mut write, entry) {
         return outcome;
     }
-    let mut workflow = entry.workflow().clone();
-    workflow.submitted = true;
-    let post = match Entry::new(
-        entry.statement().clone(),
-        workflow,
-        entry.completion().clone(),
-        entry.claim_bodies(),
-    ) {
-        Ok(post) => post
-            .with_design(entry.design())
-            .with_creator_team(entry.creator_team()),
-        Err(error) => return protocol_fault("task::board-incoherent", error.to_string()),
+    let post = match activation::submitted_entry(entry) {
+        Ok(post) => post,
+        Err(outcome) => return outcome,
     };
     let mut answer = file_answer(snapshot, command, &post, None, None);
     answer.status = "submitted".to_owned();

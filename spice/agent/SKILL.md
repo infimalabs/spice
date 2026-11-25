@@ -115,8 +115,8 @@ this occupant reuse one submission; successors are separate.
   preserving full output/status. Ad hoc checks are not proof. Fix `git
   commit`/`gate pre-commit` failures; `--no-verify` requires current operator
   authority and exact critical blockers.
-- Finish via `task done --validation TEXT`. Draft done retains possession;
-  after intake-only triage, use `task free`. Taste holds block done/clean review
+- Finish via `task done --validation TEXT`. Capture holds own drafts;
+  done keeps it; free after intake-only triage. Taste holds block done/clean review
   without movement until `task modify` passes policy. Clean review:
   `task review HANDLE --finding clean --note NOTE` after inspecting integrated
   diff and acceptance/steering evidence from `task show --context --history`.
