@@ -343,6 +343,12 @@ pub enum OpenError {
     },
     Sqlite(rusqlite::Error),
     Migration(MigrationError),
+    /// A stored Design maturity projection does not have the schema its
+    /// journal version promises.
+    InvalidDesignMaturity {
+        design: String,
+        source: serde_json::Error,
+    },
     /// Schema admission was attempted before disabling trusted schema objects.
     TrustedSchemaEnabled,
     InvalidCursor {
@@ -365,6 +371,10 @@ impl fmt::Display for OpenError {
                 )
             }
             Self::Sqlite(error) => write!(formatter, "journal SQLite operation failed: {error}"),
+            Self::InvalidDesignMaturity { design, source } => write!(
+                formatter,
+                "journal Design maturity for {design} does not match its stored schema: {source}"
+            ),
             Self::Migration(error) => error.fmt(formatter),
             Self::TrustedSchemaEnabled => {
                 formatter.write_str("journal schema admission requires PRAGMA trusted_schema = OFF")
@@ -391,6 +401,7 @@ impl Error for OpenError {
             Self::Open { source, .. } => Some(source),
             Self::Sqlite(error) => Some(error),
             Self::Migration(error) => Some(error),
+            Self::InvalidDesignMaturity { source, .. } => Some(source),
             Self::InvalidCursor { .. } | Self::JournalMode { .. } | Self::TrustedSchemaEnabled => {
                 None
             }

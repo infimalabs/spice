@@ -338,21 +338,66 @@ fn crossing_drops_run_only_item_keys_to_the_folded_shape() {
             ",\"positive\":true,\"negative\":true,\"suffix_positive\":",
         );
     assert_ne!(stored, current, "the fixture carries schema three's keys");
+    let mut corrupt =
+        serde_json::from_str::<serde_json::Value>(&stored).expect("schema three JSON");
+    corrupt["items"] = serde_json::json!({});
+    let corrupt = serde_json::to_vec(&corrupt).expect("corrupt fixture JSON");
+    journal
+        .connection
+        .execute(
+            "UPDATE design_maturity SET body = ?1 WHERE design = ?2",
+            params![&corrupt, design.to_string()],
+        )
+        .expect("store corrupt schema three row");
+    journal
+        .connection
+        .execute(
+            "UPDATE journal_schema SET version = 3 WHERE singleton = 1",
+            [],
+        )
+        .expect("name schema three");
+    journal
+        .connection
+        .pragma_update(None, "user_version", 3)
+        .expect("name schema three in SQLite");
+
+    let error = crate::migrate::admit(&mut journal.connection)
+        .expect_err("corrupt schema three maturity refuses");
+    match error {
+        crate::migrate::OpenError::InvalidDesignMaturity { design: found, .. } => {
+            assert_eq!(found, design.to_string())
+        }
+        other => panic!("unexpected crossing error: {other:?}"),
+    }
+    assert_eq!(body(&journal), corrupt, "the corrupt row stays untouched");
+    let row_version: u32 = journal
+        .connection
+        .query_row(
+            "SELECT version FROM journal_schema WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("schema row version");
+    let pragma_version: u32 = journal
+        .connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("SQLite schema version");
+    assert_eq!((row_version, pragma_version), (3, 3));
+
     journal
         .connection
         .execute(
             "UPDATE design_maturity SET body = ?1 WHERE design = ?2",
             params![stored.into_bytes(), design.to_string()],
         )
-        .expect("store schema three row");
-
-    let transaction = journal.connection.transaction().expect("crossing");
-    let [.., (3, cross)] = crate::migrate::CROSSING_STEPS else {
-        panic!("schema three crosses last");
-    };
-    cross(&transaction).expect("cross to schema four");
-    transaction.commit().expect("crossing commits");
-
+        .expect("restore valid schema three row");
+    let migration = crate::migrate::admit(&mut journal.connection)
+        .expect("cross schema three")
+        .expect("crossing occurred");
+    assert_eq!(
+        (migration.from(), migration.to()),
+        (3, crate::SCHEMA_VERSION)
+    );
     assert_eq!(body(&journal), folded);
     journal.verify().expect("crossed projection verifies");
 }
