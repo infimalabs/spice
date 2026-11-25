@@ -14,7 +14,8 @@ pub use design::{
 };
 pub use detail::{
     TaskAcknowledgment, TaskDetail, TaskDetailAnswer, TaskDetailClosure, TaskDetailDeletion,
-    TaskDetailDisposition, TaskDetailOrigin, TaskDetailReview, TaskDetailStep, TaskStep,
+    TaskDetailDisposition, TaskDetailOrigin, TaskDetailPass, TaskDetailPost, TaskDetailReview,
+    TaskDetailStep, TaskStep,
 };
 pub use relations::{
     ORIGIN_REQUEST_PREVIEW_LIMIT, OriginRequest, TASK_RELATION_DEPTH_LIMIT,

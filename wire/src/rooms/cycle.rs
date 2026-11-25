@@ -392,6 +392,10 @@ pub struct DesignCycleFacts {
     /// decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass: Option<Seq>,
+    /// The horizon that pass opened from: the latest boundary before its
+    /// round completed, after which its finishing lane's room post counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opened: Option<Seq>,
     /// Position of the operator's latest decision of one of its passes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision: Option<Seq>,
@@ -456,13 +460,17 @@ impl DesignCycleFold {
     }
 
     fn completed(&mut self, seq: Seq) {
+        if self.facts.pass.is_none() {
+            self.facts.opened = self.facts.horizon;
+            self.facts.pass = Some(seq);
+        }
         self.boundary(seq);
-        self.facts.pass.get_or_insert(seq);
         self.completed = true;
     }
 
     fn decided(&mut self, seq: Seq, outcome: &DecisionOutcome) {
         self.facts.pass = None;
+        self.facts.opened = None;
         self.facts.decision = Some(seq);
         let feedback = match outcome {
             DecisionOutcome::Returned { .. } => true,

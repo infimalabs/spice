@@ -279,6 +279,7 @@ mod tests {
             deletion: None,
             disposition: None,
             review: None,
+            pass: None,
             origin: None,
             description_quotes: Vec::new(),
         }));

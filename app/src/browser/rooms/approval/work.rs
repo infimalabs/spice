@@ -48,6 +48,7 @@ pub(super) fn render(context: &Context<'_>, offered: &[TaskStamp], detail: Html)
                 <span data-decision-tally="">{tally}{if draft.comment().trim().is_empty() { "" } else { " · with comment" }}</span>
             </header>
             {render_term_nets(context)}
+            {render_final_word(context, false)}
             <div class="work-decision-outputs">
                 <ol aria-label="Offered outputs">
                     {for offered.iter().enumerate().map(|(index, output)| render_output(context, offered.len(), output, index, draft, locked))}

@@ -801,7 +801,7 @@ fn input_value(node: &NodeRef) -> String {
         .unwrap_or_default()
 }
 
-fn actor_label(runtime: &AppRuntime, actor: &Actor) -> String {
+pub(super) fn actor_label(runtime: &AppRuntime, actor: &Actor) -> String {
     match actor {
         Actor::Principal(principal) => principal_label(runtime, *principal),
         Actor::Lane(lane) => lane_label(runtime, *lane),
