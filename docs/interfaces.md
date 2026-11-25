@@ -78,8 +78,14 @@ that command accepts. `task adopt` takes two task handles.
   STAMP, "verdict": "accepted"|"rejected", "comment": TEXT?}, …], "comment":
   TEXT?}`, naming every offered output exactly once, else
   `preparation::decision-output-mismatch`. Comments are optional but nonblank
-  when present. Exactly the accepted outputs receive execution authorization;
-  rejecting all outputs authorizes nothing. With none offered the outcome is
+  when present. Exactly the accepted outputs receive execution authorization.
+  An accepted output's output-specific comment is also recorded atomically as
+  one operator-authored post in that output's task room, caused by the
+  immutable decision; the overall comment and rejected-output comments remain
+  only on the decision. The copied post uses the ordinary room publication
+  bound and refuses the whole decision with `room::post-too-large` rather than
+  partially selecting work. Rejecting all outputs authorizes nothing. With
+  none offered the outcome is
   `{"kind": "concluded"}` or `{"kind": "collapsed", "reason": TEXT}`, staging
   the corresponding guarded Design conclusion in the same transaction. Any
   pass can instead use `{"kind": "returned", "reason": TEXT}`; the nonblank

@@ -2,7 +2,7 @@
 //! Design's controlled work: the accepted outputs it authorizes, the rejected
 //! outputs it closes, or the conclusion or collapse it commits.
 use super::*;
-use wire::rooms::{OutputRevision, RoomSource};
+use wire::rooms::{OutputRevision, OutputVerdict, RoomSource};
 
 /// What one decision commits beyond its own immutable record.
 enum Consequence {
@@ -344,6 +344,7 @@ fn commit_decision(
                 },
                 &validation,
                 resolution,
+                &decision.outcome,
                 repository,
             ) {
                 Ok(action) => action,
@@ -400,6 +401,60 @@ fn commit_decision(
     committed(bus, write, CommandAnswer::Text(answer))
 }
 
+/// Copy accepted output comments into their task rooms under the decision fact.
+///
+/// Accepted output heads and verdicts preserve the same recorded order. Each
+/// publication is part of the guarded decision transaction, so a refusal or
+/// retry cannot leave a partial or duplicate post.
+fn stage_accepted_output_comments(
+    bus: &Bus,
+    write: &mut JournalWrite,
+    decided: PendingFact,
+    at: Instant,
+    selected: &[TaskHead],
+    outcome: &DecisionOutcome,
+) -> Result<(), Outcome<CommandAnswer>> {
+    let DecisionOutcome::Resolved { outputs, .. } = outcome else {
+        return Ok(());
+    };
+    let mut selected = selected.iter();
+    for output in outputs
+        .iter()
+        .filter(|output| matches!(output.verdict, OutputVerdict::Accepted))
+    {
+        let head = selected
+            .next()
+            .expect("every accepted preparation output has one selected head");
+        assert_eq!(
+            head.born, output.output,
+            "accepted preparation outputs preserve decision order"
+        );
+        let Some(comment) = output.comment.as_deref() else {
+            continue;
+        };
+        let room = TaskHandle::for_topic(&head.topic.path, &head.born);
+        let content = room::authored_observation(comment, &room)?;
+        let publication = room::mint_publication(bus, &head.born, at.get().as_microsecond())?;
+        write
+            .fact(
+                RoomPublished {
+                    room: head.born.clone(),
+                    publication,
+                    content,
+                },
+                FactCause::Pending(decided),
+            )
+            .map_err(|error| {
+                store_fault("preparation::output-comment-invalid", error.to_string())
+            })?;
+    }
+    assert!(
+        selected.next().is_none(),
+        "every selected preparation output has one accepted decision"
+    );
+    Ok(())
+}
+
 /// Stage a work resolution's authorization, releases, and rejected-output
 /// closures under its decision fact, then describe what it did.
 fn stage_resolution(
@@ -408,6 +463,7 @@ fn stage_resolution(
     decision: crate::board_command::mutation::DecisionWrite<'_>,
     validation: &str,
     resolution: Resolution,
+    outcome: &DecisionOutcome,
     host: Option<Host<'_>>,
 ) -> Result<String, Outcome<CommandAnswer>> {
     let crate::board_command::mutation::DecisionWrite {
@@ -432,6 +488,7 @@ fn stage_resolution(
             .map_err(|error| {
                 store_fault("preparation::authorization-invalid", error.to_string())
             })?;
+        stage_accepted_output_comments(bus, write, decided, at, &outputs, outcome)?;
         parts.push(format!("selected {} output(s)", outputs.len()));
         let selected = release::selected(
             bus,
