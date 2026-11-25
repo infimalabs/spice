@@ -116,6 +116,23 @@ impl DesignNets {
         self.terms.iter().any(|term| term.truncated)
     }
 
+    /// Threshold-free guidance for a regime whose term signs do not all
+    /// point the same way.
+    #[must_use]
+    pub fn advice(&self) -> Option<&'static str> {
+        match self.regime() {
+            DesignRegime::Contested => Some(
+                "Lower agreement and more cancellation favor a Plan, Design, or more research; \
+                 higher agreement narrows that scope but never admits ordinary work.",
+            ),
+            DesignRegime::Split => Some(
+                "Lower agreement and more cancellation favor a Plan, Design, or more research; \
+                 higher agreement makes concrete work more credible.",
+            ),
+            DesignRegime::Positive | DesignRegime::Negative => None,
+        }
+    }
+
     fn aligned(&self) -> u64 {
         self.terms
             .iter()
@@ -227,6 +244,12 @@ mod tests {
         assert_eq!(items.nets(&current).regime(), DesignRegime::Negative);
         items.observe(&charge(2, ITEMS[0], 1));
         assert_eq!(items.nets(&current).regime(), DesignRegime::Contested);
+        assert!(
+            items
+                .nets(&current)
+                .advice()
+                .is_some_and(|advice| advice.contains("never admits ordinary work"))
+        );
         assert_eq!(items.nets(&current).deciding().matches("net").count(), 1);
 
         // Only current items weigh: dropping the tied term leaves the
@@ -287,6 +310,10 @@ mod tests {
         assert_eq!(nets.agreement(), Some((36, 40)));
         assert_eq!(nets.cancellation(), 4);
         assert_eq!(nets.regime(), DesignRegime::Split);
+        assert!(
+            nets.advice()
+                .is_some_and(|advice| advice.contains("concrete work more credible"))
+        );
 
         assert_eq!(DesignItems::default().nets(&divided).agreement(), None);
     }

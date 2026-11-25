@@ -33,6 +33,8 @@ pub(crate) struct DesignAwareness {
     state: DesignMaturityState,
     /// Each current question item's standing.
     items: Vec<ItemStanding>,
+    /// Current statement term-net aggregates.
+    nets: NetSummary,
     effect: &'static str,
 }
 
@@ -43,6 +45,31 @@ pub(crate) struct ItemStanding {
     standing: DesignItemStanding,
     handle: String,
     text: String,
+    positive: u64,
+    negative: u64,
+    net: i64,
+    truncated: bool,
+}
+
+/// Exact term-net aggregates; `inexact` applies to every numeric field when
+/// any current term exceeded the retained lane bound.
+#[derive(Debug, Serialize)]
+pub(crate) struct NetSummary {
+    total: i64,
+    agreement: Option<Agreement>,
+    cancellation: u64,
+    zero_nets: usize,
+    regime: &'static str,
+    inexact: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    guidance: Option<&'static str>,
+}
+
+/// The unreduced agreement fraction `aligned/signed`.
+#[derive(Debug, Serialize)]
+pub(crate) struct Agreement {
+    aligned: u64,
+    signed: u64,
 }
 
 /// One admitted awareness record.
@@ -164,20 +191,38 @@ fn awareness(
     }
 
     let state = maturity.state(&term);
+    let nets = maturity.items.nets(&term);
     let standings = maturity.items.standings(&term);
-    let current = standings
+    let current = nets
+        .terms
         .iter()
-        .map(|standing| standing.item.clone())
+        .map(|term| term.item.clone())
         .collect::<Vec<_>>();
     let items = standings
         .into_iter()
+        .zip(&nets.terms)
         .zip(term)
-        .map(|(standing, text)| ItemStanding {
-            handle: standing.item.handle(&current).to_owned(),
+        .map(|((standing, term), text)| ItemStanding {
+            handle: term.item.handle(&current).to_owned(),
             standing,
             text,
+            positive: term.positive,
+            negative: term.negative,
+            net: term.net(),
+            truncated: term.truncated,
         })
         .collect();
+    let summary = NetSummary {
+        total: nets.total(),
+        agreement: nets
+            .agreement()
+            .map(|(aligned, signed)| Agreement { aligned, signed }),
+        cancellation: nets.cancellation(),
+        zero_nets: nets.zero_nets(),
+        regime: nets.regime().as_str(),
+        inexact: nets.inexact(),
+        guidance: nets.advice(),
+    };
     Ok((
         ReplyPosition::Snapshot(cursor),
         DesignAwareness {
@@ -187,6 +232,7 @@ fn awareness(
             maturity,
             state,
             items,
+            nets: summary,
             effect: "advisory only; neither blocks nor authorizes a Design decision",
         },
     ))
@@ -237,20 +283,34 @@ impl fmt::Display for DesignAwareness {
         )?;
         write!(
             formatter,
-            "\n{}",
-            maturity_summary(&self.maturity, &self.state)
+            "\n{}\n{}",
+            maturity_summary(&self.maturity, &self.state),
+            net_summary(&self.nets),
         )?;
         for item in &self.items {
             let (charges, lanes) = (item.standing.charges, item.standing.lanes);
             write!(
                 formatter,
-                "\n- {} {}: {charges} charge{} from {lanes} lane{}: {}",
+                "\n- {} {} · {}+/{}- net {:+}: {charges} charge{} from {lanes} lane{}: {}",
                 item.handle,
                 item.standing.state.label(),
+                item.positive,
+                item.negative,
+                item.net,
                 if charges == 1 { "" } else { "s" },
                 if lanes == 1 { "" } else { "s" },
                 item.text,
             )?;
+            if item.truncated {
+                write!(
+                    formatter,
+                    " (more than {} lanes charged this term; exact counts unavailable)",
+                    wire::rooms::DESIGN_MATURITY_LANE_LIMIT
+                )?;
+            }
+        }
+        if let Some(guidance) = self.nets.guidance {
+            write!(formatter, "\nterm guidance: {guidance}")?;
         }
         for head in self.maturity.recent_heads.iter().rev() {
             write!(
@@ -303,6 +363,19 @@ fn maturity_summary(maturity: &DesignMaturity, state: &DesignMaturityState) -> S
         if contributing_lanes == 1 { "" } else { "s" },
         maturity.requests,
         if requested_lanes == 1 { "" } else { "s" },
+    )
+}
+
+fn net_summary(nets: &NetSummary) -> String {
+    let marker = if nets.inexact { " (inexact)" } else { "" };
+    let agreement = nets.agreement.as_ref().map_or_else(
+        || "n/a".to_owned(),
+        |agreement| format!("{}/{}", agreement.aligned, agreement.signed),
+    );
+    format!(
+        "term nets: total {:+}{marker}; agreement {agreement}{marker}; cancellation {}{marker}; \
+         zero-net terms {}{marker}; regime {}",
+        nets.total, nets.cancellation, nets.zero_nets, nets.regime
     )
 }
 
@@ -536,5 +609,30 @@ mod tests {
             scored.contains("reach narrow score 0.25 floor 0.1"),
             "{scored}"
         );
+    }
+
+    #[test]
+    fn net_summary_keeps_the_exact_fraction_and_marks_each_inexact_aggregate() {
+        let summary = NetSummary {
+            total: 3,
+            agreement: Some(Agreement {
+                aligned: 7,
+                signed: 11,
+            }),
+            cancellation: 4,
+            zero_nets: 2,
+            regime: "contested",
+            inexact: true,
+            guidance: None,
+        };
+        let rendered = net_summary(&summary);
+        assert!(rendered.contains("agreement 7/11 (inexact)"), "{rendered}");
+        assert!(rendered.contains("total +3 (inexact)"), "{rendered}");
+        assert!(rendered.contains("cancellation 4 (inexact)"), "{rendered}");
+        assert!(
+            rendered.contains("zero-net terms 2 (inexact)"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains('%'), "{rendered}");
     }
 }

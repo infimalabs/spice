@@ -47,6 +47,7 @@ pub(super) fn render(context: &Context<'_>, offered: &[TaskStamp], detail: Html)
                 <strong>{"Pass "}<code>{fact.clone()}</code></strong>
                 <span data-decision-tally="">{tally}{if draft.comment().trim().is_empty() { "" } else { " · with comment" }}</span>
             </header>
+            {render_term_nets(context)}
             <div class="work-decision-outputs">
                 <ol aria-label="Offered outputs">
                     {for offered.iter().enumerate().map(|(index, output)| render_output(context, offered.len(), output, index, draft, locked))}

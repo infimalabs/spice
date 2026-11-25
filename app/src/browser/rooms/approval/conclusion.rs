@@ -23,6 +23,7 @@ pub(super) fn render(context: &Context<'_>, detail: Html) -> Html {
                 <strong>{"Pass "}<code>{fact.clone()}</code></strong>
                 <span data-decision-tally="">{"no offered output · conclude, collapse, or return"}</span>
             </header>
+            {render_term_nets(context)}
             <p class="work-decision-summary">
                 {"Done keeps accepted work released, closes the Design and its room, and leaves its history readable. Collapse records why the premise failed."}
             </p>
