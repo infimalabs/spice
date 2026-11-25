@@ -78,7 +78,7 @@ const MACHO_UUID_LENGTH: usize = 36;
 const MACHO_UUID_HYPHENS: [usize; 4] = [8, 13, 18, 23];
 
 /// Required shell files; generation-declared renderer files complete the inventory.
-pub const APP_FILES: [&str; 13] = [
+pub const APP_FILES: [&str; 14] = [
     APP_HTML,
     APP_MODULE,
     APP_STYLE,
@@ -88,6 +88,7 @@ pub const APP_FILES: [&str; 13] = [
     LANE_MOSAIC_STYLE,
     CHROME_STYLE,
     COMPOSER_STYLE,
+    COMPOSE_OVERLAY_STYLE,
     WORK_STYLE,
     WORK_MAP_STYLE,
     RESPONSIVE_STYLE,
@@ -111,6 +112,8 @@ pub const LANE_MOSAIC_STYLE: &str = "lane_mosaic.css";
 pub const CHROME_STYLE: &str = "chrome.css";
 /// Composer stylesheet.
 pub const COMPOSER_STYLE: &str = "composer.css";
+/// Global composer left-overlay stylesheet.
+pub const COMPOSE_OVERLAY_STYLE: &str = "compose_overlay.css";
 /// Global Work page stylesheet.
 pub const WORK_STYLE: &str = "work.css";
 /// Work relationship graph stylesheet.

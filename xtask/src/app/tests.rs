@@ -104,6 +104,11 @@ fn write_raw_generation(stage: &Path, label: &str, source_identity: &Digest, val
         .expect("write chrome stylesheet");
     fs::write(stage.join("composer.css"), format!("composer {label}"))
         .expect("write composer stylesheet");
+    fs::write(
+        stage.join("compose_overlay.css"),
+        format!("compose overlay {label}"),
+    )
+    .expect("write compose overlay stylesheet");
     fs::write(stage.join("work.css"), format!("work {label}")).expect("write Work stylesheet");
     fs::write(stage.join("work-map.css"), format!("work map {label}"))
         .expect("write Work graph stylesheet");
@@ -120,7 +125,8 @@ fn write_raw_generation(stage: &Path, label: &str, source_identity: &Digest, val
             "<link href=\"/style.css\"><link href=\"/spice_sidebar.css\">\
              <link href=\"/mosaic.css\"><link href=\"/team_controls.css\">\
              <link href=\"/lane_mosaic.css\"><link href=\"/chrome.css\">\
-             <link href=\"/composer.css\"><link href=\"/work.css\"><link href=\"/work-map.css\">\
+             <link href=\"/composer.css\"><link href=\"/compose_overlay.css\">\
+             <link href=\"/work.css\"><link href=\"/work-map.css\">\
              <link href=\"/responsive.css\">\
              <script src=\"/app.js\"></script>\
              <link href=\"/app.js\"><link href=\"/app_bg.wasm\">{second_wasm}\
@@ -391,6 +397,7 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
             "app.module",
             "app_bg.wasm",
             "chrome.css",
+            "compose_overlay.css",
             "composer.css",
             "lane_mosaic.css",
             "mosaic.css",

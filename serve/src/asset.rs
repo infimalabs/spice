@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-static APP_ASSETS: [AppAsset; 13] = [
+static APP_ASSETS: [AppAsset; 14] = [
     AppAsset::new("/", wire::manifest::APP_HTML),
     AppAsset::new("/app.module", wire::manifest::APP_MODULE),
     AppAsset::new("/style.css", wire::manifest::APP_STYLE),
@@ -18,6 +18,10 @@ static APP_ASSETS: [AppAsset; 13] = [
     AppAsset::new("/lane_mosaic.css", wire::manifest::LANE_MOSAIC_STYLE),
     AppAsset::new("/chrome.css", wire::manifest::CHROME_STYLE),
     AppAsset::new("/composer.css", wire::manifest::COMPOSER_STYLE),
+    AppAsset::new(
+        "/compose_overlay.css",
+        wire::manifest::COMPOSE_OVERLAY_STYLE,
+    ),
     AppAsset::new("/work.css", wire::manifest::WORK_STYLE),
     AppAsset::new("/work-map.css", wire::manifest::WORK_MAP_STYLE),
     AppAsset::new("/responsive.css", wire::manifest::RESPONSIVE_STYLE),
@@ -803,6 +807,7 @@ mod tests {
                 ("/lane_mosaic.css", "text/css; charset=utf-8"),
                 ("/chrome.css", "text/css; charset=utf-8"),
                 ("/composer.css", "text/css; charset=utf-8"),
+                ("/compose_overlay.css", "text/css; charset=utf-8"),
                 ("/work.css", "text/css; charset=utf-8"),
                 ("/work-map.css", "text/css; charset=utf-8"),
                 ("/responsive.css", "text/css; charset=utf-8"),
@@ -985,6 +990,7 @@ mod tests {
             &[
                 "app_bg.wasm",
                 "chrome.css",
+                "compose_overlay.css",
                 "composer.css",
                 "lane_mosaic.css",
                 "mosaic.css",

@@ -218,24 +218,21 @@ surfaces.
 
 ## Draft composer parity
 
-The header's **Ask** tab is the open composer cut at its utility-tab strip.
-Check that the editor's DOM identity, screen rectangle, typed text and
-selection survive expansion, dismissal and conversion, and that closed it
-shows the first writing line beside live Draft and Help over the accent edge;
-the rest is cut off and out of the Tab order. Unfocused, focused, pressed and
-disabled tabs keep their lower borders above both the closed and expanded
-accent; adding another utility tab divides the same strip rather than adding a
-stacking exception. Compare its fill and rimless, shadowless sides with the
-hanging totals tabs, and its [collapsed and expanded
-widths](OVERVIEW.md#drafts-and-oops-intake) with and without work totals. In
-both themes and inline directions, look for a bright hook in either gutter, an
-inner edge, doubled ring or seam; the rail separator stops cleanly at the
-accent. On a fresh narrow RTL page, the open sheet must widen leftward from
-the tab's right edge, keeping both accent endpoints and the
-recipient field inside the viewport; LTR widens rightward from its left edge.
-Check both directions after resizing, with empty and multiline content and
-while changing modes. Opening must not move or rewrap the already-laid-out
-editor, and the recipient inset and separator must stay beside the control rail.
+The global composer is the left overlay's strip under the header. Check that
+the editor's DOM identity, typed text and selection survive expansion,
+dismissal and conversion, and that closed it shows the destination track, the
+open inbox count, and live Draft and Help over the accent rail; the sheet below
+is cut off and out of the Tab order. Choosing a destination opens the sheet on
+it with the editor focused. Open, the sheet runs to the viewport's foot: editor,
+To row with Send/Create, then Principals and the inbox scrolling on its own.
+Open Spice beside it on a desktop viewport: neither sheet masks the other, both
+stay interactive, a press inside either keeps both, a press on the page beside
+them closes the left one, and Escape closes the newest first. Opening the strip
+while Spice is open must work the same. On a phone the closed strip shows only
+the current destination and count; with both requested, Spice takes the screen
+and the left sheet returns when it closes. In both themes and inline
+directions, look for a bright hook in either gutter, an inner edge, doubled
+ring or seam. Opening must not move or rewrap the already-laid-out editor.
 By
 keyboard, each agent checkbox announces its name and state, Best-matched is
 pressed only with none chosen, and choosing never resizes the dialog. Several
@@ -253,7 +250,7 @@ the accepted-for-agent toast rather than opening a broken target.
 Once any submit is locally admitted the dialog is busy: its composition
 desaturates and seals against every edit and resubmission, and the
 action keeps its word and reads busy, as the team SEND does. Escape or an
-outside click still collapses it; the tab stays clickable and reopens the same
+outside click still collapses it; the strip stays clickable and reopens the same
 sealed pending view. Durable
 acceptance alone clears or hands off the submitted content. A
 refusal or transport failure restores the exact text, media, recipient and work
@@ -271,10 +268,10 @@ restores SEND. Press Command-Shift-Enter on an Ask: the dialog goes pending,
 each occupied agent gets one authored-body card, and acceptance clears the
 composer. Other modes leave composition and board unchanged.
 
-Switch all four kinds with text, quotes and images present; exact outer
-composer, editor and rail dimensions must survive every mode change, resizing
-and media addition. In particular, Ask's recipient row stays inside its
-reserved row on each browser. Quotes stay above the editor. Images use the
+Switch all four kinds with text, quotes and images present; the sheet, editor
+and action dimensions must survive every mode change, resizing and media
+addition, and Ask's wrapping recipients stay beside the action on each browser.
+Quotes stay above the editor. Images use the
 team composers' bounded, scrolling thumbnail strip over its lower inline end,
 clearing writing space only while present; each thumbnail opens and removes as
 in a team composer. Its attachment chooser is touch-only; desktop adds images
@@ -282,19 +279,16 @@ by paste or drop. Only Ask adds To and its
 subdued Best-matched choice; work changes the textarea's title/pitch/context
 template, never adding a Pitch, Topic or second context field.
 
-Compare the DRAFT/ⓘ tabs with the hanging totals. The shared utility strip
-divides itself equally; only its outside lower corners round, and every lower
-border paints over the accent. Open and closed accents remain one full-width
-bottom strip with no inline edge, cap, horn or notch in LTR or RTL. Each end
-rounds through the strip's full thickness. The four-stop glass selector,
-circular action and accent keep equal gaps; the groove radius matches its thumb.
-Draft wears the kind's accent when on and is inert for Ask. Ask is neutral;
-Task, Plan and Design use green, blue and plum in both themes.
+Compare the DRAFT/HELP tabs with the hanging totals: only their outside lower
+corners round, and every lower border paints over the accent. The strip's
+accent is one full-width rail with no inline edge, cap, horn or notch in LTR or
+RTL. The four-stop glass track's groove radius matches its thumb. Draft wears
+the kind's accent when on and is inert for Ask. Ask is neutral; Task, Plan and
+Design use green, blue and plum in both themes.
 
-Check the fixed-extent opening/closing fade against Spice: no moving edge or
-rewrapped writing, immediate reduced-motion settlement, focus outside the
-closed tab, and no Escape reopening during close. Narrow tracks clip the sheet
-without rewrapping and ellipsize the closed prompt. Empty/whitespace content
+Check the opening/closing fade against Spice: no moving edge or rewrapped
+writing, immediate reduced-motion settlement, focus outside the closed strip,
+and no Escape reopening during close. Empty/whitespace content
 leaves Send/Create muted; applicable content lights the team SEND backlight
 without a readiness rim. Hover/focus brighten it; pressing dims it. Held
 Command adds the 2px command ring: Ask shares FULL's semantic blue while Task,

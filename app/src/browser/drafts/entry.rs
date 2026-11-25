@@ -66,13 +66,9 @@ impl Mode {
         }
     }
 
-    /// Collapsed, every mode advertises the same global destination keys.
-    /// Expanded work teaches the single composer decode: title, blank line,
-    /// pitch, blank line, then optional context.
-    const fn placeholder(self, expanded: bool) -> &'static str {
-        if !expanded {
-            return "(A)sk, (T)ask, (P)lan, (D)esign…";
-        }
+    /// Work teaches the single composer decode: title, blank line, pitch,
+    /// blank line, then optional context.
+    const fn placeholder(self) -> &'static str {
         match self {
             Self::Message => "A plain question or steering for an agent (required)",
             Self::Task => {
@@ -241,7 +237,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
         <div ref={anchor} class="app-compose-entry"
             data-base-flavor={if mode.base_accent().is_some() { "accent" } else { "neutral" }}
             data-base-accent={mode.base_accent().map(|accent| accent.to_string())}>
-            <dialog ref={dialog.clone()} open=true id="app-compose-dialog"
+            <dialog ref={dialog.clone()} open=true id="app-compose-dialog" popover="manual"
                 class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge app-closed-edge--block-end"
                 data-expanded={presentation.expanded.to_string()}
                 data-presented={presentation.visible.to_string()}
@@ -249,10 +245,8 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                 inert={presentation.closing.then_some("true")}
                 data-admission-state={busy.then_some("pending")}
                 aria-busy={busy.to_string()}
-                aria-label="Ask"
-                onclick={outside_click(close.clone())}
-                onkeydown={keys}
-                onclose={presentation.closed} oncancel={presentation.cancel}>
+                aria-label="Compose"
+                onkeydown={keys}>
                 <div class="app-compose-surface" aria-hidden="true" />
                 <form ref={form} class="draft-form app-compose-form"
                     data-draft-create={(!message).then_some("")} onsubmit={submit} oninput={edited}>
@@ -260,11 +254,11 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                     // the utility controls live beside Help and state their
                     // own disabledness.
                     <fieldset disabled={busy}>
-                        <legend class="app-compose-modes-row">
+                        <legend class="app-compose-modes-row" onclick={expand.reform(|_: MouseEvent| ())}>
                             {mode_controls(&mode, busy)}
                         </legend>
                         <div id="app-compose-trigger" onfocusin={expand.reform(|_: FocusEvent| ())} onclick={expand.reform(|_: MouseEvent| ())}>
-                            {render_context(NEW_DRAFT_KEY, &props.controls.composer, "10", None, mode.title_label(), (mode.placeholder(*expanded), mode.quote_placeholder()), true)}
+                            {render_context(NEW_DRAFT_KEY, &props.controls.composer, "10", None, mode.title_label(), (mode.placeholder(), mode.quote_placeholder()), true)}
                         </div>
                         {submit_action(*mode, ready, *applicable, busy, full_send, full_broadcast)}
                         {details(runtime, &recipients, *mode)}
@@ -277,9 +271,10 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                     </span>
                 </form>
                 {utility_tabs(&mode, &draft, busy, props.inbox_waiting)}
-                <section class="app-compose-inbox" aria-label="Principals" hidden={!presentation.expanded}>
+                // The Principals section names itself by its own heading.
+                <div class="app-compose-inbox" hidden={!presentation.expanded}>
                     {props.inbox.clone()}
-                </section>
+                </div>
             </dialog>
         </div>
     }
@@ -623,7 +618,7 @@ fn submits_something(mode: Mode, composer: &ComposerDrafts) -> bool {
     !title.is_empty() && !pitch.is_empty()
 }
 
-/// The rail's bottom action: Send in Ask mode, Create otherwise. Both words
+/// The To row's trailing action: Send in Ask mode, Create otherwise. Both words
 /// fill SEND's fixed label box; Create's glyphs compress to fit it. It takes the
 /// team SEND's backlit glass only once a press would submit, and its label: an
 /// Ask naming every agent on the roster, or a held broadcast stroke that would
@@ -656,8 +651,8 @@ fn submit_action(
     }
 }
 
-/// The vertical destination slider has the same four controls in every mode,
-/// so the rail never resizes under its moving thumb.
+/// The strip's horizontal destination slider has the same four controls in
+/// every mode, so the strip never resizes under its moving thumb.
 fn mode_controls(mode: &UseStateHandle<Mode>, sending: bool) -> Html {
     html! {
         <div class="app-control-rail app-segment-slider app-compose-modes" role="group" aria-label="Compose as"
@@ -767,7 +762,7 @@ pub(super) fn refocus_if_open() {
     let open = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.get_element_by_id("app-compose-dialog"))
-        .is_some_and(|dialog| dialog.matches(":modal").unwrap_or(false));
+        .is_some_and(|dialog| dialog.get_attribute("data-expanded").as_deref() == Some("true"));
     if open {
         focus_after_render(primary_textarea_id(NEW_DRAFT_KEY));
     }
@@ -1031,18 +1026,4 @@ fn utility_tabs(
             }
         </div>
     }
-}
-
-fn outside_click(close: Callback<()>) -> Callback<MouseEvent> {
-    Callback::from(move |event: MouseEvent| {
-        let Some(dialog) = event.target_dyn_into::<web_sys::HtmlDialogElement>() else {
-            return;
-        };
-        let rect = dialog.get_bounding_client_rect();
-        let x = f64::from(event.client_x());
-        let y = f64::from(event.client_y());
-        if x < rect.left() || x > rect.right() || y < rect.top() || y > rect.bottom() {
-            close.emit(());
-        }
-    })
 }
