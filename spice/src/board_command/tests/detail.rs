@@ -51,7 +51,7 @@ fn task_show_separates_current_context_and_bounded_history() {
         &[],
         TaskShowHistory::default(),
         None,
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: false,
             context: false,
@@ -112,7 +112,7 @@ fn task_show_separates_current_context_and_bounded_history() {
             ..TaskShowHistory::default()
         },
         None,
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: false,
             context: false,
@@ -136,7 +136,7 @@ fn task_show_separates_current_context_and_bounded_history() {
         &[],
         TaskShowHistory::default(),
         Some(&oversized),
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: false,
             context: true,
@@ -187,7 +187,7 @@ fn task_show_counts_the_history_it_collapses() {
                 ..TaskShowHistory::default()
             },
             None,
-            None,
+            TaskShowLocal::default(),
             &TaskShowOptions {
                 full,
                 context: false,
@@ -224,6 +224,7 @@ fn task_show_labels_design_items_as_questions() {
     let mut design = at(&answer, &task).clone();
     design.statement.body.intent = Some(wire::TaskIntent::Design);
     design.statement.body.term = vec!["Which boundary remains open?".to_owned()];
+    let maturity = wire::rooms::DesignMaturity::default();
     let show = |full: bool| {
         task_show_bounded(
             &answer,
@@ -231,7 +232,10 @@ fn task_show_labels_design_items_as_questions() {
             &[],
             TaskShowHistory::default(),
             None,
-            None,
+            TaskShowLocal {
+                maturity: Some(&maturity),
+                room: None,
+            },
             &TaskShowOptions {
                 full,
                 context: false,
@@ -260,6 +264,12 @@ fn task_show_labels_design_items_as_questions() {
             "questions:\n  - {} Which boundary remains open?",
             item.handle(&[])
         )),
+        "{full}"
+    );
+    assert!(
+        full.contains("term evidence regime contested")
+            && full.contains("quiet · 0+/0- net +0")
+            && full.contains("term total +0; agreement n/a; cancellation 0; zero-net terms 1"),
         "{full}"
     );
     for text in [collapsed, full] {
@@ -297,7 +307,7 @@ fn task_show_collapses_prose_and_full_prints_it_whole() {
             &[],
             TaskShowHistory::default(),
             None,
-            None,
+            TaskShowLocal::default(),
             &TaskShowOptions {
                 full,
                 context,
@@ -362,7 +372,7 @@ fn task_show_context_uses_aggregate_detail_budget_and_exact_continuation() {
         &[],
         TaskShowHistory::default(),
         None,
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: false,
             context: true,
@@ -810,7 +820,7 @@ fn task_show_names_lanes_by_roster_name_while_exports_keep_bare_actors() {
             ..TaskShowHistory::default()
         },
         None,
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: false,
             context: false,

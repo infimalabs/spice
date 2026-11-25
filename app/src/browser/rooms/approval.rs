@@ -149,6 +149,72 @@ impl<'a> Context<'a> {
     }
 }
 
+/// The exact term-net evidence the pass gate used, rendered before the
+/// operator decides the completed pass.
+fn render_term_nets(context: &Context<'_>) -> Html {
+    let statement = &context.controller.statement.body;
+    let empty = wire::rooms::DesignItems::default();
+    let items = context
+        .runtime
+        .room_projection()
+        .maturity(context.design)
+        .map_or(&empty, |maturity| &maturity.items);
+    let nets = items.nets(&statement.term);
+    let standings = items.standings(&statement.term);
+    let current = nets
+        .terms
+        .iter()
+        .map(|term| term.item.clone())
+        .collect::<Vec<_>>();
+    let marker = if nets.inexact() { " · inexact" } else { "" };
+    let agreement = nets
+        .agreement()
+        .map_or_else(|| "n/a".to_owned(), |(a, b)| format!("{a}/{b}"));
+    html! {
+        <section class="work-decision-nets" aria-label="Term nets">
+            <strong>{format!("Term evidence · {} regime", nets.regime().as_str())}</strong>
+            <ul>
+                {for nets.terms.iter().zip(standings).zip(&statement.term).map(|((term, standing), text)| {
+                    let handle = term.item.handle(&current).to_owned();
+                    html! {
+                        <li>
+                            <code>{handle}</code>
+                            {" · "}
+                            {standing.state.label()}
+                            {format!(" · {}+/{}- net {:+}", term.positive, term.negative, term.net())}
+                            if term.truncated {
+                                {format!(
+                                    " · more than {} lanes charged this term; exact counts unavailable",
+                                    wire::rooms::DESIGN_MATURITY_LANE_LIMIT
+                                )}
+                            }
+                            {" · "}
+                            {crate::browser::task_detail::render_task_text(
+                                text,
+                                &[],
+                                "work-decision-term",
+                                |_| false,
+                            )}
+                        </li>
+                    }
+                })}
+            </ul>
+            <p>
+                {format!(
+                    "total {:+}{marker} · agreement {agreement}{marker} · cancellation {}{marker} \
+                     · zero-net terms {}{marker}",
+                    nets.total(),
+                    nets.cancellation(),
+                    nets.zero_nets(),
+                )}
+            </p>
+            if let Some(advice) = nets.advice() {
+                <p>{advice}</p>
+            }
+        </section>
+    }
+}
+
 /// One recorded decision as its room conversation shows it: what the
 /// operator decided, its verdict counts, and each offered output's handle
 /// opening that task's sheet.

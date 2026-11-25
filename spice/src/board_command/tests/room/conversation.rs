@@ -78,7 +78,10 @@ fn page(
         &[],
         TaskShowHistory::of(answer, task, None),
         None,
-        Some(shown),
+        TaskShowLocal {
+            maturity: None,
+            room: Some(shown),
+        },
         &TaskShowOptions {
             full: false,
             context: false,

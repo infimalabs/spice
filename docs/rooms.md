@@ -270,12 +270,23 @@ owns each rule summarized here.
   not hold; else it refuses `preparation::pass-empty`, moving nothing; others'
   posts and contributions do not count. The operator chooses by outcome, not
   timing: conclude a delivered purpose and collapse a failed premise whenever
-  found, keeping any output already selected. Before the final arrival
-  records, the participants investigate every current question until each
-  carries an item-specific nonzero charge, whatever its sign: the resident
-  reads that coverage from the current statement and refuses an uncovered
-  arrival `preparation::questions-uncovered`, naming each gap and moving
-  nothing.
+  found, keeping any output already selected.
+
+  `task show`, `room awareness`, and the pending pass decision card expose the
+  same bounded computation: each current term's positive/negative lane counts,
+  net and standing; the summed net; agreement
+  `Σ|P−N| / Σ(P+N)` (or `n/a`); cancellation; zero-net count; and regime.
+  More than 64 lanes on a term makes its counts and every aggregate visibly
+  inexact. Contested and split readouts give threshold-free guidance: lower
+  agreement and more cancellation favor staging or research; higher agreement
+  narrows contested staging without admitting ordinary work and makes concrete
+  work more credible in a split regime.
+
+  Before the final arrival records, the participants investigate every current
+  question until each carries an item-specific nonzero charge, whatever its
+  sign: the resident reads that coverage from the current statement and
+  refuses an uncovered arrival `preparation::questions-uncovered`, naming each
+  gap and moving nothing.
   Coverage is not concurrence and proves nothing about the research behind a
   charge; maturity's heard-question steeping cutoff still decides readiness
   alone, and a statement naming no question is covered. The final arrival

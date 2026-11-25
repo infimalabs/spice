@@ -9,6 +9,8 @@ pub(super) use list::actor_route_matches;
 #[cfg(test)]
 pub(in crate::board_command) use list::{TaskListOptions, TaskListStatus, task_list};
 use list::{TaskListPageOptions, task_list_page};
+mod nets;
+use nets::{design_net_lines, task_show_maturity};
 mod room;
 pub(in crate::board_command) use room::{TaskShowRoom, claim_room_context};
 use room::{resumes_in_room, task_show_room};
@@ -117,6 +119,10 @@ pub(super) fn client_show(
                 Ok(artifacts) => artifacts,
                 Err(outcome) => return outcome,
             };
+            let maturity = match task_show_maturity(repository, task) {
+                Ok(maturity) => maturity,
+                Err(outcome) => return outcome,
+            };
             let principals = if options.history {
                 match task_show_principals(repository) {
                     Ok(principals) => Some(principals),
@@ -154,7 +160,10 @@ pub(super) fn client_show(
                 &artifacts,
                 history,
                 origin_context.as_deref(),
-                room,
+                TaskShowLocal {
+                    maturity: maturity.as_ref(),
+                    room,
+                },
                 &options,
             ) {
                 Ok(text) => text,
@@ -446,7 +455,7 @@ pub(in crate::board_command) fn task_show_with_origin(
         artifacts,
         history,
         origin_context,
-        None,
+        TaskShowLocal::default(),
         &TaskShowOptions {
             full: true,
             context: true,
@@ -458,6 +467,20 @@ pub(in crate::board_command) fn task_show_with_origin(
         },
     )
     .expect("unpaged task detail has no unknown cursor")
+}
+
+/// Local journal evidence that enriches one task detail beyond board heads.
+#[derive(Default)]
+pub(in crate::board_command) struct TaskShowLocal<'a> {
+    pub(in crate::board_command) maturity: Option<&'a wire::rooms::DesignMaturity>,
+    pub(in crate::board_command) room: Option<TaskShowRoom>,
+}
+
+impl TaskShowLocal<'_> {
+    fn net_lines(&self, statement: &wire::intent::BoardStatement) -> Vec<String> {
+        self.maturity
+            .map_or_else(Vec::new, |maturity| design_net_lines(maturity, statement))
+    }
 }
 
 fn task_items_label(statement: &wire::intent::BoardStatement) -> &'static str {
@@ -516,7 +539,7 @@ pub(in crate::board_command) fn task_show_bounded(
     artifacts: &[artifact::Artifact],
     history: TaskShowHistory<'_>,
     origin_context: Option<&str>,
-    room: Option<TaskShowRoom>,
+    local: TaskShowLocal<'_>,
     options: &TaskShowOptions,
 ) -> Result<String, Outcome<CommandAnswer>> {
     let statement = &task.statement.body;
@@ -528,6 +551,7 @@ pub(in crate::board_command) fn task_show_bounded(
             .map(|standing| format!("standing {standing}")),
     );
     lines.extend(design_cycle(board, task).map_or_else(Vec::new, |cycle| cycle.lines()));
+    lines.extend(local.net_lines(statement));
     if let Some(preparation) = &statement.preparation {
         lines.extend([
             format!("preparation {}", stamp_name(board, &preparation.parent)),
@@ -620,7 +644,7 @@ pub(in crate::board_command) fn task_show_bounded(
             task,
             history,
             origin_context,
-            room,
+            local.room,
             options,
             options.budget(),
         )?);
