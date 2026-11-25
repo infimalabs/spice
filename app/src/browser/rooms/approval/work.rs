@@ -127,7 +127,11 @@ fn render_output(
                 <span>
                     {identity}
                     if let Some(title) = title {
-                        {" · "}{title}
+                        {" · "}
+                        {crate::browser::task_detail::render_task_title(
+                            &title,
+                            &crate::composer_markdown::inline::LineControls::Nested,
+                        )}
                     }
                 </span>
                 {task.map_or_else(Html::default, |task| html! { <span>{output_kind(task).into_owned()}</span> })}
@@ -165,7 +169,16 @@ fn render_term(context: &Context<'_>, output: &TaskStamp) -> Html {
             <strong>{"Acceptance · "}{task_handle_link(context.open_task, output, &task.statement.body.handle)}</strong>
             <ul>
                 {for task.statement.body.term.iter().zip(&items).map(|(text, item)| html! {
-                    <li><code>{item.handle(&items).to_owned()}</code>{" "}{text.clone()}</li>
+                    <li>
+                        <code>{item.handle(&items).to_owned()}</code>
+                        {" "}
+                        {crate::browser::task_detail::render_task_text(
+                            text,
+                            &[],
+                            "work-decision-criterion",
+                            |_| false,
+                        )}
+                    </li>
                 })}
             </ul>
         </>

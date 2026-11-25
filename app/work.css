@@ -498,7 +498,7 @@
 .work-room-lanes { font-size: var(--app-type-detail); }
 .work-room-lanes ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .work-questions { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.work-questions > li { overflow-wrap: anywhere; }
+.work-questions > li { overflow-wrap: anywhere; } :is(.work-decision-criterion, .work-question-text), :is(.work-decision-criterion, .work-question-text) :is(.message-body, p) { display: inline; }
 .work-question-handle { margin-right: 1ch; color: var(--muted); }
 .work-question-standing {
   margin-right: 1ch;
