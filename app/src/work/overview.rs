@@ -311,7 +311,11 @@ impl WorkProjection<'_> {
             let Some(&task_index) = by_task.get(dependent) else {
                 continue;
             };
-            for dependency in &self.tasks[task_index].dependencies {
+            for dependency in self.tasks[task_index]
+                .dependencies
+                .iter()
+                .filter(|dependency| !dependency.released())
+            {
                 let prerequisite = neighbor(
                     &mut nodes,
                     &mut node_by_task,
@@ -505,6 +509,34 @@ mod tests {
             )),
             TaskOverviewBase::Drafts,
             "the Drafts scope stays neutral even over only Design-owned drafts"
+        );
+    }
+    #[test]
+    fn dependency_overview_omits_preparation_lifecycle_wait() {
+        let design = design(1, "/design");
+        let mut output = task(2, "/output");
+        output.statement.body.preparation = Some(wire::TaskPreparation {
+            parent: stamp(1),
+            controller: stamp(1),
+            construction: stamp(2),
+        });
+        let mut board = board(vec![design, output]);
+        board
+            .design_cycles
+            .insert(stamp(1), wire::rooms::DesignCycle::WaitingOnSelectedWork);
+        let work = WorkProjection::from_board_and_lanes(&board, None);
+        assert!(
+            work.tasks()[0]
+                .dependencies()
+                .iter()
+                .any(super::super::WorkDependency::released),
+            "the lifecycle wait remains available to task detail"
+        );
+
+        let selection = TaskOverviewSelection::new([stamp(1), stamp(2)], TaskOverviewContext::Task);
+        assert!(
+            work.overview_graph(&selection).edges().is_empty(),
+            "preparation state is not an execution dependency"
         );
     }
 }

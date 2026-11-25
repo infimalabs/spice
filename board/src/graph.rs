@@ -238,16 +238,6 @@ fn render_scope(view: View, entries: &[Entry], reviews: &[ReviewEdge], live_only
             }
         }
         View::Dependencies => {
-            let designs = entries
-                .iter()
-                .filter(|entry| {
-                    entry
-                        .statement()
-                        .intent
-                        .is_some_and(wire::TaskIntent::is_design)
-                })
-                .map(Entry::born)
-                .collect::<BTreeSet<_>>();
             let name = |stamp: &TaskStamp| {
                 handles
                     .get(stamp)
@@ -256,18 +246,6 @@ fn render_scope(view: View, entries: &[Entry], reviews: &[ReviewEdge], live_only
             for entry in ordered.into_iter().filter(visible) {
                 for edge in entry.dependencies() {
                     writeln!(text, "{} -> {}", name(&edge.task), name(&edge.after))
-                        .expect("String writes are infallible");
-                }
-                // This virtual lifecycle relation presents the Design's wait
-                // without adding an ordinary dependency to either statement.
-                if let Some(design) = wire::intent::released_construction_root(
-                    entry.born(),
-                    entry.workflow(),
-                    entry.statement().preparation.as_ref(),
-                )
-                .filter(|design| designs.contains(design))
-                {
-                    writeln!(text, "{} -> {}", name(design), entry.handle())
                         .expect("String writes are infallible");
                 }
             }

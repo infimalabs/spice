@@ -186,7 +186,7 @@ fn operator_selection_releases_outputs_and_leaves_the_design_unclaimed_and_open(
             .dependencies
             .is_empty()
     );
-    assert_reads_released_lifecycle_relation(
+    assert_reads_preparation_without_dependency_relation(
         &bus,
         epoch,
         &design_stamp,
@@ -195,9 +195,9 @@ fn operator_selection_releases_outputs_and_leaves_the_design_unclaimed_and_open(
     clean(&root, bus);
 }
 
-/// The Design's own task read carries its released output, and the typed
-/// dependency graph draws their virtual lifecycle relation.
-fn assert_reads_released_lifecycle_relation(
+/// The Design's task read may carry released lifecycle context, while the
+/// typed relation graph exposes it only through the preparation controller.
+fn assert_reads_preparation_without_dependency_relation(
     bus: &Bus,
     epoch: CanonicalUuid,
     design_stamp: &TaskStamp,
@@ -235,24 +235,36 @@ fn assert_reads_released_lifecycle_relation(
         Actor::TEST_PRINCIPAL,
         &wire::intent::TaskRelations {
             roots: vec![design_stamp.clone()],
-            relations: vec![wire::intent::TaskRelationKind::Dependency],
+            relations: vec![
+                wire::intent::TaskRelationKind::Dependency,
+                wire::intent::TaskRelationKind::Controller,
+            ],
             depth: 1,
             node_limit: 16,
         },
     ));
+    let joins_output = |edge: &wire::intent::TaskRelationEdge| {
+        edge.from
+            == (wire::intent::TaskRelationNodeRef::Task {
+                task: design_stamp.clone(),
+            })
+            && edge.to
+                == (wire::intent::TaskRelationNodeRef::Task {
+                    task: output_stamp.clone(),
+                })
+    };
+    assert!(
+        !projected.edges.iter().any(|edge| {
+            edge.relation == wire::intent::TaskRelationKind::Dependency && joins_output(edge)
+        }),
+        "preparation state must not masquerade as an execution dependency: {:?}",
+        projected.edges
+    );
     assert!(
         projected.edges.iter().any(|edge| {
-            edge.relation == wire::intent::TaskRelationKind::Dependency
-                && edge.from
-                    == wire::intent::TaskRelationNodeRef::Task {
-                        task: design_stamp.clone(),
-                    }
-                && edge.to
-                    == wire::intent::TaskRelationNodeRef::Task {
-                        task: output_stamp.clone(),
-                    }
+            edge.relation == wire::intent::TaskRelationKind::Controller && joins_output(edge)
         }),
-        "the dependency relation draws the Design waiting on its released output: {:?}",
+        "the controller relation retains the Design-to-output connection: {:?}",
         projected.edges
     );
 }

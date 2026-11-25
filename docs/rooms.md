@@ -300,9 +300,10 @@ owns each rule summarized here.
   the final settlement of released work count; Design requests, notices,
   leaves, a lane's room posts, and tasks prepared under the Design do not.
   Released work is the Design's lifecycle wait set: the accepted outputs
-  retained preparation says it released. Dependency graphs and sheets draw
-  that derived relation without writing an editable statement dependency. The
-  work settles by the fact that completes it: a completing `task done`,
+  retained preparation says it released. Preparation/controller views show
+  that relation; dependency graphs and sheets show only editable statement
+  dependencies.
+  The work settles by the fact that completes it: a completing `task done`,
   operator closure or deletion, a conclusion, or the clean final review of a
   flow that ends in review, which the review fact records as its completed
   status. Until then the Design gathers input, awaits the operator's decision,
@@ -331,8 +332,8 @@ owns each rule summarized here.
      offered output it concludes or collapses the Design. Returning the pass
      or rejecting an output is counted input: with no output accepted, the
      Design is ready for its next pass at once.
-  4. **Waiting on selected work**: the accepted work runs as the Design's
-     prerequisites. Its final settlement makes the next pass ready; input
+  4. **Waiting on selected work**: the accepted work runs in the Design's
+     lifecycle wait set. Its final settlement makes the next pass ready; input
      recorded meanwhile counts then.
 
   A deferred Design keeps its cycle and history, but no lane may possess it
