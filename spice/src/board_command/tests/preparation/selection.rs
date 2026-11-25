@@ -2,6 +2,134 @@
 //! rejected outputs close, and a selection that would loop is refused.
 
 use super::*;
+use wire::rooms::{ROOM_PUBLICATION_BYTES_LIMIT, RoomPublicationContent, RoomPublished};
+
+fn output_publications(bus: &Bus, output: &TaskHandle) -> journal::SelectedFactPage {
+    let room = output.born().expect("fixture output carries a birth stamp");
+    bus.read(move |read| {
+        read.room_publications(
+            &room,
+            None,
+            journal::FactReadBudget::new(8, journal::MAX_RETAINED_FACT_PAGE_BYTES)
+                .expect("fixture room page budget"),
+        )
+    })
+    .expect("output room publications read")
+}
+
+#[test]
+fn accepted_output_comment_is_published_once_in_its_room() {
+    let (root, bus, epoch, seats) = fixture("preparation-selection-comment", 1);
+    let design = add_controller(
+        &bus,
+        epoch,
+        "Commented selection",
+        wire::TaskIntent::Design,
+        None,
+    );
+    capture_design(&bus, epoch, &seats[0], &design);
+    let accepted = add_plan_output(&bus, epoch, &design, "Accepted output");
+    let rejected = add_plan_output(&bus, epoch, &design, "Rejected output");
+    assert_committed(end_pass(&bus, epoch, &seats[0], &design));
+
+    let read = read_pass(&bus, epoch, &design);
+    let accepted_stamp = accepted.born().expect("accepted output stamp");
+    let outputs = read
+        .1
+        .outputs
+        .iter()
+        .map(|revision| OutputDecision {
+            output: revision.task.clone(),
+            verdict: if revision.task == accepted_stamp {
+                OutputVerdict::Accepted
+            } else {
+                OutputVerdict::Rejected
+            },
+            comment: Some(if revision.task == accepted_stamp {
+                "Start with the retained operator constraint.".to_owned()
+            } else {
+                "This rejection remains only on the Design decision.".to_owned()
+            }),
+        })
+        .collect();
+    let outcome = DecisionOutcome::Resolved {
+        outputs,
+        comment: Some("This overall comment also remains on the Design.".to_owned()),
+    };
+    let mut oversized = outcome.clone();
+    let DecisionOutcome::Resolved { outputs, .. } = &mut oversized else {
+        unreachable!("fixture decision is resolved")
+    };
+    outputs
+        .iter_mut()
+        .find(|output| output.verdict == OutputVerdict::Accepted)
+        .expect("fixture has an accepted output")
+        .comment = Some("x".repeat(ROOM_PUBLICATION_BYTES_LIMIT + 1));
+    let refused = decide_read(&bus, epoch, &design, 1, read.clone(), oversized);
+    let Outcome::Refusal(refusal) = refused else {
+        panic!("an oversized copied room comment committed: {refused:?}")
+    };
+    assert_eq!(refusal.reason(), "room::post-too-large");
+    assert!(
+        at(&board(&bus, epoch, Actor::TEST_PRINCIPAL), &accepted)
+            .workflow
+            .body
+            .is_draft()
+    );
+    assert!(output_publications(&bus, &accepted).rows.is_empty());
+    assert_committed(decide_read(
+        &bus,
+        epoch,
+        &design,
+        1,
+        read.clone(),
+        outcome.clone(),
+    ));
+    assert!(
+        matches!(
+            decide_read(&bus, epoch, &design, 1, read, outcome.clone()),
+            Outcome::Refusal(_)
+        ),
+        "a stale retry refuses instead of recording another publication"
+    );
+
+    let page = output_publications(&bus, &accepted);
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].actor, Actor::TEST_PRINCIPAL);
+    let published = page.rows[0]
+        .fact
+        .read::<RoomPublished>()
+        .expect("accepted output publication has its typed body");
+    assert_eq!(
+        published.content,
+        RoomPublicationContent::Authored {
+            text: "Start with the retained operator constraint.".to_owned()
+        }
+    );
+    let cause = page.rows[0]
+        .cause
+        .expect("copied output comment is caused by its decision");
+    let cause_page = bus
+        .read(move |read| {
+            read.fact_page(
+                journal::FactPageStart::At(cause),
+                cause,
+                journal::FactReadBudget::new(1, journal::MAX_RETAINED_FACT_PAGE_BYTES)
+                    .expect("fixture cause page budget"),
+            )
+        })
+        .expect("decision cause reads");
+    let decided = cause_page.rows[0]
+        .fact
+        .read::<wire::rooms::PreparationDecided>()
+        .expect("publication cause is the typed decision");
+    assert_eq!(decided.decision.outcome, outcome);
+    assert!(
+        output_publications(&bus, &rejected).rows.is_empty(),
+        "rejected-output and overall comments do not publish to output rooms"
+    );
+    clean(&root, bus);
+}
 
 #[test]
 fn operator_selection_releases_outputs_and_leaves_the_design_unclaimed_and_open() {
