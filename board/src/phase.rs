@@ -258,12 +258,16 @@ pub fn deliverable(phase: &Phase) -> &'static str {
     match *phase {
         Phase::Design => {
             "board state is the deliverable: investigate every question and weigh each with a \
-             nonzero `spice room contribute HANDLE --charge=C --question HEX TEXT`, building only \
-             outputs the room's contributions or other cited sources earn; a pass that builds \
-             nothing says in the room whether the Design's purpose is delivered or its premise \
-             failed. Then record your completed share with `spice task done --validation \"...\"` \
-             and run `spice task next`; the final share ends the pass for the operator's \
-             decision, and only the operator concludes a Design"
+             nonzero `spice room contribute HANDLE --charge=C --question HEX TEXT`. When the \
+             evidence supports the Design, construct the outputs that would deliver it under \
+             this held Design with `spice task add TITLE --pitch TEXT --term TEXT`, ordinary \
+             tasks or a Plan, building only what the room's contributions or other cited \
+             sources earn; those outputs are what the operator decides. A pass that constructs \
+             none posts why with `spice room post HANDLE TEXT`: the Design's purpose is \
+             delivered or its premise failed; ending an empty pass without that post refuses. \
+             Then record your completed share with `spice task done --validation \"...\"` and \
+             run `spice task next`; the final share ends the pass for the operator's decision, \
+             and only the operator concludes a Design"
         }
         Phase::Draft => {
             "board state is the deliverable: make the acceptance explicit or decompose the \
@@ -314,8 +318,9 @@ pub fn released_reminder(entry: &Entry) -> String {
             ),
             Some(wire::rooms::DesignPassEnd::Abandoned) | None => format!(
                 "your earlier pass of {task} ended before its round completed; finish this pass \
-                 with `spice task done`, saying in the room whether the Design's purpose is \
-                 delivered or its premise did not hold when it builds nothing"
+                 with `spice task done`, constructing the outputs its evidence supports or \
+                 posting with `spice room post {task}` whether the Design's purpose is \
+                 delivered or its premise did not hold"
             ),
         };
     }

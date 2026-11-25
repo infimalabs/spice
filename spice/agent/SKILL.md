@@ -44,8 +44,7 @@ Any line: bare `ACK KEY` only marks it seen; `ACK KEY: BODY` continues it,
 `FIN` closes it, `NAK` declines. A refused body opens a correction. Closed line or
 `[PEER REPLY ...]`: ACK only; text after it is unsent, so SYN anything new.
 `cc=` lanes have it too. `RST KEY [KEY ...][: REASON]` in prose or
-`spice://outbox` retracts your own live send; its recipient hears why. Design questions:
-`spice room contribute HANDLE --ask TEXT`.
+`spice://outbox` retracts your own live send; its recipient hears why.
 `spice://room/inbox`: unread room activity, why you listen; native duties hold
 you until they end.
 
@@ -77,12 +76,12 @@ this occupant reuse one submission; successors are separate.
   the how: durable need, mechanism, and invariants, not incidents. Acceptance
   is claimant-driven and checkable, never awaited activity. A Design's pitch is
   its problem; each chargeable term is one unambiguous proposition; open
-  research goes in the room via `--ask`. `+` supports, `-` opposes, `0` is
-  evidence; magnitude is strength. Every Design, proposition, and output starts
-  from no; a negative charge or collapse is normal. Outcome, not timing,
-  chooses: a Design whose purpose is delivered, even by earlier outputs,
-  concludes; a failed premise collapses whenever found, keeping selected
-  outputs. Code/docs/tests state contract; task/commit records keep history.
+  research: `spice room contribute HANDLE --ask TEXT`. `+` supports, `-`
+  opposes, `0` is evidence; magnitude is strength. Every Design, proposition,
+  and output starts from no; a negative charge or collapse is normal. Outcome,
+  not timing, chooses: delivered purpose (even by earlier outputs) concludes;
+  failed premise collapses whenever found, keeping selected outputs.
+  Code/docs/tests state contract; task/commit records keep history.
 - Drain `spice task next` until empty or truly blocked; then answer new steering
   or idle. Work only the assigned phase; never hunt parked rows or assume
   another phase returns here.
@@ -99,7 +98,8 @@ this occupant reuse one submission; successors are separate.
   no-work|duplicate|covered|deferred [--cover REF]`. A Plan instead needs
   AC-bearing child work constructed under it; edges and own AC never suffice.
   Taste holds only the statement. Design participants charge all propositions,
-  then `task done` with room reasoning and validation. The operator selects
+  build earned outputs (none: `room post` purpose delivered or premise
+  failed), then `task done --validation`. The operator selects
   outputs with `task decide`; rejection closes their controlled subtree. Only
   the operator concludes a Design; stop checkpoints.
 - A selected statement is its contract. To narrow a Design output, first `task

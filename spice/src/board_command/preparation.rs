@@ -141,6 +141,43 @@ pub(super) fn require_question_coverage(
     ))
 }
 
+/// Refuse ending a pass that leaves the operator nothing to decide: the Design
+/// offers no output and the finishing lane posted no observation in its room
+/// since the last pass boundary saying whether its purpose is delivered or its
+/// premise failed. An empty pass otherwise reads as an unstated collapse.
+pub(super) fn require_pass_outcome(
+    snapshot: &bus::TaskSnapshot,
+    controller: &TaskStamp,
+    actor: &wire::Actor,
+) -> Result<(), Outcome<CommandAnswer>> {
+    if decision::offered_outputs(snapshot, controller)
+        .next()
+        .is_some()
+    {
+        return Ok(());
+    }
+    let heads = task_heads(snapshot, controller)?;
+    let statement = heads.statement().body();
+    let horizon = snapshot.facts().design(statement).horizon;
+    if snapshot
+        .facts()
+        .room_stated_after(actor, controller, horizon)
+    {
+        return Ok(());
+    }
+    let handle = statement.handle(heads.workflow().body().phase);
+    Err(refusal(
+        "preparation::pass-empty",
+        Some(handle.to_string()),
+        format!(
+            "construct the outputs this pass's evidence supports under the held Design with \
+             `spice task add TITLE --pitch TEXT --term TEXT`, or say why it needs none with \
+             `spice room post {handle} TEXT`: its purpose is already delivered (name what \
+             delivered it) or its premise failed (name the evidence)"
+        ),
+    ))
+}
+
 pub(super) fn adopt_output(
     bus: &Bus,
     command: &wire::AdmittedCommand,

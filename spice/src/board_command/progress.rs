@@ -323,6 +323,7 @@ fn done_transition(
                 .task_snapshot()
                 .map_err(|error| store_fault("task::heads-unreadable", error.to_string()))?;
             preparation::require_question_coverage(&observed, entry.born())?;
+            preparation::require_pass_outcome(&observed, entry.born(), command.actor())?;
         }
         let transition = board::Transition::after_round(entry, at, false).map_err(|error| {
             refusal(

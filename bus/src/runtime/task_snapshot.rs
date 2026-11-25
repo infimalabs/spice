@@ -272,6 +272,11 @@ struct Indexes {
     room_publication_positions: Arc<
         HashMap<(journal::crossing::Actor, journal::crossing::TaskStamp), journal::crossing::Seq>,
     >,
+    /// Each actor's newest authored observation in one room: a post or a
+    /// packet, never a contribution or leave.
+    room_statement_positions: Arc<
+        HashMap<(journal::crossing::Actor, journal::crossing::TaskStamp), journal::crossing::Seq>,
+    >,
     /// Every Design question item each lane ever answered: a contribution
     /// against it, or a leave declining a request that listed it. An item is
     /// its content, so a reworded question is another item.
@@ -374,8 +379,14 @@ impl Indexes {
         let Some(room) = row.fact.room_record() else {
             return;
         };
-        Arc::make_mut(&mut self.room_publication_positions)
-            .insert((row.actor.clone(), room.clone()), row.seq);
+        let key = (row.actor.clone(), room.clone());
+        if matches!(
+            row.fact.kind(),
+            journal::crossing::FactKind::RoomPublished | journal::crossing::FactKind::RoomMessaged
+        ) {
+            Arc::make_mut(&mut self.room_statement_positions).insert(key.clone(), row.seq);
+        }
+        Arc::make_mut(&mut self.room_publication_positions).insert(key, row.seq);
         if let Some(contributed) = row.fact.read::<journal::crossing::rooms::RoomContributed>() {
             if let Some(item) = contributed.item {
                 Arc::make_mut(&mut self.item_answers).insert((
@@ -986,6 +997,22 @@ impl TaskFacts {
             .room_publication_positions
             .get(&(journal::crossing::Actor::Lane(lane), room.clone()))
             .is_some_and(|at| *at > after)
+    }
+
+    /// Whether `actor` posted an authored observation in `room` after
+    /// `after`, or ever when `after` is absent. Contributions and leaves are
+    /// not observations.
+    #[must_use]
+    pub fn room_stated_after(
+        &self,
+        actor: &journal::crossing::Actor,
+        room: &journal::crossing::TaskStamp,
+        after: Option<journal::crossing::Seq>,
+    ) -> bool {
+        self.indexes
+            .room_statement_positions
+            .get(&(actor.clone(), room.clone()))
+            .is_some_and(|at| after.is_none_or(|after| *at > after))
     }
 
     /// Each charged question item's series for `design`, if any item was

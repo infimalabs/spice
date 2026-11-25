@@ -149,8 +149,16 @@ fn a_design_pass_ends_on_acceptance_from_pending_work_linked_either_way() {
         matches!(&unwitnessed, Outcome::Refusal(refusal) if refusal.reason() == "task::term-witness-missing"),
         "{unwitnessed:?}"
     );
-    assert_committed(end_linked_pass(&bus, epoch, &seats[0], &forward, true));
-    assert_committed(end_linked_pass(&bus, epoch, &seats[1], &reverse, true));
+    for (seat, design) in [(&seats[0], &forward), (&seats[1], &reverse)] {
+        post_observation(
+            &bus,
+            epoch,
+            Actor::Lane(seat.lane),
+            design,
+            "Delivered by the linked pending work.",
+        );
+        assert_committed(end_linked_pass(&bus, epoch, seat, design, true));
+    }
     let ended = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     for design in [&forward, &reverse] {
         assert!(at(&ended, design).design_cycle.pass.is_some());
