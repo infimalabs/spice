@@ -133,7 +133,7 @@ fn crossing_projects_only_live_task_trust_owners() {
         &digest("c"),
         wire::WorkflowStatus::deleted(instant()),
     );
-    let [(_, cross)] = crossing else {
+    let [(_, cross), ..] = crossing else {
         panic!("schema two crosses in one step");
     };
     cross(&transaction).expect("cross to schema three");

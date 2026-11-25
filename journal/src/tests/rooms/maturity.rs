@@ -232,13 +232,14 @@ fn indexed_and_live_maturity_are_the_same_bounded_measure() {
             1_001,
             Some(ITEM),
         ),
-        contributed(
+        contributed_on(
             &mut journal,
             &design,
             lane(3),
-            RoomContributionKind::Question,
+            RoomContributionKind::charge(-1),
             statement,
             1_002,
+            Some(ITEM),
         ),
         contributed(
             &mut journal,
@@ -285,6 +286,75 @@ fn indexed_and_live_maturity_are_the_same_bounded_measure() {
         actual.state(&[ITEM.to_owned()]),
         DesignMaturityState::Steeped
     );
+}
+
+/// Schema three's run-only series keys leave every stored maturity row, and
+/// the crossed row is byte-for-byte the fold of its history.
+#[test]
+fn crossing_drops_run_only_item_keys_to_the_folded_shape() {
+    let mut journal = Journal::in_memory().expect("journal");
+    let design = design(&mut journal, 1);
+    let statement = current_statement(&journal, &design);
+    let charges = [
+        (1, 1, ITEM),
+        (2, -1, ITEM),
+        (3, -1, "Who answers it?"),
+        (2, 1, ITEM),
+    ];
+    for (offset, (last, charge, item)) in charges.into_iter().enumerate() {
+        contributed_on(
+            &mut journal,
+            &design,
+            lane(last),
+            RoomContributionKind::charge(charge),
+            statement,
+            1_000 + i64::try_from(offset).expect("offset fits"),
+            Some(item),
+        );
+    }
+    let body = |journal: &Journal| -> Vec<u8> {
+        journal
+            .connection
+            .query_row(
+                "SELECT body FROM design_maturity WHERE design = ?1",
+                params![design.to_string()],
+                |row| row.get(0),
+            )
+            .expect("maturity row")
+    };
+    let folded = body(&journal);
+    let current = String::from_utf8(folded.clone()).expect("JSON body");
+    let stored = current
+        .replace(
+            ",\"lanes\":[",
+            ",\"suffix_conceded\":true,\"displaced_strong\":true,\"last_strong\":false,\"lanes\":[",
+        )
+        .replace(
+            ",\"suffix_strong\":",
+            &format!(",\"suffix_lanes\":[\"{}\"],\"suffix_strong\":", lane(2)),
+        )
+        .replace(
+            ",\"suffix_positive\":",
+            ",\"positive\":true,\"negative\":true,\"suffix_positive\":",
+        );
+    assert_ne!(stored, current, "the fixture carries schema three's keys");
+    journal
+        .connection
+        .execute(
+            "UPDATE design_maturity SET body = ?1 WHERE design = ?2",
+            params![stored.into_bytes(), design.to_string()],
+        )
+        .expect("store schema three row");
+
+    let transaction = journal.connection.transaction().expect("crossing");
+    let [.., (3, cross)] = crate::migrate::CROSSING_STEPS else {
+        panic!("schema three crosses last");
+    };
+    cross(&transaction).expect("cross to schema four");
+    transaction.commit().expect("crossing commits");
+
+    assert_eq!(body(&journal), folded);
+    journal.verify().expect("crossed projection verifies");
 }
 
 /// An item admission asks each of its questions once, whatever its standing:

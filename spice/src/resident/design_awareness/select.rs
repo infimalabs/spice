@@ -37,7 +37,7 @@ enum Standing {
     Unheard,
     /// Charges weighed it short of agreement: unopposed or contested.
     Unagreed,
-    /// Its latest run concurs.
+    /// Every charging lane's latest charge agrees at the floor.
     Concurred,
 }
 

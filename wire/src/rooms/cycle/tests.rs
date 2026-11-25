@@ -394,9 +394,9 @@ impl Journal {
     }
 }
 
-/// The first `posts` charges of the cheapest steep: A +1, B -1, A -1.
+/// The first `posts` charges of the cheapest steep: A +1, B -1, A -2.
 fn steeping(journal: &mut Journal, posts: usize) {
-    for (by, value) in [(1, 1), (2, -1), (1, -1)].into_iter().take(posts) {
+    for (by, value) in [(1, 1), (2, -1), (1, -2)].into_iter().take(posts) {
         journal.lane(&charged(by, value));
     }
 }
@@ -406,7 +406,7 @@ fn first_pass_needs_steeped_maturity() {
     let mut journal = Journal::new();
     steeping(&mut journal, 2);
     assert_eq!(journal.cycle(false), DesignCycle::GatheringInput);
-    journal.lane(&charged(1, -1));
+    journal.lane(&charged(1, -2));
     assert_eq!(journal.cycle(false), DesignCycle::ReadyForPass);
     assert_eq!(
         journal.cycles.facts(&design(), &[]).cycle(false),

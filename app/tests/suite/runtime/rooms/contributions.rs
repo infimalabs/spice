@@ -385,7 +385,7 @@ fn maturity_projection_is_incremental_bounded_and_standing_neutral() {
             RoomContributionKind::charge(-1),
         ),
         attributed(6, 10, &third, THIRD, RoomContributionKind::charge(0)),
-        attributed(7, 10, &fourth, LANE, RoomContributionKind::charge(-1)),
+        attributed(7, 10, &fourth, LANE, RoomContributionKind::charge(-2)),
     ];
     let runtime = contribution_runtime(&session, &snapshot);
     let projection = runtime.room_projection();

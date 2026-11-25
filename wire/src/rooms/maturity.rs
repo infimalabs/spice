@@ -32,24 +32,22 @@ pub const DESIGN_MATURITY_LANE_LIMIT: usize = 64;
 /// recently charged item's series is dropped.
 pub const DESIGN_MATURITY_ITEM_LIMIT: usize = 32;
 
-/// Where one question item stands in its charge series.
+/// Where one question item stands by each charging lane's latest sign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DesignItemState {
     /// No charge has weighed the item.
     Quiet,
-    /// Only positive charges have weighed the item, short of the agreement
-    /// floor.
+    /// Every charging lane's latest charge is positive, short of the
+    /// agreement floor.
     UnopposedFor,
-    /// Only negative charges have weighed the item, short of the agreement
-    /// floor.
+    /// Every charging lane's latest charge is negative, short of the
+    /// agreement floor.
     UnopposedAgainst,
-    /// Both signs have weighed the item and its latest run does not concur.
+    /// Charging lanes' latest charges disagree in sign.
     Contested,
-    /// The item's latest one-signed run is agreed: three lanes, or two lanes
-    /// with a strength-2 charge when only that sign ever weighed the item, or
-    /// two lanes with a concession after both signs did. A run that displaced
-    /// a strength-2 opposing charge also carries a strength-2 charge.
+    /// Every charging lane's latest charge shares one sign, from three lanes,
+    /// or two with a strength-2 charge since the item's sign last changed.
     Concurred,
 }
 
@@ -72,24 +70,18 @@ impl DesignItemState {
 pub enum DesignItemInput {
     /// No charge has weighed the item.
     AnyCharge,
-    /// Only positive charges have weighed the item, short of three lanes or
-    /// two with a +2 charge: more positive lanes.
+    /// Every lane charged positive, short of three lanes or two with a +2
+    /// charge: more positive lanes.
     PositiveLanes,
-    /// Only negative charges have weighed the item, short of three lanes or
-    /// two with a -2 charge: more negative lanes.
+    /// Every lane charged negative, short of three lanes or two with a -2
+    /// charge: more negative lanes.
     NegativeLanes,
-    /// The positive run lacks a concession and three lanes: a positive
-    /// charge from a lane whose last charge was negative, or more positive
-    /// lanes.
+    /// Lanes disagree and positive lanes lead, or tie after a positive
+    /// charge: a positive charge from a lane whose latest charge is negative.
     PositiveAgreement,
-    /// The negative run lacks a concession and three lanes.
+    /// Lanes disagree and negative lanes lead, or tie after a negative
+    /// charge: a negative charge from a lane whose latest charge is positive.
     NegativeAgreement,
-    /// The agreed positive run has not answered the displaced strength-2
-    /// negative charge with a +2 of its own.
-    PositiveStrength,
-    /// The agreed negative run has not answered the displaced strength-2
-    /// positive charge with a -2 of its own.
-    NegativeStrength,
 }
 
 impl DesignItemInput {
@@ -101,13 +93,11 @@ impl DesignItemInput {
             Self::PositiveLanes => "more positive lanes",
             Self::NegativeLanes => "more negative lanes",
             Self::PositiveAgreement => {
-                "a positive charge from a lane that last charged negative, or more positive lanes"
+                "a positive charge from a lane whose latest charge is negative"
             }
             Self::NegativeAgreement => {
-                "a negative charge from a lane that last charged positive, or more negative lanes"
+                "a negative charge from a lane whose latest charge is positive"
             }
-            Self::PositiveStrength => "a +2 charge",
-            Self::NegativeStrength => "a -2 charge",
         }
     }
 }
@@ -124,8 +114,9 @@ pub struct DesignItemLane {
 
 /// Fixed-size fold of one question item's charged posts in journal order.
 ///
-/// The suffix is the trailing run of same-sign charges; the post just before
-/// it is the losing sign's last.
+/// Each retained lane's latest sign decides where the item stands, the same
+/// evidence its term net reads; the trailing same-sign run supplies only the
+/// strength-2 floor and the tie direction.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DesignItemSeries {
@@ -133,28 +124,14 @@ pub struct DesignItemSeries {
     pub item: StatementItem,
     /// Charged posts on the item.
     pub charges: u64,
-    /// Some charge was positive.
-    pub positive: bool,
-    /// Some charge was negative.
-    pub negative: bool,
-    /// The suffix's sign is positive.
+    /// The latest charge was positive.
     pub suffix_positive: bool,
-    /// Distinct suffix lanes, sorted and capped at
-    /// [`DESIGN_MATURITY_LANE_LIMIT`], beyond every threshold.
-    pub suffix_lanes: Vec<CanonicalUuid>,
-    /// Some suffix charge had strength 2.
+    /// Some charge since the sign last changed had strength 2.
     pub suffix_strong: bool,
-    /// Some suffix charge came from a lane whose previous charge had the
-    /// opposite sign.
-    pub suffix_conceded: bool,
-    /// The losing sign's last charge had strength 2.
-    pub displaced_strong: bool,
-    /// The latest charge had strength 2.
-    pub last_strong: bool,
     /// Each lane's latest sign, sorted by lane.
     pub lanes: Vec<DesignItemLane>,
     /// More distinct lanes charged than `lanes` retains; an unretained lane's
-    /// earlier sign is unknown and concedes nothing.
+    /// sign is unknown and moves no standing.
     pub lanes_truncated: bool,
 }
 
@@ -163,14 +140,8 @@ impl DesignItemSeries {
         Self {
             item,
             charges: 0,
-            positive: false,
-            negative: false,
             suffix_positive: false,
-            suffix_lanes: Vec::new(),
             suffix_strong: false,
-            suffix_conceded: false,
-            displaced_strong: false,
-            last_strong: false,
             lanes: Vec::new(),
             lanes_truncated: false,
         }
@@ -179,33 +150,14 @@ impl DesignItemSeries {
     /// Fold one nonzero charge by `lane`.
     fn observe(&mut self, lane: CanonicalUuid, charge: RoomCharge) {
         let positive = charge.get() > 0;
-        let strong = charge.get().unsigned_abs() == 2;
         if self.charges == 0 || positive != self.suffix_positive {
-            self.displaced_strong = self.charges != 0 && self.last_strong;
             self.suffix_positive = positive;
-            self.suffix_lanes.clear();
             self.suffix_strong = false;
-            self.suffix_conceded = false;
         }
         self.charges = self.charges.saturating_add(1);
-        if positive {
-            self.positive = true;
-        } else {
-            self.negative = true;
-        }
-        if let Err(index) = self.suffix_lanes.binary_search(&lane)
-            && self.suffix_lanes.len() < DESIGN_MATURITY_LANE_LIMIT
-        {
-            self.suffix_lanes.insert(index, lane);
-        }
-        self.suffix_strong |= strong;
-        self.last_strong = strong;
+        self.suffix_strong |= charge.get().unsigned_abs() == 2;
         match self.lanes.binary_search_by_key(&lane, |known| known.lane) {
-            Ok(index) => {
-                let known = &mut self.lanes[index];
-                self.suffix_conceded |= known.positive != positive;
-                known.positive = positive;
-            }
+            Ok(index) => self.lanes[index].positive = positive,
             Err(index) if self.lanes.len() < DESIGN_MATURITY_LANE_LIMIT => {
                 self.lanes.insert(index, DesignItemLane { lane, positive });
             }
@@ -213,53 +165,44 @@ impl DesignItemSeries {
         }
     }
 
-    /// The suffix holds a concession and two lanes, or three lanes.
-    fn agreed(&self) -> bool {
-        let lanes = self.suffix_lanes.len();
-        lanes >= 3 || (lanes >= 2 && self.suffix_conceded)
-    }
-
-    /// A run no opposing charge preceded holds three lanes, or two with a
-    /// strength-2 charge.
-    fn unanimous(&self) -> bool {
-        let lanes = self.suffix_lanes.len();
-        lanes >= 3 || (lanes >= 2 && self.suffix_strong)
-    }
-
-    /// The suffix displaced a strength-2 charge without one of its own.
-    fn buried(&self) -> bool {
-        self.displaced_strong && !self.suffix_strong
+    /// Retained lanes whose latest charge is positive, then negative.
+    fn signs(&self) -> (usize, usize) {
+        let positive = self.lanes.iter().filter(|lane| lane.positive).count();
+        (positive, self.lanes.len() - positive)
     }
 
     /// Where the item stands.
     #[must_use]
     pub fn state(&self) -> DesignItemState {
-        match (self.positive, self.negative) {
-            (false, false) => DesignItemState::Quiet,
-            (true, false) | (false, true) if self.unanimous() => DesignItemState::Concurred,
-            (true, false) => DesignItemState::UnopposedFor,
-            (false, true) => DesignItemState::UnopposedAgainst,
-            (true, true) if self.agreed() && !self.buried() => DesignItemState::Concurred,
-            (true, true) => DesignItemState::Contested,
+        match self.signs() {
+            (0, 0) => DesignItemState::Quiet,
+            (agreeing, 0) | (0, agreeing)
+                if agreeing >= 3 || (agreeing >= 2 && self.suffix_strong) =>
+            {
+                DesignItemState::Concurred
+            }
+            (_, 0) => DesignItemState::UnopposedFor,
+            (0, _) => DesignItemState::UnopposedAgainst,
+            _ => DesignItemState::Contested,
         }
     }
 
     /// The input that would move the item toward concurrence; none once it
-    /// concurs. A contested run first needs agreement, then any strength-2
-    /// answer it owes.
+    /// concurs. A contested item needs a lane on the trailing side to join
+    /// the leading one.
     #[must_use]
     pub fn needs(&self) -> Option<DesignItemInput> {
-        let positive = self.suffix_positive;
+        let (positive, negative) = self.signs();
         Some(match self.state() {
             DesignItemState::Quiet => DesignItemInput::AnyCharge,
             DesignItemState::UnopposedFor => DesignItemInput::PositiveLanes,
             DesignItemState::UnopposedAgainst => DesignItemInput::NegativeLanes,
-            DesignItemState::Contested if !self.agreed() && positive => {
+            DesignItemState::Contested
+                if positive > negative || (positive == negative && self.suffix_positive) =>
+            {
                 DesignItemInput::PositiveAgreement
             }
-            DesignItemState::Contested if !self.agreed() => DesignItemInput::NegativeAgreement,
-            DesignItemState::Contested if positive => DesignItemInput::PositiveStrength,
-            DesignItemState::Contested => DesignItemInput::NegativeStrength,
+            DesignItemState::Contested => DesignItemInput::NegativeAgreement,
             DesignItemState::Concurred => return None,
         })
     }
