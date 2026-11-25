@@ -1074,7 +1074,9 @@ fn render_message_controls(
 
 /// The quote shards above one composer. A lane composer passes its status; a
 /// design composer has none, so its shards carry no lane status. A locked
-/// stack shows sent shards with no control that edits or removes them.
+/// stack shows sent shards with no control that edits or removes them. The
+/// global creator renders those same full-size shards as description-only
+/// composers inside its fixed watchband.
 pub(in crate::browser) fn render_quote_shards(
     lane_key: &str,
     draft: &ComposerDraft,
@@ -1085,8 +1087,27 @@ pub(in crate::browser) fn render_quote_shards(
     locked: bool,
 ) -> Html {
     let status_key = status.map(crate::runtime::LaneStatus::key);
+    let description_only = lane_key == crate::composer_drafts::NEW_DRAFT_KEY;
+    let stack_label = description_only.then_some("Quoted long-description composers");
+    let textarea_label = if description_only {
+        "Long description for quoted source"
+    } else {
+        "Reply to quoted message"
+    };
+    let remove_label = if description_only {
+        "Remove quoted long-description composer"
+    } else {
+        "Remove quoted composer shard"
+    };
     html! {
-        <div class="composer-quote-stack" data-composer-quote-stack-target-id={lane_key.to_owned()}>
+        <div
+            class={classes!(
+                "composer-quote-stack",
+                description_only.then_some("draft-quote-sections"),
+            )}
+            aria-label={stack_label}
+            data-composer-quote-stack-target-id={lane_key.to_owned()}
+        >
             {for draft.quotes.iter().map(|quote| {
                 let remove_key = lane_key.to_owned();
                 let remove_drafts = drafts.clone();
@@ -1140,7 +1161,7 @@ pub(in crate::browser) fn render_quote_shards(
                             )}
                             <button
                                 type="button"
-                                aria-label="Remove quoted composer shard"
+                                aria-label={remove_label}
                                 disabled={locked}
                                 onclick={remove}
                             >{"×"}</button>
@@ -1150,7 +1171,7 @@ pub(in crate::browser) fn render_quote_shards(
                             id={textarea_id}
                             lane={lane_key.to_owned()}
                             drafts={drafts.dispatcher()}
-                            label="Reply to quoted message"
+                            label={textarea_label}
                             body={quote.body.clone()}
                             placeholder={placeholder.to_owned()}
                             rows="2"
