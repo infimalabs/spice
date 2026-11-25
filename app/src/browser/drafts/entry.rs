@@ -66,13 +66,14 @@ impl Mode {
         }
     }
 
-    /// Collapsed Message names both available actions. Expanded work teaches
-    /// the single composer decode, title, blank line, pitch, blank line, then
-    /// optional context, in the terms each intent's statement needs. Each line
-    /// says what belongs there; a field label would be copied or replaced.
+    /// Collapsed, every mode advertises the same global destination keys.
+    /// Expanded work teaches the single composer decode: title, blank line,
+    /// pitch, blank line, then optional context.
     const fn placeholder(self, expanded: bool) -> &'static str {
+        if !expanded {
+            return "(A)sk, (T)ask, (P)lan, (D)esign…";
+        }
         match self {
-            Self::Message if !expanded => "(A)sk, (T)ask, (P)lan, (D)esign…",
             Self::Message => "A plain question or steering for an agent (required)",
             Self::Task => {
                 "A short name for the finished result (required)\n\nOne plain sentence on \
