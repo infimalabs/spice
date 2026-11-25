@@ -242,17 +242,16 @@ repository-owned OOPS Design. A pass refines the report into an
 acceptance-bearing output the operator decides. The construction reference creates no execution
 dependency, and there is no separate OOPS lifecycle state or action.
 
-The main header's **Ask** tab is the composer, cut at its utility-tab strip.
-**Draft**, **Help**, and later tabs divide the strip equally; only the outside
-tabs round, and their lower borders paint above both accent rails. **DRAFT** and
-**HELP** are plain bold uppercase tab labels, not count badges. The strip sits
-outside the masked sheet layer. Closed, the composer hangs like the
-totals tabs, with no outer rim, showing its first
-writing line—**Ask or task agent(s)...** while empty—beside that strip.
-Opening and closing crossfade the lower sheet without moving the writing line
-or tabs. The composer prefers the Spice menu's width, compresses to one
-work-total lane, then uses its whole track while clipping a wider sheet.
-Dismissal leaves focus outside.
+The main header's closed left-overlay strip is the global composer. A compact
+horizontal **Ask**, **Task**, **Plan**, and **Design** selector stays mounted
+beside the live **Draft** and **Help** controls. Opening grows that same
+composer into a left-side sheet without remounting its writing surface or
+changing its draft. The sheet mirrors the right Spice overlay's glass and edge
+vocabulary but owns its existing composer presentation lifecycle, so both
+overlays can stand open on desktop without masking each other. A narrow
+viewport gives the active overlay the available viewport while keeping the
+other launcher's surface reachable. Opening and closing do not move or rewrap
+already-laid-out writing, and dismissal leaves focus outside.
 
 **Ask** is the default; expanded, its writing line reads **Ask or steer
 (required)**. Beside **To**, an inline-scrolling row offers **Best-matched
@@ -274,10 +273,16 @@ the choice while retaining drafted quotes; work modes do not broadcast. A held
 stroke that would press Send/Create rings it as team SEND's command ring does,
 in theme ink for an Ask's broadcast.
 
-**Ask**, **Task**, **Plan**, and **Design** share one textarea and a vertical
-glass selector between Draft/Help and circular Send/Create. Kind, recipient,
-image count, and resizing preserve editor and rail geometry. Ask's recipients
-stay in a reserved row, so all modes keep one sheet size.
+**Ask**, **Task**, **Plan**, and **Design** share one textarea and one compact
+horizontal glass selector. Kind, recipient, image count, and resizing preserve
+editor and action geometry. Ask's recipients stay in a reserved, full-width
+row, so all modes keep one sheet size.
+
+The expanded sheet continues from the composer into **Principals** and the
+connected principal's personal inbox, using the existing principal and inbox
+renderers, state, actions, notices, and live count. That human-facing section
+has no second instance in the right Spice overlay, which retains connection and
+capacity readouts, Providers, Teams and agents, and Jobs.
 See the [composer checks](BROWSER.md#draft-composer-parity).
 A rounded full-width bottom accent identifies Ask as neutral, Task green, Plan
 blue, and Design plum; both inline edges stay borderless, with no separator

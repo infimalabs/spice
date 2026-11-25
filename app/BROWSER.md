@@ -218,24 +218,24 @@ surfaces.
 
 ## Draft composer parity
 
-The header's **Ask** tab is the open composer cut at its utility-tab strip.
+The header's closed left-overlay strip is the composer cut at its controls.
 Check that the editor's DOM identity, screen rectangle, typed text and
-selection survive expansion, dismissal and conversion, and that closed it
-shows the first writing line beside live Draft and Help over the accent edge;
-the rest is cut off and out of the Tab order. Unfocused, focused, pressed and
-disabled tabs keep their lower borders above both the closed and expanded
-accent; adding another utility tab divides the same strip rather than adding a
-stacking exception. Compare its fill and rimless, shadowless sides with the
-hanging totals tabs, and its [collapsed and expanded
-widths](OVERVIEW.md#drafts-and-oops-intake) with and without work totals. In
-both themes and inline directions, look for a bright hook in either gutter, an
-inner edge, doubled ring or seam; the rail separator stops cleanly at the
-accent. On a fresh narrow RTL page, the open sheet must widen leftward from
-the tab's right edge, keeping both accent endpoints and the
-recipient field inside the viewport; LTR widens rightward from its left edge.
-Check both directions after resizing, with empty and multiline content and
-while changing modes. Opening must not move or rewrap the already-laid-out
-editor, and the recipient inset and separator must stay beside the control rail.
+selection survive expansion, dismissal and conversion, and that the closed
+edge exposes the four mode controls plus live Draft and Help while the rest is
+cut off and out of the Tab order. The selected mode's thumb, utility controls,
+fill and accent must stay coherent in both states without an outer rim,
+doubled ring or seam. Expanded, the composer becomes a left-side sheet using
+the right Spice sheet's visual vocabulary but not its lifecycle.
+
+Open left and right overlays together at desktop widths: neither sheet, veil,
+focus trap nor scroll frame may mask or dismiss the other. Escape and outside
+click dismiss the active surface once and restore its own surviving opener.
+On a fresh narrow page, exercise both inline directions and open each overlay
+in turn: the active sheet must use the available viewport, keep every mode,
+recipient and utility control inside it, and leave the other surface reachable.
+Repeat after resizing, with empty and multiline content and while changing
+modes. Opening must not move or rewrap the already-laid-out editor, and the
+recipient row must retain its full useful width.
 By
 keyboard, each agent checkbox announces its name and state, Best-matched is
 pressed only with none chosen, and choosing never resizes the dialog. Several
@@ -282,19 +282,17 @@ by paste or drop. Only Ask adds To and its
 subdued Best-matched choice; work changes the textarea's title/pitch/context
 template, never adding a Pitch, Topic or second context field.
 
-Compare the DRAFT/ⓘ tabs with the hanging totals. The shared utility strip
-divides itself equally; only its outside lower corners round, and every lower
-border paints over the accent. Open and closed accents remain one full-width
-bottom strip with no inline edge, cap, horn or notch in LTR or RTL. Each end
-rounds through the strip's full thickness. The four-stop glass selector,
-circular action and accent keep equal gaps; the groove radius matches its thumb.
-Draft wears the kind's accent when on and is inert for Ask. Ask is neutral;
-Task, Plan and Design use green, blue and plum in both themes.
+Compare Draft and Help with the four-stop mode track. They remain proper
+keyboard controls in the tab or button treatment the surface uses; the
+selected mode's thumb, circular Send/Create action and accents keep deliberate
+gaps. Draft wears the kind's accent when on and is inert for Ask. Ask is
+neutral; Task, Plan and Design use green, blue and plum in both themes.
 
 Check the fixed-extent opening/closing fade against Spice: no moving edge or
 rewrapped writing, immediate reduced-motion settlement, focus outside the
-closed tab, and no Escape reopening during close. Narrow tracks clip the sheet
-without rewrapping and ellipsize the closed prompt. Empty/whitespace content
+closed strip, and no Escape reopening during close. Narrow tracks use the
+available viewport without rewrapping and ellipsize any closed prompt.
+Empty/whitespace content
 leaves Send/Create muted; applicable content lights the team SEND backlight
 without a readiness rim. Hover/focus brighten it; pressing dims it. Held
 Command adds the 2px command ring: Ask shares FULL's semantic blue while Task,
@@ -308,8 +306,9 @@ submitted Draft left by phase-zero validation remain read-only, while a
 transport refusal retains the local composition. Draft on records an editable
 Draft and persists across dismissal. Creating the first editable Draft updates
 the shared totals strip and `/work/drafts`; its width affects the editor only
-below the Spice menu's preferred width, without shifting clearance. Check focus
-containment, image annotation and narrow-view overflow.
+below the left overlay's preferred width, without shifting the right overlay
+or its content clearance. Check focus containment, image annotation and
+narrow-view overflow.
 
 Exercise [Draft editing](OVERVIEW.md#drafts-and-oops-intake) through creation,
 reopening after reload, and Save with an annotated image in every Kind.
