@@ -1407,13 +1407,12 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
 .app-compose-form label { display: grid; gap: 4px; min-width: 0; }
 .app-compose-form :is(label, .app-compose-recipient) > span { color: var(--muted); font-size: var(--app-type-fact); }
 /* To sits beside one never-wrapping row of recipient choices that scrolls
-   inline. Best-matched and unchosen agents wear placeholder ink. */
+   inline. */
 .app-compose-form .app-compose-recipient { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
 .app-compose-recipients { display: flex; gap: 6px; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: none; }
-.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 22px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; color: color-mix(in srgb, var(--muted) 55%, var(--control)); font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
+.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 22px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
 .app-compose-recipient-choice input { margin: 0; accent-color: var(--ink); }
 .app-compose-recipient-choice:is([aria-pressed="true"], :has(input:checked)) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
-.app-compose-recipient-choice:has(input:checked) { color: var(--ink); }
 /* Direct images keep the team composers' strip: one bounded row that grows
    from the writing area's lower inline end and scrolls past its bound. It
    lies over the writing area, which clears it only while it holds an image,
