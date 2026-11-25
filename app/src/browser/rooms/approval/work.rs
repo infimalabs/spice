@@ -115,10 +115,21 @@ fn render_output(
         |task| task.statement.body.handle.to_string(),
     );
     let comment_id = yew::AttrValue::from(format!("output-comment-{}-{output}", context.design));
+    let identity = task.map_or_else(
+        || html! { <code>{output.to_string()}</code> },
+        |task| task_handle_link(context.open_task, output, &task.statement.body.handle),
+    );
+    let title = task.map(|task| task.presentation_title().to_owned());
     html! {
         <li class="work-decision-output" key={output.to_string()} data-approval-output={output.to_string()}>
             <div class="work-decision-output-heading">
                 <span>{format!("Output {} of {total}", index + 1)}</span>
+                <span>
+                    {identity}
+                    if let Some(title) = title {
+                        {" · "}{title}
+                    }
+                </span>
                 {task.map_or_else(Html::default, |task| html! { <span>{output_kind(task).into_owned()}</span> })}
             </div>
             <p>{task.map_or("Output unavailable on the current board", |task| task.statement.body.pitch.as_str())}</p>
