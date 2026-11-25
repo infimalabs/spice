@@ -1,6 +1,6 @@
-//! The Principals section of the global menu: the connected principal's own
-//! row, which seats their personal inbox, and for an operator-role principal
-//! every born principal with their initials, code and identity, roles,
+//! The Principals section of the global composer's left overlay: the connected
+//! principal's own row seats their personal inbox and, for an operator-role
+//! principal, every born principal with their initials, code and identity, roles,
 //! capability, and admission time, beside the admission, one-time capability
 //! handoff, profile edit, operator role, and capability retirement
 //! `spice principal` offers, through its commands.

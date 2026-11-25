@@ -214,22 +214,6 @@ body:has(.shell),
 .app-spice-quota-well { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .app-spice-quota-account { fill: var(--accent-slot); stroke: none; }
 .app-spice-button[data-quota-stale] .app-spice-quota-account { filter: saturate(.35); }
-/* Messages waiting in the operator's inbox wear a small neutral status dot.
-   Its center sits just outside the round button's rim at 45 degrees: absolute
-   positioning uses the button's inner padding edge, so the negative inset
-   accounts for the two-pixel border and favors separation from the pepper. */
-.app-spice-button[data-inbox-waiting]::after {
-  position: absolute;
-  top: -1px;
-  right: -1px;
-  z-index: 2;
-  width: 7px;
-  height: 7px;
-  border-radius: var(--app-radius-circle);
-  background: var(--muted);
-  box-shadow: 0 0 0 2px var(--panel);
-  content: "";
-}
 .app-spice-button:not([data-accent]):is([data-connection="starting"], [data-connection="connecting"]) {
   --app-spice-edge: var(--focus);
 }

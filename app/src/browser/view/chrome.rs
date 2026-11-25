@@ -122,17 +122,11 @@ pub(super) fn render_spice_button(button: SpiceButton<'_>) -> Html {
         (true, true) => Some(3),
     };
     let connection_label = button.connection.label();
-    let mut trigger_label = match &quota {
+    let trigger_label: AttrValue = match &quota {
         Some(quota) => format!("{trigger_label} - {connection_label} - {}", quota.label),
         None => format!("{trigger_label} - {connection_label}"),
-    };
-    let waiting = button.runtime.map_or(0, waiting_messages);
-    match waiting {
-        0 => {}
-        1 => trigger_label.push_str(" - 1 message waiting for you"),
-        count => trigger_label.push_str(&format!(" - {count} messages waiting for you")),
     }
-    let trigger_label: AttrValue = trigger_label.into();
+    .into();
     html! {
         <button
             ref={button.node_ref}
@@ -141,7 +135,6 @@ pub(super) fn render_spice_button(button: SpiceButton<'_>) -> Html {
             data-accent={edge_accent.map(|accent| accent.to_string())}
             data-connection={button.connection.indicator_state()}
             data-quota-stale={quota.as_ref().is_some_and(|quota| quota.stale).then_some("true")}
-            data-inbox-waiting={(waiting > 0).then(|| waiting.to_string())}
             data-sidebar-focus-key={focus_key}
             aria-label={trigger_label.clone()}
             aria-haspopup="dialog"
