@@ -13,9 +13,9 @@ pub use design::{
     DesignRequest, DesignRequestAsk, DesignStanding, is_open_design, released_construction_root,
 };
 pub use detail::{
-    TASK_DETAIL_PASS_POST_BYTES_LIMIT, TASK_DETAIL_PASS_POST_LIMIT, TaskAcknowledgment, TaskDetail,
-    TaskDetailAnswer, TaskDetailClosure, TaskDetailDeletion, TaskDetailDisposition,
-    TaskDetailOrigin, TaskDetailPass, TaskDetailPost, TaskDetailReview, TaskDetailStep, TaskStep,
+    TaskAcknowledgment, TaskDetail, TaskDetailAnswer, TaskDetailClosure, TaskDetailDeletion,
+    TaskDetailDisposition, TaskDetailOrigin, TaskDetailPass, TaskDetailPost, TaskDetailReview,
+    TaskDetailStep, TaskStep,
 };
 pub use relations::{
     ORIGIN_REQUEST_PREVIEW_LIMIT, OriginRequest, TASK_RELATION_DEPTH_LIMIT,
