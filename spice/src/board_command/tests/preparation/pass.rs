@@ -206,8 +206,15 @@ fn a_positive_pass_ends_with_an_offered_output_or_a_stated_purpose() {
         &design,
         "The operator's note.",
     );
-    let stated = "Purpose delivered: the research findings answer every term.";
-    post_observation(&bus, epoch, lane.clone(), &design, stated);
+    let post_body = "x".repeat(
+        wire::intent::TASK_DETAIL_PASS_POST_BYTES_LIMIT / wire::intent::TASK_DETAIL_PASS_POST_LIMIT,
+    );
+    let stated = (0..wire::intent::TASK_DETAIL_PASS_POST_LIMIT + 2)
+        .map(|index| format!("Purpose delivered {index:02}: {post_body}"))
+        .collect::<Vec<_>>();
+    for statement in &stated {
+        post_observation(&bus, epoch, lane.clone(), &design, statement);
+    }
     assert_committed(complete_share(&bus, epoch, &seats[0], &design));
     let ended = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     assert!(
@@ -234,13 +241,28 @@ fn a_positive_pass_ends_with_an_offered_output_or_a_stated_purpose() {
         .pass
         .expect("the pending pass carries its final word");
     assert_eq!(word.finish.author, lane, "the finishing lane spoke last");
+    let shown = word.posts.len();
+    assert!(shown > 0 && shown <= wire::intent::TASK_DETAIL_PASS_POST_LIMIT);
+    assert!(
+        word.posts.iter().map(|post| post.text.len()).sum::<usize>()
+            <= wire::intent::TASK_DETAIL_PASS_POST_BYTES_LIMIT,
+        "the inline final word stays inside its text budget"
+    );
+    assert_eq!(
+        usize::try_from(word.omitted_posts).expect("omitted count fits usize") + shown,
+        stated.len(),
+        "every matching post is shown or counted as omitted"
+    );
     assert_eq!(
         word.posts
             .iter()
             .map(|post| post.text.as_str())
             .collect::<Vec<_>>(),
-        [stated],
-        "only the finishing lane's posts since the pass opened"
+        stated[stated.len() - shown..]
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        "only the bounded newest suffix of the finishing lane's posts is inline"
     );
 
     let offering = add_controller(

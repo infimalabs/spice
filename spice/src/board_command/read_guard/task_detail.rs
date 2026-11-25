@@ -136,23 +136,49 @@ fn pass_final_word(
         })?
         .clone();
     let room = &task.statement.body.born;
-    let posts = facts
-        .iter()
-        .filter(|envelope| {
-            envelope.actor == finish.author
-                && envelope.seq <= pass
-                && cycle.opened.is_none_or(|opened| envelope.seq > opened)
-        })
-        .filter_map(|envelope| {
-            let (posted, text) = recorded_note(envelope)?;
-            (posted == *room).then_some(wire::intent::TaskDetailPost {
-                position: envelope.seq,
-                at: envelope.at,
-                text,
-            })
-        })
-        .collect();
-    Some(wire::intent::TaskDetailPass { finish, posts })
+    let mut posts: std::collections::VecDeque<wire::intent::TaskDetailPost> =
+        std::collections::VecDeque::new();
+    let mut post_bytes = 0_usize;
+    let mut omitted_posts = 0_u64;
+    for envelope in facts.iter().filter(|envelope| {
+        envelope.actor == finish.author
+            && envelope.seq <= pass
+            && cycle.opened.is_none_or(|opened| envelope.seq > opened)
+    }) {
+        let Some((posted, text)) = recorded_note(envelope) else {
+            continue;
+        };
+        if posted != *room {
+            continue;
+        }
+        let bytes = text.len();
+        if bytes > wire::intent::TASK_DETAIL_PASS_POST_BYTES_LIMIT {
+            omitted_posts += u64::try_from(posts.len()).expect("post count fits u64") + 1;
+            posts.clear();
+            post_bytes = 0;
+            continue;
+        }
+        while posts.len() >= wire::intent::TASK_DETAIL_PASS_POST_LIMIT
+            || post_bytes + bytes > wire::intent::TASK_DETAIL_PASS_POST_BYTES_LIMIT
+        {
+            let Some(omitted) = posts.pop_front() else {
+                break;
+            };
+            post_bytes -= omitted.text.len();
+            omitted_posts += 1;
+        }
+        post_bytes += bytes;
+        posts.push_back(wire::intent::TaskDetailPost {
+            position: envelope.seq,
+            at: envelope.at,
+            text,
+        });
+    }
+    Some(wire::intent::TaskDetailPass {
+        finish,
+        posts: posts.into(),
+        omitted_posts,
+    })
 }
 
 /// Durable history on the named tasks, each task's rows in ascending journal
