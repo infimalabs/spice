@@ -211,15 +211,14 @@ owns each rule summarized here.
   requested/contributing lane intersections, and one charge series per
   question item. A charged contribution records its item's text identity
   (trimmed, whitespace collapsed, case-folded) at admission, so a reorder
-  keeps a series and a reword starts a new one. Over nonzero charges in
-  journal order, an item is quiet with no charge. While only one sign has been
-  seen, it concurs once three distinct lanes, or two with a strength-2 charge,
-  have charged it, and is otherwise unopposed and needs more lanes of that
-  sign. Once both signs have been seen, it concurs when the current one-signed
-  run holds two distinct lanes one of which earlier charged the opposite sign,
-  or three distinct lanes, and is otherwise contested. A run cannot bury the
-  opposite side's last strength-2 charge without a strength-2 charge of its
-  own. Zero charges and questions never enter a series. Steeping is judged
+  keeps a series and a reword starts a new one. Each retained lane's latest
+  nonzero charge decides where an item stands, the same evidence its term net
+  reads, so a lane reversing itself replaces its own sign. An item is quiet
+  with no charge and contested while latest signs disagree. When they share one
+  sign, it concurs at three lanes, or two with a strength-2 charge since its
+  sign last changed, and is otherwise unopposed and needs more lanes of that
+  sign. A contested item needs a lane on the trailing side to join the leading
+  one. Zero charges and questions never enter a series. Steeping is judged
   against the current statement's items: fresh means no contribution; steeped
   means at least `min(N, ceil(2 ln(1 + N)))` of the N current items have
   received a nonzero charge, some item concurs, and none is contested;

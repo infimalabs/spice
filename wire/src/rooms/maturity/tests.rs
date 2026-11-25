@@ -165,7 +165,7 @@ fn declines_count_per_asking_head_and_never_move_state() {
 }
 
 #[test]
-fn an_item_concurs_only_on_a_conceded_or_three_lane_unburied_run() {
+fn an_item_stands_by_each_lanes_latest_sign() {
     let item = ITEMS[0];
     let mut maturity = DesignMaturity::default();
     assert_eq!(item_state(&maturity, item), DesignItemState::Quiet);
@@ -186,71 +186,56 @@ fn an_item_concurs_only_on_a_conceded_or_three_lane_unburied_run() {
 
     maturity.observe_contribution(&charge(1, item, 1));
     assert_eq!(item_state(&maturity, item), DesignItemState::UnopposedFor);
-    assert_eq!(
-        item_needs(&maturity, item),
-        Some(DesignItemInput::PositiveLanes)
-    );
     maturity.observe_contribution(&charge(1, item, -1));
     assert_eq!(
         item_state(&maturity, item),
-        DesignItemState::Contested,
-        "a lane flipping its own sign sees both signs but cannot alone concur"
+        DesignItemState::UnopposedAgainst,
+        "a lane reversing itself never contests its own charge"
     );
     maturity.observe_contribution(&charge(2, item, -1));
     assert_eq!(
-        item_state(&maturity, item),
-        DesignItemState::Concurred,
-        "two suffix lanes, one of which conceded"
+        item_needs(&maturity, item),
+        Some(DesignItemInput::NegativeLanes)
     );
     maturity.observe_contribution(&charge(3, item, 1));
     assert_eq!(item_state(&maturity, item), DesignItemState::Contested);
-
-    let mut opposed = DesignMaturity::default();
-    for (lane, value) in [(1, 1), (2, -1)] {
-        opposed.observe_contribution(&charge(lane, item, value));
-    }
     assert_eq!(
-        item_needs(&opposed, item),
+        item_needs(&maturity, item),
         Some(DesignItemInput::NegativeAgreement),
-        "an unagreed run needs a concession or more lanes, not strength"
-    );
-    let mut conceded = opposed.clone();
-    conceded.observe_contribution(&charge(1, item, -1));
-    assert_eq!(item_needs(&conceded, item), None, "the concession concurs");
-    opposed.observe_contribution(&charge(1, item, 2));
-    assert_eq!(
-        item_state(&opposed, item),
-        DesignItemState::Contested,
-        "a strength-2 re-charge does not supply agreement"
+        "the trailing side must join the leading one"
     );
 
-    let mut buried = DesignMaturity::default();
-    for (lane, value) in [(1, -2), (2, 1), (3, 1), (4, 1)] {
-        buried.observe_contribution(&charge(lane, item, value));
-    }
+    let observed = |charges: &[(u8, i8)]| {
+        let mut maturity = DesignMaturity::default();
+        for &(lane, value) in charges {
+            maturity.observe_contribution(&charge(lane, item, value));
+        }
+        maturity
+    };
+    let reversed = observed(&[(1, 1), (2, 1), (3, -2), (3, 1)]);
     assert_eq!(
-        item_state(&buried, item),
-        DesignItemState::Contested,
-        "three unconceded lanes cannot bury a strength-2 charge without one"
+        item_state(&reversed, item),
+        DesignItemState::Concurred,
+        "a lane reversing to join two earlier lanes concurs at once"
     );
-    assert_eq!(
-        item_needs(&buried, item),
-        Some(DesignItemInput::PositiveStrength)
-    );
-    buried.observe_contribution(&charge(5, item, 2));
-    assert_eq!(item_state(&buried, item), DesignItemState::Concurred);
+    assert!(reversed.items.steeped(&term(&[item])));
 
-    let mut unconceded = DesignMaturity::default();
-    for (lane, value) in [(1, -1), (2, 1), (3, 1)] {
-        unconceded.observe_contribution(&charge(lane, item, value));
-    }
+    let tied = observed(&[(1, 1), (2, -1)]);
     assert_eq!(
-        item_state(&unconceded, item),
-        DesignItemState::Contested,
-        "two lanes without a concession do not concur"
+        item_needs(&tied, item),
+        Some(DesignItemInput::NegativeAgreement),
+        "a tie follows the latest charge's sign"
     );
-    unconceded.observe_contribution(&charge(4, item, 1));
-    assert_eq!(item_state(&unconceded, item), DesignItemState::Concurred);
+    let outvoted = observed(&[(1, -2), (2, 1), (3, 1), (4, 1)]);
+    assert_eq!(
+        item_state(&outvoted, item),
+        DesignItemState::Contested,
+        "more lanes never overrule a lane that still disagrees"
+    );
+    assert_eq!(
+        item_needs(&outvoted, item),
+        Some(DesignItemInput::PositiveAgreement)
+    );
 }
 
 /// A run no opposing charge preceded concurs at three lanes, or two with
@@ -438,7 +423,7 @@ fn a_design_tracks_current_items_and_prioritizes_contested_input() {
         "a question enters no item"
     );
 
-    for (lane, value) in [(1, 1), (2, -1), (1, -1)] {
+    for (lane, value) in [(1, 1), (2, -1), (1, -2)] {
         maturity.observe_contribution(&charge(lane, ITEMS[0], value));
     }
     assert_eq!(
@@ -548,7 +533,7 @@ fn every_item_concurring_is_judged_apart_from_steeped() {
         !maturity.items.all_concurred(&current),
         "an unopposed item is still open to an outside lane"
     );
-    for lane in 1..=3 {
+    for lane in 1..=4 {
         maturity.observe_contribution(&charge(lane, ITEMS[1], -1));
     }
     assert!(maturity.items.all_concurred(&current));

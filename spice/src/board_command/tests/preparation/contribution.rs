@@ -200,8 +200,8 @@ fn lanes_contribute_typed_records_that_read_grouped_and_authorize_nothing() {
         .expect("admission keys each charge by its item's current text");
     assert_eq!(
         (series.charges, series.state()),
-        (3, wire::rooms::DesignItemState::Contested),
-        "a zero charge enters no series, and one lane flipping its sign cannot concur alone"
+        (3, wire::rooms::DesignItemState::UnopposedAgainst),
+        "a zero charge enters no series, and one lane flipping its sign holds only its latest"
     );
 
     let page = history(root.as_ref(), root.as_ref(), &[design.as_str()]);
