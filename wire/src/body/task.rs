@@ -102,7 +102,7 @@ pub struct TaskAdded {
     pub task: TaskStamp,
     /// Statement title.
     pub title: String,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// Longer authored context.
     #[serde(

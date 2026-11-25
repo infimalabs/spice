@@ -365,7 +365,7 @@ pub struct TaskHead {
     pub topic_origin: Seq,
     /// Authored title.
     pub title: String,
-    /// One plain sentence saying why the task matters.
+    /// One plain sentence saying who can do what once the task lands and why.
     pub pitch: String,
     /// Longer authored context.
     #[serde(

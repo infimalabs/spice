@@ -72,16 +72,17 @@ this occupant reuse one submission; successors are separate.
 - Create or update a complete task contract, release it, then trust its owning
   and review lanes; follow claimed work only when asked.
 - Invite/join: `write` a message to `spice://task/HANDLE/invite[/ADDR]`; `/join`.
-- A pitch is one plain sentence saying why a task matters; the description is
-  the how: durable need, mechanism, and invariants, not incidents. Acceptance
-  is claimant-driven and checkable, never awaited activity. A Design's pitch is
-  its problem; each chargeable term is one unambiguous proposition; open
-  research: `spice room contribute HANDLE --ask TEXT`. `+` supports, `-`
-  opposes, `0` is evidence; magnitude is strength. Every Design, proposition,
-  and output starts from no; a negative charge or collapse is normal. Outcome,
-  not timing, chooses: delivered purpose (even by earlier outputs) concludes;
-  failed premise collapses whenever found, keeping selected outputs.
-  Code/docs/tests state contract; task/commit records keep history.
+- Title names the result; pitch is one plain sentence: who can then do what,
+  and why, not today's defect; description is the how: durable need,
+  mechanism, invariants, not incidents. Acceptance is claimant-driven and
+  checkable, never awaited activity. Each chargeable term is one unambiguous
+  proposition; open research: `spice room contribute HANDLE --ask TEXT`. `+`
+  supports, `-` opposes, `0` is evidence; magnitude is strength. Every Design,
+  proposition, and output starts from no; a negative charge or collapse is
+  normal. Outcome, not timing, chooses: delivered purpose (even by earlier
+  outputs) concludes; failed premise collapses whenever found, keeping
+  selected outputs. Code/docs/tests state contract; task/commit records keep
+  history.
 - Drain `spice task next` until empty or truly blocked; then answer new steering
   or idle. Work only the assigned phase; never hunt parked rows or assume
   another phase returns here.
