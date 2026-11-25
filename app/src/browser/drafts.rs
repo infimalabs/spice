@@ -613,36 +613,38 @@ fn render_context(
                     {render_image_indicators(key, &draft.attachments, None, composer, false)}
                 </div>
             }
-            if attached && !draft.quotes.is_empty() {
-                {render_quote_shards(
-                    key,
-                    &draft,
-                    None,
-                    composer,
-                    Callback::from(submit_on_command_enter),
-                    "Why this source matters to the work.",
-                    false,
-                )}
-            }
-            <div class="draft-context-editor">
-                <ComposerTextarea
-                    key={draft.body.clone()}
-                    id={primary_textarea_id(key)}
-                    lane={key.to_owned()}
-                    drafts={composer.dispatcher()}
-                    label={label.to_owned()}
-                    body={draft.body.clone()}
-                    {placeholder}
-                    rows={rows}
-                    primary_target={None::<String>}
-                    quote_identity={None::<String>}
-                    broadcast_help={(key == NEW_DRAFT_KEY && attached).then(|| entry::BROADCAST_HELP_ID.to_owned())}
-                    onkeydown={Callback::from(submit_on_command_enter)}
-                    onpaste={paste_images(key.to_owned(), None, composer.clone())}
-                />
-                if attached && key == NEW_DRAFT_KEY {
-                    {render_image_indicators(key, &draft.attachments, None, composer, false)}
+            <div class="draft-context-stack agent-composer-stack">
+                if attached && !draft.quotes.is_empty() {
+                    {render_quote_shards(
+                        key,
+                        &draft,
+                        None,
+                        composer,
+                        Callback::from(submit_on_command_enter),
+                        "Why this source belongs in the long description.",
+                        false,
+                    )}
                 }
+                <div class="draft-context-editor">
+                    <ComposerTextarea
+                        key={draft.body.clone()}
+                        id={primary_textarea_id(key)}
+                        lane={key.to_owned()}
+                        drafts={composer.dispatcher()}
+                        label={label.to_owned()}
+                        body={draft.body.clone()}
+                        {placeholder}
+                        rows={rows}
+                        primary_target={None::<String>}
+                        quote_identity={None::<String>}
+                        broadcast_help={(key == NEW_DRAFT_KEY && attached).then(|| entry::BROADCAST_HELP_ID.to_owned())}
+                        onkeydown={Callback::from(submit_on_command_enter)}
+                        onpaste={paste_images(key.to_owned(), None, composer.clone())}
+                    />
+                    if attached && key == NEW_DRAFT_KEY {
+                        {render_image_indicators(key, &draft.attachments, None, composer, false)}
+                    }
+                </div>
             </div>
         </div>
     }

@@ -959,6 +959,7 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   gap: 3px;
   min-width: 0;
 }
+.draft-context-stack { display: contents; }
 
 .draft-context-heading {
   display: flex;
@@ -1182,7 +1183,7 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
 /* While closing, inert keeps the open-only controls unavailable as their
    opacity fades. Settled closed state then hides them from paint and focus. */
 .app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit, .composer-shard-image-indicators > :not(.composer-shard-image-attach)),
-.app-compose-dialog[data-presented="false"]:not([inert]) .draft-context > :not(.draft-context-editor) { visibility: hidden; }
+.app-compose-dialog[data-presented="false"]:not([inert]) .draft-quote-sections { visibility: hidden; }
 .app-compose-dialog[data-presented="false"] :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit) { opacity: 0; }
 /* The veil stands only while the sheet is presented. */
 .app-compose-dialog[data-presented="false"]::backdrop { opacity: 0; }
@@ -1312,18 +1313,13 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   .app-compose-submit,
   .app-compose-dialog[data-admission-state="pending"] .app-compose-form > fieldset { transition: none; }
 }
-/* The trigger and context wrappers dissolve so the writing area and the
-   context's own heading, quotes and images order as one column beside the
-   rail. */
+/* The trigger and context wrappers dissolve. The inner stack is the fixed
+   global watchband: its main composer and every Quote+ composer each occupy
+   one full viewport, while the stack scrolls without growing the sheet or its
+   control rail. */
 .app-compose-dialog :is(#app-compose-trigger, .draft-context) { display: contents; }
-/* The editor keeps the writing area's own height in every mode, so the image
-   strip laid over its lower inline end never moves. */
-.app-compose-dialog .draft-context-editor {
-  position: relative;
-  order: -2;
-  align-self: start;
-  width: calc(100% - var(--app-compose-rail-width));
-}
+.app-compose-dialog .draft-context-stack { --composer-shard-block-size: calc(var(--app-compose-sheet-block) - var(--app-compose-recipient-block)); display: grid; order: -2; align-self: start; width: calc(100% - var(--app-compose-rail-width)); height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); }
+.app-compose-dialog .draft-context-editor { position: relative; order: 1; width: 100%; height: var(--composer-shard-block-size); min-height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); }
 .app-compose-dialog .draft-context-heading { padding: 6px var(--app-spice-section-inset-inline) 0; }
 /* To and its choices stay centered in one reserved row of definite block size,
    so recipient metrics never change the sheet when Ask replaces a work kind. */
@@ -1457,7 +1453,7 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
    first line centered in the closed tab's fill above its rail. Its geometry
    is the same closed and open, so the tab shows that line where the open
    sheet does. */
-.app-compose-dialog .draft-context > .draft-context-editor textarea {
+.app-compose-dialog .draft-context-editor textarea {
   height: calc(var(--app-compose-sheet-block) - var(--app-compose-recipient-block));
   max-height: none;
   padding-block: var(--app-compose-line-inset) 12px;
@@ -1471,26 +1467,26 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   resize: none;
   overflow: auto;
 }
-.app-compose-dialog .draft-context > .draft-context-editor:has(.composer-shard-image-indicator) textarea {
+.app-compose-dialog .draft-context-editor:has(.composer-shard-image-indicator) textarea {
   padding-block-end: calc(var(--app-compose-strip-block) + 2 * var(--app-compose-rail-inset));
 }
 /* The tab's cut falls inside the second line, so a closed tab trims the
    writing area to its first. A closed tab too narrow for its prompt ends it
    in an ellipsis; the prompt takes its ellipsis from the writing area. */
-.app-compose-dialog[data-presented="false"] .draft-context > .draft-context-editor textarea { overflow: hidden; }
-.app-compose-dialog[data-presented="false"]:not([inert]) .draft-context > .draft-context-editor textarea {
+.app-compose-dialog[data-presented="false"] .draft-context-editor textarea { overflow: hidden; }
+.app-compose-dialog[data-presented="false"]:not([inert]) .draft-context-editor textarea {
   clip-path: inset(0 0 calc(100% - var(--app-compose-line-inset) - var(--app-compose-line)) 0);
 }
-.app-compose-dialog[data-expanded="false"] .draft-context > .draft-context-editor textarea { text-overflow: ellipsis; }
-.app-compose-dialog .draft-context > .draft-context-editor textarea::placeholder { white-space: pre-line; }
-.app-compose-dialog[data-expanded="false"] .draft-context > .draft-context-editor textarea::placeholder {
+.app-compose-dialog[data-expanded="false"] .draft-context-editor textarea { text-overflow: ellipsis; }
+.app-compose-dialog .draft-context-editor textarea::placeholder { white-space: pre-line; }
+.app-compose-dialog[data-expanded="false"] .draft-context-editor textarea::placeholder {
   max-width: calc(var(--app-compose-anchor-width) - 2 * var(--app-compose-edge) - 20px);
   white-space: pre;
   overflow: hidden;
 }
 /* The open sheet and caret show where typing goes; a ring inside the sheet
    would read as a second edge. */
-.app-compose-dialog .draft-context > .draft-context-editor textarea:is(:focus, :focus-visible) {
+.app-compose-dialog .draft-context-editor textarea:is(:focus, :focus-visible) {
   outline: none;
   box-shadow: none;
 }

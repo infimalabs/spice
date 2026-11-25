@@ -180,6 +180,17 @@ no first phase has placed forms the Unplaced group ahead of every topic
 group; its Topic fact reads Unplaced, with the stored relative tail when the
 claimant set one, and opens that group. Once placed, the fact names the topic.
 
+## Global composer
+
+The command-bar composer has one primary writing area for the selected Ask,
+Task, Plan, or Design. For work, that primary area alone supplies the title,
+pitch, and optional longer context. Each Quote+ press adds another removable,
+full-size composer to the same fixed watchband. Its source and explanation
+enter the created work's long description only; it cannot supply or replace
+the title, pitch, kind, acceptance, or creation action. Quote composers retain
+source order. The watchband scrolls between full-size panes without changing
+the outer sheet or overlapping the fixed destination and Create rail.
+
 ## Team composer controls
 
 The panel holds TURBO, team menu, speech, SEND and Drive/Drain. The menu offers
