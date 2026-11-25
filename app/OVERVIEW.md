@@ -9,8 +9,7 @@ reduced motion removes it. Dismissal returns focus to a surviving launcher.
 
 Attached accent rails use the **closed-edge** recipe: radius equals thickness.
 Message cards, work total/task tabs and quota-account accents share it. The
-closed composer's upper inline-start utility join stays square; both lower
-outer corners, rail included, round.
+closed composer strip's lower outer corners, rail included, round.
 Structural dividers stay square. Standalone cards, media, dialogs, round
 controls, pills and focus rings keep their radii; joined controls round only
 outside endpoints.
@@ -242,20 +241,25 @@ repository-owned OOPS Design. A pass refines the report into an
 acceptance-bearing output the operator decides. The construction reference creates no execution
 dependency, and there is no separate OOPS lifecycle state or action.
 
-The main header's **Ask** tab is the composer, cut at its utility-tab strip.
-**Draft**, **Help**, and later tabs divide the strip equally; only the outside
-tabs round, and their lower borders paint above both accent rails. **DRAFT** and
-**HELP** are plain bold uppercase tab labels, not count badges. The strip sits
-outside the masked sheet layer. Closed, the composer hangs like the
-totals tabs, with no outer rim, showing its first
-writing line—**Ask or task agent(s)...** while empty—beside that strip.
-Opening and closing crossfade the lower sheet without moving the writing line
-or tabs. The composer prefers the Spice menu's width, compresses to one
-work-total lane, then uses its whole track while clipping a wider sheet.
+The global composer is the left overlay, the companion of the right Spice
+sidebar. Closed, it is one strip under the header: a horizontal glass track of
+**Ask**, **Task**, **Plan**, and **Design**, the principal inbox's open count,
+then the **Draft** and **Help** tabs, over one accent rail. **DRAFT** and
+**HELP** are plain bold uppercase tab labels; only the outside tabs round.
+Choosing a destination, its shortcut, or a quote opens the strip into a
+full-height sheet: the writing area, the To row with circular Send/Create,
+then **Principals** and the personal inbox, which scrolls on its own. The sheet
+is non-modal and casts no veil, so the Spice sidebar may stand open beside it;
+a press outside both, or Escape (newest overlay first), dismisses it. Opening
+and closing fade the laid-out sheet below the strip without moving it. The
+strip prefers the Spice menu's width, compresses to one work-total lane, and
+the open sheet widens to at least one lane. On a phone the closed strip shows
+only the current destination and the open count, and where both overlays do
+not fit, an open Spice sidebar hides the left overlay until it closes.
 Dismissal leaves focus outside.
 
 **Ask** is the default; expanded, its writing line reads **Ask or steer
-(required)**. Beside **To**, an inline-scrolling row offers **Best-matched
+(required)**. Beside **To**, a wrapping row offers **Best-matched
 agent**, pressed while none is chosen, and a checkbox per current agent. With
 none chosen, the resident picks the best eligible agent from retained
 conversation profiles, possibly starting a vacant one; acceptance closes the
@@ -274,14 +278,13 @@ the choice while retaining drafted quotes; work modes do not broadcast. A held
 stroke that would press Send/Create rings it as team SEND's command ring does,
 in theme ink for an Ask's broadcast.
 
-**Ask**, **Task**, **Plan**, and **Design** share one textarea and a vertical
-glass selector between Draft/Help and circular Send/Create. Kind, recipient,
-image count, and resizing preserve editor and rail geometry. Ask's recipients
-stay in a reserved row, so all modes keep one sheet size.
+**Ask**, **Task**, **Plan**, and **Design** share one textarea and the strip's
+horizontal glass selector. Kind, recipient, image count, and resizing preserve
+editor geometry; Ask's recipients wrap beside the action.
 See the [composer checks](BROWSER.md#draft-composer-parity).
-A rounded full-width bottom accent identifies Ask as neutral, Task green, Plan
-blue, and Design plum; both inline edges stay borderless, with no separator
-between the editor and control rail. Quotes sit above the editor, and direct
+The strip's accent rail identifies Ask as neutral, Task green, Plan blue, and
+Design plum; the open sheet's inline-end edge mirrors the Spice sidebar's.
+Quotes sit above the editor, and direct
 images use the team composers' bounded thumbnail strip over
 its lower inline end. Images can also be chosen, pasted, or dropped.
 

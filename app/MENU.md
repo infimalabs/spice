@@ -1,6 +1,7 @@
 # Menus
 
-The global Spice menu, Help sheet, team arrangement, and each lane's menu.
+The left composer overlay with its Principals, the right Spice menu, Help sheet,
+team arrangement, and each lane's menu.
 
 ## Keyboard help
 
@@ -145,11 +146,13 @@ fact re-reads it: profile edits publish in place; role edits reconnect so reads
 and subjects change together. A profile without a name reads as
 `principal <id>`.
 
-## Principals in the global menu
+## Principals in the left overlay
 
-After **Providers**, the Spice view shows **Principals**. The connected
-principal appears there once, as their own row marked `(you)`, and that row
-seats their personal inbox with its heading, open count, items, and controls.
+Below the composition, the open left overlay shows **Principals**; the right
+Spice view no longer carries it. The connected principal appears there once,
+as their own row marked `(you)`, and that row seats their personal inbox with
+its heading, open count, items, and controls. While the overlay is closed, its
+strip carries the open count beside **Draft** and **Help**.
 The row and inbox stand whether or not this connection may list principals,
 and while the listing loads or is refused; until the principal directory
 arrives the row reads as loading. An operator-role principal also sees every
@@ -176,7 +179,8 @@ operator, read under the heading.
 
 After **Teams**, the Spice view closes its operational sections with **Jobs**,
 every job every lane keeps, apart from the Teams roster. The sections read
-**Providers**, **Principals**, **Teams**, then **Jobs**. The list and its
+**Providers**, **Teams**, then **Jobs**: the right view holds system and agent
+concerns, the left overlay human ones. The list and its
 inspection card share one
 fixed four-row slot in every state; longer content scrolls inside it. At either
 edge, arrow and page keys continue through the containing Spice menu instead of

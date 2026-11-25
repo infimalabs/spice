@@ -1,0 +1,474 @@
+/* The global composer is the left overlay, the companion of the right-side
+   Spice overlay. Closed, it is one strip under the command bar: the four
+   destinations on a horizontal thumb track, then the Draft and Help tabs.
+   Open, the same strip heads a full-height sheet holding the composition, its
+   To row and action, and the principal inbox below them. */
+
+@property --app-compose-sheet-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The entry keeps the strip's place in the header while its dialog stands in
+   the top layer. */
+.app-compose-lane {
+  display: flex;
+  grid-area: 1 / 1;
+  align-items: flex-start;
+  min-width: 0;
+  height: var(--app-header-control);
+}
+/* The entry prefers the Spice menu's width and yields to the totals only down
+   to one lane's minimum, or its whole track when even that does not fit. */
+.app-compose-entry {
+  --app-compose-inset: calc(var(--app-spice-side-gap) + env(safe-area-inset-left, 0px) + var(--app-titlebar-inset-start, 0px));
+  --app-compose-end-inset: var(--app-shell-edge-end);
+  flex: 0 1 var(--app-side-view-small);
+  margin-inline-start: calc(var(--app-compose-inset) - var(--app-commandbar-inset-start));
+  margin-block-start: calc(-1 * var(--app-commandbar-block-pad));
+  min-width: min(var(--team-surface-min-inline), calc(100% - var(--app-compose-inset) + var(--app-commandbar-inset-start)));
+  height: var(--app-header-control);
+}
+.app-compose-entry:dir(rtl) {
+  --app-compose-inset: calc(var(--app-spice-side-gap) + env(safe-area-inset-right, 0px) + var(--app-titlebar-inset-start, 0px));
+  --app-compose-end-inset: calc(var(--app-shell-edge-inline) + env(safe-area-inset-left, 0px));
+}
+/* The sheet is a non-modal manual popover, so it stands above the Spice layer
+   without a veil and without making that layer inert. It is laid out once,
+   whole: closed, its lower pixels are transparent and the cut rests under the
+   strip; opening fades them in, so nothing it holds moves or changes shape. */
+.app-compose-dialog.app-modal {
+  --app-compose-sheet-opacity: 0;
+  --app-compose-edge: var(--app-focus-ring-width);
+  --app-compose-gap: 10px;
+  --app-compose-utility-width: 7rem;
+  --app-compose-action: 64px;
+  --app-compose-tab-block: 36px;
+  --app-compose-accent-edge: var(--message-rail);
+  --app-compose-editor-block: clamp(7.5rem, 26dvh, 14rem);
+  --app-compose-line: 22px;
+  --app-compose-writing-start: 12px;
+  --app-compose-writing-end: var(--app-compose-writing-start);
+  --app-compose-strip-block: 28px;
+  --app-compose-open-min: min(var(--team-surface-min-inline), calc(100vw - var(--app-compose-inset) - var(--app-compose-end-inset)));
+  --app-closed-edge-color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-line));
+  --app-closed-edge-thickness: var(--app-compose-accent-edge);
+  --app-closed-edge-layer: 4;
+  --team-control-item-height: 28px;
+  inset: 0 auto auto var(--app-commandbar-inset-start);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 0fr;
+  width: var(--app-compose-anchor-width, 36rem);
+  height: auto;
+  max-height: 100dvh;
+  padding: 0;
+  overflow: clip;
+  border: 0;
+  border-inline-end: var(--app-control-edge-width) solid color-mix(in srgb, var(--control-line-soft) calc(100% * var(--app-compose-sheet-opacity)), transparent);
+  border-radius: 0 0 var(--app-closed-edge-radius) var(--app-closed-edge-radius);
+  background: transparent;
+  box-shadow: none;
+  isolation: isolate;
+  font-family: var(--app-font, ui-sans-serif, system-ui, sans-serif);
+}
+/* No veil: the page beside the sheet stays visible, and a press there closes
+   the sheet. */
+.app-compose-dialog::backdrop { display: none; }
+/* Open, the sheet runs to the viewport's foot. It keeps the entry's width;
+   only an entry squeezed below a lane's minimum widens to it, bounded by the
+   viewport. The composition takes its height and the inbox the rest. */
+.app-compose-dialog[data-expanded="true"] {
+  grid-template-rows: auto minmax(0, 1fr);
+  inset-block-end: 0;
+  min-width: var(--app-compose-open-min);
+  border-radius: 0;
+}
+.app-compose-dialog[data-presented="true"] {
+  --app-compose-sheet-opacity: 1;
+  box-shadow: var(--shadow);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-compose-dialog.app-modal {
+    transition:
+      --app-compose-sheet-opacity var(--app-motion-settle) var(--app-ease-standard),
+      box-shadow var(--app-motion-settle) var(--app-ease-standard);
+  }
+  .app-compose-surface { transition: background-color var(--app-motion-settle) var(--app-ease-standard); }
+  .app-compose-dialog :is(.app-compose-details, .app-compose-inbox) {
+    transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+  }
+  /* The action keeps its own ink and face easing beside the shared fade. */
+  .app-compose-dialog .app-compose-submit {
+    transition: opacity var(--app-motion-settle) var(--app-ease-standard), color var(--app-motion-fast) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard);
+  }
+}
+.app-compose-surface {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--app-base-control);
+  backdrop-filter: var(--overlay-frost);
+  pointer-events: none;
+}
+.app-compose-surface,
+.app-compose-form {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0 var(--app-compose-tab-block),
+    rgb(0 0 0 / var(--app-compose-sheet-opacity)) var(--app-compose-tab-block) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0 var(--app-compose-tab-block),
+    rgb(0 0 0 / var(--app-compose-sheet-opacity)) var(--app-compose-tab-block) 100%
+  );
+  mask-mode: alpha;
+}
+.app-compose-dialog[data-presented="true"] .app-compose-surface { background-color: var(--app-control-glass-paint); }
+/* One accent rail closes the strip, open or closed, so the sheet's edge never
+   blinks while it fades; the shared bottom rail would land at the viewport's
+   foot and stays off. */
+.app-compose-dialog::before {
+  position: absolute;
+  z-index: var(--app-closed-edge-layer);
+  inset: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge)) 0 auto;
+  block-size: var(--app-compose-accent-edge);
+  border-radius: var(--app-closed-edge-radius);
+  background: var(--app-closed-edge-color);
+  content: "";
+  pointer-events: none;
+}
+.app-compose-dialog.app-closed-edge::after { content: none; }
+@media (forced-colors: active) {
+  .app-compose-dialog::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+/* While closing, inert keeps the open-only controls unavailable as their
+   opacity fades. Settled closed state then hides them from paint and focus. */
+.app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-details, .app-compose-submit) { visibility: hidden; }
+/* The writing area leaves focus order only once the sheet has settled closed;
+   it is already rendered when opening asks for its focus. */
+.app-compose-dialog[data-expanded="false"] .draft-context-stack { visibility: hidden; }
+.app-compose-dialog[data-expanded="false"] .draft-quote-sections { display: none; }
+.app-compose-dialog[data-presented="false"] :is(.app-compose-details, .app-compose-submit) { opacity: 0; }
+/* Admission keeps the submitted composition visible but marks its contents
+   provisional through desaturation. No control geometry changes. */
+.app-compose-dialog[data-admission-state="pending"] {
+  cursor: progress;
+}
+.app-compose-dialog[data-admission-state="pending"] .app-compose-form > fieldset {
+  filter: grayscale(1);
+  transition: filter var(--app-motion-settle) var(--app-ease-standard);
+}
+.app-compose-dialog[data-admission-state="pending"] :is(textarea, input, select, button, label) { cursor: progress; }
+/* A closed sealed composition still needs one live interaction: reopening
+   it. This transparent button covers the strip beneath its live controls
+   without granting any mutation authority. */
+.app-compose-pending-open {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: var(--app-closed-edge-layer);
+  height: var(--app-compose-tab-block);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: progress;
+}
+/* The form keeps its whole height under the sheet's cut and claims only the
+   strip while closed. The writing area spans the sheet; To and the action
+   share the row beneath it. */
+.app-compose-form {
+  position: relative;
+  align-self: start;
+  box-sizing: border-box;
+  min-width: var(--app-compose-open-min);
+  min-height: var(--app-compose-tab-block);
+  overflow: clip;
+  background: transparent;
+  padding: 0;
+}
+.app-compose-form fieldset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  gap: 0 var(--app-compose-gap);
+  margin: 0;
+  padding: var(--app-compose-tab-block) 0 var(--app-compose-gap);
+  border: 0;
+}
+/* The strip: a horizontal destination track from the inline start, leaving
+   the inline end to the utility tabs. Choosing a destination opens the sheet
+   on it. */
+.app-compose-modes-row {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  display: grid;
+  align-items: center;
+  box-sizing: border-box;
+  width: calc(100% - var(--app-compose-utility-width));
+  height: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge));
+  padding: 0 6px;
+}
+.app-compose-dialog:not([data-inbox-waiting="0"]) .app-compose-modes-row {
+  width: calc(100% - var(--app-compose-utility-width) - 2.4em);
+}
+.app-segment-slider.app-compose-modes {
+  --app-segment-count: 4;
+  block-size: var(--team-control-item-height);
+  max-inline-size: none;
+  border-radius: calc(var(--team-control-item-height) / 2);
+}
+.app-compose-modes > .app-choice-chip {
+  min-height: 0;
+  padding: 0 6px;
+  font: 600 var(--app-type-control)/1 var(--app-font, ui-sans-serif, system-ui, sans-serif);
+  cursor: pointer;
+}
+/* Utility tabs hang from the strip's inline end, one layer above its rail.
+   Only the outside lower corners round. Draft wears the sheet's accent when
+   engaged but has no press in Ask; Help stays live while admission seals the
+   composition. */
+.app-compose-dialog .app-compose-utility-tabs {
+  position: absolute;
+  z-index: calc(var(--app-closed-edge-layer) + 1);
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: row-reverse;
+  width: var(--app-compose-utility-width);
+  height: var(--app-compose-tab-block);
+}
+.app-compose-dialog .app-compose-utility-tab {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  font-size: var(--app-type-compact);
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.app-compose-dialog .app-compose-utility-tab:first-child { border-end-end-radius: var(--app-radius-card); }
+.app-compose-dialog .app-compose-utility-tab:last-child { border-end-start-radius: var(--app-radius-card); }
+.app-compose-dialog .app-compose-draft[aria-pressed="true"] {
+  border-color: var(--app-base-accent);
+  background: color-mix(in srgb, var(--app-base-accent) 16%, var(--app-base-control));
+  color: var(--app-base-ink);
+}
+.app-compose-dialog .app-compose-draft:disabled {
+  opacity: 1;
+  border-color: var(--app-base-line);
+  background: color-mix(in srgb, var(--app-horn-tab-tint) 5%, var(--app-base-control));
+  color: color-mix(in srgb, var(--app-base-muted) 62%, transparent);
+  cursor: not-allowed;
+}
+.app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
+.app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
+.app-compose-dialog .app-compose-utility-tab:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+/* Messages waiting for the operator count beside the strip's tabs. */
+.app-compose-dialog .app-compose-inbox-count {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-start: -2.2em;
+  pointer-events: none;
+}
+/* The action, Send or Create, is lettered at the team controls' size. It
+   rests muted on its glass face; once a press would submit something it takes
+   the team SEND's ink and backlight. */
+.app-compose-submit {
+  position: relative;
+  grid-row: 2;
+  grid-column: 2;
+  margin-inline-end: var(--app-compose-gap);
+  width: var(--app-compose-action);
+  box-sizing: border-box;
+  height: var(--app-compose-action);
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border: var(--team-control-edge);
+  border-radius: var(--app-radius-circle);
+  background: var(--team-send-glass-face);
+  box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), var(--team-control-rest), var(--team-send-glass-catch);
+  color: var(--muted);
+  font: 700 var(--app-type-primary-action)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -.025em;
+  text-transform: uppercase;
+  transition: color var(--app-motion-fast) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard);
+  cursor: pointer;
+  isolation: isolate;
+  overflow: hidden;
+}
+.app-compose-submit .team-send-label { font-size: 1.5em; }
+.app-compose-submit::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--team-send-emitter);
+  filter: blur(3px);
+  opacity: 0;
+  content: "";
+  pointer-events: none;
+  transition: opacity var(--app-motion-settle) var(--app-ease-standard);
+}
+.app-compose-submit[data-lit="true"]:not(:disabled) {
+  color: var(--ink);
+  backdrop-filter: blur(1.5px) saturate(1.15);
+}
+.app-compose-submit[data-lit="true"]:not(:disabled)::before { opacity: .58; }
+.app-compose-submit[data-lit="true"]:not(:disabled):is(:hover, :focus-visible)::before { opacity: .72; }
+.app-compose-submit[data-lit="true"]:not(:disabled):active::before { opacity: .46; }
+.app-compose-submit:not(:disabled):hover { background-color: color-mix(in srgb, var(--app-highlight-source) 7.5%, transparent); }
+.app-compose-submit:not(:disabled):active { box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent); }
+.app-compose-submit:disabled { color: var(--muted); cursor: not-allowed; }
+.app-compose-submit:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+  .app-compose-dialog.app-modal,
+  .app-compose-submit,
+  .app-compose-dialog[data-admission-state="pending"] .app-compose-form > fieldset { transition: none; }
+}
+/* The trigger and context wrappers dissolve. The inner stack is the fixed
+   global watchband: its main composer and every Quote+ composer each occupy
+   one full viewport, while the stack scrolls without growing the sheet. */
+.app-compose-dialog :is(#app-compose-trigger, .draft-context) { display: contents; }
+.app-compose-dialog .draft-context-stack {
+  --composer-shard-block-size: var(--app-compose-editor-block);
+  display: grid;
+  grid-row: 1;
+  grid-column: 1 / -1;
+  align-self: start;
+  height: var(--composer-shard-block-size);
+  max-height: var(--composer-shard-block-size);
+  margin-block-end: var(--app-compose-gap);
+}
+.app-compose-dialog .draft-context-editor { position: relative; order: 1; width: 100%; height: var(--composer-shard-block-size); min-height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); }
+.app-compose-dialog .draft-context-heading { padding: 6px var(--app-spice-section-inset-inline) 0; }
+/* To and its choices take the row's whole width beside the action; choices
+   wrap rather than scroll. */
+.app-compose-details {
+  display: grid;
+  grid-row: 2;
+  grid-column: 1;
+  box-sizing: border-box;
+  min-block-size: var(--app-compose-action);
+  align-content: center;
+  padding-inline-start: var(--app-compose-writing-start);
+}
+.app-compose-form label { display: grid; gap: 4px; min-width: 0; }
+.app-compose-form :is(label, .app-compose-recipient) > span { color: var(--muted); font-size: var(--app-type-fact); }
+.app-compose-form .app-compose-recipient { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.app-compose-recipients { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 22px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
+.app-compose-recipient-choice input { margin: 0; accent-color: var(--ink); }
+.app-compose-recipient-choice:is([aria-pressed="true"], :has(input:checked)) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+/* Direct images keep the team composers' strip: one bounded row that grows
+   from the writing area's lower inline end and scrolls past its bound. It
+   lies over the writing area, which clears it only while it holds an image,
+   so no count changes the sheet. */
+.app-compose-dialog .draft-context-editor > :is(textarea, .composer-shard-image-indicators) { grid-area: 1 / 1; }
+.app-compose-dialog .draft-context-editor > .composer-shard-image-indicators {
+  z-index: 1;
+  place-self: end;
+  max-width: min(222px, 100% - 2 * var(--app-compose-gap));
+  margin: 0 var(--app-compose-gap) var(--app-compose-gap);
+}
+/* As in the team composers, only a touch screen without hover shows the
+   attach circle: it has no paste or drop. The circle centers on the first
+   writing line, which clears it. */
+.app-compose-dialog .draft-context-editor .composer-shard-image-attach {
+  --app-compose-attach-size: 22px;
+  position: absolute;
+  z-index: 1;
+  inset-block-start: calc(var(--app-compose-gap) + (var(--app-compose-line) - var(--app-compose-attach-size)) / 2);
+  inset-inline-end: 8px;
+  display: none;
+}
+@media (hover: none) and (pointer: coarse) {
+  .app-compose-dialog.app-modal { --app-compose-writing-end: calc(var(--app-round-control-size) + var(--app-compose-writing-start)); }
+  .app-compose-dialog .draft-context-editor .composer-shard-image-attach { display: grid; }
+}
+.app-compose-form input,
+.app-compose-form select { width: 100%; box-sizing: border-box; }
+/* The writing area is the sheet's face: no edge or corner of its own. */
+.app-compose-dialog .draft-context-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--app-compose-editor-block);
+  margin: 0;
+  padding-block: var(--app-compose-gap) 12px;
+  padding-inline: var(--app-compose-writing-start) var(--app-compose-writing-end);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: var(--app-compose-line);
+  field-sizing: fixed;
+  white-space: pre-wrap;
+  resize: none;
+  overflow: auto;
+}
+.app-compose-dialog .draft-context-editor:has(.composer-shard-image-indicator) textarea {
+  padding-block-end: calc(var(--app-compose-strip-block) + 2 * var(--app-compose-gap));
+}
+.app-compose-dialog .draft-context-editor textarea::placeholder { white-space: pre-line; }
+/* The open sheet and caret show where typing goes; a ring inside the sheet
+   would read as a second edge. */
+.app-compose-dialog .draft-context-editor textarea:is(:focus, :focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+/* The principal inbox fills the rest of the open sheet and scrolls on its
+   own, below one rule from the composition. */
+.app-compose-inbox {
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  border-block-start: var(--app-control-edge);
+  opacity: var(--app-compose-sheet-opacity);
+}
+/* Principals keep the Spice view's section geometry: content stands off the
+   sheet's edges by the header's inset. */
+.app-compose-inbox > .app-sheet-section {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding-inline: var(--app-spice-section-inset-inline);
+  padding-block-end: var(--app-compose-gap);
+}
+.app-compose-dialog [hidden] { display: none !important; }
+/* A phone's header leaves the closed strip one chip wide: it names the current
+   destination and the waiting count, and opening restores the whole track,
+   Draft, and Help. */
+@media (max-width: 560px) {
+  .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
+  .app-compose-modes > .app-choice-chip { padding-inline: 3px; font-size: var(--app-type-compact); }
+  .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
+  .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
+  .app-compose-dialog[data-expanded="false"] .app-compose-modes-row { width: var(--app-compose-anchor-width); }
+  .app-compose-dialog[data-expanded="false"]:not([data-inbox-waiting="0"]) .app-compose-modes-row {
+    width: calc(var(--app-compose-anchor-width) - 2.4em);
+  }
+  .app-compose-dialog[data-expanded="false"] .app-segment-slider.app-compose-modes { --app-segment-count: 1; --app-segment-stop: 0; }
+  .app-compose-dialog[data-expanded="false"] .app-compose-modes > .app-choice-chip:not([aria-pressed="true"]) { display: none; }
+}
+/* Where the two overlays cannot stand side by side, the open Spice overlay
+   takes the screen and the left one waits beneath it. */
+@media (max-width: 60rem) {
+  :root:has(.app-sidebar-layer) .app-compose-dialog { visibility: hidden; }
+}
+@media (max-width: 76rem) {
+  :root:has(.app-sidebar-layer[data-sidebar-width="large"]) .app-compose-dialog { visibility: hidden; }
+}

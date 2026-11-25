@@ -8,13 +8,14 @@ use wire::{Digest, Domain};
 
 use super::AppBuildError;
 
-const SOURCE_FILES: [&str; 21] = [
+const SOURCE_FILES: [&str; 22] = [
     "Cargo.lock",
     "Cargo.toml",
     "rust-toolchain.toml",
     "app/Cargo.toml",
     "app/index.html",
     "app/chrome.css",
+    "app/compose_overlay.css",
     "app/composer.css",
     "app/lane_mosaic.css",
     "app/mosaic.css",

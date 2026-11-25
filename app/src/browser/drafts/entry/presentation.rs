@@ -1,10 +1,16 @@
-//! One sheet whose expanded pixels fade beneath its persistent closed tab.
+//! One left overlay whose expanded pixels fade beneath its persistent strip.
+//! It stays non-modal in the top layer, so the right-side Spice overlay can
+//! stand open beside it.
 
 use super::*;
 use crate::browser::overlay;
 
-/// The sheet's shadow fades with its veil; that fade's end is the close boundary.
+/// The sheet's shadow fades with it; that fade's end is the close boundary.
 const FADE: &str = "box-shadow";
+/// A press inside any of these leaves the sheet open: the sheet itself, a
+/// dialog or popover raised over it, the Spice overlay beside it, and the
+/// launcher that opens that overlay.
+const COMPANIONS: &str = "dialog, [popover], .app-sidebar-layer, .app-spice-button";
 
 pub(super) struct Presentation {
     pub expanded: bool,
@@ -13,8 +19,6 @@ pub(super) struct Presentation {
     pub finish: Callback<()>,
     pub open: Callback<()>,
     pub close: Callback<()>,
-    pub closed: Callback<Event>,
-    pub cancel: Callback<Event>,
 }
 
 #[hook]
@@ -53,10 +57,7 @@ pub(super) fn use_presentation(
         FADE,
         finish.clone(),
     );
-    // Leaving modality hands focus back to the writing line it came from.
-    // That return is not a request to open.
-    let returning = use_mut_ref(|| false);
-    use_dialog(anchor, dialog, *expanded, returning.clone());
+    use_dialog(anchor, dialog, *expanded);
     let close = {
         let requested = requested.clone();
         Callback::from(move |()| requested.set(false))
@@ -64,30 +65,14 @@ pub(super) fn use_presentation(
     let open = {
         let requested = requested.clone();
         Callback::from(move |()| {
-            if !closing && !*returning.borrow() {
+            if !closing {
                 requested.set(true);
             }
         })
     };
-    let closed = {
-        let dialog = dialog.clone();
-        let close = close.clone();
-        Callback::from(move |_: Event| {
-            if dialog
-                .cast::<web_sys::HtmlDialogElement>()
-                .is_some_and(|dialog| !dialog.open())
-            {
-                close.emit(());
-            }
-        })
-    };
-    let cancel = {
-        let close = close.clone();
-        Callback::from(move |event: Event| {
-            event.prevent_default();
-            close.emit(());
-        })
-    };
+    let dismissible = *expanded && !closing;
+    overlay::use_escape_owner(dismissible, close.clone());
+    use_outside_press(dismissible, close.clone());
     Presentation {
         expanded: *expanded,
         visible: *requested && *presented,
@@ -95,18 +80,64 @@ pub(super) fn use_presentation(
         finish,
         open,
         close,
-        closed,
-        cancel,
+    }
+}
+
+/// A press anywhere but the sheet and its companions dismisses it, as a veil
+/// would without hiding the page beneath.
+#[hook]
+fn use_outside_press(active: bool, close: Callback<()>) {
+    use_effect_with(active, move |&active| {
+        let registration = active
+            .then(|| {
+                let document = web_sys::window()?.document()?;
+                let pressed = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(
+                    move |event: web_sys::Event| {
+                        let inside = event
+                            .target()
+                            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                            .and_then(|target| target.closest(COMPANIONS).ok().flatten())
+                            .is_some();
+                        if !inside {
+                            close.emit(());
+                        }
+                    },
+                );
+                document
+                    .add_event_listener_with_callback(
+                        "pointerdown",
+                        pressed.as_ref().unchecked_ref(),
+                    )
+                    .ok()?;
+                Some((document, pressed))
+            })
+            .flatten();
+        move || {
+            if let Some((document, pressed)) = registration {
+                let _ = document.remove_event_listener_with_callback(
+                    "pointerdown",
+                    pressed.as_ref().unchecked_ref(),
+                );
+            }
+        }
+    });
+}
+
+/// Show a manual popover once, reflectively as the toasts do, so the build
+/// needs no unstable `web-sys` flag.
+fn show_popover(element: &web_sys::Element) {
+    if element.matches(":popover-open").unwrap_or(true) {
+        return;
+    }
+    if let Ok(show) = js_sys::Reflect::get(element, &wasm_bindgen::JsValue::from_str("showPopover"))
+        && let Ok(show) = show.dyn_into::<js_sys::Function>()
+    {
+        let _ = show.call0(element);
     }
 }
 
 #[hook]
-fn use_dialog(
-    anchor: &NodeRef,
-    dialog: &NodeRef,
-    expanded: bool,
-    returning: Rc<std::cell::RefCell<bool>>,
-) {
+fn use_dialog(anchor: &NodeRef, dialog: &NodeRef, expanded: bool) {
     let anchor = anchor.clone();
     let dialog = dialog.clone();
     use_effect_with(expanded, move |&expanded| {
@@ -146,28 +177,19 @@ fn use_dialog(
             Some((observer, resized))
         });
         if let Some(dialog) = dialog.cast::<web_sys::HtmlDialogElement>() {
+            show_popover(&dialog);
             if expanded {
-                if !dialog.matches(":modal").unwrap_or(false) {
-                    dialog.close();
-                    let _ = dialog.show_modal();
-                }
                 if let Ok(Some(target)) =
-                    dialog.query_selector(".draft-context > .draft-context-editor textarea")
+                    dialog.query_selector(".draft-context .draft-context-editor textarea")
                     && let Some(target) = target.dyn_ref::<web_sys::HtmlElement>()
                 {
                     let _ = target.focus();
                 }
-            } else {
-                // A closed sheet holds no focus: its writing line opens it.
-                *returning.borrow_mut() = true;
-                dialog.close();
-                dialog.set_open(true);
-                if let Ok(Some(focused)) = dialog.query_selector(":focus")
-                    && let Some(focused) = focused.dyn_ref::<web_sys::HtmlElement>()
-                {
-                    let _ = focused.blur();
-                }
-                *returning.borrow_mut() = false;
+            } else if let Ok(Some(focused)) = dialog.query_selector(":focus")
+                && let Some(focused) = focused.dyn_ref::<web_sys::HtmlElement>()
+            {
+                // A closed sheet holds no focus: its strip opens it.
+                let _ = focused.blur();
             }
         }
         move || {
