@@ -271,6 +271,15 @@ fn render_final_word(context: &Context<'_>, empty: bool) -> Html {
                         {text(&post.text)}
                     </article>
                 })}
+                if word.omitted_posts != 0 {
+                    <p class="work-decision-word-mark">
+                        {format!(
+                            "{} earlier final-word {} omitted; open Room for the complete paged history.",
+                            word.omitted_posts,
+                            if word.omitted_posts == 1 { "post" } else { "posts" },
+                        )}
+                    </p>
+                }
                 if let wire::intent::TaskStep::Done { validation, .. } = &word.finish.step {
                     <article class="work-decision-word-validation">
                         <span>{"Validation"}</span>
