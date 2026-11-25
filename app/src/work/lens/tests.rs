@@ -18,6 +18,7 @@ fn remote_task(
             &stamp(value),
         ),
         title: title.to_owned(),
+        pitch: format!("Why {title} matters"),
         phase: phase.parse().expect("fixture phase"),
         status,
     }
@@ -297,6 +298,10 @@ fn enrichment_resolves_a_missing_selected_task_in_place() {
     );
     assert_eq!(resolved.nodes[0].detail, "todo · pending");
     assert_eq!(resolved.nodes[0].status, None);
+    assert_eq!(
+        resolved.nodes[0].pitch.as_ref(),
+        Some(&board.tasks[0].statement.body.pitch)
+    );
     let completed = &resolved.nodes[1];
     assert_eq!(completed.kind, "Selected task");
     assert!(completed.selected);
@@ -314,6 +319,10 @@ fn enrichment_resolves_a_missing_selected_task_in_place() {
     );
     assert_eq!(completed.detail, "review · completed");
     assert_eq!(completed.status, Some(wire::WorkflowStatusKind::Completed));
+    assert_eq!(
+        completed.pitch.as_deref(),
+        Some("Why Completed prerequisite matters")
+    );
     assert_eq!(resolved.edges.len(), 1);
     assert_eq!((resolved.edges[0].from, resolved.edges[0].to), (1, 0));
     assert!(resolved.source.contains("Completed prerequisite"));

@@ -439,6 +439,7 @@ fn map_targets(
                     id: node.id.clone(),
                     task: task.clone(),
                     label: node.label.clone(),
+                    pitch: node.pitch.clone(),
                     selected: node.selected,
                     availability: tone.map(|tone| tone.availability),
                     disposition: tone.and_then(|tone| tone.disposition),

@@ -357,6 +357,7 @@ mod tests {
                     task,
                 ),
                 title: "Shown task".to_owned(),
+                pitch: String::new(),
                 phase: "todo".parse().expect("fixture phase"),
                 status: wire::WorkflowStatusKind::Pending,
             }],

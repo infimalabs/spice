@@ -434,6 +434,7 @@ fn task_node(task: &BoardTask) -> TaskRelationNode {
         task: task.statement.body.born.clone(),
         handle: task.statement.body.handle.clone(),
         title: task.presentation_title.clone(),
+        pitch: task.statement.body.pitch.clone(),
         phase: task.workflow.body.phase,
         status: task.workflow.body.status.kind(),
     }

@@ -40,6 +40,8 @@ pub(crate) struct Node {
     /// Workflow status the typed enrichment reports for a task the admitted
     /// board lacks, such as a completed prerequisite.
     pub(crate) status: Option<wire::WorkflowStatusKind>,
+    /// The task's pitch, for a task node whose statement is known.
+    pub(crate) pitch: Option<String>,
     diagram: String,
     pub(crate) selected: bool,
 }
@@ -435,12 +437,14 @@ fn present_local_node(
                 ),
                 format!("{} · {}", row.workflow.body.phase, row.workflow.body.status),
                 None,
+                row.statement.body.pitch.clone(),
             )
         })
         .or_else(|| match enrichment {
             Some(TaskRelationNode::Task {
                 handle,
                 title,
+                pitch,
                 phase,
                 status,
                 ..
@@ -448,24 +452,29 @@ fn present_local_node(
                 format!("{handle} · {}", compact_title(title)),
                 format!("{phase} · {status}"),
                 Some(*status),
+                pitch.clone(),
             )),
             _ => None,
         });
-    let (kind, label, detail, status) = match (resolved, node.kind()) {
-        (Some((label, detail, status)), _) if node.selected() => {
-            ("Selected task", label, detail, status)
+    let (kind, label, detail, status, pitch) = match (resolved, node.kind()) {
+        (Some((label, detail, status, pitch)), _) if node.selected() => {
+            ("Selected task", label, detail, status, Some(pitch))
         }
-        (Some((label, detail, status)), _) => ("External dependency", label, detail, status),
+        (Some((label, detail, status, pitch)), _) => {
+            ("External dependency", label, detail, status, Some(pitch))
+        }
         (None, TaskOverviewNodeKind::Missing) => (
             "Missing task",
             node.task().to_string(),
             "Missing from the admitted board snapshot".to_owned(),
+            None,
             None,
         ),
         (None, _) => (
             "Unavailable task",
             node.task().to_string(),
             "Unavailable in the admitted board snapshot".to_owned(),
+            None,
             None,
         ),
     };
@@ -478,6 +487,7 @@ fn present_local_node(
         at: None,
         task: Some(node.task().clone()),
         status,
+        pitch,
         selected: node.selected(),
     }
 }
@@ -494,6 +504,7 @@ fn present_remote_node(
             task,
             handle,
             title,
+            pitch,
             phase,
             status,
         } => {
@@ -507,6 +518,7 @@ fn present_remote_node(
                 diagram: format!("{handle}\n{title}\nPhase {phase} — {status}"),
                 task: Some(task.clone()),
                 status: Some(*status),
+                pitch: Some(pitch.clone()),
                 selected: selection.tasks().contains(task),
             }
         }
@@ -549,6 +561,7 @@ fn present_remote_node(
                 ),
                 task: None,
                 status: None,
+                pitch: None,
                 selected: false,
             }
         }
@@ -585,6 +598,7 @@ fn present_remote_node(
                 ),
                 task: None,
                 status: None,
+                pitch: None,
                 selected: false,
             }
         }
@@ -630,6 +644,7 @@ fn present_origin_node(
         diagram,
         task: None,
         status: None,
+        pitch: None,
         selected: false,
     }
 }
@@ -676,6 +691,7 @@ fn present_review_node(
         diagram,
         task: None,
         status: None,
+        pitch: None,
         selected: false,
     }
 }

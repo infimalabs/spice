@@ -142,8 +142,8 @@
 .work-row-id { font: 600 var(--app-type-label)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .work-row-id[data-kind="design"] { color: var(--work-id-design); }
 .work-row-id[data-kind="execution"] { color: var(--work-id-execution); }
-/* The title's Markdown body renders inline, on the row's one line. */
-.work-row-title :is(.markdown-body, p) { display: inline; margin: 0; }
+.work-row-title { display: grid; } .work-row-title > span { overflow: hidden; text-overflow: ellipsis; }
+.work-row-title :is(.markdown-body, p) { display: inline; margin: 0; } .work-row-pitch { color: var(--muted); font-size: var(--app-type-meta); }
 .work-row-phase,
 .work-row-holder,
 .work-row-age { color: var(--muted); font: var(--app-type-meta)/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
