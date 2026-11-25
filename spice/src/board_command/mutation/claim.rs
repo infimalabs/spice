@@ -12,6 +12,9 @@ use super::*;
 pub(in crate::board_command) struct ClaimPlan<'a> {
     snapshot: ValidatedSnapshot,
     pub(in crate::board_command) selected: Entry,
+    /// The selected row is the actor's own unsubmitted draft, which this
+    /// capture submits in the same write.
+    submit: bool,
     grant: ClaimGrant<'a>,
     next: Option<Box<str>>,
     room_context: Option<Box<str>>,
@@ -96,18 +99,18 @@ fn claim_plan_with_resources<'a>(
     if let Some(resources) = resources {
         environment = resources.observe(environment, &snapshot.entries)?;
     }
-    let selected = if possession.named() {
-        named_claim_selection(&snapshot, command, possession, &environment)?.clone()
+    let (selected, submit) = if possession.named() {
+        named_claim_selection(&snapshot, command, possession, &environment)?
     } else {
-        allocator_claim_selection(
+        let selected = allocator_claim_selection(
             &snapshot,
             command,
             allocation,
             profiles,
             &environment,
             &snapshot.owners,
-        )?
-        .clone()
+        )?;
+        (selected.clone(), false)
     };
     // Named capture may possess a planning deliverable, but a recovery-bound
     // capture adopts implementation, so it refuses planning before Git work.
@@ -121,6 +124,7 @@ fn claim_plan_with_resources<'a>(
     Ok(ClaimPlan {
         snapshot,
         selected,
+        submit,
         grant,
         next,
         room_context,
@@ -653,6 +657,7 @@ pub(in crate::board_command) fn commit_claim(
     let ClaimPlan {
         snapshot,
         selected,
+        submit,
         grant,
         next,
         room_context,
@@ -683,25 +688,30 @@ pub(in crate::board_command) fn commit_claim(
         .flatten()
         .map(|held| held.claim().clone());
     let nothing_stolen = stealing && displaced.is_none();
-    let won = match mint_claim(
-        &mut write,
-        board::allocate::Mint {
-            task: &born,
-            actor: command.actor(),
-            workflow: selected.workflow(),
-            topic: selected.topic(),
-            lane,
-            occupant,
-            epoch: command.epoch(),
-            at,
-            expiry,
-            maximum,
-            git,
-            recovery: win.recovery.clone(),
-            source,
-            cause: None,
-        },
-    ) {
+    let won = match submit
+        .then(|| activation::append_submitted(&mut write, &selected))
+        .transpose()
+        .and_then(|submitted| {
+            mint_claim(
+                &mut write,
+                board::allocate::Mint {
+                    task: &born,
+                    actor: command.actor(),
+                    workflow: selected.workflow(),
+                    topic: selected.topic(),
+                    lane,
+                    occupant,
+                    epoch: command.epoch(),
+                    at,
+                    expiry,
+                    maximum,
+                    git,
+                    recovery: win.recovery.clone(),
+                    source,
+                    cause: submitted,
+                },
+            )
+        }) {
         Ok(won) => won,
         Err(outcome) => {
             if let Some(prepared) = prepared_git
@@ -965,12 +975,15 @@ fn allocator_claim_selection<'a>(
     Ok(selected)
 }
 
-fn named_claim_selection<'a>(
-    snapshot: &'a ValidatedSnapshot,
+/// The named task and whether this capture submits it: an explicit capture
+/// of the actor's own pending, uncontrolled, unheld draft marks it submitted
+/// in the claim's write, so it stands as the triage work it then claims.
+fn named_claim_selection(
+    snapshot: &ValidatedSnapshot,
     command: &wire::AdmittedCommand,
     possession: Possession,
     environment: &wire::Environment,
-) -> Result<&'a Entry, Outcome<CommandAnswer>> {
+) -> Result<(Entry, bool), Outcome<CommandAnswer>> {
     let task = command
         .expected()
         .iter()
@@ -995,16 +1008,25 @@ fn named_claim_selection<'a>(
                 "capture into one current pending task",
             )
         })?;
-    if entry.is_draft() && !entry.is_submitted_draft() {
-        return Err(refusal(
-            "task::draft-capture-refused",
-            Some(standing_detail(entry)),
-            format!(
-                "only a submitted draft is claimable; advance and claim it with spice task file {} --claim",
-                entry.handle(),
-            ),
-        ));
-    }
+    let submitted = if entry.is_draft() && !entry.is_submitted_draft() {
+        if !own_draft_capture(snapshot, entry, possession)? {
+            return Err(refusal(
+                "task::draft-capture-refused",
+                Some(standing_detail(entry)),
+                format!(
+                    "only a submitted draft or your own draft is claimable; capture your own \
+                     with spice task capture {handle}, or advance and claim it with spice task \
+                     file {handle} --claim",
+                    handle = entry.handle(),
+                ),
+            ));
+        }
+        Some(activation::submitted_entry(entry)?)
+    } else {
+        None
+    };
+    let submit = submitted.is_some();
+    let entry = submitted.as_ref().unwrap_or(entry);
     let satisfied = board::resolved_tasks(&snapshot.entries);
     refuse_held_design(entry, &satisfied)?;
     let (admitted, stealing) = match possession {
@@ -1020,10 +1042,28 @@ fn named_claim_selection<'a>(
         Possession::Join => unreachable!("task join admits through its own shared-task law"),
     };
     if admitted {
-        Ok(entry)
+        Ok((entry.clone(), submit))
     } else {
         Err(named_claim_ineligible(entry, stealing))
     }
+}
+
+/// Whether a plain capture names a pending, uncontrolled, unheld draft created
+/// on the actor's own origin thread, the same authorship default reads use.
+fn own_draft_capture(
+    snapshot: &ValidatedSnapshot,
+    entry: &Entry,
+    possession: Possession,
+) -> Result<bool, Outcome<CommandAnswer>> {
+    if possession != Possession::Capture
+        || !entry.workflow().status.is_pending()
+        || entry.is_controlled()
+        || entry.is_held()
+    {
+        return Ok(false);
+    }
+    let row = visible_task(snapshot, entry.born())?;
+    Ok(row.origin_thread == snapshot.answer.actor_route.origin_thread)
 }
 
 /// An open Design that awaits the operator's decision or waits on work it

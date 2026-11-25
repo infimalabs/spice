@@ -385,3 +385,22 @@ pub(in crate::board_command) fn append_submitted(
     write.workflow_head(entry.born().clone(), submitted, move |_| workflow);
     Ok(submitted)
 }
+
+/// `entry` as its hand-off mark leaves it: still in draft, now submitted.
+pub(in crate::board_command) fn submitted_entry(
+    entry: &Entry,
+) -> Result<Entry, Outcome<CommandAnswer>> {
+    let mut workflow = entry.workflow().clone();
+    workflow.submitted = true;
+    Entry::new(
+        entry.statement().clone(),
+        workflow,
+        entry.completion().clone(),
+        entry.claim_bodies(),
+    )
+    .map(|post| {
+        post.with_design(entry.design())
+            .with_creator_team(entry.creator_team())
+    })
+    .map_err(|error| protocol_fault("task::board-incoherent", error.to_string()))
+}

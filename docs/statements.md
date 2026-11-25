@@ -345,15 +345,17 @@ accepted work.
 A row in draft has one of three standings, none a lifecycle dimension.
 *Controlled*: its preparation names an open controller; it is never allocated
 or claimed and leaves draft only through controller authority. *Author-held*:
-uncontrolled and not submitted; never allocated. The operator's saved app
-drafts, explicit `--draft` rows and drive-denied landings start here.
+uncontrolled and not submitted; never allocated, and claimed only by an
+explicit `task capture` from its own origin thread, which submits it in the
+same write and leaves it in draft. The operator's saved app drafts, explicit
+`--draft` rows and drive-denied landings start here.
 *Submitted*: uncontrolled and marked submitted; ordinary allocatable triage
 work under drive policy, acquirable by `task next` and claimable. The mark is
-set only by the author's single hand-off act, `task file` or creation without
-`--draft`, is never cleared, is never set on a controlled row, and is not an
-activation authority: a triage claimant still leaves draft only through the
-validator below. Deferral stays a timed snooze; a wake time never becomes
-intake authority.
+set only by the author's hand-off acts, `task file`, creation without
+`--draft`, or the author's own capture; it is never cleared, is never set on a
+controlled row, and is not an activation authority: a triage claimant still
+leaves draft only through the validator below. Deferral stays a timed snooze;
+a wake time never becomes intake authority.
 
 `task add --draft` records an author-held draft unless preparation controls it.
 Default reads show it only to the operator and its origin thread; complete

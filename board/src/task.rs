@@ -228,8 +228,9 @@ impl Entry {
     }
 
     /// Whether this draft is triage work the allocator may hand out: the
-    /// author submitted it and no controller gates it. Author-held and
-    /// controlled drafts are never allocated or claimed.
+    /// author submitted it and no controller gates it. Author-held drafts are
+    /// never allocated, and claimed only by an author capture that submits
+    /// them first; controlled drafts are never allocated or claimed.
     #[must_use]
     pub const fn is_submitted_draft(&self) -> bool {
         self.is_draft() && self.workflow.submitted && !self.is_controlled()
