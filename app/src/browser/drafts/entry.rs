@@ -608,7 +608,8 @@ fn submits_something(mode: Mode, composer: &ComposerDrafts) -> bool {
     !title.is_empty() && !pitch.is_empty()
 }
 
-/// The rail's bottom action: Send in Ask mode, Create otherwise. It takes the
+/// The rail's bottom action: Send in Ask mode, Create otherwise. Both words
+/// fill SEND's fixed label box; Create's glyphs compress to fit it. It takes the
 /// team SEND's backlit glass only once a press would submit, and its label: an
 /// Ask naming every agent on the roster, or a held broadcast stroke that would
 /// reach the whole fleet, compresses it into FULL SEND. While a submission is
@@ -632,7 +633,9 @@ fn submit_action(
                     <span class="team-send-word">{"Send"}</span>
                 </span>
             } else {
-                {"Create"}
+                <span class="team-send-label">
+                    <span class="app-compose-create-word">{"Create"}</span>
+                </span>
             }
         </button>
     }
