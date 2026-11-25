@@ -152,12 +152,8 @@ fn awareness(
                     "the journal names a task but no read position",
                 )
             })?;
+            let term = design_terms(read, &anchor, &design)?;
             let maturity = read.design_maturity(&anchor).map_err(store)?;
-            let term = read
-                .task_head(&anchor)
-                .map_err(store)?
-                .map(|head| head.body().term.clone())
-                .unwrap_or_default();
             let population = read.design_notice_count(&anchor, after).map_err(store)?;
             let budget = journal::FactReadBudget::new(
                 retain.clamp(1, journal::FactReadBudget::RETAINED.rows()),
@@ -236,6 +232,26 @@ fn awareness(
             effect: "advisory only; neither blocks nor authorizes a Design decision",
         },
     ))
+}
+
+/// The current statement terms of the Design anchored at `anchor`, refusing
+/// a task without Design intent so no Design readout is fabricated for it.
+fn design_terms(
+    read: &journal::JournalRead<'_>,
+    anchor: &TaskStamp,
+    design: &TaskHandle,
+) -> Result<Vec<String>, Failure> {
+    match read.task_head(anchor).map_err(store)? {
+        Some(head) if head.body().intent.is_some_and(wire::TaskIntent::is_design) => {
+            Ok(head.body().term.clone())
+        }
+        _ => Err(Failure::Refusal(crate::read_page::refusal(
+            "room",
+            "not-design",
+            Some(design.to_string()),
+            "room awareness reads only a Design; read this task with spice task show",
+        ))),
+    }
 }
 
 /// Each row beside its continuation key, the journal position.

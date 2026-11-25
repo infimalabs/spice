@@ -879,6 +879,44 @@ fn design_awareness_pages_heavy_notices_over_their_exact_population() {
     lanes.finish();
 }
 
+/// Awareness answers only for a Design: an ordinary task refuses rather than
+/// rendering a fabricated Design readout, while a Design still answers.
+#[test]
+fn design_awareness_refuses_a_task_that_is_not_a_design() {
+    let lanes = Lanes::new("design-awareness-not-design");
+    let ordinary = lanes.seed_task("dVrD245Kc", "Ordinary", None, None, None);
+    let design = lanes.seed_task(
+        "dVrD245Kd",
+        "Design",
+        Some("Decide something."),
+        Some(wire::TaskIntent::Design),
+        None,
+    );
+    let answer = |task: &wire::TaskHandle| {
+        let matches = crate::cli::command()
+            .try_get_matches_from(["spice", "room", "awareness", task.as_str()])
+            .expect("room awareness parses");
+        let contract = crate::cli::selected_contract(&matches).expect("awareness is registered");
+        let journal =
+            journal::JournalReader::open(&lanes.paths.journal).expect("the journal opens to read");
+        crate::room_command::awareness::answer(
+            &journal,
+            crate::cli::selected_matches(&matches),
+            contract.path,
+        )
+    };
+
+    match answer(&ordinary) {
+        Outcome::Refusal(refusal) => assert_eq!(refusal.reason(), "room::not-design"),
+        other => panic!("an ordinary task did not refuse: {other:?}"),
+    }
+    assert!(
+        matches!(answer(&design), Outcome::Reply(_)),
+        "a Design still answers"
+    );
+    lanes.finish();
+}
+
 /// A transaction reaches only occupied lanes it leaves with unread activity:
 /// a publication reaches its room's listeners, an unrelated task reaches no
 /// one, and a vacant listener is never reached. Listening follows the claim
