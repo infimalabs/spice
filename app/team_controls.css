@@ -118,6 +118,8 @@
 .app-compose-dialog .app-compose-submit .team-send-full { color: var(--app-semantic-focus); }
 :is(.team-composer .team-send, .app-compose-submit) .team-send-word { position: absolute; inset: 0; inline-size: 4ch; transform: translateX(var(--team-send-word-offset)) scaleX(var(--team-send-word-scale)); transform-origin: left center; transition: transform var(--app-motion-fast) var(--app-ease-standard); }
 :is(.team-composer .team-send, .app-compose-submit)[data-full-send="true"] .team-send-label { --team-send-full-opacity: 1; --team-send-full-scale: .5; --team-send-word-offset: 2ch; --team-send-word-scale: .5; }
+/* CREATE keeps SEND's 4ch box at the same size: six glyphs compress into it. */
+.app-compose-submit .app-compose-create-word { position: absolute; inset: 0; inline-size: 6ch; white-space: nowrap; transform: scaleX(calc(4 / 6)); transform-origin: left center; }
 .team-composer .team-turbo:disabled,
 .team-composer .team-menu:disabled,
 .app-spice-sidebar-anchor .app-spice-turbo:disabled,
