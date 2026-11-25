@@ -104,6 +104,49 @@ fn a_pass_ends_only_once_every_current_question_is_covered() {
     clean(&root, bus);
 }
 
+/// A covered pass that constructed no output refuses to end until its
+/// finishing lane posts why in the Design's room; contributions and another
+/// actor's post do not stand in for that statement.
+#[test]
+fn an_empty_pass_ends_only_once_its_lane_posts_why() {
+    let (root, bus, epoch, seats) = fixture("preparation-empty-pass", 1);
+    let lane = Actor::Lane(seats[0].lane);
+    let design = add_controller(&bus, epoch, "Empty Design", wire::TaskIntent::Design, None);
+    wake_design(&bus, epoch, &design);
+    capture_for(&bus, epoch, &seats[0], &design);
+    cover_questions(&bus, epoch, &seats[0], &design);
+    post_observation(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &design,
+        "The operator's note.",
+    );
+
+    let held = board(&bus, epoch, lane.clone());
+    let empty = complete_share(&bus, epoch, &seats[0], &design);
+    assert_refused(&empty, "preparation::pass-empty");
+    let after = board(&bus, epoch, lane.clone());
+    let (before, unmoved) = (at(&held, &design), at(&after, &design));
+    assert_eq!(unmoved.claims, before.claims, "the claim stays active");
+    assert!(unmoved.design_cycle.pass.is_none(), "no pass ends");
+
+    post_observation(
+        &bus,
+        epoch,
+        lane.clone(),
+        &design,
+        "Premise failed: the need is already met elsewhere.",
+    );
+    assert_committed(complete_share(&bus, epoch, &seats[0], &design));
+    let ended = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    assert!(
+        at(&ended, &design).design_cycle.pass.is_some(),
+        "the stated pass ends"
+    );
+    clean(&root, bus);
+}
+
 /// Each participant's `task done` records its share; only the final arrival
 /// completes the round, which leaves the Design awaiting the operator. No
 /// decision lands before the pass ends.

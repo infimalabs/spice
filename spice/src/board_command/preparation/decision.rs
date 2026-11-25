@@ -117,7 +117,7 @@ fn require_completed_pass(
 
 /// The Design's offered work: every pending, acceptance-bearing Draft it
 /// controls, at its current revision.
-fn offered_outputs<'a>(
+pub(super) fn offered_outputs<'a>(
     snapshot: &'a bus::TaskSnapshot,
     design: &'a TaskStamp,
 ) -> impl Iterator<Item = &'a journal::TaskHeads> {

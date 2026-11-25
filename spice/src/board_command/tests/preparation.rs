@@ -239,6 +239,29 @@ pub(super) fn cover_questions(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, desi
     }
 }
 
+/// Post `text` in `design`'s room as `actor`: the observation an empty pass
+/// owes when it constructs no output.
+pub(super) fn post_observation(
+    bus: &Bus,
+    epoch: CanonicalUuid,
+    actor: Actor,
+    design: &TaskHandle,
+    text: &str,
+) {
+    let heads = at(&board(bus, epoch, actor.clone()), design).clone();
+    let command = fixture_command(
+        epoch,
+        actor,
+        CommandKind::RoomPost,
+        vec![statement_witness(&heads)],
+        &wire::rooms::RoomPost {
+            room: design.clone(),
+            text: text.to_owned(),
+        },
+    );
+    assert_committed(dispatch(bus, &command).expect("room post dispatches"));
+}
+
 fn output_revision(row: &BoardTask) -> OutputRevision {
     OutputRevision {
         task: row.statement.body.born.clone(),
