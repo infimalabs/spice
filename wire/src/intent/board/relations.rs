@@ -96,6 +96,7 @@ pub enum TaskRelationNode {
         task: crate::TaskStamp,
         handle: crate::TaskHandle,
         title: String,
+        pitch: String,
         phase: crate::Phase,
         status: crate::WorkflowStatusKind,
     },

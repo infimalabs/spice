@@ -466,6 +466,7 @@ fn task_relations_answer_round_trips_discriminated_nodes_and_frontier() {
                 task,
                 handle: "SPICE-1kKRRsDPx".parse().expect("fixture task handle"),
                 title: "Inspect bounded relationships".to_owned(),
+                pitch: "Bounded relationship answers keep the graph readable.".to_owned(),
                 phase: "todo".parse().expect("fixture phase"),
                 status: wire::WorkflowStatusKind::Pending,
             },

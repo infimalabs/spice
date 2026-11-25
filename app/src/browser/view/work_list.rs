@@ -610,10 +610,15 @@ fn render_retained_row(rows: &Rows<'_, '_, '_>, task: &TaskStamp) -> Html {
                 <span class="work-row-glyph" aria-hidden="true">{retained_standing(detail).0}</span>
                 <span class="work-row-id" data-kind={kind}>{handle}</span>
                 <span class="work-row-title">
-                    {task_detail::render_task_title(
-                        &title,
-                        &crate::composer_markdown::inline::LineControls::Nested,
-                    )}
+                    <span>
+                        {task_detail::render_task_title(
+                            &title,
+                            &crate::composer_markdown::inline::LineControls::Nested,
+                        )}
+                    </span>
+                    if let Some(answer) = answer {
+                        <span class="work-row-pitch">{answer.task.statement.body.pitch.clone()}</span>
+                    }
                 </span>
                 <span class="work-row-phase">{phase}</span>
                 <span class="work-row-holder">{holder}</span>
@@ -699,10 +704,13 @@ fn render_row(rows: &Rows<'_, '_, '_>, index: usize) -> Html {
                 <span class="work-row-glyph" aria-hidden="true">{holder.glyph()}</span>
                 <span class="work-row-id" data-kind={kind}>{statement.handle.to_string()}</span>
                 <span class="work-row-title">
-                    {task_detail::render_task_title(
-                        &row.presentation_title,
-                        &crate::composer_markdown::inline::LineControls::Nested,
-                    )}
+                    <span>
+                        {task_detail::render_task_title(
+                            &row.presentation_title,
+                            &crate::composer_markdown::inline::LineControls::Nested,
+                        )}
+                    </span>
+                    <span class="work-row-pitch">{statement.pitch.clone()}</span>
                 </span>
                 <span class="work-row-phase">
                     <span>{phase}</span>

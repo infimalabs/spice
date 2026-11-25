@@ -14,6 +14,7 @@ pub(super) struct MapNodeTarget {
     pub(super) id: String,
     pub(super) task: TaskStamp,
     pub(super) label: String,
+    pub(super) pitch: Option<String>,
     pub(super) selected: bool,
     pub(super) availability: Option<&'static str>,
     pub(super) disposition: Option<&'static str>,
@@ -81,7 +82,8 @@ fn geometry_overlay(props: &GeometryOverlayProps) -> Html {
                         data-work-mark={target.mark}
                         data-work-state={target.state}
                         aria-label={label.clone()}
-                        title={label}
+                        aria-description={target.pitch.clone()}
+                        title={target.pitch.as_ref().map_or_else(|| label.clone(), |pitch| format!("{label}\n{pitch}"))}
                         data-task-selected={target.selected.to_string()}
                         onclick={activate}
                     ></button>
