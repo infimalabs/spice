@@ -8,7 +8,12 @@ pub(super) fn task_show_maturity(
     repository: Host<'_>,
     task: &BoardTask,
 ) -> Result<Option<wire::rooms::DesignMaturity>, Outcome<CommandAnswer>> {
-    if task.statement.body.intent != Some(wire::TaskIntent::Design) {
+    if !task
+        .statement
+        .body
+        .intent
+        .is_some_and(wire::TaskIntent::is_design)
+    {
         return Ok(None);
     }
     let state = repository
