@@ -255,11 +255,10 @@ impl Service {
                 Ok(frame) => {
                     service.frame = Some(frame);
                     service.arm_deadline(shared);
-                    service.probe_retired();
                 }
                 Err(_) => {
                     drop(service);
-                    Self::close(shared, "Could not load the isolated renderer");
+                    Self::fail(shared, "Could not load the isolated renderer");
                 }
             }
             return;
@@ -274,7 +273,7 @@ impl Service {
         );
         if result.is_err() {
             drop(service);
-            Self::close(shared, "Could not send content to its renderer");
+            Self::fail(shared, "Could not send content to its renderer");
             return;
         }
         service.arm_deadline(shared);
@@ -286,7 +285,7 @@ impl Service {
         // this event loop; recovery runs only once the browser can execute it.
         self.deadline = Some(Timeout::new(RESPONSE_MILLIS, move || {
             if let Some(shared) = weak.upgrade() {
-                Self::close(&shared, "Renderer did not respond; retry or reload spice");
+                Self::fail(&shared, "Renderer did not respond; retry or reload spice");
             }
         }));
     }
@@ -342,9 +341,14 @@ impl Service {
         self.cache.push_back((key, render));
     }
 
+    /// Close a renderer failure and check whether its app generation retired.
+    fn fail(shared: &Shared, reason: &'static str) {
+        shared.borrow().probe_retired();
+        Self::close(shared, reason);
+    }
+
     pub(super) fn close(shared: &Shared, reason: &'static str) {
         let mut service = shared.borrow_mut();
-        service.probe_retired();
         service.dispatch = None;
         service.deadline = None;
         service.frame = None;
