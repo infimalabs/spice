@@ -90,7 +90,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             Row {
                 keys: &[&[COMMAND, "Enter"]],
-                action: "Send the message or create the work",
+                action: "Send a message, record an author-held Draft, or submit one for triage",
             },
             Row {
                 keys: &[&[COMMAND, "Shift", "Enter"]],

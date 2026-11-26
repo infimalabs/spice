@@ -41,7 +41,8 @@ thread_local! {
 /// The submit button value that files the Draft instead of saving it.
 const FILE_SUBMITTER: &str = "file";
 
-/// One Draft-off creation between its admitted Draft row and confirmed filing.
+/// One Draft-off hand-off between its admitted Draft row and confirmed board
+/// disposition.
 #[derive(Clone, PartialEq, Eq)]
 enum AutomaticFiling {
     Attaching(TaskStamp),
@@ -72,9 +73,9 @@ pub(super) struct Controls {
     /// Draft's context under its own key.
     composer: UseReducerHandle<ComposerDrafts>,
     /// A composer Create with Draft off stays read-only from the admitted
-    /// Draft row through the confirmed file transition. `Attaching` holds it
+    /// Draft row through its confirmed board hand-off. `Attaching` holds it
     /// while its images land, `Waiting` needs the row's heads, and `Sending`
-    /// prevents a second file until the board confirms ordinary work.
+    /// prevents a second hand-off until the board confirms its disposition.
     file_on_arrival: UseStateHandle<Option<AutomaticFiling>>,
 }
 
@@ -157,8 +158,8 @@ fn files(event: &SubmitEvent) -> bool {
 /// Send a new Draft's creation, then its images once it lands. The creator
 /// empties as soon as the Draft exists and transfers its exact context to that
 /// Draft. Draft-on creation exposes the editor immediately. Draft-off creation
-/// keeps it hidden through image attachment and filing; either refusal releases
-/// the complete Draft for Save or Create.
+/// keeps it hidden through image attachment and board hand-off; a transport
+/// refusal releases the complete Draft for another Save or Create.
 fn create(
     controls: &Controls,
     sender: &SenderHandle,
@@ -378,10 +379,10 @@ fn DraftEditor(props: &EditorProps) -> Html {
     }
 }
 
-/// File a Draft-off creation exactly once after its images and admitted row
+/// Hand off a Draft-off creation exactly once after its images and admitted row
 /// arrive, keeping its transient Draft editor hidden through attachment and
-/// filing. Either refusal releases the editor. Successful filing remains
-/// hidden until the refreshed board row proves it is ordinary work.
+/// filing. A request refusal releases the editor. A successful hand-off remains
+/// hidden after the refreshed board proves it submitted or ordinary work.
 #[hook]
 pub(super) fn use_file_on_arrival(
     runtime: Option<&AppRuntime>,
@@ -425,8 +426,9 @@ pub(super) fn use_file_on_arrival(
     });
 }
 
-/// File `row` under its current heads, reporting whether it became ordinary
-/// work or a submitted Draft and whether the resident accepted the transition.
+/// File `row` under its current heads. The board's disposition is
+/// authoritative: activated work is created, while work without acceptance is
+/// submitted for triage.
 fn send_filing(
     controls: &Controls,
     sender: &SenderHandle,
@@ -436,11 +438,7 @@ fn send_filing(
     let results = controls.results.clone();
     let landed = Callback::from(move |answer: TaskAnswer| {
         if answer.status == "submitted" {
-            let message = answer.diagnostic.as_deref().map_or_else(
-                || format!("Submitted Draft {} for triage.", answer.task),
-                |diagnostic| format!("Submitted Draft {} for triage: {diagnostic}", answer.task),
-            );
-            results.settled(message);
+            results.settled(format!("Submitted Draft {} for triage.", answer.task));
         } else {
             results.settled(format!("Created {}.", answer.task));
         }
