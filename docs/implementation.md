@@ -43,10 +43,11 @@ provider reads the lane's message.
 The overlay's subagent and eval-tool restrictions, and its publishing gates,
 follow the inventory beside [`config_overlay`](../vendor/src/omp.rs). A seat
 never hosts a collab room, publishes images, sends tool output to Spotlight,
-or files auto-QA reports, and its bash tool denies `omp share`, `omp clip`,
-`omp stream`, `omp skill(s) publish`, `omp grievances push`, and
-`gh gist create`. These gates are not containment: eval-spawned processes and
-hand-written network calls stay outside them.
+or files auto-QA reports. Its registered host shell refuses `omp share`,
+`omp clip`, `omp stream`, `omp skill(s) publish`, `omp grievances push`, and
+`gh gist create` before launch; the overlay applies the same denies to omp's
+built-in bash route. These gates are not containment: eval-spawned processes,
+absolute-path executables, and hand-written network calls stay outside them.
 
 The first turn is one `prompt` request with follow-up admission. A fresh or
 idle session starts it immediately; a resumed session that restored an

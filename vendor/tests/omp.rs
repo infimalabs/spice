@@ -255,6 +255,50 @@ fn a_shell_call_always_has_a_bounded_deadline_unless_it_is_asked_for_as_a_servic
 }
 
 #[test]
+fn the_registered_shell_refuses_publishing_routes_before_launch() {
+    let arguments = |command: &str| {
+        serde_json::json!({"command": command})
+            .as_object()
+            .expect("an argument object")
+            .clone()
+    };
+    for route in [
+        "omp share",
+        "omp clip",
+        "omp stream",
+        "omp skill publish",
+        "omp skills publish",
+        "omp grievances push",
+        "gh gist create",
+    ] {
+        for command in [
+            route.to_owned(),
+            format!("printf ready && {route} --help"),
+            format!("printf ready; ({route})"),
+        ] {
+            assert_eq!(
+                omp::ShellCall::parse(&arguments(&command)),
+                Err(format!(
+                    "shell refuses publishing command `{route}` in an omp seat"
+                )),
+                "{command}"
+            );
+        }
+    }
+    for command in [
+        "omp session pack",
+        "omp config --help",
+        "printf '%s' 'omp share'",
+        "echo gh gist create",
+    ] {
+        assert!(
+            omp::ShellCall::parse(&arguments(command)).is_ok(),
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn host_tool_progress_is_partial_and_only_answers_or_refusals_settle_the_call() {
     let frame = |bytes: Vec<u8>| -> serde_json::Value {
         serde_json::from_slice(bytes.strip_suffix(b"\n").expect("one line")).expect("JSON")
