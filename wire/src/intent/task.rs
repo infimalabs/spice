@@ -870,10 +870,17 @@ pub struct TaskAnswer {
         deserialize_with = "crate::optional::present"
     )]
     pub diagnostic: Option<Box<str>>,
-    /// Independent siblings older than the relation window whose statement
-    /// matched the created one, strongest first.
+    /// Siblings whose statement matched the created one closely enough to
+    /// warn without refusing, strongest first, at most the duplicate preview.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicates: Vec<DuplicateWarning>,
+    /// Further matching siblings the duplicate preview leaves out.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub duplicates_omitted: u32,
+}
+
+const fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// One durable long-running task completion handoff.

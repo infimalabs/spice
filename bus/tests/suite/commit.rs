@@ -1342,6 +1342,7 @@ fn result(task: &TaskHandle, status: &str) -> intent::TaskAnswer {
         next: None,
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
     }
 }
 

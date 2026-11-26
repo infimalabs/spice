@@ -72,17 +72,58 @@ impl DuplicateStanding {
     }
 }
 
-/// One sibling statement at or above [`DUPLICATE_WARNING_FLOOR`].
-#[derive(Clone, Debug, PartialEq)]
-pub struct DuplicateScore {
-    /// Cosine with the created statement.
-    pub cosine: f64,
-    /// The strongest weighted terms both statements share.
-    pub surface: Vec<String>,
+/// Most siblings of one duplicate band a creation's answer or refusal names;
+/// the rest are counted, never rendered.
+pub const DUPLICATE_PREVIEW: usize = 3;
+
+/// The strongest [`DUPLICATE_PREVIEW`] siblings of one band, strongest first
+/// and first-seen among equals, and how many matched in all. Admitting a
+/// sibling never grows it past the preview.
+#[derive(Clone, Debug)]
+pub struct DuplicatePreview<T> {
+    shown: Vec<(f64, T)>,
+    matched: usize,
+}
+
+impl<T> Default for DuplicatePreview<T> {
+    fn default() -> Self {
+        Self {
+            shown: Vec::with_capacity(DUPLICATE_PREVIEW),
+            matched: 0,
+        }
+    }
+}
+
+impl<T> DuplicatePreview<T> {
+    /// Count `sibling` scoring `cosine`, keeping it when it ranks among the
+    /// strongest.
+    pub fn admit(&mut self, cosine: f64, sibling: T) {
+        self.matched += 1;
+        let at = self.shown.partition_point(|(shown, _)| *shown >= cosine);
+        if at >= DUPLICATE_PREVIEW {
+            return;
+        }
+        if self.shown.len() == DUPLICATE_PREVIEW {
+            self.shown.pop();
+        }
+        self.shown.insert(at, (cosine, sibling));
+    }
+
+    /// The kept siblings with their cosines, strongest first.
+    #[must_use]
+    pub fn shown(&self) -> &[(f64, T)] {
+        &self.shown
+    }
+
+    /// How many matching siblings the preview leaves out.
+    #[must_use]
+    pub fn omitted(&self) -> usize {
+        self.matched - self.shown.len()
+    }
 }
 
 /// One created statement weighted under the shared fit, ready to score
-/// siblings both before its write and inside the write's guard.
+/// siblings.
 #[derive(Clone, Debug)]
 pub struct DuplicateProbe {
     frequency: Arc<FrequencyProfile>,
@@ -104,16 +145,25 @@ impl DuplicateProbe {
         }
     }
 
-    /// `sibling`'s score when it reaches [`DUPLICATE_WARNING_FLOOR`].
+    /// `sibling`'s cosine when it reaches [`DUPLICATE_WARNING_FLOOR`].
     #[must_use]
-    pub fn score(&self, sibling: &TaskHead) -> Option<DuplicateScore> {
+    pub fn cosine(&self, sibling: &TaskHead) -> Option<f64> {
         let created = self.statement.as_ref()?;
         let sibling = MatchCache::shared().prepare(&self.frequency, sibling)?;
         let cosine = created.cosine(&sibling).ok()?;
-        (cosine.is_finite() && cosine >= DUPLICATE_WARNING_FLOOR).then(|| DuplicateScore {
-            cosine,
-            surface: created.explanation(&sibling),
-        })
+        (cosine.is_finite() && cosine >= DUPLICATE_WARNING_FLOOR).then_some(cosine)
+    }
+
+    /// The strongest weighted terms `sibling` shares with the created
+    /// statement.
+    #[must_use]
+    pub fn surface(&self, sibling: &TaskHead) -> Vec<String> {
+        let Some(created) = self.statement.as_ref() else {
+            return Vec::new();
+        };
+        MatchCache::shared()
+            .prepare(&self.frequency, sibling)
+            .map_or_else(Vec::new, |sibling| created.explanation(&sibling))
     }
 }
 
@@ -199,5 +249,16 @@ mod tests {
             fresh(DUPLICATE_PREPARED_FLOOR, prepared),
             Some(DuplicateStanding::Refused)
         );
+    }
+
+    #[test]
+    fn a_preview_keeps_the_strongest_siblings_and_counts_the_rest() {
+        let mut preview = DuplicatePreview::default();
+        for (cosine, sibling) in [(0.4, 'a'), (0.9, 'b'), (0.5, 'c'), (0.9, 'd'), (0.3, 'e')] {
+            preview.admit(cosine, sibling);
+        }
+        assert_eq!(preview.shown(), &[(0.9, 'b'), (0.9, 'd'), (0.5, 'c')]);
+        assert_eq!(preview.omitted(), 2);
+        assert!(preview.shown.capacity() <= DUPLICATE_PREVIEW);
     }
 }

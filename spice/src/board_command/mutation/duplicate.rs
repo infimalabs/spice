@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use board::duplicate::{DuplicateKinship, DuplicateProbe, DuplicateScore, DuplicateStanding};
+use board::duplicate::{DuplicateKinship, DuplicatePreview, DuplicateProbe, DuplicateStanding};
 use board::similarity::FREQUENCY_WINDOW;
 
 use super::*;
@@ -15,15 +15,11 @@ pub(super) struct DuplicateScreen {
     cursor: Option<wire::Seq>,
     pub(super) related: Vec<wire::TaskStamp>,
     pub(super) warnings: Vec<wire::intent::DuplicateWarning>,
+    pub(super) warnings_omitted: u32,
 }
 
-struct Match<'a> {
-    statement: &'a TaskHead,
-    phase: Phase,
-    creator: Option<&'a wire::Actor>,
-    score: DuplicateScore,
-    standing: DuplicateStanding,
-}
+/// One band's preview of matching siblings.
+type Band<'a> = DuplicatePreview<&'a journal::TaskHeads>;
 
 /// Admit the relations `statement`, about to be created by `command`, names
 /// in `related`, then screen it against every independent sibling: unsettled
@@ -59,77 +55,82 @@ pub(super) fn screen(
         .map(|statement| &statement.born)
         .collect::<BTreeSet<_>>();
     let probe = DuplicateProbe::new(statement, recent.iter().copied());
-    let mut matches = live
-        .iter()
-        .filter(|heads| {
-            let sibling = heads.statement().body();
-            sibling.born != statement.born
-                && (heads.workflow().body().status.is_pending() || window.contains(&sibling.born))
-                && observed.facts().task_creator(&sibling.born) != Some(command.actor())
-        })
-        .filter_map(|heads| {
-            let sibling = heads.statement().body();
-            let kinship = exempt.kinship(sibling)?;
-            let score = probe.score(sibling)?;
-            let standing =
-                DuplicateStanding::of(&statement.born, &sibling.born, score.cosine, kinship)?;
-            // A declared relation admits any sibling but a fresh one.
-            if standing != DuplicateStanding::Refused && related.contains(&sibling.born) {
-                return None;
-            }
-            Some(Match {
-                statement: sibling,
-                phase: heads.workflow().body().phase,
-                creator: observed.facts().task_creator(&sibling.born),
-                score,
-                standing,
-            })
-        })
-        .collect::<Vec<_>>();
-    matches.sort_by(|left, right| right.score.cosine.total_cmp(&left.score.cosine));
-    let fresh = matches
-        .iter()
-        .filter(|sibling| sibling.standing == DuplicateStanding::Refused)
-        .collect::<Vec<_>>();
-    if let Some(first) = fresh.first() {
-        let sibling = first.statement.handle(first.phase);
+    let (mut fresh, mut unrelated, mut warned) =
+        (Band::default(), Band::default(), Band::default());
+    for heads in &live {
+        let sibling = heads.statement().body();
+        if sibling.born == statement.born
+            || !(heads.workflow().body().status.is_pending() || window.contains(&sibling.born))
+            || observed.facts().task_creator(&sibling.born) == Some(command.actor())
+        {
+            continue;
+        }
+        let Some(kinship) = exempt.kinship(sibling) else {
+            continue;
+        };
+        let Some(cosine) = probe.cosine(sibling) else {
+            continue;
+        };
+        let Some(standing) = DuplicateStanding::of(&statement.born, &sibling.born, cosine, kinship)
+        else {
+            continue;
+        };
+        // A declared relation admits any sibling but a fresh one.
+        match standing {
+            DuplicateStanding::Refused => fresh.admit(cosine, *heads),
+            _ if related.contains(&sibling.born) => {}
+            DuplicateStanding::Unrelated => unrelated.admit(cosine, *heads),
+            DuplicateStanding::Warned => warned.admit(cosine, *heads),
+        }
+    }
+    let described = |band: &Band<'_>| described(&probe, &observed, &statement.born, band);
+    if let Some((_, first)) = fresh.shown().first() {
+        let sibling = handle(first);
         return Err(refusal(
             "task::duplicate-fresh",
-            Some(described(&statement.born, &fresh)),
+            Some(described(&fresh)),
             format!(
                 "another lane just created this work: ask the holder of {sibling} for an invitation, or post what this statement adds with `spice room post {sibling} TEXT`; no relation admits a duplicate within a minute of its sibling"
             ),
         ));
     }
-    let unrelated = matches
-        .iter()
-        .filter(|sibling| sibling.standing == DuplicateStanding::Unrelated)
-        .collect::<Vec<_>>();
-    if let Some(first) = unrelated.first() {
-        let sibling = first.statement.handle(first.phase);
+    if let Some((_, first)) = unrelated.shown().first() {
+        let sibling = handle(first);
         return Err(refusal(
             "task::duplicate-unrelated",
-            Some(described(&statement.born, &unrelated)),
+            Some(described(&unrelated)),
             format!(
                 "reuse {sibling} by asking its holder for an invitation or posting what this statement adds with `spice room post {sibling} TEXT`, or retry with --related naming each sibling when this is distinct related work"
             ),
         ));
     }
-    let warnings = matches
+    let warnings = warned
+        .shown()
         .iter()
-        .map(|sibling| wire::intent::DuplicateWarning {
-            task: sibling.statement.handle(sibling.phase),
-            title: sibling.statement.title.clone(),
-            creator: sibling.creator.cloned(),
-            cosine: format!("{:.2}", sibling.score.cosine).into_boxed_str(),
-            surface: sibling.score.surface.clone(),
+        .map(|(cosine, heads)| {
+            let sibling = heads.statement().body();
+            wire::intent::DuplicateWarning {
+                task: handle(heads),
+                title: sibling.title.clone(),
+                creator: observed.facts().task_creator(&sibling.born).cloned(),
+                cosine: format!("{cosine:.2}").into_boxed_str(),
+                surface: probe.surface(sibling),
+            }
         })
         .collect();
     Ok(DuplicateScreen {
         cursor: observed.cursor(),
         related,
         warnings,
+        warnings_omitted: u32::try_from(warned.omitted()).unwrap_or(u32::MAX),
     })
+}
+
+fn handle(heads: &journal::TaskHeads) -> TaskHandle {
+    heads
+        .statement()
+        .body()
+        .handle(heads.workflow().body().phase)
 }
 
 impl DuplicateScreen {
@@ -219,27 +220,39 @@ impl Exemption {
     }
 }
 
-/// Each sibling's handle, title, creator, cosine, age, and shared terms.
-fn described(created: &wire::TaskStamp, siblings: &[&Match<'_>]) -> String {
-    siblings
+/// Each previewed sibling's handle, title, creator, cosine, age, and shared
+/// terms, then how many more matched.
+fn described(
+    probe: &DuplicateProbe,
+    observed: &bus::TaskSnapshot,
+    created: &wire::TaskStamp,
+    band: &Band<'_>,
+) -> String {
+    let mut described = band
+        .shown()
         .iter()
-        .map(|sibling| {
+        .map(|(cosine, heads)| {
+            let sibling = heads.statement().body();
             let age = created
                 .micros()
-                .saturating_sub(sibling.statement.born.micros())
+                .saturating_sub(sibling.born.micros())
                 .max(0)
                 / 1_000_000;
             format!(
-                "{} {:?} by {} cosine {:.2} age {age}s shares {}",
-                sibling.statement.handle(sibling.phase),
-                sibling.statement.title,
-                sibling
-                    .creator
+                "{} {:?} by {} cosine {cosine:.2} age {age}s shares {}",
+                handle(heads),
+                sibling.title,
+                observed
+                    .facts()
+                    .task_creator(&sibling.born)
                     .map_or_else(|| "unknown".to_owned(), ToString::to_string),
-                sibling.score.cosine,
-                sibling.score.surface.join(","),
+                probe.surface(sibling).join(","),
             )
         })
         .collect::<Vec<_>>()
-        .join("; ")
+        .join("; ");
+    if band.omitted() > 0 {
+        described.push_str(&format!("; and {} more", band.omitted()));
+    }
+    described
 }

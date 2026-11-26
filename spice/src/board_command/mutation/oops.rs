@@ -421,6 +421,7 @@ fn commit_oops_intake(
     let answer = wire::intent::TaskAnswer {
         diagnostic,
         duplicates: duplicates.warnings,
+        duplicates_omitted: duplicates.warnings_omitted,
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created,

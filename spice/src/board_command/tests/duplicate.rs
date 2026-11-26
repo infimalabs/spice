@@ -212,24 +212,43 @@ fn a_recent_duplicate_commits_only_with_a_relation_both_tasks_list() {
 }
 
 #[test]
-fn an_old_duplicate_commits_with_a_warning_naming_it() {
+fn old_duplicates_commit_with_a_bounded_warning_preview() {
     let (root, bus, epoch, seats) = fixture("duplicate-old", 1);
-    let first = sibling(&bus, epoch, &seats[0]);
+    authorize_lane_creation(&bus, epoch, &seats[0]);
+    let siblings = (0..board::duplicate::DUPLICATE_PREVIEW as i64 + 2)
+        .map(|seconds| {
+            let born = born_after(seconds);
+            assert_committed(create(
+                &bus,
+                epoch,
+                Actor::Lane(seats[0].lane),
+                &born,
+                &duplicated(),
+            ));
+            handle(&born)
+        })
+        .collect::<Vec<_>>();
     let CommandAnswer::Task(answer) = assert_committed(create(
         &bus,
         epoch,
         Actor::TEST_PRINCIPAL,
-        &born_after(15 * 60 + 1),
+        &born_after(15 * 60 + 10),
         &duplicated(),
     )) else {
         panic!("task add answers its task");
     };
-    let [warning] = answer.duplicates.as_slice() else {
-        panic!("one warning names the old sibling: {:?}", answer.duplicates);
-    };
-    assert_eq!(warning.task, handle(&first));
-    assert_eq!(&*warning.cosine, "1.00");
-    assert_eq!(warning.creator, Some(Actor::Lane(seats[0].lane)));
+    assert_eq!(
+        answer.duplicates.len(),
+        board::duplicate::DUPLICATE_PREVIEW,
+        "the preview bounds the warnings: {:?}",
+        answer.duplicates
+    );
+    assert_eq!(answer.duplicates_omitted, 2);
+    for warning in &answer.duplicates {
+        assert!(siblings.contains(&warning.task));
+        assert_eq!(&*warning.cosine, "1.00");
+        assert_eq!(warning.creator, Some(Actor::Lane(seats[0].lane)));
+    }
     clean(&root, bus);
 }
 

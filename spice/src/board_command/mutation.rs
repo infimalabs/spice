@@ -739,6 +739,7 @@ where
     let answer = wire::intent::TaskAnswer {
         diagnostic,
         duplicates: duplicates.warnings,
+        duplicates_omitted: duplicates.warnings_omitted,
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created: Default::default(),
@@ -1140,6 +1141,7 @@ pub(super) fn task_note(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(snapshot.ownership(entry)),
         placement: None,
         created: Default::default(),
@@ -1350,6 +1352,7 @@ fn commit_dependency_edit(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(snapshot.ownership(entry)),
         placement: None,
         created: Default::default(),

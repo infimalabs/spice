@@ -75,6 +75,7 @@ pub(in crate::board_command) fn task_target(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(ownership),
         placement: None,
         created: Default::default(),

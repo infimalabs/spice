@@ -51,6 +51,7 @@ pub(in crate::board_command) fn task_media(
         body: CommandAnswer::Task(Box::new(wire::intent::TaskAnswer {
             diagnostic: None,
             duplicates: Vec::new(),
+            duplicates_omitted: 0,
             ownership: Some(snapshot.ownership(entry)),
             placement: None,
             created: Default::default(),
