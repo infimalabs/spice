@@ -130,7 +130,7 @@
    page beneath them. */
 .app-compose-dialog[data-expanded="false"] { pointer-events: none; }
 .app-compose-dialog[data-expanded="false"] :is(
-  .app-compose-modes-row,
+  .app-compose-mode,
   .app-compose-utility-tabs,
   .app-inbox-button,
   .app-compose-pending-open
