@@ -218,7 +218,7 @@ with the same remedy.
 An upgrade candidate verifies its own bytes against sealed release evidence
 before applying, without Cargo, `xtask`, or a source checkout. It admits the
 package index, then its platform's payload and proof receipt, and refuses a
-candidate whose identity does not match or whose version is not newer.
+candidate whose identity or product version does not match that evidence.
 
 Each hosted release publishes three standalone platform executables, one
 deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Download only the

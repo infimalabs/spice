@@ -1218,9 +1218,9 @@ as the candidate, then reads only the running target's `payload.json` and
 candidate executable, and clean proof retain their evidence bindings. Selected
 paths and parent directories must be unlinked regular files and directories,
 with bounded member and aggregate sizes. The index must have mode `644`, the
-candidate must be a regular file, and the package's product version must be
-newer than the installed appliance's; inadmissible evidence or candidate bytes
-refuse `install::package-refused`.
+candidate must be a regular file, and the package's product version must equal
+the candidate's compile-time product version; inadmissible evidence or
+candidate bytes refuse `install::package-refused`.
 
 Evidence containing only the package index and target documents is sufficient.
 Executables, debug artifacts, `release/manifest.json`, and `release/notes.md`
