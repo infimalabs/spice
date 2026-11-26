@@ -16,7 +16,7 @@ mod provider;
 mod session;
 
 use plan::PublicationPlan;
-use session::Publications;
+use session::{PublicationSession, Publications};
 
 /// What one `publish-hosted-release` invocation asks of the pinned request.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,9 +39,21 @@ impl PublishRequest {
     }
 }
 
+/// Where one creating or resuming invocation stops.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublishEffect {
+    /// Stage every native target and persist the admitted plan with its
+    /// complete asset inventory, then stop before any tag or release
+    /// mutation. The request stays pinned for a later resume or abandon.
+    StageOnly,
+    /// Continue from the admitted plan through publication and fresh
+    /// verification.
+    Publish,
+}
+
 /// Create or resume all hosted native stages, publish their exact executables
 /// and shared sealed evidence, then read the public release back from fresh
-/// storage.
+/// storage. [`PublishEffect::StageOnly`] stops at the persisted plan.
 ///
 /// A new request reads `main` once and pins that commit. While it is pending,
 /// an invocation must name the pinned commit to resume it or abandon it; a
@@ -49,6 +61,7 @@ impl PublishRequest {
 /// selects the release.
 pub fn publish_hosted_release(
     request: &PublishRequest,
+    effect: PublishEffect,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), PublishError> {
@@ -79,6 +92,7 @@ pub fn publish_hosted_release(
         .map_err(|error| PublishError::Refused(error.to_string()))?;
     let session = publications.begin(&source_commit)?;
     PublicationPlan::admit_existing_notes(session.root(), &source_commit, &notes)?;
+    let unpublished = !session.publication_may_have_started()?;
     let inputs = match session.inputs_run()? {
         Some(run) => hosted_release_inputs(Attach::Run(run))?,
         None => hosted_release_inputs_dispatch(source_commit)?,
@@ -95,16 +109,72 @@ pub fn publish_hosted_release(
     hosted_release_stage_with_inputs(inputs.manifest().run_id, &inputs, output, error_output)?;
     let plan = PublicationPlan::capture(&worktree, session.root(), &inputs, &notes)?;
     plan.persist(session.root())?;
-    provider::publish_and_verify(&worktree, session.root(), &plan)?;
-    publications.finish()?;
-    writeln!(
-        output,
-        "published and freshly verified {} at {} from {}",
+    conclude(effect, &session, unpublished, || {
+        provider::publish_and_verify(&worktree, session.root(), &plan)
+    })?;
+    match effect {
+        PublishEffect::StageOnly => report_staged(output, &session, &plan, unpublished),
+        PublishEffect::Publish => {
+            publications.finish()?;
+            writeln!(
+                output,
+                "published and freshly verified {} at {} from {}",
+                plan.tag,
+                plan.source_commit,
+                inputs.manifest().run_id
+            )
+            .map_err(PublishError::Output)
+        }
+    }
+}
+
+/// The boundary between the persisted plan and every publication effect. A
+/// stage-only request that began before any publication marks its session
+/// unpublished, so it may still be abandoned; publishing withdraws that mark
+/// before its first effect.
+fn conclude(
+    effect: PublishEffect,
+    session: &PublicationSession,
+    unpublished: bool,
+    publish: impl FnOnce() -> Result<(), PublishError>,
+) -> Result<(), PublishError> {
+    match effect {
+        PublishEffect::StageOnly if unpublished => session.mark_unpublished(),
+        PublishEffect::StageOnly => Ok(()),
+        PublishEffect::Publish => {
+            session.withdraw_unpublished()?;
+            publish()
+        }
+    }
+}
+
+fn report_staged(
+    output: &mut impl Write,
+    session: &PublicationSession,
+    plan: &PublicationPlan,
+    unpublished: bool,
+) -> Result<(), PublishError> {
+    let commit = &plan.source_commit;
+    let mut report = format!(
+        "staged {} at {commit} without publishing; assets in {}\n",
         plan.tag,
-        plan.source_commit,
-        inputs.manifest().run_id
-    )
-    .map_err(PublishError::Output)
+        session.root().join("assets").display()
+    );
+    for asset in &plan.assets {
+        report.push_str(&format!(
+            "  {}  {}  {} bytes\n",
+            asset.sha256, asset.name, asset.bytes
+        ));
+    }
+    report.push_str(&format!(
+        "publish with `spice dev xtask -- publish-hosted-release {commit} --notes FILE`"
+    ));
+    if unpublished {
+        report.push_str(&format!(
+            " or drop it with `spice dev xtask -- publish-hosted-release --abandon {commit}`"
+        ));
+    }
+    writeln!(output, "{report}").map_err(PublishError::Output)
 }
 
 fn current_worktree() -> Result<PathBuf, PublishError> {
