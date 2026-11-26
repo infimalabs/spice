@@ -218,8 +218,8 @@ surfaces.
 
 ## Draft composer parity
 
-The global composer is the left overlay's strip under the header; its operator
-launcher follows the [composer doctrine](OVERVIEW.md#drafts-and-oops-intake)
+The global composer is the inline-start overlay's strip under the header; its
+operator launcher follows the [composer doctrine](OVERVIEW.md#drafts-and-oops-intake)
 and opens or closes the human side. Check that the editor's DOM identity, typed
 text and selection survive expansion, dismissal and conversion. Closed, the face shows
 its whole rim and shadow on the bare header and the tabs hang alone, with
@@ -228,16 +228,16 @@ neither face nor tab, and the sheet is cut off and out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused and fades in the shared page veil. Open,
 the sheet runs to the viewport's foot: editor, To row with Send/Create, then
-Principals and the inbox scrolling on its own. Open Spice beside it on a
-desktop viewport: the left sheet and right sidebar both stand above exactly
-one veil, with no additional darkening when the second sheet opens. Neither
-sheet masks the other, both stay interactive, and closing either leaves the
-same veil under the survivor; only closing the last removes it. A press inside
-either keeps both, a press on the page beside them closes the left one, and
-Escape closes the newest first. Opening the strip while Spice is open must
-work the same. On a phone the closed strip shows the operator launcher and
-current destination; with both overlays requested, Spice takes the screen and
-the left sheet returns when it closes. In both themes and inline directions,
+Principals and the inbox scrolling on its own. On desktop, the composer stays
+at inline-start and Spice at inline-end; both stand above exactly one veil,
+with no additional darkening when the second sheet opens. Neither sheet masks
+the other, both stay interactive, and closing either leaves the same veil
+under the survivor; only closing the last removes it. A press inside either
+keeps both, a press on the page beside them closes the composer, and Escape
+closes the newest first. Opening the strip while Spice is open must work the
+same. On a phone the closed strip shows the operator launcher and current
+destination; with both overlays requested, Spice takes the screen and the
+composer returns when it closes. In both themes and inline directions,
 look for a bright hook in either gutter, an inner edge, doubled ring or seam. By
 keyboard, each agent checkbox announces its name and state, Best match is
 pressed only with none chosen, chosen pills are solid accent among muted
@@ -310,9 +310,8 @@ submitted Draft left by phase-zero validation remain read-only, while a
 transport refusal retains the local composition. Draft on records an editable
 Draft and persists across dismissal. Creating the first editable Draft updates
 the shared totals strip and `/work/drafts`; its width affects the editor only
-below the left overlay's preferred width, without shifting the right overlay
-or its content clearance. Check focus containment, image annotation and
-narrow-view overflow.
+below the composer's preferred width, without shifting Spice or its content
+clearance. Check focus containment, image annotation and narrow-view overflow.
 
 Exercise [Draft editing](OVERVIEW.md#drafts-and-oops-intake) through creation,
 reopening after reload, and Save with an annotated image in every Kind.

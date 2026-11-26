@@ -88,7 +88,8 @@
   --app-compose-open-min: min(var(--team-surface-min-inline), calc(100vw - var(--app-compose-inset) - var(--app-compose-end-inset)));
   --app-closed-edge-layer: 4;
   --team-control-item-height: 28px;
-  inset: 0 auto auto var(--app-commandbar-inset-start);
+  inset-block: 0 auto;
+  inset-inline: var(--app-commandbar-inset-start) auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
@@ -121,9 +122,10 @@
 }
 /* Closed, the top-layer sheet begins at the tabs: the fixed operator launcher
    stands outside its paint and clip over the primary page. Opening restores
-   the sheet's full left edge behind the launcher without moving either one. */
-#app-compose-dialog { left: var(--app-compose-launcher-inline) !important; right: auto !important; }
-#app-compose-dialog[data-expanded="true"] { left: 0 !important; }
+   the sheet's full inline-start edge behind the launcher without moving either
+   one. Logical insets keep the sheet and launcher on the same side in RTL. */
+#app-compose-dialog { inset-inline: var(--app-compose-launcher-inline) auto !important; }
+#app-compose-dialog[data-expanded="true"] { inset-inline-start: 0 !important; }
 /* The closed popover keeps its full laid-out sheet for stable opening
    geometry, but only the controls painted in its header may participate in
    hit testing. Without this boundary, transparent sheet pixels intercept the
