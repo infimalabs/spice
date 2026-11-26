@@ -326,10 +326,12 @@ per block naming its count and the `spice://` resource that expands exactly
 it; nothing is cut with an ellipsis. `task show` prints `description: N lines
 spice://task/HANDLE/description`, `terms: N items
 spice://task/HANDLE/terms` (`questions` for a Design), and `history: N
-steps spice://task/HANDLE/history`; `task show --full` prints every block
-whole. Where the holder works nothing collapses: the held-claim briefing and a
-fresh claim's answer carry the whole description and every term, and every
-assignment points at `task show HANDLE --full`. Task list and board rows print
+steps spice://task/HANDLE/history`; `task show --full` prints every authored
+block whole and, in review, the immediately preceding phase's complete
+validation before the task's artifact references. Where the holder works
+nothing collapses: the held-claim briefing and a fresh claim's answer carry the
+whole description and every term, and every assignment points at `task show
+HANDLE --full`. Task list and board rows print
 title and pitch; a lane's unread room page names each room's title, pitch, and
 description count; a Design request opens with its `Pitch:` line and quotes
 each matched question whole.

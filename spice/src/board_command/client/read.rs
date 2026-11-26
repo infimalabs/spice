@@ -11,6 +11,8 @@ pub(in crate::board_command) use list::{TaskListOptions, TaskListStatus, task_li
 use list::{TaskListPageOptions, task_list_page};
 mod nets;
 use nets::{design_net_lines, task_show_maturity};
+mod review_validation;
+use review_validation::preceding_validation_lines;
 mod room;
 pub(in crate::board_command) use room::{TaskShowRoom, claim_room_context};
 use room::{resumes_in_room, task_show_room};
@@ -103,8 +105,10 @@ pub(super) fn client_show(
             ],
             dependencies: true,
             claims: false,
-            // A collapsed show counts the history it does not print.
-            history: !options.full || options.context || options.history,
+            // Both collapsed and full reads need workflow history: collapsed
+            // output counts it, while full review output carries the author's
+            // immediately preceding validation.
+            history: true,
         },
     ) {
         Outcome::Reply(Reply {
@@ -608,6 +612,9 @@ pub(in crate::board_command) fn task_show_bounded(
         }
     }
     lines.extend(edge_lines(board, task));
+    if options.full {
+        lines.extend(preceding_validation_lines(task, history));
+    }
     lines.extend(artifact_lines(&statement.handle, artifacts));
     if options.context || options.history {
         lines.extend(bounded_detail_lines(
