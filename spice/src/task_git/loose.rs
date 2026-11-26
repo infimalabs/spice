@@ -6,7 +6,9 @@
 //! reaches the network.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::Read as _;
 
+use super::dirty::DirtyPaths;
 use super::*;
 
 /// Git operations that leave a worktree half-applied until continued or
@@ -39,6 +41,8 @@ pub struct LooseWork {
     pub head: String,
     /// Every staged, unstaged, and non-ignored untracked path, sorted.
     pub dirty: Vec<String>,
+    /// The staged state and worktree bytes behind `dirty`.
+    dirty_fingerprint: u64,
     pub unlanded: Unlanded,
     /// The unfinished Git operation, if one is in progress.
     pub operation: Option<&'static str>,
@@ -52,8 +56,8 @@ impl LooseWork {
     }
 
     /// A process-local identity of this loose state: equal states share it,
-    /// and a moved HEAD or baseline, a changed dirty set, or a different
-    /// operation changes it.
+    /// and a moved HEAD or baseline, changed dirty paths or bytes, or a
+    /// different operation changes it.
     #[must_use]
     pub fn fingerprint(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -61,6 +65,7 @@ impl LooseWork {
             &self.head,
             &self.unlanded.baseline,
             &self.dirty,
+            self.dirty_fingerprint,
             self.operation,
         )
             .hash(&mut hasher);
@@ -71,17 +76,132 @@ impl LooseWork {
 /// Read the loose work of the worktree at `root`.
 pub fn loose_work(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
     let root = Worktree::new(root, ambient);
-    let dirty = dirty_paths(root)?
-        .all()
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+    let dirty = dirty_paths(root)?;
+    let dirty_fingerprint = dirty_fingerprint(root, &dirty)?;
+    let dirty = dirty.all().into_iter().map(str::to_owned).collect();
     Ok(LooseWork {
         head: required_read(root, &["rev-parse", "HEAD"], "read HEAD")?,
         dirty,
+        dirty_fingerprint,
         unlanded: unlanded_in(root, 0)?,
         operation: operation_in(root)?,
     })
+}
+
+/// Hash the index state and worktree bytes behind every dirty path without
+/// writing the index. Git's raw diffs carry staged object ids and mode/status
+/// changes; regular files and symlink targets carry unstaged and untracked
+/// content. Reads are streamed so one large loose file does not become one
+/// large allocation.
+fn dirty_fingerprint(root: Worktree<'_>, dirty: &DirtyPaths) -> Result<u64, Error> {
+    let mut hasher = DefaultHasher::new();
+    if !dirty.staged.is_empty() {
+        hash_raw_diff(
+            root,
+            &[
+                "diff",
+                "--cached",
+                "--raw",
+                "--no-abbrev",
+                "-z",
+                "HEAD",
+                "--",
+            ],
+            &mut hasher,
+        )?;
+    }
+    if !dirty.unstaged.is_empty() {
+        hash_raw_diff(
+            root,
+            &["diff", "--raw", "--no-abbrev", "-z", "--"],
+            &mut hasher,
+        )?;
+    }
+    for (kind, paths) in [(b'w', &dirty.unstaged), (b'u', &dirty.untracked)] {
+        kind.hash(&mut hasher);
+        for path in paths {
+            path.hash(&mut hasher);
+            hash_worktree_path(root, path, &mut hasher)?;
+        }
+    }
+    Ok(hasher.finish())
+}
+
+fn hash_raw_diff(
+    root: Worktree<'_>,
+    command: &[&str],
+    hasher: &mut DefaultHasher,
+) -> Result<(), Error> {
+    let args = [&["--no-optional-locks"][..], command].concat();
+    let output = run(root, &args)?;
+    if !output.success() {
+        return Err(Error::fault(
+            "git::command-failed",
+            output.detail("fingerprint loose index state"),
+        ));
+    }
+    output.stdout.hash(hasher);
+    Ok(())
+}
+
+fn hash_worktree_path(
+    root: Worktree<'_>,
+    path: &str,
+    hasher: &mut DefaultHasher,
+) -> Result<(), Error> {
+    let absolute = root.join(path);
+    let metadata = match fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            b'm'.hash(hasher);
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(Error::fault(
+                "git::loose-path-unreadable",
+                format!("read metadata for loose path {path:?}: {error}"),
+            ));
+        }
+    };
+    let kind = metadata.file_type();
+    if kind.is_symlink() {
+        b'l'.hash(hasher);
+        fs::read_link(&absolute)
+            .map_err(|error| {
+                Error::fault(
+                    "git::loose-path-unreadable",
+                    format!("read loose symlink {path:?}: {error}"),
+                )
+            })?
+            .hash(hasher);
+        return Ok(());
+    }
+    if !kind.is_file() {
+        b'o'.hash(hasher);
+        metadata.len().hash(hasher);
+        return Ok(());
+    }
+    b'f'.hash(hasher);
+    metadata.len().hash(hasher);
+    let mut file = fs::File::open(&absolute).map_err(|error| {
+        Error::fault(
+            "git::loose-path-unreadable",
+            format!("open loose path {path:?}: {error}"),
+        )
+    })?;
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| {
+            Error::fault(
+                "git::loose-path-unreadable",
+                format!("read loose path {path:?}: {error}"),
+            )
+        })?;
+        if read == 0 {
+            return Ok(());
+        }
+        hasher.write(&buffer[..read]);
+    }
 }
 
 /// The commits on HEAD of the worktree at `root` that its integration
@@ -146,11 +266,56 @@ fn operation_in(root: Worktree<'_>) -> Result<Option<&'static str>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "spice-loose-fingerprint-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ));
+            fs::create_dir(&root).expect("scratch directory creates");
+            Self(root)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn worktree_path_fingerprint(root: &Path, path: &str) -> u64 {
+        let ambient = Ambient::default();
+        let mut hasher = DefaultHasher::new();
+        hash_worktree_path(Worktree::new(root, &ambient), path, &mut hasher)
+            .expect("worktree path hashes");
+        hasher.finish()
+    }
+
+    #[test]
+    fn same_path_bytes_move_the_worktree_fingerprint() {
+        let scratch = Scratch::new();
+        let path = scratch.0.join("loose.txt");
+        fs::write(&path, b"first").expect("first loose bytes write");
+        let first = worktree_path_fingerprint(&scratch.0, "loose.txt");
+        fs::write(&path, b"other").expect("changed loose bytes write");
+        let changed = worktree_path_fingerprint(&scratch.0, "loose.txt");
+        assert_ne!(changed, first, "same-length changed bytes move the state");
+        fs::write(&path, b"first").expect("original loose bytes restore");
+        assert_eq!(
+            worktree_path_fingerprint(&scratch.0, "loose.txt"),
+            first,
+            "equal bytes retain the state"
+        );
+    }
 
     fn loose() -> LooseWork {
         LooseWork {
             head: "a".repeat(40),
             dirty: vec!["src/lib.rs".to_owned()],
+            dirty_fingerprint: 7,
             unlanded: Unlanded {
                 total: 1,
                 rows: vec!["abc1234 work".to_owned()],
@@ -173,6 +338,10 @@ mod tests {
             dirty: vec!["src/main.rs".to_owned()],
             ..base.clone()
         };
+        let same_path_content = LooseWork {
+            dirty_fingerprint: 8,
+            ..base.clone()
+        };
         let moved = LooseWork {
             head: "c".repeat(40),
             ..base.clone()
@@ -188,7 +357,7 @@ mod tests {
             },
             ..base.clone()
         };
-        for changed in [dirty, moved, rebasing, rebased] {
+        for changed in [dirty, same_path_content, moved, rebasing, rebased] {
             assert_ne!(changed.fingerprint(), base.fingerprint(), "{changed:?}");
         }
         let reread = LooseWork {
