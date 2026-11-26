@@ -1401,3 +1401,97 @@
 }
 /* The strip's open principal-input count rides the utility tabs' outer corner. */
 .app-compose-dialog .app-compose-inbox-count { position: absolute; inset-block-start: 4px; inset-inline-start: -2.2em; pointer-events: none; }
+#app-compose-dialog[data-expanded="true"] { inset-inline-start: 0 !important; }
+
+/* The left composer is a non-modal top-layer popover. Its own veil stays
+   below the independent right sidebar, while the Spice launcher remains
+   reachable so either overlay can open first. */
+.app-compose-backdrop {
+  position: fixed;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: default;
+  transition: var(--app-side-view-fade);
+}
+.app-compose-backdrop[data-presented="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.commandbar:has(.app-compose-dialog[data-expanded="true"]) .app-spice-button {
+  z-index: 2;
+}
+.app-compose-dialog:popover-open::backdrop {
+  background: transparent;
+  backdrop-filter: none;
+}
+@media (min-width: 561px) {
+  .shell:has(.app-compose-dialog) .app-sidebar-layer { pointer-events: none; }
+  .shell:has(.app-compose-dialog) .app-sidebar-backdrop {
+    inset-inline-start: var(--app-side-view-small);
+    width: auto;
+    pointer-events: auto;
+  }
+  .shell:has(.app-compose-dialog) .app-sidebar { pointer-events: auto; }
+}
+@media (max-width: 560px) {
+  .shell:has(> .app-sidebar-layer) :is(.app-compose-backdrop, .app-compose-dialog:popover-open) {
+    visibility: hidden;
+    pointer-events: none;
+  }
+  #app-compose-dialog.app-modal {
+    --app-compose-rail-width: 48px;
+    --app-compose-inbox-badge-inline: 20px;
+  }
+  #app-compose-dialog[data-expanded="true"] {
+    inset-inline-start: 0 !important;
+    inline-size: calc(100vw - var(--app-round-control-size) - var(--app-spice-side-gap)) !important;
+    min-inline-size: calc(100vw - var(--app-round-control-size) - var(--app-spice-side-gap));
+    max-inline-size: calc(100vw - var(--app-round-control-size) - var(--app-spice-side-gap));
+  }
+  #app-compose-dialog[data-expanded="true"] .app-compose-surface {
+    background-color: var(--panel);
+    backdrop-filter: none;
+  }
+  #app-compose-dialog[data-expanded="true"] .app-compose-modes-row {
+    inline-size: calc(100vw - var(--app-round-control-size) - var(--app-spice-side-gap) - var(--app-compose-rail-width) - var(--app-compose-edge) - var(--app-compose-inbox-badge-inline));
+  }
+  .shell:has(#app-compose-dialog[data-expanded="true"]) .team-composer-controls {
+    visibility: hidden;
+  }
+  #app-compose-dialog[data-expanded="true"] .app-compose-modes > .app-choice-chip {
+    font-size: var(--app-type-control);
+  }
+  #app-compose-dialog[data-expanded="true"] .app-compose-modes > .app-choice-chip::before {
+    content: none;
+  }
+  #app-compose-dialog .app-compose-submit { inset-inline-end: 10px; }
+  #app-compose-dialog .app-compose-details { padding-inline-end: 92px; }
+  #app-compose-dialog .app-compose-modes-row {
+    inline-size: calc(var(--app-compose-anchor-width) - var(--app-compose-rail-width) - var(--app-compose-edge) - var(--app-compose-inbox-badge-inline));
+    min-inline-size: 0;
+    max-inline-size: none;
+    overflow: hidden;
+  }
+  .app-compose-dialog .app-compose-modes > .app-choice-chip,
+  .app-compose-dialog.app-modal .app-compose-utility-tab {
+    min-width: 0;
+    font-size: 0;
+  }
+  .app-compose-dialog .app-compose-modes > .app-choice-chip::before,
+  .app-compose-dialog.app-modal .app-compose-utility-tab::before {
+    font-size: var(--app-type-compact);
+  }
+  .app-compose-modes > .app-choice-chip:nth-child(1)::before { content: "A"; }
+  .app-compose-modes > .app-choice-chip:nth-child(2)::before { content: "T"; }
+  .app-compose-modes > .app-choice-chip:nth-child(3)::before { content: "P"; }
+  .app-compose-modes > .app-choice-chip:nth-child(4)::before { content: "D"; }
+  .app-compose-draft::before { content: "D"; }
+  .app-help-trigger::before { content: "H"; }
+  .app-compose-dialog .app-compose-inbox-count { inset-inline-start: 4px; }
+}

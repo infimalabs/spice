@@ -53,14 +53,15 @@ pub(super) fn use_presentation(
         FADE,
         finish.clone(),
     );
-    // Leaving modality hands focus back to the writing line it came from.
-    // That return is not a request to open.
+    // The composer is a non-modal top-layer popover, so it shares the app's
+    // newest-first Escape order with the independent right sidebar.
     let returning = use_mut_ref(|| false);
     use_dialog(anchor, dialog, *expanded, returning.clone());
     let close = {
         let requested = requested.clone();
         Callback::from(move |()| requested.set(false))
     };
+    overlay::use_escape_owner(*requested && *expanded && !closing, close.clone());
     let open = {
         let requested = requested.clone();
         Callback::from(move |()| {
@@ -109,7 +110,10 @@ fn use_dialog(
 ) {
     let anchor = anchor.clone();
     let dialog = dialog.clone();
+    let prior_expanded = use_mut_ref(|| false);
     use_effect_with(expanded, move |&expanded| {
+        let was_expanded = *prior_expanded.borrow();
+        *prior_expanded.borrow_mut() = expanded;
         let align = {
             let anchor = anchor.clone();
             let dialog = dialog.clone();
@@ -147,25 +151,27 @@ fn use_dialog(
         });
         if let Some(dialog) = dialog.cast::<web_sys::HtmlDialogElement>() {
             if expanded {
-                if !dialog.matches(":modal").unwrap_or(false) {
-                    dialog.close();
-                    let _ = dialog.show_modal();
+                if !dialog.matches(":popover-open").unwrap_or(false) {
+                    call_popover(dialog.unchecked_ref(), "showPopover");
                 }
-                if let Ok(Some(target)) =
-                    dialog.query_selector(".draft-context > .draft-context-editor textarea")
+                if let Ok(Some(target)) = dialog.query_selector(".draft-context-editor textarea")
                     && let Some(target) = target.dyn_ref::<web_sys::HtmlElement>()
                 {
                     let _ = target.focus();
                 }
             } else {
-                // A closed sheet holds no focus: its writing line opens it.
                 *returning.borrow_mut() = true;
+                if dialog.matches(":popover-open").unwrap_or(false) {
+                    call_popover(dialog.unchecked_ref(), "hidePopover");
+                }
                 dialog.close();
                 dialog.set_open(true);
-                if let Ok(Some(focused)) = dialog.query_selector(":focus")
-                    && let Some(focused) = focused.dyn_ref::<web_sys::HtmlElement>()
+                if was_expanded
+                    && let Ok(Some(target)) =
+                        dialog.query_selector(".app-compose-modes [aria-pressed=\"true\"]")
+                    && let Some(target) = target.dyn_ref::<web_sys::HtmlElement>()
                 {
-                    let _ = focused.blur();
+                    let _ = target.focus();
                 }
                 *returning.borrow_mut() = false;
             }
@@ -177,4 +183,15 @@ fn use_dialog(
             drop(observed);
         }
     });
+}
+
+/// Reach the Popover API reflectively, matching the toast implementation so
+/// this stable build needs no additional `web-sys` feature.
+fn call_popover(element: &web_sys::Element, method: &str) {
+    if let Some(function) = js_sys::Reflect::get(element, &JsValue::from_str(method))
+        .ok()
+        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+    {
+        let _ = function.call0(element);
+    }
 }

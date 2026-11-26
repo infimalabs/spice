@@ -1059,12 +1059,10 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
 /* One borderless sheet hangs from the header. A separate rounded-end rail
    carries its bottom accent without rounding the editor or curling into the
    gutters.
-   It is laid out once, whole. Closed, its lower pixels are transparent and
-   the cut rests at the height of its Draft and Help tabs: their fill and rail,
-   no rim and no shadow, with the writing line beside the pair. Opening fades
-   those lower pixels into the already-laid-out sheet, so nothing it holds
-   moves or changes shape. The rail's stack of utility tabs, selector, action
-   and accent, one inset apart, sets the sheet's height. */
+   It is laid out once, whole. Closed, the cut rests at the shared top row:
+   the horizontal destination track beside Draft and Help. Opening fades the
+   editor, recipients, action and inbox into the already-laid-out sheet, so
+   nothing it holds moves or changes shape. */
 .app-compose-dialog.app-modal {
   --app-compose-sheet-opacity: 0;
   --app-compose-edge: var(--app-focus-ring-width);
@@ -1083,9 +1081,10 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   --app-compose-writing-start: 10px;
   --app-compose-writing-end: var(--app-compose-writing-start);
   --team-control-item-height: 36px;
-  --app-compose-selector-block: calc(4 * var(--team-control-item-height) + 3px);
-  --app-compose-sheet-block: calc(var(--app-compose-tab-block) + 3 * var(--app-compose-rail-inset) + var(--app-compose-selector-block) + var(--app-compose-rail-action) + var(--app-compose-accent-edge) - 2 * var(--app-compose-edge));
-  --app-compose-recipient-block: 50px;
+  --app-compose-selector-block: var(--app-compose-tab-block);
+  --app-compose-sheet-block: calc(var(--app-compose-tab-block) + 3 * var(--app-compose-rail-inset) + 4 * var(--team-control-item-height) + 3px + var(--app-compose-rail-action) + var(--app-compose-accent-edge) - 2 * var(--app-compose-edge));
+  --app-compose-recipient-block: 84px;
+  --app-compose-inbox-badge-inline: 28px;
   --app-compose-strip-block: 28px;
   --app-compose-open-min: min(var(--team-surface-min-inline), calc(100vw - var(--app-compose-inset) - var(--app-compose-end-inset)));
   inset: 0 auto auto var(--app-commandbar-inset-start);
@@ -1185,10 +1184,10 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   }
 }
 /* While closing, inert keeps the open-only controls unavailable as their
-   opacity fades. Settled closed state then hides them from paint and focus. */
-.app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit, .composer-shard-image-indicators > :not(.composer-shard-image-attach)) { visibility: hidden; }
+   opacity fades. The mode track remains the closed launch surface. */
+.app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-details, .app-compose-submit, .composer-shard-image-indicators > :not(.composer-shard-image-attach)) { visibility: hidden; }
 .app-compose-dialog[data-expanded="false"] .draft-quote-sections { display: none; }
-.app-compose-dialog[data-presented="false"] :is(.app-compose-modes-row, .app-compose-details, .app-compose-submit) { opacity: 0; }
+.app-compose-dialog[data-presented="false"] :is(.app-compose-details, .app-compose-submit) { opacity: 0; }
 /* The veil stands only while the sheet is presented. */
 .app-compose-dialog[data-presented="false"]::backdrop { opacity: 0; }
 /* Open, the sheet keeps the entry's width; only an entry squeezed below a
@@ -1223,7 +1222,7 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
    it takes the team SEND's ink and backlight. */
 .app-compose-submit {
   position: absolute;
-  inset-block-start: calc(var(--app-compose-tab-block) + 2 * var(--app-compose-rail-inset) + var(--app-compose-selector-block));
+  inset-block: auto calc(var(--app-compose-edge) + (var(--app-compose-recipient-block) - var(--app-compose-rail-action)) / 2);
   inset-inline-end: calc((var(--app-compose-rail-width) - var(--app-compose-rail-action)) / 2 + var(--app-compose-edge));
   width: var(--app-compose-rail-action);
   box-sizing: border-box;
@@ -1280,9 +1279,11 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   inset-inline-end: 0;
   display: flex;
   flex-direction: row-reverse;
-  width: calc(var(--app-compose-rail-width) + var(--app-compose-edge));
+  width: calc(var(--app-compose-rail-width) + var(--app-compose-edge) + var(--app-compose-inbox-badge-inline));
   height: var(--app-compose-tab-block);
+  box-sizing: border-box; padding-inline-start: var(--app-compose-inbox-badge-inline);
 }
+.app-compose-dialog .app-compose-inbox-count { inset-inline-start: 6px; }
 .app-compose-dialog .app-compose-utility-tab {
   flex: 1 1 0;
   justify-content: center;
@@ -1322,7 +1323,7 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
    one full viewport, while the stack scrolls without growing the sheet or its
    control rail. */
 .app-compose-dialog :is(#app-compose-trigger, .draft-context) { display: contents; }
-.app-compose-dialog .draft-context-stack { --composer-shard-block-size: calc(var(--app-compose-sheet-block) - var(--app-compose-recipient-block)); display: grid; order: -2; align-self: start; width: calc(100% - var(--app-compose-rail-width)); height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); }
+.app-compose-dialog .draft-context-stack { --composer-shard-block-size: calc(var(--app-compose-sheet-block) - var(--app-compose-tab-block) - var(--app-compose-recipient-block)); display: grid; order: -2; align-self: start; width: 100%; height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); margin-block-start: var(--app-compose-tab-block); }
 .app-compose-dialog .draft-context-editor { position: relative; order: 1; width: 100%; height: var(--composer-shard-block-size); min-height: var(--composer-shard-block-size); max-height: var(--composer-shard-block-size); }
 .app-compose-dialog .draft-context-heading { padding: 6px var(--app-spice-section-inset-inline) 0; }
 /* To and its choices stay centered in one reserved row of definite block size,
@@ -1338,35 +1339,33 @@ button.room-flow-control:disabled { cursor: not-allowed; opacity: .52; }
   padding-inline: var(--app-compose-writing-start) calc(var(--app-compose-rail-width) + var(--app-compose-writing-start));
   overflow: hidden;
 }
-/* The controls form one team-style inline-end rail: the Draft and Help tabs
-   above a vertical wide-thumb destination slider, then the circular
-   Send/Create action and the bottom accent, each one rail inset below the
-   last. */
+/* The four destinations form the closed strip's horizontal thumb track. Draft
+   and Help occupy its inline end; the same row remains mounted while open. */
 .app-compose-modes-row {
   position: absolute;
   z-index: 3;
-  inset-block-start: calc(var(--app-compose-tab-block) + var(--app-compose-rail-inset));
-  inset-inline-end: calc(var(--app-compose-rail-inset) + var(--app-compose-edge));
-  width: calc(var(--app-compose-rail-width) - 2 * var(--app-compose-rail-inset));
+  inset-block-start: 0;
+  inset-inline: 0 calc(var(--app-compose-rail-width) + var(--app-compose-edge) + var(--app-compose-inbox-badge-inline));
+  height: var(--app-compose-tab-block);
   padding: 0;
 }
 .app-compose-form > fieldset { min-block-size: var(--app-compose-sheet-block); }
 .app-segment-slider.app-compose-modes {
   --app-segment-count: 4;
-  --app-segment-face-block-size: calc((100% - 3px) / var(--app-segment-count));
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(var(--app-segment-count), var(--team-control-item-height));
-  block-size: var(--app-compose-selector-block);
+  grid-template-columns: repeat(var(--app-segment-count), minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  inline-size: 100%;
+  block-size: var(--app-compose-tab-block);
   max-inline-size: none;
-  border-radius: calc(var(--team-control-item-height) / 2);
+  border-radius: 0;
 }
 .app-compose-modes.app-segment-slider::before {
-  inset-block: auto;
-  inset-block-start: calc(var(--app-segment-stop) * (var(--app-segment-face-block-size) + 1px));
-  inset-inline: 2px;
-  inline-size: auto;
-  block-size: var(--app-segment-face-block-size);
-  transition: inset-block-start var(--app-motion-settle) var(--app-ease-standard);
+  inset-block: 2px;
+  inset-inline: auto;
+  inset-inline-start: calc(var(--app-segment-stop) * (var(--app-segment-face-inline-size) + 1px));
+  inline-size: var(--app-segment-face-inline-size);
+  block-size: auto;
+  transition: inset-inline-start var(--app-motion-settle) var(--app-ease-standard);
 }
 @media (prefers-reduced-motion: reduce) {
   .app-compose-modes.app-segment-slider::before { transition: none; }

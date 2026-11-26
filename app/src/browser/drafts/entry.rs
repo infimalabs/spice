@@ -241,7 +241,8 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
         <div ref={anchor} class="app-compose-entry"
             data-base-flavor={if mode.base_accent().is_some() { "accent" } else { "neutral" }}
             data-base-accent={mode.base_accent().map(|accent| accent.to_string())}>
-            <dialog ref={dialog.clone()} open=true id="app-compose-dialog"
+            {backdrop(&presentation, close.clone())}
+            <dialog ref={dialog.clone()} open=true popover="manual" id="app-compose-dialog"
                 class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge app-closed-edge--block-end"
                 data-expanded={presentation.expanded.to_string()}
                 data-presented={presentation.visible.to_string()}
@@ -260,9 +261,10 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                     // the utility controls live beside Help and state their
                     // own disabledness.
                     <fieldset disabled={busy}>
-                        <legend class="app-compose-modes-row">
+                        <div class="app-compose-modes-row" role="group" aria-label="Composer kind"
+                            onclick={expand.reform(|_: MouseEvent| ())}>
                             {mode_controls(&mode, busy)}
-                        </legend>
+                        </div>
                         <div id="app-compose-trigger" onfocusin={expand.reform(|_: FocusEvent| ())} onclick={expand.reform(|_: MouseEvent| ())}>
                             {render_context(NEW_DRAFT_KEY, &props.controls.composer, "10", None, mode.title_label(), (mode.placeholder(*expanded), mode.quote_placeholder()), true)}
                         </div>
@@ -285,9 +287,19 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     }
 }
 
+fn backdrop(presentation: &presentation::Presentation, close: Callback<()>) -> Html {
+    html! {
+        <button type="button" class="app-compose-backdrop app-overlay-veil"
+            data-presented={presentation.visible.to_string()}
+            hidden={!presentation.expanded}
+            aria-label="Close composer"
+            onclick={close.reform(|_: MouseEvent| ())} />
+    }
+}
+
 /// Bare mode keys outside text entry open the global composer at that
-/// destination. The same modal guard as Help leaves every active sheet in
-/// control of its own keyboard.
+/// destination. Native modals keep control of their own keyboard; otherwise
+/// the composer's shared Escape owner participates in newest-first dismissal.
 #[hook]
 fn use_mode_shortcuts(mode: &UseStateHandle<Mode>, open: &Callback<()>, busy: bool) {
     let current = use_mut_ref(|| (mode.clone(), open.clone(), busy));
@@ -656,8 +668,8 @@ fn submit_action(
     }
 }
 
-/// The vertical destination slider has the same four controls in every mode,
-/// so the rail never resizes under its moving thumb.
+/// The horizontal destination slider has the same four controls in every
+/// mode, so the closed strip and open sheet share one moving thumb.
 fn mode_controls(mode: &UseStateHandle<Mode>, sending: bool) -> Html {
     html! {
         <div class="app-control-rail app-segment-slider app-compose-modes" role="group" aria-label="Compose as"
