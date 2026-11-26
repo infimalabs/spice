@@ -96,6 +96,10 @@ same G and rack digest. The inventory carries no app files: the executable
 is the app's only carrier.
 The app source identity spells each relative path as UTF-8 components joined by
 `/` and orders inputs by that spelling, independent of the host path separator.
+The generation shell's `data-app-source` names that identity over every
+input; the Wasm carries the identity of only the inputs the compiler reads,
+excluding the shell, its stylesheets, and renderer sources, so a stylesheet
+edit publishes a new generation without recompiling the app crate.
 
 **Invariant —** The provider preflight compiles the release app exactly once.
 `.github/workflows/input.yml` checks out one exact landed `main` SHA,

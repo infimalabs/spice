@@ -83,7 +83,8 @@ use speech_runtime::{
 use view::{AppRender, render_app};
 use watchband::{ComposerDrafts, TeamControlAction, TeamControls, TeamRequest};
 
-/// Source identity injected by installed Spice `dev xtask -- app` and verified before publish.
+/// Identity of the compiled sources, injected by installed Spice `dev xtask -- app` and verified
+/// before publish. The shell's `data-app-source` names every input, stylesheets included.
 const APP_SOURCE_IDENTITY: &str = match option_env!("SPICE_APP_SOURCE_IDENTITY") {
     // env-policy: allow
     Some(identity) => identity,
@@ -1122,7 +1123,5 @@ pub fn start() {
         .expect("browser document")
         .get_element_by_id("app")
         .expect("app root");
-    root.set_attribute("data-app-source", APP_SOURCE_IDENTITY)
-        .expect("stamp app source identity");
     yew::Renderer::<AppRouter>::with_root(root).render();
 }

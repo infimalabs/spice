@@ -38,6 +38,7 @@ const SOURCE_DIRECTORIES: [&str; 2] = ["app/src", "wire/src"];
 pub(super) struct SourceSnapshot {
     inputs: BTreeMap<String, Digest>,
     identity: Digest,
+    compiled: Digest,
 }
 
 impl SourceSnapshot {
@@ -45,21 +46,36 @@ impl SourceSnapshot {
     pub(super) fn capture(root: &Path) -> Result<Self, AppBuildError> {
         let mut inputs = BTreeMap::new();
         let mut framed = Vec::new();
+        let mut compiled = Vec::new();
         for relative in source_paths(root)? {
             let path = root.join(&relative);
             let bytes = fs::read(&path).map_err(|source| AppBuildError::Io { path, source })?;
+            let start = framed.len();
             framed.extend_from_slice(&(relative.len() as u64).to_be_bytes());
             framed.extend_from_slice(relative.as_bytes());
             framed.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
             framed.extend_from_slice(&bytes);
+            if !copied_asset(&relative) {
+                compiled.extend_from_slice(&framed[start..]);
+            }
             inputs.insert(relative, Digest::compute(Domain::GateFile, &bytes));
         }
-        let identity = Digest::compute(Domain::DistInventory, &framed);
-        Ok(Self { inputs, identity })
+        Ok(Self {
+            inputs,
+            identity: Digest::compute(Domain::DistInventory, &framed),
+            compiled: Digest::compute(Domain::DistInventory, &compiled),
+        })
     }
 
+    /// Every input, assets included: what one published generation is from.
     pub(super) const fn identity(&self) -> &Digest {
         &self.identity
+    }
+
+    /// Only the inputs compilation reads, so the Wasm carries this identity and
+    /// an asset-only edit leaves rustc's environment, and its build, unchanged.
+    pub(super) const fn compiled(&self) -> &Digest {
+        &self.compiled
     }
 
     /// Refuse to pair output with an identity captured before a source moved.
@@ -91,6 +107,18 @@ fn source_paths(root: &Path) -> Result<Vec<String>, AppBuildError> {
     collect_directory(root, &renderer, &mut paths)?;
     paths.sort();
     Ok(paths)
+}
+
+/// Whether Trunk or staging copies `relative` into the generation without the
+/// compiler reading it: the page shell, its stylesheets, and renderer sources.
+fn copied_asset(relative: &str) -> bool {
+    let stylesheet = relative
+        .strip_prefix("app/")
+        .is_some_and(|name| !name.contains('/') && name.ends_with(".css"));
+    let renderer = relative
+        .strip_prefix(super::renderer::DIRECTORY)
+        .is_some_and(|rest| rest.starts_with('/'));
+    stylesheet || renderer || relative == "app/index.html"
 }
 
 pub(super) fn collect_directory(
@@ -302,6 +330,23 @@ mod tests {
             error.to_string().contains("app/src/worktree_only.rs"),
             "the changed source was not named: {error}"
         );
+    }
+
+    #[test]
+    fn a_copied_asset_edit_moves_only_the_full_identity() {
+        let tree = SourceTree::new();
+        let root = &tree.0;
+        let before = SourceSnapshot::capture(root).expect("capture fixture sources");
+        fs::write(root.join("app/compose_overlay.css"), "edited stylesheet")
+            .expect("edit stylesheet");
+        let styled = SourceSnapshot::capture(root).expect("capture edited stylesheet");
+        assert_ne!(styled.identity(), before.identity());
+        assert_eq!(styled.compiled(), before.compiled());
+
+        fs::write(root.join("app/src/lib.rs"), "edited module").expect("edit module");
+        let compiled = SourceSnapshot::capture(root).expect("capture edited module");
+        assert_ne!(compiled.identity(), styled.identity());
+        assert_ne!(compiled.compiled(), styled.compiled());
     }
 
     #[test]

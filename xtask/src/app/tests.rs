@@ -130,7 +130,8 @@ fn write_raw_generation(stage: &Path, label: &str, source_identity: &Digest, val
              <link href=\"/responsive.css\">\
              <script src=\"/app.js\"></script>\
              <link href=\"/app.js\"><link href=\"/app_bg.wasm\">{second_wasm}\
-             <main id=\"app\" data-app-generation=\"{APP_GENERATION_PLACEHOLDER}\">{label}</main>"
+             <main id=\"app\" data-app-generation=\"{APP_GENERATION_PLACEHOLDER}\" \
+             data-app-source=\"{APP_SOURCE_PLACEHOLDER}\">{label}</main>"
         ),
     )
     .expect("write shell");
@@ -142,6 +143,7 @@ fn publish_fixture(root: &Path, label: &str) {
     app_at(
         root,
         root,
+        &sources,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -287,6 +289,7 @@ fn foreign_wasm_with_right_css_cannot_publish() {
         &root,
         &root,
         &expected,
+        &expected,
         &mut Vec::new(),
         |stage, _| {
             write_raw_generation(stage, "right-css", &foreign, true);
@@ -318,6 +321,7 @@ fn missing_renderer_sources_cannot_publish() {
         &root,
         &root,
         &sources,
+        &sources,
         &mut Vec::new(),
         |stage, _| {
             write_raw_generation(stage, "missing-renderer", &sources, true);
@@ -348,6 +352,7 @@ fn renderer_sources_come_from_the_source_root_when_publishing_elsewhere() {
     let identity = app_at(
         &source_root,
         &publish_root,
+        &sources,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -383,7 +388,7 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
     write_raw_generation(&stage, "first", &sources, true);
     renderer::stage(&root, &stage).expect("renderer sources stage");
 
-    let identity = finalize_stage(&stage, &sources).expect("generated stage finalizes");
+    let identity = finalize_stage(&stage, &sources, &sources).expect("generated stage finalizes");
 
     let mut names = fs::read_dir(&stage)
         .expect("read stage")
@@ -414,7 +419,8 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
     );
     let shell = fs::read_to_string(stage.join("app.html")).expect("read shell");
     assert!(
-        shell.contains(&format!("data-app-generation=\"{identity}\"")),
+        shell.contains(&format!("data-app-generation=\"{identity}\""))
+            && shell.contains(&format!("data-app-source=\"{sources}\"")),
         "the shell does not name its loaded generation: {shell}"
     );
     assert!(shell.contains(wire::manifest::renderer::ATTRIBUTE));
@@ -440,18 +446,29 @@ fn finalization_produces_the_closed_worktree_stage_inventory() {
 #[test]
 fn a_current_generation_from_the_same_sources_stands_in_for_the_compiler() {
     let root = fixture("worktree-app-current");
-    assert_eq!(current_generation_of(&root, &fixture_source()), None);
+    assert_eq!(
+        current_generation_of(&root, &fixture_source(), &fixture_source()),
+        None
+    );
     publish_fixture(&root, "first");
     let current = spice::serve::AppSource::resolve(&root)
         .expect("published generation resolves")
         .current_generation()
         .expect("published generation is current");
     assert_eq!(
-        current_generation_of(&root, &fixture_source()).as_ref(),
+        current_generation_of(&root, &fixture_source(), &fixture_source()).as_ref(),
         Some(current.identity())
     );
     let edited = Digest::compute(Domain::DistInventory, b"edited app sources");
-    assert_eq!(current_generation_of(&root, &edited), None);
+    assert_eq!(
+        current_generation_of(&root, &edited, &fixture_source()),
+        None,
+        "a stylesheet-only edit keeps the compiled identity but owes a new generation"
+    );
+    assert_eq!(
+        current_generation_of(&root, &fixture_source(), &edited),
+        None
+    );
 
     // An archive beside the unchanged generation that no longer admits, as one
     // an earlier rack format wrote, is rewritten from the generation's files.
@@ -655,6 +672,7 @@ fn publication_switches_only_after_an_event_releases_the_complete_generation() {
                 &build_root,
                 &build_root,
                 &sources,
+                &sources,
                 &mut Vec::new(),
                 |stage, _| {
                     started_tx.send(()).expect("announce build barrier");
@@ -735,6 +753,7 @@ fn concurrent_stagings_of_the_same_sources_publish_one_generation() {
                             &root,
                             &root,
                             &sources,
+                            &sources,
                             &mut Vec::new(),
                             |stage, _| {
                                 write_raw_generation(stage, "shared", &sources, true);
@@ -794,6 +813,7 @@ fn a_failed_finalization_preserves_the_prior_pointer_or_first_build_absence() {
         &root,
         &root,
         &sources,
+        &sources,
         &mut Vec::new(),
         |stage, _| {
             write_raw_generation(stage, "broken", &sources, false);
@@ -816,6 +836,7 @@ fn a_failed_finalization_preserves_the_prior_pointer_or_first_build_absence() {
     app_at(
         &fresh,
         &fresh,
+        &sources,
         &sources,
         &mut Vec::new(),
         |stage, _| {
@@ -849,6 +870,7 @@ fn a_failed_build_preserves_the_prior_pointer_or_first_build_absence() {
         &root,
         &root,
         &sources,
+        &sources,
         &mut Vec::new(),
         |stage, _| fail_partial_build(stage),
         || Ok(()),
@@ -867,6 +889,7 @@ fn a_failed_build_preserves_the_prior_pointer_or_first_build_absence() {
     let error = app_at(
         &fresh,
         &fresh,
+        &sources,
         &sources,
         &mut Vec::new(),
         |stage, _| fail_partial_build(stage),
