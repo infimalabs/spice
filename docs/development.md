@@ -79,6 +79,7 @@ another executable test arm.
 | App WASM typecheck | `spice dev cargo -- app-wasm-typecheck` checks only `app` for `wasm32`. |
 | Browser | `spice dev xtask -- app-demo --open` stages current worktree app sources and serves them with the current native binary in an isolated disposable root; see [`app/BROWSER.md`](../app/BROWSER.md). Plain `spice demo` exercises the installed appliance and retains its recovery commands. Browser evidence is disposable. |
 | Commit | Stage the change, then run `spice gate prove ACTION` for one selected action, `spice gate prove --missing` for every missing proof, or `spice gate prove` for the full selected set; then `git commit`. |
+| Whole tree | `spice gate prove --all` proves the staged tree as if every path changed: every applicable reusable action and every Cargo typecheck and test shard, Windows typechecks included, reusing current receipts and listing each one. On a clean worktree it proves the checked-out commit. |
 | Gate change | `spice gate prove` and the commit hooks run the installed appliance's gate code, not current source. When a change edits gate logic, run each changed arm from current source against the staged tree with `spice dev xtask -- gate ARM` before relying on the installed gate. |
 
 The unscoped `spice dev xtask -- verify` refuses: repository-wide verification

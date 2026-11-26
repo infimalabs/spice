@@ -466,9 +466,35 @@ pub fn prepare_staged_actions_from_anchor(
     ambient: &Ambient,
     anchor: crate::gate::PreparedArm<'static>,
 ) -> Result<StagedActionSelection, ChangeGateError> {
+    prepare_actions(ambient, anchor, false)
+}
+
+/// Apply packaged action selection as if every path of the staged tree changed.
+///
+/// Whole-tree proof owes what introducing the complete tree would owe, so an
+/// unchanged commit still selects every applicable arm and every Cargo shard
+/// its paths reach.
+pub fn prepare_whole_tree_actions_from_anchor(
+    ambient: &Ambient,
+    anchor: crate::gate::PreparedArm<'static>,
+) -> Result<StagedActionSelection, ChangeGateError> {
+    prepare_actions(ambient, anchor, true)
+}
+
+fn prepare_actions(
+    ambient: &Ambient,
+    anchor: crate::gate::PreparedArm<'static>,
+    whole_tree: bool,
+) -> Result<StagedActionSelection, ChangeGateError> {
     let environment = child_environment(ambient)?;
-    let (selection, tests) = select_changes(&anchor, SelectionSurface::Packaged, &environment)?;
-    let cargo_tests = tests.cargo_selected(anchor.root(), anchor.changes());
+    let changes = if whole_tree {
+        anchor.paths()
+    } else {
+        anchor.changes()
+    };
+    let (selection, tests) =
+        select_changes(&anchor, changes, SelectionSurface::Packaged, &environment)?;
+    let cargo_tests = tests.cargo_selected(anchor.root(), changes);
     Ok(StagedActionSelection {
         anchor,
         selection,
@@ -562,7 +588,8 @@ fn run_with_selection(
     publish_phase_terminal(progress, "capture", capture_started, "success")?;
     publish_phase(progress, "selection", Some(anchor.changes().len()))?;
     let selection_started = Instant::now();
-    let (selection, test_execution) = select_changes(&anchor, surface, &environment)?;
+    let (selection, test_execution) =
+        select_changes(&anchor, anchor.changes(), surface, &environment)?;
     publish_selection(progress, &selection)?;
     publish_phase_terminal(progress, "selection", selection_started, "success")?;
 
@@ -686,8 +713,12 @@ fn settle_partial_state<W: Write + Send + ?Sized>(
                     .surface
                     .prepare_anchor(context.ambient, context.claim.clone())
                     .map_err(ChangeGateError::gate)?;
-                let (retry_selection, _) =
-                    select_changes(&retry, context.surface, context.environment)?;
+                let (retry_selection, _) = select_changes(
+                    &retry,
+                    retry.changes(),
+                    context.surface,
+                    context.environment,
+                )?;
                 if &retry_selection != context.selection || retry.source() != context.source {
                     return Err(ChangeGateError::refusal(
                         "change-gate-source-moved",
@@ -716,26 +747,24 @@ fn settle_partial_state<W: Write + Send + ?Sized>(
 
 fn select_changes(
     anchor: &crate::gate::PreparedArm<'_>,
+    changes: &[String],
     surface: SelectionSurface,
     environment: &Environment,
 ) -> Result<(ChangeSelectionReport, TestExecution), ChangeGateError> {
     let (selection, test_execution) = match surface {
         SelectionSurface::Packaged => {
             let policy = packaged_policy(anchor.root(), anchor.paths(), environment)?;
-            let selection = gate::select_change_gates(
-                anchor.source().clone(),
-                anchor.changes(),
-                &policy.selection,
-            )
-            .and_then(|selection| {
-                gate::compile_language_reach(
-                    anchor.root(),
-                    anchor.paths(),
-                    policy.selection.package_roots(),
-                    policy.selection.test_paths(),
-                    selection,
-                )
-            });
+            let selection =
+                gate::select_change_gates(anchor.source().clone(), changes, &policy.selection)
+                    .and_then(|selection| {
+                        gate::compile_language_reach(
+                            anchor.root(),
+                            anchor.paths(),
+                            policy.selection.package_roots(),
+                            policy.selection.test_paths(),
+                            selection,
+                        )
+                    });
             (
                 selection,
                 TestExecution::Packaged {
@@ -748,7 +777,7 @@ fn select_changes(
             let selection = gate::select_current_source_change_gates(
                 anchor.source().clone(),
                 anchor.paths(),
-                anchor.changes(),
+                changes,
                 &policy.generated_paths,
                 &policy.rules,
             )

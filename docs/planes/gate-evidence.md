@@ -73,6 +73,11 @@ directory, and a failed action's refusal carries a bounded tail and that path.
 A shell pipeline can mask the prover's exit status; preserve the status rather
 than inferring success from a filter or the last progress line.
 
+`spice gate prove --all` selects as if every staged path changed, so an
+unchanged commit still owes every applicable reusable action and Cargo shard.
+It reuses each current receipt, proves each missing one, and lists every
+receipt. Live-only actions publish no receipt and stay with pre-commit.
+
 Compiler output in `.spice/output/cargo/` and gate output in
 `.spice/output/gate/` each keep up to seven days of captures within 64 MiB per
 directory. Older captures go first under byte pressure; the current complete

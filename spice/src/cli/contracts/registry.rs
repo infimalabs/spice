@@ -210,7 +210,7 @@ pub(super) const CONTRACTS: &[Contract] = &[
     ),
     row!(
         ["gate", "prove"],
-        "gate prove [ACTION] [--missing] [--verbose]",
+        "gate prove [ACTION] [--missing] [--all] [--verbose]",
         Local,
         None,
         [],
