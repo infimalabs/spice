@@ -513,24 +513,21 @@
   padding-block-end: var(--app-compose-gap);
 }
 .app-compose-dialog [hidden] { display: none !important; }
-/* A phone's closed strip keeps the mirrored operator launcher and one selected
-   destination; opening restores the whole track, Draft, and Help. The track is
-   too narrow for equal tabs, so each destination starts from its label and the
-   spare width pads them all alike; a slimmer inset lets the four labels fit
-   down to a 320px viewport. */
+/* On a phone the left overlay mirrors the right one. Closed, only the
+   operator launcher stands in the header, as only the Spice launcher and its
+   totals do: the header has no room for a destination tab beside the totals,
+   so the sheet's box collapses and its contents leave paint, hit testing and
+   focus. Open, it takes the whole screen as the Spice menu does, with the
+   whole track, Draft, and Help. The track is too narrow for equal tabs, so each
+   destination starts from its label and the spare width pads them all alike; a
+   slimmer inset lets the four labels fit down to a 320px viewport. */
 @media (max-width: 560px) {
   .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
+  .app-compose-dialog.app-modal[data-expanded="true"] { width: 100vw; }
+  .app-compose-dialog.app-modal[data-expanded="false"] { width: 0; overflow: clip; }
+  .app-compose-dialog[data-expanded="false"] :is(.app-compose-form, .app-compose-utility-tabs) { visibility: hidden; }
   .app-compose-modes-row { padding: 0 4px; }
   .app-compose-dialog .app-compose-mode { flex-basis: auto; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-modes-row {
-    width: auto;
-    min-width: calc(var(--app-compose-anchor-width) + var(--app-compose-inset) - var(--app-compose-launcher-inline));
-    padding-inline-start: 0;
-  }
-  .app-compose-dialog[data-expanded="false"] .app-compose-mode:not([aria-pressed="true"]) { display: none; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-mode[aria-pressed="true"] { border-radius: 0 0 var(--app-radius-card) var(--app-radius-card); }
 }
 /* Where the two overlays cannot stand side by side, the open Spice overlay
    takes the screen and the left one waits beneath it. */
