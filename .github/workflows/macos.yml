@@ -511,7 +511,13 @@ jobs:
           "$finalizer/xtask" verify-staged-darwin "$work/unsigned-stage"
           "$finalizer/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$stage"
           "$finalizer/xtask" verify-staged-darwin "$stage"
-          runner="$finalizer/proof-native-darwin/bin/spice-proof-darwin-runner"
+          # The sealed runner admits only the environment build.sh pinned in the
+          # stage job: the exact toolchain path, the Cargo home directory, and the
+          # vendor closure below this workspace's ignored target directory.
+          rustup toolchain install 1.97.1-aarch64-apple-darwin --profile minimal --no-self-update
+          mkdir -p "$RUNNER_TEMP/bootstrap-cargo" "$GITHUB_WORKSPACE/target"
+          mv "$finalizer/proof-native-darwin" "$GITHUB_WORKSPACE/target/proof-native-darwin"
+          runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
           plan=$("$finalizer/spice" config proof.runner "$runner" \
             | sed -n 's/^digest = "\([0-9a-f]*\)"$/\1/p')
           test -n "$plan"
