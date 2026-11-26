@@ -28,28 +28,27 @@ version chunks an oversized frame whole instead of compacting or replacing it,
 so a refusal fails the lane. Capture reassembles chunks before they reach the
 tape, giving live decoding and replay the same bytes.
 
-The request then states queue and interrupt dispositions, the model OMP's
-catalog resolves, its effort, and fast mode, which outranks a resumed session's
-recorded tier. The first prompt waits for every exact correlated answer. A
+The request states queue and interrupt dispositions, the catalog-resolved
+model, effort, and fast mode, which outranks a resumed session's tier. A
 same-ID answer naming another command fails closed, as does any refusal except
 the exact no-tier fast-mode response ([refusals](loops.md)). Each remaining
-process argument in [`vendor/src/omp.rs`](../vendor/src/omp.rs) explains why no
-command replaces it. Each launch pins its configuration overlay and steering
-extension beside the occupant's supervisor record without changing
-global OMP settings. Unstated settings, including other model families' tiers,
-remain OMP-owned. The extension removes OMP's steering wrapper before the
-provider reads the lane's message.
+process argument in [`vendor/src/omp.rs`](../vendor/src/omp.rs) explains why it
+remains. Every launch pins its configuration overlay and steering extension
+beside the supervisor record; unstated settings remain OMP-owned. The extension
+removes OMP's steering wrapper before the provider reads the lane's message.
 
-The overlay's subagent and eval-tool restrictions, and its publishing gates,
-follow the inventory beside [`config_overlay`](../vendor/src/omp.rs). A seat
-never hosts a collab room, publishes images, sends tool output to Spotlight,
-or files auto-QA reports. Its registered host shell refuses `omp share`,
-`omp clip`, `omp stream`, `omp skill(s) publish`, `omp grievances push`, and
-`gh gist create` before launch; the overlay applies the same denies to omp's
-built-in bash route. These gates are not containment: eval-spawned processes,
-absolute-path executables, and hand-written network calls stay outside them.
+The overlay restrictions and publishing gates follow the inventory beside
+[`config_overlay`](../vendor/src/omp.rs). Seats disable collab, image
+publishing, Spotlight, and auto-QA. The registered host shell refuses
+`omp share`, `omp clip`, `omp stream`, `omp skill(s) publish`,
+`omp grievances push`, and `gh gist create` before launch, including through
+command substitution, `command` or `env` prefixes, and POSIX shell `-c`
+scripts; omp's built-in bash gets the same direct-command denies. These gates
+are not containment: eval-spawned processes, absolute-path executables, and
+hand-written network calls stay outside them.
 
-The first turn is one `prompt` request with follow-up admission. A fresh or
+The first turn is one `prompt` request with follow-up admission and waits for
+every exact correlated answer. A fresh or
 idle session starts it immediately; a resumed session that restored an
 in-flight turn queues it once behind that owner, so OMP answers accepted or
 queued instead of exposing its transient busy refusal. Other prompt refusals

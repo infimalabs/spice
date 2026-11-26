@@ -302,12 +302,38 @@ fn the_registered_shell_refuses_publishing_routes_before_launch() {
             "{command}"
         );
     }
+    for (command, route) in [
+        ("echo \"$(omp share)\"", "omp share"),
+        ("printf ready `omp clip`", "omp clip"),
+        ("command omp stream", "omp stream"),
+        ("command -p omp skill publish", "omp skill publish"),
+        ("env omp skills publish", "omp skills publish"),
+        ("env READY=yes omp grievances push", "omp grievances push"),
+        ("READY=1 omp share", "omp share"),
+        ("ONE=1 TWO='ready now' gh gist create", "gh gist create"),
+        ("env -i gh gist create", "gh gist create"),
+        ("sh -c 'omp share'", "omp share"),
+        ("bash -ec 'gh gist create'", "gh gist create"),
+    ] {
+        assert_eq!(
+            omp::ShellCall::parse(&arguments(command)),
+            Err(format!(
+                "shell refuses publishing command `{route}` in an omp seat"
+            )),
+            "{command}"
+        );
+    }
     for command in [
         "omp session pack",
         "omp config --help",
         "printf '%s' 'omp share'",
         "printf '%s' '\"omp\" share'",
         "echo gh gist create",
+        "printf '%s' READY=1 omp share",
+        "printf '%s' '$(omp share)'",
+        "command -v omp share",
+        "env -u omp printf '%s' 'omp share'",
+        "sh -c 'printf \"%s\" \"omp share\"'",
     ] {
         assert!(
             omp::ShellCall::parse(&arguments(command)).is_ok(),
