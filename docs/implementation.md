@@ -42,9 +42,10 @@ The overlay restrictions and publishing gates follow the inventory beside
 publishing, Spotlight, and auto-QA. The registered host shell refuses
 `omp share`, `omp clip`, `omp stream`, `omp skill(s) publish`,
 `omp grievances push`, and `gh gist create` before launch, including through
-command substitution, `command` or `env` prefixes, and POSIX shell `-c`
-scripts; omp's built-in bash gets the same direct-command denies. These gates
-are not containment: eval-spawned processes, absolute-path executables, and
+command substitution, `command` or `env` prefixes, POSIX shell `-c` scripts,
+and control-list prefixes such as negation, conditionals, and loops; omp's
+built-in bash gets the same direct-command denies. These gates are not
+containment: eval-spawned processes, absolute-path executables, and
 hand-written network calls stay outside them.
 
 The first turn is one `prompt` request with follow-up admission and waits for

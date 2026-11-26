@@ -25,8 +25,9 @@ pub(super) fn command(command: &str) -> Option<&'static str> {
 }
 
 fn command_bytes(bytes: &[u8]) -> Option<&'static str> {
-    const EXECUTABLES: [&[u8]; 8] = [
-        b"omp", b"gh", b"command", b"env", b"sh", b"bash", b"dash", b"zsh",
+    const EXECUTABLES: [&[u8]; 17] = [
+        b"omp", b"gh", b"command", b"env", b"sh", b"bash", b"dash", b"zsh", b"!", b"if", b"then",
+        b"elif", b"else", b"while", b"until", b"do", b"time",
     ];
     const OMP_COMMANDS: [&[u8]; 6] = [
         b"share",
@@ -89,6 +90,16 @@ fn command_bytes(bytes: &[u8]) -> Option<&'static str> {
             }
             Some(4..=7) => {
                 if let Some(route) = shell_script(bytes, index) {
+                    return Some(route);
+                }
+            }
+            Some(8..=15) => {
+                if let Some(route) = command_bytes(&bytes[index..]) {
+                    return Some(route);
+                }
+            }
+            Some(16) => {
+                if let Some(route) = command_prefix(bytes, index) {
                     return Some(route);
                 }
             }
@@ -377,12 +388,12 @@ fn next_word(bytes: &[u8], index: &mut usize, candidates: &[&[u8]]) -> Option<us
 }
 
 fn take_word(bytes: &[u8], index: &mut usize, candidates: &[&[u8]]) -> Option<usize> {
-    debug_assert!(candidates.len() <= u8::BITS as usize);
-    let mut possible = ((1_u16 << candidates.len()) - 1) as u8;
+    debug_assert!(candidates.len() <= u32::BITS as usize);
+    let mut possible = ((1_u64 << candidates.len()) - 1) as u32;
     let mut normalized_len = 0;
     let mut quote = None;
     let mut saw_word = false;
-    let compare = |actual: u8, possible: &mut u8, normalized_len: &mut usize| {
+    let compare = |actual: u8, possible: &mut u32, normalized_len: &mut usize| {
         for (candidate, expected) in candidates.iter().enumerate() {
             if expected.get(*normalized_len).copied() != Some(actual) {
                 *possible &= !(1 << candidate);

@@ -314,6 +314,15 @@ fn the_registered_shell_refuses_publishing_routes_before_launch() {
         ("env -i gh gist create", "gh gist create"),
         ("sh -c 'omp share'", "omp share"),
         ("bash -ec 'gh gist create'", "gh gist create"),
+        ("! omp share", "omp share"),
+        ("if omp clip; then :; fi", "omp clip"),
+        ("if false; then gh gist create; fi", "gh gist create"),
+        ("while omp stream; do :; done", "omp stream"),
+        (
+            "until false; do omp skill publish; done",
+            "omp skill publish",
+        ),
+        ("time -p omp grievances push", "omp grievances push"),
     ] {
         assert_eq!(
             omp::ShellCall::parse(&arguments(command)),
@@ -334,6 +343,8 @@ fn the_registered_shell_refuses_publishing_routes_before_launch() {
         "command -v omp share",
         "env -u omp printf '%s' 'omp share'",
         "sh -c 'printf \"%s\" \"omp share\"'",
+        "printf '%s' 'if omp share; then gh gist create; fi'",
+        "echo '! omp share'",
     ] {
         assert!(
             omp::ShellCall::parse(&arguments(command)).is_ok(),
