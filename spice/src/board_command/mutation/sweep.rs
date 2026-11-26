@@ -288,6 +288,7 @@ fn commit_sweep(
     let answer = wire::intent::TaskAnswer {
         diagnostic,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created,

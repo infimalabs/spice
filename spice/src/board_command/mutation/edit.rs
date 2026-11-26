@@ -135,6 +135,7 @@ fn publish_relations(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(snapshot.ownership(entry)),
         placement: None,
         created: Default::default(),
@@ -599,6 +600,7 @@ fn publish_correction(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         ownership: Some(ownership),
         placement: None,
         created: Default::default(),

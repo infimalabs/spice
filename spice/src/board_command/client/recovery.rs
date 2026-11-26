@@ -594,6 +594,7 @@ fn reconcile_client_recovery(
                         CommandAnswer::Task(Box::new(wire::intent::TaskAnswer {
                             diagnostic: None,
                             duplicates: Vec::new(),
+                            duplicates_omitted: 0,
                             placement: None,
                             created: Default::default(),
                             ownership: None,

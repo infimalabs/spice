@@ -234,6 +234,7 @@ fn commit_shared_arrival(
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
         duplicates: Vec::new(),
+        duplicates_omitted: 0,
         placement: None,
         created: Default::default(),
         taste: None,
