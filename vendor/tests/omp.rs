@@ -382,7 +382,9 @@ fn the_compaction_threshold_rides_an_overlay_the_lane_must_have_written() {
     // its `--config` overlay; the layout is omp's own config.yml.
     assert_eq!(
         omp::config_overlay(170_000, false),
-        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
+        format!(
+            "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n{PUBLISHING_GATES}"
+        )
     );
 
     let mut unwritten = fixture(Resume::Fresh);
@@ -394,6 +396,11 @@ fn the_compaction_threshold_rides_an_overlay_the_lane_must_have_written() {
         }
     );
 }
+
+/// The publishing gates omp 18 reads from a `--config` overlay: they outrank a
+/// global config that turns each feature on, and each deny holds under yolo
+/// approval, alone or as one segment of a compound command.
+const PUBLISHING_GATES: &str = "collab:\n  autoStart: \"off\"\nimages:\n  urls:\n    enabled: false\nspotlight:\n  experiment:\n    enabled: false\ndev:\n  autoqa: false\nbash:\n  patterns:\n    - match: \"omp share*\"\n      approval: deny\n    - match: \"omp clip*\"\n      approval: deny\n    - match: \"omp stream*\"\n      approval: deny\n    - match: \"omp skill publish*\"\n      approval: deny\n    - match: \"omp skills publish*\"\n      approval: deny\n    - match: \"omp grievances push*\"\n      approval: deny\n    - match: \"gh gist create*\"\n      approval: deny\n";
 
 #[test]
 fn the_language_server_disposition_names_the_tool_and_keeps_its_servers_in_the_lane() {
@@ -415,7 +422,9 @@ fn the_language_server_disposition_names_the_tool_and_keeps_its_servers_in_the_l
     // which is exactly the process the lane could neither see nor reap.
     assert_eq!(
         omp::config_overlay(170_000, true),
-        "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: true\n  shared: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n"
+        format!(
+            "compaction:\n  thresholdTokens: 170000\nlsp:\n  enabled: true\n  shared: false\neval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n{PUBLISHING_GATES}"
+        )
     );
 
     let mut implicit = fixture(Resume::Fresh);

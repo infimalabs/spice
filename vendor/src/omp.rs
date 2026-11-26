@@ -437,6 +437,20 @@ fn render(
 ///
 /// OpenAI live steering is explicitly disabled so queued steering lands at
 /// normal command boundaries.
+///
+/// Nothing in a seat publishes off the machine, whatever the global omp
+/// config says. `collab.autoStart` stays off, so no session is replicated
+/// through the collab relay. `images.urls.enabled` is false, so outgoing
+/// images never reach the publication chain, whose default ends at the public
+/// litterbox host. `spotlight.experiment.enabled` is false, so tool output is
+/// not sent to Stencil for shaping. `dev.autoqa` is false, so the model is not
+/// told to file tool-issue reports, which `omp grievances push` uploads.
+/// The seat's stdin carries only Spice-rendered text, so omp's `/share` and
+/// `/collab` are unreachable; their command-line forms are not. The bash
+/// rules denying `PUBLISHING_COMMANDS` are absolute under the seat's yolo
+/// approval, and project config cannot loosen an overlay's deny. These are
+/// settings and approval gates, not containment: a process eval spawns, an
+/// omp binary named by path, or a hand-written network call is outside them.
 #[must_use]
 pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
     let mut overlay = format!("compaction:\n  thresholdTokens: {auto_compact_threshold_tokens}\n");
@@ -448,8 +462,29 @@ pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
     overlay.push_str(
         "eval:\n  tools:\n    enabled: false\ncommit:\n  enabled: false\ntask:\n  maxRecursionDepth: 0\ntodo:\n  reminders: false\nproviders:\n  openaiLiveSteering: false\n",
     );
+    overlay.push_str(
+        "collab:\n  autoStart: \"off\"\nimages:\n  urls:\n    enabled: false\nspotlight:\n  experiment:\n    enabled: false\ndev:\n  autoqa: false\nbash:\n  patterns:\n",
+    );
+    for command in PUBLISHING_COMMANDS {
+        overlay.push_str("    - match: \"");
+        overlay.push_str(command);
+        overlay.push_str("*\"\n      approval: deny\n");
+    }
     overlay
 }
+
+/// The command-line routes by which omp, or the `gh` that omp's gist share
+/// store drives, uploads a session, screen, recording, skill, or tool report.
+/// Each is denied with every argument that follows it.
+const PUBLISHING_COMMANDS: [&str; 7] = [
+    "omp share",
+    "omp clip",
+    "omp stream",
+    "omp skill publish",
+    "omp skills publish",
+    "omp grievances push",
+    "gh gist create",
+];
 
 /// The extension a lane writes beside its overlay and loads with
 /// `--extension`, so the provider reads each steered message as the lane
