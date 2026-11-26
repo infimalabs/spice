@@ -148,15 +148,12 @@ impl DuplicateScreen {
             let Some(first) = first else {
                 return Ok(());
             };
-            let Some(heads) = read.changed_task_heads(first, current)?.into_iter().next() else {
+            if !read.task_statement_workflow_or_topic_changed(first, current)? {
                 return Ok(());
-            };
-            let statement = heads.statement().body();
-            Err(GuardError::refused(format!(
-                "task::duplicate-screen-moved: {} {:?} changed after duplicate screening",
-                statement.handle(heads.workflow().body().phase),
-                statement.title,
-            )))
+            }
+            Err(GuardError::refused(
+                "task::duplicate-screen-moved: a task statement, workflow, or topic changed after duplicate screening",
+            ))
         }));
     }
 }
