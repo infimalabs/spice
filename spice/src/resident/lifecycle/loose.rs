@@ -51,15 +51,21 @@ impl Loose {
         &mut self,
         targets: &mut [Target<'_>],
         snapshot: &bus::TaskSnapshot,
+        ambient: &spice::ambient::Ambient,
         diagnostic: &mut dyn std::io::Write,
     ) {
-        self.judge_exits(snapshot, diagnostic);
+        self.judge_exits(snapshot, ambient, diagnostic);
         for target in targets {
             target.loose_worktree = target.held_claim == Available::None && self.due(target.lane);
         }
     }
 
-    fn judge_exits(&mut self, snapshot: &bus::TaskSnapshot, diagnostic: &mut dyn std::io::Write) {
+    fn judge_exits(
+        &mut self,
+        snapshot: &bus::TaskSnapshot,
+        ambient: &spice::ambient::Ambient,
+        diagnostic: &mut dyn std::io::Write,
+    ) {
         if self.exited.is_empty() {
             return;
         }
@@ -80,7 +86,7 @@ impl Loose {
                 self.lanes.remove(&lane);
                 continue;
             }
-            match spice::task_git::loose_work(Path::new(&row.worktree)) {
+            match spice::task_git::loose_work(Path::new(&row.worktree), ambient) {
                 Ok(work) => self.judge(lane, work.is_loose().then(|| work.fingerprint())),
                 Err(error) => {
                     let _ = writeln!(
