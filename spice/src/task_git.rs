@@ -989,11 +989,7 @@ fn boundary(
 /// that declares no pairing integrates into `origin`'s HEAD branch; a
 /// repository with no `origin` then has no target.
 fn resolve_target(root: Worktree<'_>) -> Result<Option<Target>, Error> {
-    let lane = required_read(
-        root,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
-        "resolve current branch",
-    )?;
+    let lane = current_branch(root)?;
     let environment = root
         .ambient
         .environment()
@@ -1049,6 +1045,26 @@ fn resolve_target(root: Worktree<'_>) -> Result<Option<Target>, Error> {
         remote,
         branch,
     }))
+}
+
+/// The lane's checked-out branch. Lane work integrates through a branch, so a
+/// detached HEAD is the operator's to fix, not a Git fault: `symbolic-ref
+/// --quiet` exits 1 exactly when HEAD names a commit instead of a branch.
+fn current_branch(root: Worktree<'_>) -> Result<String, Error> {
+    const DETACHED: i32 = 1;
+    let output = run(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    match output.status {
+        0 => Ok(output.stdout.trim().to_owned()),
+        DETACHED => Err(Error::refusal(
+            "git::head-detached",
+            "the lane worktree's HEAD is detached, so it has no branch to carry task work",
+            "switch the worktree to a branch (git switch BRANCH or git switch -c BRANCH) and retry",
+        )),
+        _ => Err(Error::fault(
+            "git::command-failed",
+            output.detail("resolve current branch"),
+        )),
+    }
 }
 
 fn fetch(root: Worktree<'_>, target: &Target) -> Result<(), Error> {
