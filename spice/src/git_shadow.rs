@@ -50,6 +50,25 @@ pub fn environment(repository: &Repository, base: Environment) -> Result<Environ
     })
 }
 
+/// The system-scope config file native Git reads under `environment` with this
+/// module's shadow removed: the file task completion and the reference guard
+/// read, and the one the shadow includes. `None` when Git reports none.
+///
+/// # Errors
+///
+/// Returns an error when Git cannot launch or answers with non-text.
+pub fn native_system_config(
+    root: &Path,
+    environment: &Environment,
+) -> Result<Option<PathBuf>, Error> {
+    let native = native_environment(environment);
+    let path = system_config_path(
+        &mut |arguments, environment| git_read(root, arguments, environment),
+        &native,
+    )?;
+    Ok(path.map(PathBuf::from))
+}
+
 /// Activate the repository's installed Git hooks for one child environment.
 ///
 /// Two command-scope conditional includes select the installed hook config for

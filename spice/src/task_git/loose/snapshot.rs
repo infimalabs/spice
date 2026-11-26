@@ -5,20 +5,9 @@ use gix::bstr::{BStr, ByteSlice as _};
 
 use super::*;
 
-pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
-    read_with_system(root, ambient, None)
-}
-
-#[cfg(test)]
-pub(super) fn read_with_native_system(
-    root: &Path,
-    ambient: &Ambient,
-    system: &Path,
-) -> Result<LooseWork, Error> {
-    read_with_system(root, ambient, Some(system))
-}
-
-fn read_with_system(
+/// Read the loose work at `root`, loading `native_system` as the system scope
+/// unless Ambient disables it, as native Git would.
+pub(super) fn read(
     root: &Path,
     ambient: &Ambient,
     native_system: Option<&Path>,
@@ -56,10 +45,9 @@ fn read_with_system(
             "gix could not decode the worktree index",
         )
     })??;
-    let shadow = generated_shadow(ambient);
     let baseline = branch
         .as_deref()
-        .map(|branch| integration_baseline(&repository, branch, shadow.as_deref()))
+        .map(|branch| integration_baseline(&repository, branch))
         .transpose()?
         .flatten();
     Ok(LooseWork {
@@ -94,13 +82,12 @@ fn native_config(
     ambient: &Ambient,
     native_system: Option<&Path>,
 ) -> Result<gix::config::File, Error> {
-    let shadow = generated_shadow(ambient);
     let home = ambient.get("HOME").map(PathBuf::from);
     let branch = repository
         .head_name()
         .map_err(|error| fault("git::head-unreadable", "read HEAD name", error))?;
     let mut environment = |name: &str| native_variable(ambient, name);
-    let system = system_config(ambient, shadow.as_deref(), native_system)
+    let system = system_config(ambient, native_system)
         .map(|path| gix::config::file::Metadata::from(gix::config::Source::System).at(path));
     let mut sources = system.into_iter().chain(
         gix::config::source::Kind::Global
@@ -150,22 +137,12 @@ fn native_config(
     Ok(config)
 }
 
-fn system_config(
-    ambient: &Ambient,
-    generated_shadow: Option<&Path>,
-    native_system: Option<&Path>,
-) -> Option<PathBuf> {
+fn system_config<'a>(ambient: &Ambient, native_system: Option<&'a Path>) -> Option<&'a Path> {
     let disabled = ambient
         .get("GIT_CONFIG_NOSYSTEM")
         .and_then(|value| gix::config::Boolean::try_from(OsString::from(value)).ok())
         .is_some_and(|value| value.0);
-    if disabled {
-        return None;
-    }
-    generated_shadow
-        .map(Path::to_path_buf)
-        .or_else(|| native_system.map(Path::to_path_buf))
-        .or_else(|| gix::config::Source::System.storage_location(&mut |_| None))
+    native_system.filter(|_| !disabled)
 }
 
 fn native_variable(ambient: &Ambient, name: &str) -> Option<OsString> {
@@ -177,14 +154,6 @@ fn native_variable(ambient: &Ambient, name: &str) -> Option<OsString> {
         return None;
     }
     ambient.get(name).map(OsString::from)
-}
-
-fn generated_shadow(ambient: &Ambient) -> Option<PathBuf> {
-    let path = PathBuf::from(ambient.get("GIT_CONFIG_SYSTEM")?);
-    fs::read(&path)
-        .ok()
-        .filter(|content| crate::git_shadow::is_generated_shadow(content))
-        .map(|_| path)
 }
 
 fn dirty_state(
@@ -310,11 +279,10 @@ fn staged_fingerprint(change: &gix::diff::index::Change) -> u64 {
 fn integration_baseline(
     repository: &gix::Repository,
     branch: &str,
-    shadow: Option<&Path>,
 ) -> Result<Option<String>, Error> {
     let config = repository.config_snapshot();
-    let remote = config_value(&config, branch, "remote", shadow)?;
-    let merge = config_value(&config, branch, "merge", shadow)?;
+    let remote = config_value(&config, branch, "remote")?;
+    let merge = config_value(&config, branch, "merge")?;
     let pairing = match (remote, merge) {
         (None, None) => None,
         (Some(remote), Some(merge)) => Some((remote, merge)),
@@ -359,15 +327,9 @@ fn config_value(
     config: &gix::config::Snapshot<'_>,
     branch: &str,
     name: &str,
-    shadow: Option<&Path>,
 ) -> Result<Option<String>, Error> {
     let mut value = None;
-    let Some(sections) = config
-        .plumbing()
-        .sections_by_name_and_filter("branch", |metadata| {
-            shadow.is_none_or(|shadow| metadata.path.as_deref() != Some(shadow))
-        })
-    else {
+    let Some(sections) = config.plumbing().sections_by_name("branch") else {
         return Ok(None);
     };
     for section in sections {
