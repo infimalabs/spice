@@ -223,9 +223,10 @@ operator-avatar launcher mirrors the Spice button's size and browser-edge
 position, shows the operator's face edge to edge inside a hairline rim with no
 initials band, opens or closes the human side, and carries the personal inbox's
 open-count badge. Check that the editor's DOM identity, typed text and
-selection survive expansion, dismissal and conversion. Closed, the face floats
-free and the tabs hang alone, with no strip surface or edge; opening fades the
-glass in behind them, and the sheet is cut off and out of the Tab order.
+selection survive expansion, dismissal and conversion. Closed, the face shows
+its whole rim and shadow on the bare header and the tabs hang alone, with
+no strip surface, edge or clip; opening fades the glass in behind them, moving
+neither face nor tab, and the sheet is cut off and out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused and fades in the shared page veil; dismissal fades the veil out. Open,
 the sheet runs to the viewport's foot: editor, To row with Send/Create, then
@@ -239,9 +240,7 @@ Escape closes the newest first. Opening the strip while Spice is open must
 work the same. On a phone the closed strip shows the operator launcher and
 current destination; with both overlays requested, Spice takes the screen and
 the left sheet returns when it closes. In both themes and inline directions,
-look for a bright hook in either gutter, an inner edge, doubled ring or seam.
-Opening must not move or rewrap the already-laid-out editor.
-By
+look for a bright hook in either gutter, an inner edge, doubled ring or seam. By
 keyboard, each agent checkbox announces its name and state, Best-matched is
 pressed only with none chosen, and choosing never resizes the dialog. Several
 chosen agents each get one card and one toast names every outcome; a refusal
@@ -292,12 +291,6 @@ each run's outside lower corners round, each tab owns its lower border, and no
 strip-wide divider or accent rail crosses them. Check each kind's
 [accent](OVERVIEW.md#drafts-and-oops-intake) in both themes; Draft is inert
 for Ask.
-
-With the composer closed, the operator launcher must show its complete circular
-rim and shadow over the command bar's primary page material. The closed
-top-layer dialog begins after the launcher, so no dialog paint or clip may
-cross it. Opening restores the sheet behind the launcher without moving the
-launcher or any destination, DRAFT or HELP tab. Repeat at phone width.
 
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
