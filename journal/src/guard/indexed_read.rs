@@ -695,6 +695,47 @@ impl JournalRead<'_> {
         Ok(bundles)
     }
 
+    /// Whether one task statement, workflow, or topic head changed inside a
+    /// committed range. Claim, lease, and completion-only maintenance is
+    /// deliberately excluded.
+    pub fn task_statement_workflow_or_topic_changed(
+        &self,
+        first: wire::Seq,
+        last: wire::Seq,
+    ) -> Result<bool, GuardError> {
+        let Some(cursor) = self.cursor else {
+            return Err(GuardError::Invalid(
+                "changed task inputs require a durable cursor".to_owned(),
+            ));
+        };
+        if first > last || last > cursor {
+            return Err(GuardError::Invalid(format!(
+                "changed task input range {first}..={last} is outside cursor {cursor}"
+            )));
+        }
+        let first = i64::try_from(first.get())
+            .map_err(|_| GuardError::Invalid("task input range exceeds SQLite".to_owned()))?;
+        let last = i64::try_from(last.get())
+            .map_err(|_| GuardError::Invalid("task input range exceeds SQLite".to_owned()))?;
+        read_metrics::observe_query();
+        self.connection
+            .query_row(
+                "SELECT EXISTS(\
+                    SELECT 1 FROM task_heads \
+                        WHERE head_seq >= ?1 AND head_seq <= ?2 \
+                    UNION ALL SELECT 1 FROM workflow_heads \
+                        WHERE head_seq >= ?1 AND head_seq <= ?2 \
+                           OR revised_seq >= ?1 AND revised_seq <= ?2 \
+                    UNION ALL SELECT 1 FROM topic_heads \
+                        WHERE head_seq >= ?1 AND head_seq <= ?2 \
+                    LIMIT 1\
+                 )",
+                params![first, last],
+                |row| row.get(0),
+            )
+            .map_err(GuardError::Store)
+    }
+
     /// Tasks whose rendered topic moved because a node at or above theirs was
     /// created, renamed, or moved inside the range.
     fn tasks_under_topics_changed(&self, first: i64, last: i64) -> Result<Vec<String>, GuardError> {

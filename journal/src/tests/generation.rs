@@ -44,6 +44,14 @@ fn mutations_advance_once_per_transaction_and_only_the_holder_keeps_pace() {
         vec![task.clone()],
         "an in-place revision is a change a position-following reader sees"
     );
+    assert!(
+        journal
+            .read(|read| {
+                read.task_statement_workflow_or_topic_changed(applied.first(), applied.last())
+            })
+            .expect("task input movement reads"),
+        "an in-place workflow revision moves task matching inputs"
+    );
 
     let third = note(&mut journal, &holder, &task, 1);
     assert_eq!(
@@ -51,7 +59,7 @@ fn mutations_advance_once_per_transaction_and_only_the_holder_keeps_pace() {
         (3, 1),
         "a trailing claim stays behind"
     );
-    free(&mut journal, &task);
+    let freed = free(&mut journal, &task);
     assert_eq!(
         settled(&journal, &task),
         (3, 1),
@@ -61,6 +69,14 @@ fn mutations_advance_once_per_transaction_and_only_the_holder_keeps_pace() {
         workflow(&journal, &task).position(),
         transition,
         "no mutation here moved the workflow transition"
+    );
+    assert!(
+        !journal
+            .read(|read| {
+                read.task_statement_workflow_or_topic_changed(freed.first(), freed.last())
+            })
+            .expect("claim-only movement reads"),
+        "claim-only maintenance does not move task matching inputs"
     );
     let recorded = [(1, first.last()), (2, applied.last()), (3, third.last())];
     assert_eq!(advances(&journal, &task, 0, 8), recorded);
@@ -161,7 +177,7 @@ fn note(
     journal.apply(write).expect("wakes commit")
 }
 
-fn free(journal: &mut Journal, task: &TaskStamp) {
+fn free(journal: &mut Journal, task: &TaskStamp) -> crate::guard::Applied {
     let mut head = heads(journal, task)
         .latest_claim()
         .expect("claim exists")
@@ -189,7 +205,7 @@ fn free(journal: &mut Journal, task: &TaskStamp) {
         head.fact = position;
         head
     });
-    journal.apply(write).expect("release commits");
+    journal.apply(write).expect("release commits")
 }
 
 fn workflow(journal: &Journal, task: &TaskStamp) -> crate::guard::JournalHead<WorkflowHead> {
