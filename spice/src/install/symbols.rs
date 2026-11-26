@@ -1,9 +1,11 @@
 //! Authenticated macOS dSYM retention beside the installed executable.
 //!
-//! A package install carries one `MacSymbolArtifact` bound to the exact
-//! executable it ships. The installer republishes that bundle beside the
-//! executable and records its provenance in the same receipt, so the pair
-//! publishes, refreshes, rolls back, and unapplies as one generation.
+//! A package payload may bind one `MacSymbolArtifact` to the exact executable
+//! it ships. When the package carries that artifact, the installer
+//! republishes the bundle beside the executable and records its provenance in
+//! the same receipt, so the pair publishes, refreshes, rolls back, and
+//! unapplies as one generation. Published release evidence omits symbols, so
+//! a package without the artifact installs the executable alone.
 
 use std::fs;
 use std::io::{self, Read};
@@ -113,19 +115,30 @@ pub(super) struct Source {
 impl Source {
     /// Resolve the symbols bound to `binary`, if any.
     ///
-    /// A package install carries an authenticated symbol artifact: its
-    /// payload names the artifact for the Darwin target and forbids one for
-    /// Linux. A worktree build carries no payload, so it instead looks beside
-    /// the executable for the sibling dSYM a symbol-generating build writes
-    /// (see [`Self::resolve_worktree`]). A build selected from neither place
-    /// publishes no symbols, and that absence is not an error.
+    /// A packaged executable resolves through its sealed payload (see
+    /// [`Self::resolve_package`]). A worktree build carries no payload, so it
+    /// instead looks beside the executable for the sibling dSYM a
+    /// symbol-generating build writes (see [`Self::resolve_worktree`]). A
+    /// build selected from neither place publishes no symbols, and that
+    /// absence is not an error.
     pub(super) fn resolve(
         repository: &Repository,
         binary: &Path,
     ) -> Result<Option<Self>, InstallError> {
-        let Some((_, target_root)) = super::canvas::package_layout(binary) else {
-            return Self::resolve_worktree(binary, || worktree_git_state(repository));
-        };
+        match super::canvas::package_layout(binary) {
+            Some((_, target_root)) => Self::resolve_package(binary, target_root),
+            None => Self::resolve_worktree(binary, || worktree_git_state(repository)),
+        }
+    }
+
+    /// Resolve the symbol artifact a sealed package payload binds to `binary`.
+    ///
+    /// The payload names symbol metadata for the Darwin target and forbids it
+    /// for Linux and Windows. Release evidence omits the artifact itself, so
+    /// an absent artifact publishes no symbols; a present one must match the
+    /// payload and bind the exact executable, UUID, and commit, or the
+    /// install refuses.
+    fn resolve_package(binary: &Path, target_root: &Path) -> Result<Option<Self>, InstallError> {
         let payload_path = target_root.join("payload.json");
         let payload_bytes = fs::read(&payload_path)
             .map_err(|error| InstallError::io("read appliance payload", &payload_path, error))?;
@@ -156,7 +169,9 @@ impl Source {
             return Err(refused(binary, "is not the executable the payload binds"));
         }
         let artifact_path = target_root.join(&metadata.path);
-        let artifact = read_artifact(&artifact_path, metadata)?;
+        let Some(artifact) = read_artifact(&artifact_path, metadata)? else {
+            return Ok(None);
+        };
         if artifact.executable != native {
             return Err(refused(
                 &artifact_path,
@@ -368,15 +383,16 @@ fn settled_in_place(
 }
 
 /// Read the artifact through one handle and prove it never moved beneath it.
+///
+/// An absent artifact answers `None`; any other unreadable, foreign, or
+/// moving artifact refuses.
 fn read_artifact(
     path: &Path,
     metadata: &MacSymbolMetadata,
-) -> Result<MacSymbolArtifact, InstallError> {
+) -> Result<Option<MacSymbolArtifact>, InstallError> {
     let mut file = match sill::authority::open_unfollowed(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(refused(path, "is absent"));
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(InstallError::io(
                 "open appliance symbol artifact",
@@ -416,7 +432,7 @@ fn read_artifact(
     if !artifact.uuid_is_canonical() || artifact.info.is_empty() || artifact.dwarf.is_empty() {
         return Err(refused(path, "is not a canonical current symbol artifact"));
     }
-    Ok(artifact)
+    Ok(Some(artifact))
 }
 #[cfg(unix)]
 fn has_data_mode(metadata: &fs::Metadata) -> bool {
@@ -612,6 +628,99 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_package_without_its_symbol_artifact_installs_the_executable_alone() {
+        let root = scratch("package");
+        fs::create_dir(root.join("release")).unwrap();
+        fs::write(root.join("release/package.json"), b"{}").unwrap();
+        let target_root = root.join("targets/aarch64-apple-darwin");
+        fs::create_dir_all(target_root.join("bin")).unwrap();
+        let binary = target_root.join("bin/spice");
+        let executable = macho_with_uuid([0xAA; 16]);
+        fs::write(&binary, &executable).unwrap();
+        let symbols = b"symbol fixture";
+        fs::write(
+            target_root.join("payload.json"),
+            darwin_payload(&executable, symbols),
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::canvas::package_layout(&binary).map(|(_, target)| target),
+            Some(target_root.as_path()),
+        );
+
+        // Release evidence omits the artifact the payload names.
+        assert!(
+            Source::resolve_package(&binary, &target_root)
+                .unwrap()
+                .is_none()
+        );
+
+        // A present artifact the payload does not bind still refuses.
+        let artifact = target_root.join("symbols/spice.symbols");
+        fs::create_dir(artifact.parent().unwrap()).unwrap();
+        fs::write(&artifact, b"foreign symbol").unwrap();
+        assert!(matches!(
+            Source::resolve_package(&binary, &target_root),
+            Err(InstallError::SymbolsRefused { .. })
+        ));
+    }
+
+    fn darwin_payload(executable: &[u8], symbols: &[u8]) -> Vec<u8> {
+        use wire::manifest::{BuildPins, InventoryEntry, TARGET_PAYLOAD_VERSION, TargetPayload};
+
+        let native = Digest::compute(Domain::DistArtifact, executable);
+        let metadata = MacSymbolMetadata {
+            path: "symbols/spice.symbols".to_owned(),
+            mode: DATA_MODE,
+            bytes: symbols.len() as u64,
+            digest: Digest::compute(Domain::DistArtifact, symbols),
+            uuid: "11111111-2222-3333-4444-555555555555".to_owned(),
+            executable: native.clone(),
+        };
+        let inventory = vec![
+            InventoryEntry {
+                path: "bin/spice".to_owned(),
+                mode: 0o755,
+                bytes: executable.len() as u64,
+                digest: native.clone(),
+            },
+            InventoryEntry {
+                path: metadata.path.clone(),
+                mode: metadata.mode,
+                bytes: metadata.bytes,
+                digest: metadata.digest.clone(),
+            },
+        ];
+        let pins = BuildPins {
+            rust: "rustc 1.97.1".to_owned(),
+            wasm_target: "wasm32-unknown-unknown".to_owned(),
+            trunk: "trunk 0.21.0".to_owned(),
+            proof_container: format!("spice/proof@sha256:{}", "1".repeat(64)),
+        };
+        wire::encode(&TargetPayload {
+            version: TARGET_PAYLOAD_VERSION,
+            target: ReleaseTarget::Aarch64AppleDarwin,
+            source: Digest::compute(Domain::DistSourceCommit, b"source"),
+            archive: Digest::compute(Domain::DistSourceArchive, b"source archive"),
+            app: Digest::compute(Domain::DistArtifact, b"app generation"),
+            canvas: Digest::compute(Domain::DistArtifact, b"canvas archive"),
+            native,
+            symbols: Some(metadata),
+            pins_digest: Digest::compute(
+                Domain::DistPins,
+                &wire::encode(&pins).expect("pins encode"),
+            ),
+            inventory_digest: Digest::compute(
+                Domain::DistInventory,
+                &wire::encode(&inventory).expect("inventory encodes"),
+            ),
+            pins,
+            inventory,
+        })
+        .expect("payload encodes")
     }
 
     #[test]
