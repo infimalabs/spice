@@ -11,8 +11,10 @@ pub mod scripted;
 pub mod session_paths;
 
 mod model;
+mod publishing;
 
 pub use model::{ModelSelection, SelectionError, resolve_model};
+use publishing::{COMMANDS as PUBLISHING_COMMANDS, command as publishing_command};
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -475,18 +477,6 @@ pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
     overlay
 }
 
-/// The command-line routes by which omp, or the `gh` that omp's gist share
-/// store drives, uploads a session, screen, recording, skill, or tool report.
-/// Each is denied with every argument that follows it.
-const PUBLISHING_COMMANDS: [&str; 7] = [
-    "omp share",
-    "omp clip",
-    "omp stream",
-    "omp skill publish",
-    "omp skills publish",
-    "omp grievances push",
-    "gh gist create",
-];
 
 /// The extension a lane writes beside its overlay and loads with
 /// `--extension`, so the provider reads each steered message as the lane
@@ -1206,70 +1196,6 @@ pub struct ShellCall {
     /// that matches is delivered while it runs; a service's match reaches
     /// only a seated occupant.
     pub until: Option<OutputPattern>,
-}
-/// Name a publishing route when it appears where the shell will start one
-/// command, including after a compound-command separator.
-///
-/// This is deliberately a narrow gate over the commands a seat promises to
-/// refuse, not a shell parser or network sandbox. Quoted text is skipped so an
-/// admitted command may print these spellings without being refused.
-fn publishing_command(command: &str) -> Option<&'static str> {
-    let bytes = command.as_bytes();
-    let mut at_start = true;
-    let mut quote = None;
-    let mut escaped = false;
-    let mut index = 0;
-
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if escaped {
-            escaped = false;
-            index += 1;
-            continue;
-        }
-        if byte == b'\\' && quote != Some(b'\'') {
-            escaped = true;
-            index += 1;
-            continue;
-        }
-        if let Some(delimiter) = quote {
-            if byte == delimiter {
-                quote = None;
-            }
-            index += 1;
-            continue;
-        }
-        if matches!(byte, b'\'' | b'"' | b'`') {
-            quote = Some(byte);
-            index += 1;
-            continue;
-        }
-        if matches!(byte, b';' | b'|' | b'&' | b'\n' | b'(' | b'{') {
-            at_start = true;
-            index += 1;
-            continue;
-        }
-        if at_start && byte.is_ascii_whitespace() {
-            index += 1;
-            continue;
-        }
-        if at_start {
-            let remaining = &command[index..];
-            for route in PUBLISHING_COMMANDS {
-                if let Some(suffix) = remaining.strip_prefix(route)
-                    && suffix.as_bytes().first().is_none_or(|&next| {
-                        next.is_ascii_whitespace()
-                            || matches!(next, b';' | b'|' | b'&' | b'(' | b')' | b'{' | b'}')
-                    })
-                {
-                    return Some(route);
-                }
-            }
-            at_start = false;
-        }
-        index += 1;
-    }
-    None
 }
 
 impl ShellCall {
