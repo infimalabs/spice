@@ -788,7 +788,7 @@ fn recipient_field(
                 <button type="button" class="app-compose-recipient-choice" data-best-match=""
                     aria-pressed={best.to_string()} onclick={clear}
                     title="The resident picks the best-matched agent, preferring a vacant one">
-                    {"Best-matched agent"}
+                    {"Best match"}
                 </button>
                 {for runtime.and_then(AppRuntime::lanes).into_iter().flat_map(roster).map(|member| {
                     let lane = member.lane.to_string();

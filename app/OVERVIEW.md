@@ -8,8 +8,7 @@ serves both Work and Spice. Contents swap without replaying the transition;
 reduced motion removes it. Dismissal returns focus to a surviving launcher.
 
 Attached accent rails use the **closed-edge** recipe: radius equals thickness.
-Message cards, work total/task tabs and quota-account accents share it. Closed,
-the composer strip paints only its hanging tabs.
+Message cards, work total/task tabs and quota-account accents share it.
 Structural dividers stay square. Standalone cards, media, dialogs, round
 controls, pills and focus rings keep their radii; joined controls round only
 outside endpoints.
@@ -253,8 +252,7 @@ Choosing the launcher, a destination, its shortcut, or a quote expands that
 same composer into a full-height sheet: writing, the reserved action row, then
 **Principals** and the independently scrolling personal inbox. CREATE, SEND
 and FULL SEND use the same 72px circular control and material as team SEND.
-Ask shows To within the action row; switching to Task, Plan or Design hides To
-without moving or resizing the sheet, editor, action or inbox. One shared
+One shared
 page veil dims Chat beneath either side view and remains until the last closes;
 the left sheet owns its material while both are open. On desktop the non-modal
 left and right sheets coexist above that veil. On a phone, Spice temporarily
@@ -262,8 +260,9 @@ hides the left sheet and closing Spice restores it. Opening and dismissal
 preserve the laid-out composer and return focus outside.
 
 **Ask** is the default; expanded, its writing line reads **Ask or steer
-(required)**. Beside **To**, a wrapping row offers **Best-matched
-agent**, pressed while none is chosen, and a checkbox per current agent. With
+(required)**. Beside **To**, a wrapping row offers **Best match**, pressed
+while none is chosen, and a pill per current agent; chosen pills are solid
+accent. With
 none chosen, the resident picks the best eligible agent from retained
 conversation profiles, possibly starting a vacant one; acceptance closes the
 sheet and focuses that agent's Chat composer, or toasts if the roster lacks
@@ -282,8 +281,8 @@ stroke that would press Send/Create rings it as team SEND's command ring does,
 in theme ink for an Ask's broadcast.
 
 All four kinds share one textarea; kind, recipient, image count, and resizing
-preserve editor geometry, and Ask's recipients wrap beside the action (see the
-[composer checks](BROWSER.md#draft-composer-parity)). The open sheet's
+never move or resize the sheet, editor, action or inbox, and only Ask shows To
+in the action row (see the [composer checks](BROWSER.md#draft-composer-parity)). The open sheet's
 inline-end edge mirrors the Spice sidebar's. Quotes sit above the editor;
 direct images use the team composers' bounded thumbnail strip over its lower
 inline end and can also be chosen, pasted, or dropped.
@@ -291,8 +290,7 @@ inline end and can also be chosen, pasted, or dropped.
 Draft defaults off, is disabled for Ask, and holds until reload. Send/Create
 lights only when submission is possible: Ask needs text, a quote, or an image;
 work needs title and pitch. With Draft off, Create files the work at once,
-read-only from its admitted row; with Draft on it records an editable Draft. A
-narrow closed tab ellipsizes its prompt.
+read-only from its admitted row; with Draft on it records an editable Draft.
 
 For new work, the textarea's first line is the title, its next paragraph the
 pitch, and later paragraphs plus quotes the description. Images become Draft
