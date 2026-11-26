@@ -292,7 +292,7 @@ for Ask.
 
 Compare CREATE, SEND and FULL SEND with a team SEND: each is the same 72px
 circle with the same edge, transmitted-glass face, catch, typography and press
-material.
+material. Check that every label remains whole in both text directions.
 
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
