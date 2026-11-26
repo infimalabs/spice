@@ -74,9 +74,15 @@ impl LooseWork {
     }
 }
 
-/// Read the loose work of the worktree at `root`.
-pub fn loose_work(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
-    snapshot::read(root, ambient)
+/// Read the loose work of the worktree at `root`, with `native_system` the
+/// system config native Git reads, as
+/// [`crate::git_shadow::native_system_config`] resolves it.
+pub fn loose_work(
+    root: &Path,
+    ambient: &Ambient,
+    native_system: Option<&Path>,
+) -> Result<LooseWork, Error> {
+    snapshot::read(root, ambient, native_system)
 }
 
 fn hash_worktree_path(root: &Path, path: &str, hasher: &mut DefaultHasher) -> Result<(), Error> {
@@ -245,24 +251,24 @@ mod tests {
         )
         .expect("configure local integration baseline");
 
-        let clean = snapshot::read(root, &ambient).expect("clean snapshot reads");
+        let clean = snapshot::read(root, &ambient, None).expect("clean snapshot reads");
         assert!(!clean.is_loose());
         assert_eq!(clean.unlanded.total, 0);
 
         fs::write(root.join("tracked"), "next!").expect("write next tracked content");
         crate::test_repository::stage(root, &["tracked"]);
         crate::test_repository::commit(root, "local work");
-        let unlanded = snapshot::read(root, &ambient).expect("unlanded snapshot reads");
+        let unlanded = snapshot::read(root, &ambient, None).expect("unlanded snapshot reads");
         assert!(unlanded.is_loose());
         assert_eq!(unlanded.unlanded.total, 1);
 
         fs::write(root.join("tracked"), "third").expect("write staged content");
         crate::test_repository::stage(root, &["tracked"]);
-        let staged = snapshot::read(root, &ambient).expect("staged snapshot reads");
+        let staged = snapshot::read(root, &ambient, None).expect("staged snapshot reads");
         assert_eq!(staged.dirty, ["tracked"]);
 
         fs::write(root.join("tracked"), "other").expect("write unstaged same-length content");
-        let unstaged = snapshot::read(root, &ambient).expect("unstaged snapshot reads");
+        let unstaged = snapshot::read(root, &ambient, None).expect("unstaged snapshot reads");
         assert_eq!(unstaged.dirty, ["tracked"]);
         assert_ne!(unstaged.dirty_fingerprint, staged.dirty_fingerprint);
 
@@ -270,7 +276,7 @@ mod tests {
         fs::write(root.join("ignored"), "ignored").expect("write ignored content");
         let index_path = root.join(".git/index");
         let index_before = fs::read(&index_path).expect("read index before inspection");
-        let untracked = snapshot::read(root, &ambient).expect("untracked snapshot reads");
+        let untracked = snapshot::read(root, &ambient, None).expect("untracked snapshot reads");
         assert_eq!(untracked.dirty, ["tracked", "untracked"]);
         assert_eq!(
             fs::read(&index_path).expect("read index after inspection"),
@@ -280,7 +286,7 @@ mod tests {
 
         fs::write(&index_path, "not an index").expect("corrupt fixture index");
         assert!(
-            snapshot::read(root, &ambient).is_err(),
+            snapshot::read(root, &ambient, None).is_err(),
             "a corrupt index refuses"
         );
     }
@@ -297,7 +303,7 @@ mod tests {
         fs::write(root.join(".git/HEAD"), format!("{head}\n")).expect("detach fixture HEAD");
         fs::create_dir(root.join(".git/rebase-merge")).expect("mark rebase in progress");
 
-        let work = snapshot::read(root, &ambient).expect("detached operation snapshot reads");
+        let work = snapshot::read(root, &ambient, None).expect("detached operation snapshot reads");
         assert_eq!(work.operation, Some("rebase"));
         assert_eq!(work.unlanded, Unlanded::default());
     }
@@ -352,7 +358,8 @@ mod tests {
             ("GIT_CONFIG_SYSTEM", shadow.as_os_str()),
         ]);
 
-        let work = snapshot::read(root, &ambient).expect("native pairing snapshot reads");
+        let work =
+            snapshot::read(root, &ambient, Some(&system)).expect("native pairing snapshot reads");
         assert_eq!(work.unlanded.total, 1);
         assert_eq!(work.unlanded.baseline, Some(baseline.to_string()));
     }
@@ -391,8 +398,8 @@ mod tests {
         .expect("write ignored system override");
         let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", override_config.as_os_str())]);
 
-        let work = snapshot::read_with_native_system(root, &ambient, &system)
-            .expect("system pairing snapshot reads");
+        let work =
+            snapshot::read(root, &ambient, Some(&system)).expect("system pairing snapshot reads");
         assert_eq!(work.unlanded.total, 1);
         assert_eq!(work.unlanded.baseline, Some(baseline.to_string()));
     }
@@ -415,7 +422,7 @@ mod tests {
         .expect("configure URL-less remote");
 
         assert!(
-            snapshot::read(root, &Ambient::default()).is_err(),
+            snapshot::read(root, &Ambient::default(), None).is_err(),
             "a configured remote without a fetch URL refuses"
         );
     }
