@@ -386,6 +386,24 @@ fn independent_handoff_waits_only_for_an_eligible_unclaimed_peer_and_only_until_
         None,
         "the peer-first interval is bounded from the phase transition",
     );
+    let shared = entry
+        .clone()
+        .with_phase_handoff(Some(board::PhaseHandoff::from_authors(
+            [prior.clone(), peer.clone()],
+            instant("2026-08-01T06:00:03.000Z"),
+            instant("2026-08-01T06:00:30.000Z"),
+        )));
+    assert_eq!(
+        peer_decision(
+            &shared,
+            &prior,
+            &satisfied,
+            evidence(false, &subscription, &eligible_environment),
+            now,
+        ),
+        None,
+        "a co-author of the handed-off phase is no independent peer",
+    );
 }
 
 #[test]

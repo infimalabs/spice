@@ -313,7 +313,8 @@ flowchart TD
 - Wake timing follows the selected row's READY transition. A draining team
   with no occupied members settles its first wake even for one row.
   A phase handoff wakes immediately unless it returns to its author while an
-  unclaimed resident peer can select it; `task next` and lifecycle share that
+  unclaimed resident peer that authored none of the phase can select it;
+  `task next` and lifecycle share that
   predicate, wait the fixed peer
   deadline, then restore the author as last resort. A finding re-anchors that
   deadline: published authors and finding reviewers remain last resort, while a

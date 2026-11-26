@@ -6,7 +6,7 @@ use wire::rooms::DesignCycle;
 use wire::{Actor, ClaimDisposition, Instant, TaskIntent, TaskStamp};
 
 use crate::config::NextConfig;
-use crate::task::Entry;
+use crate::task::{Entry, PhaseHandoff};
 use crate::urgency::{Urgency, declared_priority};
 
 /// Readiness facts every allocation surface shares.
@@ -708,23 +708,26 @@ pub struct HandoffPeer<'a> {
     pub holds_live_claim: bool,
 }
 
-/// The open peer-first deadline for a handoff returning to its prior author.
-fn independent_handoff_peer_deadline(
-    selected: &Entry,
+/// The handoff whose peer-first opportunity is still open for its prior author.
+fn open_peer_handoff<'e>(
+    selected: &'e Entry,
     claimant: &Actor,
     now: Instant,
-) -> Option<Instant> {
-    let handoff = selected.phase_handoff()?;
-    (handoff.contains(claimant) && now < handoff.peer_until()).then_some(handoff.peer_until())
+) -> Option<&'e PhaseHandoff> {
+    selected
+        .phase_handoff()
+        .filter(|handoff| handoff.contains(claimant) && now < handoff.peer_until())
 }
 
 /// The peer-first deadline when `selected` should wait instead of returning to
 /// its prior author.
 ///
-/// Exact-row selectability is intentional: peer availability does not rerank
-/// the peer's board or consult its match score. It asks only whether the peer
-/// could take this handoff under the same route, environment, dependency, and
-/// ownership predicates used by allocation.
+/// Only an independent peer, one that authored none of the handed-off phase,
+/// holds the row: co-authors never wait on each other. Exact-row
+/// selectability is intentional: peer availability does not rerank the peer's
+/// board or consult its match score. It asks only whether the peer could take
+/// this handoff under the same route, environment, dependency, and ownership
+/// predicates used by allocation.
 pub fn independent_handoff_awaits_peer<'a, I, E>(
     selected: &Entry,
     claimant: &Actor,
@@ -735,13 +738,13 @@ pub fn independent_handoff_awaits_peer<'a, I, E>(
 where
     I: IntoIterator<Item = HandoffPeer<'a>>,
 {
-    let Some(deadline) = independent_handoff_peer_deadline(selected, claimant, now) else {
+    let Some(handoff) = open_peer_handoff(selected, claimant, now) else {
         return Ok(None);
     };
     Ok(peers()?
         .into_iter()
         .any(|peer| {
-            peer.actor != *claimant
+            !handoff.contains(&peer.actor)
                 && !peer.holds_live_claim
                 && selectable_entry_at(
                     satisfied,
@@ -752,7 +755,7 @@ where
                     now,
                 )
         })
-        .then_some(deadline))
+        .then_some(handoff.peer_until()))
 }
 
 /// Dense live-graph indexes used by every repeated ranking traversal.

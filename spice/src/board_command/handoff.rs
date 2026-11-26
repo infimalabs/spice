@@ -79,24 +79,21 @@ fn phased_completion(
         )
     })?;
     let authors = if let Some(done) = completed.fact.read::<body::TaskDone>() {
-        if !publishes(&done) {
+        if !publishes(done.git.as_ref()) {
             return Ok(None);
         }
         vec![completed.actor.clone()]
     } else if let Some(round) = completed.fact.read::<body::TaskRoundCompleted>() {
-        if !round.participants.iter().any(|participant| {
-            participant
-                .git
-                .as_ref()
-                .is_some_and(|boundary| boundary.local_commits > 0)
-        }) {
-            return Ok(None);
-        }
-        round
+        let authors = round
             .participants
             .into_iter()
+            .filter(|participant| publishes(participant.git.as_ref()))
             .map(|participant| participant.actor)
-            .collect()
+            .collect::<Vec<_>>();
+        if authors.is_empty() {
+            return Ok(None);
+        }
+        authors
     } else {
         return Err(protocol_fault(
             "board::phase-handoff-completion-invalid",
@@ -116,9 +113,8 @@ fn handoff_until(at: Instant, seconds: i64) -> Result<Instant, Outcome<CommandAn
 }
 
 /// Whether a completion published repository history, which asks the phase it
-/// entered to go to a peer.
-fn publishes(done: &body::TaskDone) -> bool {
-    done.git
-        .as_ref()
-        .is_some_and(|boundary| boundary.local_commits > 0)
+/// entered to go to a peer. Only a round participant who published is an
+/// author of that history.
+fn publishes(git: Option<&body::GitBoundary>) -> bool {
+    git.is_some_and(|boundary| boundary.local_commits > 0)
 }
