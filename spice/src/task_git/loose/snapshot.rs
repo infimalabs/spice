@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use gix::bstr::{BStr, ByteSlice as _};
@@ -5,7 +6,7 @@ use gix::bstr::{BStr, ByteSlice as _};
 use super::*;
 
 pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
-    let repository = open(root)?;
+    let repository = open(root, ambient)?;
     let head = repository
         .head()
         .map_err(|error| fault("git::head-unreadable", "read HEAD", error))?;
@@ -53,14 +54,97 @@ pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
     })
 }
 
-fn open(root: &Path) -> Result<gix::Repository, Error> {
-    let mut permissions = gix::open::Permissions::all();
-    // The resident process can itself have Spice's child-process pairing
-    // shadow. Native inspection ignores command-scope config just as
-    // `git_shadow::declared_pairing()` strips it before asking Git.
-    permissions.config.env = false;
-    gix::open_opts(root, gix::open::Options::default().permissions(permissions))
-        .map_err(|error| fault("git::repository-unreadable", "open worktree", error))
+fn open(root: &Path, ambient: &Ambient) -> Result<gix::Repository, Error> {
+    let mut repository = gix::open_opts(root, gix::open::Options::isolated())
+        .map_err(|error| fault("git::repository-unreadable", "open worktree", error))?;
+    let config = native_config(&repository, ambient)?;
+    {
+        let mut snapshot = repository.config_snapshot_mut();
+        *snapshot = config;
+        snapshot
+            .commit()
+            .map_err(|error| fault("git::config-invalid", "apply native Git config", error))?;
+    }
+    Ok(repository)
+}
+
+fn native_config(
+    repository: &gix::Repository,
+    ambient: &Ambient,
+) -> Result<gix::config::File, Error> {
+    let shadow = generated_shadow(ambient);
+    let home = ambient.get("HOME").map(PathBuf::from);
+    let branch = repository
+        .head_name()
+        .map_err(|error| fault("git::head-unreadable", "read HEAD name", error))?;
+    let mut environment = |name: &str| native_variable(ambient, name, shadow.as_deref());
+    let system = shadow
+        .as_ref()
+        .and_then(|_| gix::config::Source::System.storage_location(&mut environment))
+        .map(|path| gix::config::file::Metadata::from(gix::config::Source::System).at(path));
+    let mut sources = system.into_iter().chain(
+        gix::config::source::Kind::Global
+            .sources()
+            .iter()
+            .copied()
+            .filter_map(|source| {
+                source
+                    .storage_location(&mut environment)
+                    .map(|path| gix::config::file::Metadata::from(source).at(path))
+            }),
+    );
+    let mut buffer = Vec::new();
+    let mut config = gix::config::File::from_paths_metadata_buf(
+        &mut sources,
+        &mut buffer,
+        false,
+        gix::config::file::init::Options::default(),
+    )
+    .map_err(|error| fault("git::config-invalid", "read native Git config", error))?
+    .unwrap_or_default();
+    config
+        .append(repository.config_snapshot().plumbing().clone())
+        .map_err(|error| fault("git::config-invalid", "append repository config", error))?;
+    config
+        .resolve_includes(gix::config::file::init::Options {
+            includes: gix::config::file::includes::Options::follow(
+                gix::config::path::interpolate::Context {
+                    git_install_dir: None,
+                    home_dir: home.as_deref(),
+                    home_for_user: Some(gix::config::path::interpolate::home_for_user),
+                },
+                gix::config::file::includes::conditional::Context {
+                    git_dir: Some(repository.path()),
+                    branch_name: branch.as_ref().map(AsRef::as_ref),
+                },
+            ),
+            ..Default::default()
+        })
+        .map_err(|error| {
+            fault(
+                "git::config-invalid",
+                "resolve native Git config includes",
+                error,
+            )
+        })?;
+    Ok(config)
+}
+
+fn native_variable(
+    ambient: &Ambient,
+    name: &str,
+    generated_shadow: Option<&Path>,
+) -> Option<OsString> {
+    if name == "GIT_CONFIG_SYSTEM" {
+        return generated_shadow.map(Path::as_os_str).map(OsString::from);
+    }
+    if name == "GIT_CONFIG_COUNT"
+        || name.starts_with("GIT_CONFIG_KEY_")
+        || name.starts_with("GIT_CONFIG_VALUE_")
+    {
+        return None;
+    }
+    ambient.get(name).map(OsString::from)
 }
 
 fn generated_shadow(ambient: &Ambient) -> Option<PathBuf> {

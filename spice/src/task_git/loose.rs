@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn native_pairing_ignores_the_shadow_for_a_dotted_branch() {
+    fn native_pairing_uses_ambient_home_for_a_dotted_branch() {
         let scratch = Scratch::new();
         let root = &scratch.0;
         crate::test_repository::initialize(root);
@@ -323,34 +323,34 @@ mod tests {
         )
         .expect("write integration baseline");
 
-        let pairing = root.join("pairing.config");
+        let home = root.join("ambient-home");
+        fs::create_dir(&home).expect("create ambient home");
+        let pairing = home.join("pairing.config");
         fs::write(
             &pairing,
             "[branch \"topic.1\"]\n\tremote = .\n\tmerge = refs/heads/baseline\n",
         )
         .expect("write native pairing");
-        let native = root.join("native.config");
         fs::write(
-            &native,
+            home.join(".gitconfig"),
             format!(
                 "[includeIf \"onbranch:topic.1\"]\n\tpath = {}\n",
                 pairing.display()
             ),
         )
         .expect("write conditional native config");
+        let system = root.join("system.config");
+        fs::write(&system, "").expect("write native system config");
         let shadow = root.join("shadow.config");
         fs::write(
             &shadow,
-            crate::git_shadow::shadow_content("topic.1", native.to_str().expect("utf8 fixture")),
+            crate::git_shadow::shadow_content("topic.1", system.to_str().expect("utf8 fixture")),
         )
         .expect("write generated shadow");
-        let config = fs::read_to_string(root.join(".git/config")).expect("read fixture config");
-        fs::write(
-            root.join(".git/config"),
-            format!("{config}\n[include]\n\tpath = {}\n", shadow.display()),
-        )
-        .expect("load fixture shadow");
-        let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", shadow.as_os_str())]);
+        let ambient = Ambient::new([
+            ("HOME", home.as_os_str()),
+            ("GIT_CONFIG_SYSTEM", shadow.as_os_str()),
+        ]);
 
         let work = snapshot::read(root, &ambient).expect("native pairing snapshot reads");
         assert_eq!(work.unlanded.total, 1);
