@@ -190,8 +190,19 @@ fn active_todo_task_show_prints_the_parser_owned_done_command() {
     );
 
     let claimed = board(&bus, epoch, Actor::Lane(seats[0].lane));
-    let shown = task_show(&claimed, at(&claimed, &task), &[]);
-    assert!(shown.contains("creation_context unavailable principal-actor"));
+    let row = at(&claimed, &task);
+    let shown = task_show(&claimed, row, &[]);
+    let typed = task_show_answer(row, shown.clone());
+    assert_eq!(typed.handle, task);
+    assert_eq!(typed.title, "Render the active todo next action");
+    assert_eq!(typed.phase.as_str(), "todo");
+    assert_eq!(typed.status, "pending");
+    assert_eq!(typed.claim, vec![Actor::Lane(seats[0].lane)]);
+    assert_eq!(typed.terms, row.statement.body.term);
+    let json = serde_json::to_value(&typed).expect("typed task show encodes");
+    for field in ["handle", "title", "phase", "status", "claim", "terms"] {
+        assert!(json.get(field).is_some(), "missing {field}: {json}");
+    }
     assert!(shown.contains("claim_context unavailable registered-session-stream-missing"));
     assert!(shown.contains(&format!("spice doc ledger {task}")));
     assert!(
@@ -728,6 +739,45 @@ fn task_list_preserves_scope_status_topic_and_relevance_limit_semantics() {
     let (root, bus, epoch, _) = fixture("task-list", 0);
     let (answer, first, descendant, waiting) = task_list_fixture(&bus, epoch);
     assert_task_list_queries(&answer, &first, &descendant, &waiting);
+    clean(&root, bus);
+}
+
+#[test]
+fn task_list_typed_rows_match_the_bounded_text_page() {
+    let (root, bus, epoch, _) = fixture("task-list-typed", 0);
+    let (board, _, _, _) = task_list_fixture(&bus, epoch);
+    let listed = task_list_answer(
+        &board,
+        &TaskListOptions {
+            all: true,
+            topic: None,
+            limit: Some(2),
+            status: None,
+        },
+    );
+
+    assert!(
+        listed.text.contains("withheld 2 of 4 rows"),
+        "{}",
+        listed.text
+    );
+    for task in &listed.tasks {
+        assert!(
+            listed.text.contains(task.handle.as_str()),
+            "{}",
+            listed.text
+        );
+        assert!(!task.phase.as_str().is_empty());
+        assert!(!task.status.is_empty());
+        assert!(task.topic.is_some());
+    }
+    let json = serde_json::to_value(&listed).expect("typed task list encodes");
+    let rows = json["tasks"].as_array().expect("task rows are an array");
+    for row in rows {
+        for field in ["handle", "phase", "status", "topic"] {
+            assert!(row.get(field).is_some(), "missing {field}: {row}");
+        }
+    }
     clean(&root, bus);
 }
 

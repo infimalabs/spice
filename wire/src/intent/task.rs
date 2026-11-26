@@ -805,6 +805,51 @@ pub struct TaskOwnership {
     pub reserved: bool,
 }
 
+/// Structured task-show projection with its unchanged human rendering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskShowAnswer {
+    /// Human task page used by text rendering.
+    pub text: String,
+    /// Current public task handle.
+    pub handle: TaskHandle,
+    /// Current presentation title.
+    pub title: String,
+    /// Current workflow phase.
+    pub phase: Phase,
+    /// Current workflow status.
+    pub status: String,
+    /// Actors holding active claims, in winning order.
+    pub claim: Vec<Actor>,
+    /// Current acceptance terms.
+    pub terms: Vec<String>,
+}
+
+/// One typed row in a task-list page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskListItem {
+    /// Current public task handle.
+    pub handle: TaskHandle,
+    /// Current workflow phase.
+    pub phase: Phase,
+    /// Current workflow status.
+    pub status: String,
+    /// Current public topic, `null` for an unplaced task.
+    #[serde(deserialize_with = "crate::optional::required")]
+    pub topic: Option<crate::Topic>,
+}
+
+/// Structured task-list page with its unchanged human rendering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskListAnswer {
+    /// Human task-list page used by text rendering.
+    pub text: String,
+    /// Typed rows admitted to this page, in display order.
+    pub tasks: Vec<TaskListItem>,
+}
+
 /// The answer a task command returns.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -48,6 +48,8 @@ impl AnswerShape {
             | Self::TaskDetail
             | Self::TaskRelations
             | Self::TaskTimeline
+            | Self::TaskShow
+            | Self::TaskList
             | Self::Text
             | Self::Task
             | Self::TaskPlace
@@ -80,6 +82,8 @@ impl AnswerShape {
             Self::TaskDetail => CommandAnswer::TaskDetail(Box::new(body.read()?)),
             Self::TaskRelations => CommandAnswer::TaskRelations(Box::new(body.read()?)),
             Self::TaskTimeline => CommandAnswer::TaskTimeline(Box::new(body.read()?)),
+            Self::TaskShow => CommandAnswer::TaskShow(Box::new(body.read()?)),
+            Self::TaskList => CommandAnswer::TaskList(Box::new(body.read()?)),
             Self::Text => CommandAnswer::Text(body.read()?),
             Self::Task => CommandAnswer::Task(body.read()?),
             Self::TaskPlace => CommandAnswer::TaskPlace(Box::new(body.read()?)),

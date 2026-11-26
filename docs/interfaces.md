@@ -37,6 +37,11 @@ add committed `seq` ranges, and daemonless replies omit both. Refusals and
 faults use their own `kind`. JSON changes shape, never exit code or stream:
 replies go to stdout, refusals and faults to stderr.
 
+Task reads keep their human rendering in `body.text` and also expose stable
+fields for scripts. `task show` adds `handle`, `title`, `phase`, `status`,
+`claim`, and `terms`; `task list` adds a `tasks` array whose page-admitted rows
+carry `handle`, `phase`, `status`, and `topic` (`null` when unplaced).
+
 Text renders journal positions as condensed base-52 codes; text operands
 (`--after`, thread references) admit only those codes. A new journal begins at
 $52^3$ (`1000`), giving positions at least four significant characters; retained

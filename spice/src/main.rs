@@ -1030,6 +1030,8 @@ fn deliver_command_answer(outcome: &Outcome<wire::intent::CommandAnswer>, form: 
 fn command_answer_text(body: &wire::intent::CommandAnswer) -> Option<&str> {
     match body {
         wire::intent::CommandAnswer::Text(answer) => Some(&answer.text),
+        wire::intent::CommandAnswer::TaskShow(answer) => Some(&answer.text),
+        wire::intent::CommandAnswer::TaskList(answer) => Some(&answer.text),
         wire::intent::CommandAnswer::RoomScore(answer) => Some(&answer.text),
         _ => None,
     }

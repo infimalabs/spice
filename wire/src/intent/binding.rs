@@ -29,11 +29,12 @@ use super::{
     RoomConversationTextAnswer, RoomLeave, RoomLeaveAnswer, RoomScore, RoomScoreAnswer,
     StateAnswer, SteerInbox, SteerLineAnswer, SteerLineControl, SteerSend, TaskAdd, TaskAnswer,
     TaskClose, TaskConclude, TaskDefer, TaskDelete, TaskDepends, TaskDetail, TaskDetailAnswer,
-    TaskDone, TaskEdit, TaskFile, TaskInvite, TaskInviteAnswer, TaskJoin, TaskMedia, TaskNote,
-    TaskOopsAdd, TaskPlace, TaskPlaceAnswer, TaskRef, TaskRelations, TaskRelationsAnswer,
-    TaskReview, TaskSweep, TaskTarget, TaskTimeline, TaskTimelineAnswer, TaskWake, TasteAnswer,
-    TeamArrange, TeamConfigure, TextAnswer, TrustAnswer, TrustRef, TrustReportAnswer,
-    TrustReportRead, TrustShowAnswer, UpChange, VendorCatalog, VendorCatalogAnswer,
+    TaskDone, TaskEdit, TaskFile, TaskInvite, TaskInviteAnswer, TaskJoin, TaskListAnswer,
+    TaskMedia, TaskNote, TaskOopsAdd, TaskPlace, TaskPlaceAnswer, TaskRef, TaskRelations,
+    TaskRelationsAnswer, TaskReview, TaskShowAnswer, TaskSweep, TaskTarget, TaskTimeline,
+    TaskTimelineAnswer, TaskWake, TasteAnswer, TeamArrange, TeamConfigure, TextAnswer, TrustAnswer,
+    TrustRef, TrustReportAnswer, TrustReportRead, TrustShowAnswer, UpChange, VendorCatalog,
+    VendorCatalogAnswer,
 };
 
 /// Which intent DTO a command kind's body decodes into.
@@ -202,6 +203,10 @@ pub enum AnswerShape {
     TaskRelations,
     /// [`TaskTimelineAnswer`]
     TaskTimeline,
+    /// [`TaskShowAnswer`]
+    TaskShow,
+    /// [`TaskListAnswer`]
+    TaskList,
     /// [`TextAnswer`]
     Text,
     /// [`RoomScoreAnswer`]
@@ -292,6 +297,10 @@ pub enum CommandAnswer {
     TaskRelations(Box<TaskRelationsAnswer>),
     /// [`AnswerShape::TaskTimeline`]
     TaskTimeline(Box<TaskTimelineAnswer>),
+    /// [`AnswerShape::TaskShow`]
+    TaskShow(Box<TaskShowAnswer>),
+    /// [`AnswerShape::TaskList`]
+    TaskList(Box<TaskListAnswer>),
     /// [`AnswerShape::Text`]
     Text(TextAnswer),
     /// [`AnswerShape::RoomScore`]
@@ -378,6 +387,8 @@ impl CommandAnswer {
             | Self::TaskDetail(_)
             | Self::TaskRelations(_)
             | Self::TaskTimeline(_)
+            | Self::TaskShow(_)
+            | Self::TaskList(_)
             | Self::Text(_)
             | Self::RoomScore(_)
             | Self::RoomPost(_)
@@ -423,6 +434,8 @@ impl CommandAnswer {
             Self::TaskDetail(_) => AnswerShape::TaskDetail,
             Self::TaskRelations(_) => AnswerShape::TaskRelations,
             Self::TaskTimeline(_) => AnswerShape::TaskTimeline,
+            Self::TaskShow(_) => AnswerShape::TaskShow,
+            Self::TaskList(_) => AnswerShape::TaskList,
             Self::Text(_) => AnswerShape::Text,
             Self::RoomScore(_) => AnswerShape::RoomScore,
             Self::RoomPost(_) => AnswerShape::RoomPost,

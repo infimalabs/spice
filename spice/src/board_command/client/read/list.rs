@@ -106,6 +106,8 @@ impl TaskListPageOptions {
 struct TaskListRow {
     handle: TaskHandle,
     text: String,
+    #[serde(skip)]
+    item: wire::intent::TaskListItem,
 }
 
 #[cfg(test)]
@@ -113,6 +115,14 @@ pub(in crate::board_command) fn task_list(
     board: &BoardAnswer,
     options: &TaskListOptions,
 ) -> String {
+    task_list_answer(board, options).text
+}
+
+#[cfg(test)]
+pub(in crate::board_command) fn task_list_answer(
+    board: &BoardAnswer,
+    options: &TaskListOptions,
+) -> wire::intent::TaskListAnswer {
     task_list_page(
         board,
         &TaskListPageOptions {
@@ -128,7 +138,7 @@ pub(in crate::board_command) fn task_list(
 pub(super) fn task_list_page(
     board: &BoardAnswer,
     options: &TaskListPageOptions,
-) -> Result<String, Outcome<CommandAnswer>> {
+) -> Result<wire::intent::TaskListAnswer, Outcome<CommandAnswer>> {
     let budget = options.budget();
     let mut tasks = board
         .tasks
@@ -181,23 +191,37 @@ pub(super) fn task_list_page(
             .offer(TaskListRow {
                 handle: task.statement.body.handle.clone(),
                 text: render_task_list_row(task, &title),
+                item: wire::intent::TaskListItem {
+                    handle: task.statement.body.handle.clone(),
+                    phase: task.workflow.body.phase,
+                    status: task.status_word().to_owned(),
+                    topic: task.statement.body.topic.path.clone(),
+                },
             })
             .expect("a task list text row always serializes");
     }
     let page = admission.finish(|resume| task_list_continuation(options, resume));
     if page.rows.is_empty() && page.omission.is_none() {
-        return Ok(format!("{scope}\n{empty}"));
+        return Ok(wire::intent::TaskListAnswer {
+            text: format!("{scope}\n{empty}"),
+            tasks: Vec::new(),
+        });
     }
     let mut output = scope;
+    let mut tasks = Vec::with_capacity(page.rows.len());
     for row in page.rows {
         output.push('\n');
         output.push_str(&row.text);
+        tasks.push(row.item);
     }
     if let Some(omission) = page.omission {
         output.push('\n');
         output.push_str(&omission.to_string());
     }
-    Ok(output)
+    Ok(wire::intent::TaskListAnswer {
+        text: output,
+        tasks,
+    })
 }
 
 fn task_list_continuation(
