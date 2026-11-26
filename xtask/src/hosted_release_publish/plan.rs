@@ -100,17 +100,16 @@ impl PublicationPlan {
             path: assets_root.clone(),
             source,
         })?;
-        let mut assets = Vec::with_capacity(TARGETS.len() * 2 + 1);
+        let mut assets = Vec::with_capacity(TARGETS.len() + 2);
         for target in TARGETS {
             assets.push(capture_target(worktree, &assets_root, inputs, target)?);
         }
-        for package in package::capture(worktree, &assets_root, &version, notes)? {
-            assets.push(PublicationAsset {
-                name: package.name,
-                bytes: package.bytes,
-                sha256: package.sha256,
-            });
-        }
+        let package = package::capture(worktree, &assets_root, &version, notes)?;
+        assets.push(PublicationAsset {
+            name: package::ASSET_NAME.to_owned(),
+            bytes: package.bytes,
+            sha256: package.sha256,
+        });
         let checksums = checksum_document(&assets);
         publish(&assets_root.join(CHECKSUMS), checksums.as_bytes())?;
         assets.push(PublicationAsset {
@@ -135,15 +134,15 @@ impl PublicationPlan {
                 "publication plan schema or tag moved".into(),
             ));
         }
-        if self.assets.len() != TARGETS.len() * 2 + 1
+        if self.assets.len() != TARGETS.len() + 2
             || TARGETS
                 .iter()
                 .zip(&self.assets)
                 .any(|(target, asset)| asset.name != asset_name(*target))
-            || TARGETS
-                .iter()
-                .zip(&self.assets[TARGETS.len()..TARGETS.len() * 2])
-                .any(|(target, asset)| asset.name != package::asset_name(*target))
+            || self
+                .assets
+                .get(TARGETS.len())
+                .is_none_or(|asset| asset.name != package::ASSET_NAME)
             || self
                 .assets
                 .last()
@@ -347,19 +346,9 @@ mod tests {
                     sha256: "3".repeat(64),
                 },
                 PublicationAsset {
-                    name: package::asset_name(ReleaseTarget::Aarch64AppleDarwin),
+                    name: package::ASSET_NAME.to_owned(),
                     bytes: 6,
                     sha256: "4".repeat(64),
-                },
-                PublicationAsset {
-                    name: package::asset_name(ReleaseTarget::X86_64UnknownLinuxMusl),
-                    bytes: 7,
-                    sha256: "5".repeat(64),
-                },
-                PublicationAsset {
-                    name: package::asset_name(ReleaseTarget::X86_64PcWindowsMsvc),
-                    bytes: 8,
-                    sha256: "6".repeat(64),
                 },
                 PublicationAsset {
                     name: CHECKSUMS.to_owned(),

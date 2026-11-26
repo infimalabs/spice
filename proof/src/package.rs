@@ -547,6 +547,14 @@ pub fn admit_package_target(
             "package payload",
         ),
         (selected.proof == *admitted.proof.digest(), "package proof"),
+        (
+            selected.debug_path
+                == input
+                    .debug
+                    .as_ref()
+                    .map(|_| debug_path(input.target).expect("supplied debug path exists")),
+            "package debug path",
+        ),
     ] {
         if !matches {
             return Err(PackageError::Binding { index, field });
@@ -628,7 +636,10 @@ fn assemble_package_index(input: &PackageInput<'_>) -> Result<AdmittedPackage, P
             executable: target.executable.digest.clone(),
             payload: admitted.payload.digest().clone(),
             proof: admitted.proof.digest().clone(),
-            debug_path: debug_path(expected),
+            debug_path: target
+                .debug
+                .as_ref()
+                .map(|_| debug_path(expected).expect("supplied debug path exists")),
             signature_path: proof_path(expected),
         });
     }
@@ -743,6 +754,7 @@ fn admit_target_members(
                     _ => false,
                 }
         }
+        (Some(_), None, Some(_)) => true,
         (None, None, None) => payload.symbols.is_none(),
         _ => false,
     };
@@ -806,7 +818,10 @@ fn admit_package_document(document: &ReleasePackage) -> Result<(), PackageError>
     for (index, (entry, expected)) in document.targets.iter().zip(TARGETS).enumerate() {
         if entry.target != expected
             || entry.executable_path != executable_path(expected)
-            || entry.debug_path != debug_path(expected)
+            || entry
+                .debug_path
+                .as_deref()
+                .is_some_and(|path| debug_path(expected).as_deref() != Some(path))
             || entry.signature_path != proof_path(expected)
         {
             return Err(PackageError::PackageTarget { index });

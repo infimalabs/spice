@@ -215,37 +215,29 @@ with the same remedy.
 
 ## Upgrade
 
-An installed appliance verifies a sealed release package before applying it,
-without Cargo, `xtask`, or a source checkout. It admits the package index,
-then this platform's executable, payload, proof receipt, and symbols against
-the identities and modes the index binds, and refuses a package whose version
-is not newer than its own:
+An upgrade candidate verifies its own bytes against sealed release evidence
+before applying, without Cargo, `xtask`, or a source checkout. It admits the
+package index, then its platform's payload and proof receipt, and refuses a
+candidate whose identity does not match or whose version is not newer.
 
-Each hosted release publishes one deterministic STORE ZIP per supported target:
-
-- `spice-aarch64-apple-darwin-package.zip`
-- `spice-x86_64-unknown-linux-musl-package.zip`
-- `spice-x86_64-pc-windows-msvc-package.zip`
-
-Download only the ZIP matching the current platform. Each ZIP contains the
-common sealed package index and only that platform's executable, payload,
-proof receipt, and symbols. Verify it against the release's `SHA256SUMS`, then
-extract it before previewing:
+Each hosted release publishes three standalone platform executables, one
+deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Download only the
+current platform's executable plus the small shared evidence ZIP, verify both
+against `SHA256SUMS`, then extract the evidence before previewing:
 
 ```sh
-PACKAGE_ARCHIVE=spice-aarch64-apple-darwin-package.zip # select this platform
-mkdir spice-release-package
-unzip "$PACKAGE_ARCHIVE" -d spice-release-package
+SPICE_CANDIDATE=/absolute/path/to/spice-aarch64-apple-darwin # select this platform
+chmod +x "$SPICE_CANDIDATE"
+mkdir spice-release-evidence
+unzip spice-release-evidence.zip -d spice-release-evidence
+
+"$SPICE_CANDIDATE" install --package /absolute/path/to/spice-release-evidence || exit
+"$SPICE_CANDIDATE" install --package /absolute/path/to/spice-release-evidence --apply=DIGEST_PRINTED_BY_PREVIEW || exit
 ```
 
-On Windows, use
-`Expand-Archive spice-x86_64-pc-windows-msvc-package.zip
-spice-release-package`; the extracted root has the same package layout.
-
-```sh
-"$SPICE_BIN" install --package /absolute/path/to/spice-release-package || exit
-"$SPICE_BIN" install --package /absolute/path/to/spice-release-package --apply=DIGEST_PRINTED_BY_PREVIEW || exit
-```
+`--package` names evidence, not an executable container. The invoking
+candidate supplies the executable bytes, so the release does not duplicate
+large binaries or publish debug symbols.
 
 ### Upgrade from v0.2
 
@@ -288,18 +280,16 @@ replace. A lane may refresh a scratch repository that has never seated it.
 
 ### Windows PowerShell
 
-The installed Windows appliance uses the same package and digest contract:
+The Windows candidate uses the same evidence and digest contract:
 
 ```powershell
-$Git = Join-Path $env:ProgramFiles 'Git\cmd\git.exe'
-$SpiceCommon = & $Git rev-parse --path-format=absolute --git-common-dir
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$SpiceCommon = $SpiceCommon.Trim()
-$SpiceBin = Join-Path $SpiceCommon '.spice-install\bin\spice.exe'
+$Candidate = 'C:\absolute\path\to\spice-x86_64-pc-windows-msvc.exe'
+$Evidence = 'C:\absolute\path\to\spice-release-evidence'
+Expand-Archive spice-release-evidence.zip $Evidence
 
-& $SpiceBin install --package C:\absolute\path\to\spice-release-package
+& $Candidate install --package $Evidence
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $SpiceBin install --package C:\absolute\path\to\spice-release-package --apply=DIGEST_PRINTED_BY_PREVIEW
+& $Candidate install --package $Evidence --apply=DIGEST_PRINTED_BY_PREVIEW
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 

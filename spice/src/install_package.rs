@@ -1,4 +1,4 @@
-//! Verified local release-package acquisition for the installed appliance.
+//! Verified local release evidence and candidate acquisition.
 
 use std::fmt;
 use std::fs::{self, File};
@@ -22,10 +22,11 @@ const PACKAGE_DOCUMENT_PATH: &str = "release/package.json";
 pub(crate) fn run(
     repository: &Repository,
     source: &Path,
+    candidate: &Path,
     apply: Option<&str>,
     json: bool,
 ) -> Result<ExitStatus, Error> {
-    let acquired = acquire(source)?;
+    let acquired = acquire(source, candidate)?;
     let staged = StagedPackage::new(&acquired)?;
     delegate(&staged, repository.worktree_root(), apply, json)
         .status()
@@ -40,8 +41,9 @@ pub(crate) fn run(
 pub(crate) fn preview(
     repository: &Repository,
     source: &Path,
+    candidate: &Path,
 ) -> Result<Outcome<InstallPreview>, Error> {
-    let acquired = acquire(source)?;
+    let acquired = acquire(source, candidate)?;
     let staged = StagedPackage::new(&acquired)?;
     let output = delegate(&staged, repository.worktree_root(), None, true)
         .output()
@@ -91,7 +93,7 @@ fn launch_failure(staged: &StagedPackage, source: std::io::Error) -> Error {
     )
 }
 
-fn acquire(root: &Path) -> Result<AcquiredPackage, Error> {
+fn acquire(root: &Path, candidate_path: &Path) -> Result<AcquiredPackage, Error> {
     let metadata = match fs::symlink_metadata(root) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -121,11 +123,11 @@ fn acquire(root: &Path) -> Result<AcquiredPackage, Error> {
             .map_err(|error| Error::input(error.to_string()))?,
     )
     .map_err(|error| Error::input(error.to_string()))?;
-    let candidate = &document.product_version;
+    let candidate_version = &document.product_version;
     let current = spice::version::product();
-    if candidate.precedence(current).is_le() {
+    if candidate_version.precedence(current).is_le() {
         return Err(Error::input(format!(
-            "package version {candidate} is not newer than installed appliance version {current}"
+            "package version {candidate_version} is not newer than installed appliance version {current}"
         )));
     }
     let target = current_target()?;
@@ -134,15 +136,15 @@ fn acquire(root: &Path) -> Result<AcquiredPackage, Error> {
         .iter()
         .find(|candidate| candidate.target == target)
         .ok_or_else(|| Error::input(format!("package has no executable for {target}")))?;
+    if selected.debug_path.is_some() {
+        return Err(Error::input(
+            "package index requires an unpublished debug artifact",
+        ));
+    }
     let payload_path = format!("targets/{target}/payload.json");
-    let executable = read_member(root, &selected.executable_path, &mut bytes)?;
+    let executable = read_candidate(candidate_path, &selected.executable_path, &mut bytes)?;
     let payload = read_member(root, &payload_path, &mut bytes)?;
     let receipt = read_member(root, &selected.signature_path, &mut bytes)?;
-    let debug = selected
-        .debug_path
-        .as_deref()
-        .map(|path| read_member(root, path, &mut bytes))
-        .transpose()?;
     proof::admit_package_target(
         &document,
         &proof::PackageTargetInput::new(
@@ -150,17 +152,13 @@ fn acquire(root: &Path) -> Result<AcquiredPackage, Error> {
             executable.clone(),
             payload.clone(),
             receipt.clone(),
-        )
-        .with_debug(debug.clone()),
+        ),
     )
     .map_err(|error| Error::input(error.to_string()))?;
-    let mut members = vec![package, executable, payload, receipt];
-    members.extend(debug);
     let acquired = AcquiredPackage {
         executable_path: selected.executable_path.clone(),
         payload_path,
-        debug_path: selected.debug_path.clone(),
-        members,
+        members: vec![package, executable, payload, receipt],
     };
     acquired.member(&acquired.executable_path)?;
     acquired.member(&acquired.payload_path)?;
@@ -171,7 +169,6 @@ fn acquire(root: &Path) -> Result<AcquiredPackage, Error> {
 struct AcquiredPackage {
     executable_path: String,
     payload_path: String,
-    debug_path: Option<String>,
     members: Vec<proof::PackageMember>,
 }
 
@@ -235,6 +232,38 @@ fn read_member(
     let file = File::open(&path)
         .map_err(|source| Error::environment("open package member", &path, source))?;
     proof::PackageMember::admit_file(relative, package_mode(&path)?, file, limit)
+        .map_err(|error| Error::input(error.to_string()))
+}
+
+fn read_candidate(
+    path: &Path,
+    package_path: &str,
+    total: &mut u64,
+) -> Result<proof::PackageMember, Error> {
+    let metadata = member_metadata(path)?;
+    if !metadata.file_type().is_file() {
+        return Err(Error::input(format!(
+            "candidate executable is not an unlinked regular file: {}",
+            path.display()
+        )));
+    }
+    if metadata.len() > MAX_MEMBER_BYTES {
+        return Err(Error::input(format!(
+            "candidate executable exceeds {MAX_MEMBER_BYTES} bytes: {}",
+            path.display()
+        )));
+    }
+    *total = total
+        .checked_add(metadata.len())
+        .filter(|total| *total <= MAX_PACKAGE_BYTES)
+        .ok_or_else(|| {
+            Error::input(format!(
+                "package regular files exceed {MAX_PACKAGE_BYTES} bytes"
+            ))
+        })?;
+    let file = File::open(path)
+        .map_err(|source| Error::environment("open candidate executable", path, source))?;
+    proof::PackageMember::admit_file(package_path, 0o755, file, MAX_MEMBER_BYTES)
         .map_err(|error| Error::input(error.to_string()))
 }
 
@@ -323,9 +352,6 @@ impl StagedPackage {
             staged.publish(acquired.member(PACKAGE_DOCUMENT_PATH)?)?;
             staged.publish(acquired.member(&acquired.payload_path)?)?;
             staged.publish(acquired.member(&acquired.executable_path)?)?;
-            if let Some(symbols_path) = &acquired.debug_path {
-                staged.publish(acquired.member(symbols_path)?)?;
-            }
             return Ok(staged);
         }
         Err(Error::input(
@@ -427,7 +453,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         fs::write(&path, b"not a package directory").expect("fixture file writes");
-        let error = acquire(&path).expect_err("regular file cannot be a package root");
+        let error = acquire(&path, &path).expect_err("regular file cannot be a package root");
         fs::remove_file(&path).expect("fixture file removes");
         assert!(matches!(error, Error::Input(_)));
     }
@@ -444,14 +470,10 @@ mod tests {
         fs::create_dir(&package).expect("package fixture root creates");
         let tree = complete_package();
         write_package(&package, &tree);
-        let acquired = acquire(&package).expect("complete package acquires");
-        if current_target().unwrap() == ReleaseTarget::Aarch64AppleDarwin {
-            let symbol_path = "targets/aarch64-apple-darwin/symbols/spice.symbols";
-            assert_eq!(
-                acquired.member(symbol_path).unwrap().digest(),
-                &Digest::compute(Domain::DistArtifact, b"symbol fixture"),
-            );
-        }
+        let target = current_target().unwrap();
+        let candidate = root.join("candidate-spice");
+        write_candidate(&candidate, target);
+        let acquired = acquire(&package, &candidate).expect("evidence and candidate acquire");
         let staged = StagedPackage::new(&acquired).expect("selected package stages");
         let staged_root = staged.root.clone();
         assert_eq!(
@@ -461,24 +483,11 @@ mod tests {
         assert_eq!(sill::authority::owner_mode(&staged_root).unwrap(), 0o700,);
         assert!(staged_root.join(PACKAGE_DOCUMENT_PATH).is_file());
         assert!(staged_root.join(&acquired.payload_path).is_file());
-        let target = current_target().unwrap();
-        let debug_path = target
-            .debug_path()
-            .map(|path| format!("targets/{target}/{path}"));
-        assert_eq!(acquired.debug_path, debug_path);
-        assert_eq!(
-            debug_path
-                .as_deref()
-                .map(|path| staged_root.join(path).is_file()),
-            target.debug_path().map(|_| true),
-        );
-        if target == ReleaseTarget::Aarch64AppleDarwin {
-            let symbol_path = debug_path.expect("Darwin debug path");
-            assert_eq!(
-                fs::read(staged_root.join(&symbol_path)).unwrap(),
-                b"symbol fixture"
-            );
-        }
+        assert!(target.debug_path().is_none_or(|path| {
+            !staged_root
+                .join(format!("targets/{target}/{path}"))
+                .exists()
+        }));
 
         drop(staged);
         assert!(!staged_root.exists());
@@ -494,43 +503,59 @@ mod tests {
         write_package(&root, &tree);
         let target = current_target().unwrap();
         let prefix = format!("targets/{target}/");
-        let full = acquire(&root).expect("full package acquires");
+        let payload_path = format!("{prefix}payload.json");
+        let proof_path = format!("{prefix}proof.json");
+        let candidate = root.join("candidate-spice");
+        write_candidate(&candidate, target);
+        let full = acquire(&root, &candidate).expect("full package acquires");
         for member in tree.members() {
-            if member.path() != PACKAGE_DOCUMENT_PATH && !member.path().starts_with(&prefix) {
+            if member.path() != PACKAGE_DOCUMENT_PATH
+                && member.path() != payload_path
+                && member.path() != proof_path
+            {
                 fs::remove_file(root.join(member.path())).expect("unselected member removes");
             }
         }
-        let selected = acquire(&root).expect("only the selected target is required");
+        let selected =
+            acquire(&root, &candidate).expect("evidence and external candidate are sufficient");
         assert_eq!(
             selected.member(&selected.executable_path).unwrap().digest(),
             full.member(&full.executable_path).unwrap().digest(),
         );
-        for member in tree
-            .members()
-            .iter()
-            .filter(|member| member.path().starts_with(&prefix))
-        {
-            let path = root.join(member.path());
+        for relative in [&payload_path, &proof_path] {
+            let member = tree
+                .members()
+                .iter()
+                .find(|member| member.path() == relative)
+                .expect("selected evidence member");
+            let path = root.join(relative);
             fs::remove_file(&path).expect("selected member removes");
             assert!(
-                matches!(acquire(&root), Err(Error::Input(_))),
+                matches!(acquire(&root, &candidate), Err(Error::Input(_))),
                 "missing {}",
                 member.path()
             );
             fs::write(&path, b"changed").expect("changed member writes");
             let file = File::open(&path).expect("changed member opens");
             sill::authority::set_file_mode(&file, member.mode()).expect("member mode restores");
-            assert!(acquire(&root).is_err(), "changed {}", member.path());
+            assert!(
+                acquire(&root, &candidate).is_err(),
+                "changed {}",
+                member.path()
+            );
             let mut file = File::create(&path).expect("selected member restores");
             member.copy_to(&mut file).expect("original bytes restore");
         }
+        fs::write(&candidate, b"changed candidate").expect("candidate changes");
+        assert!(matches!(acquire(&root, &candidate), Err(Error::Input(_))));
+        write_candidate(&candidate, target);
         #[cfg(unix)]
         {
             let directory = root.join("targets").join(target.as_str());
             let held = root.join("held-target");
             fs::rename(&directory, &held).expect("selected directory moves");
             std::os::unix::fs::symlink(&held, &directory).expect("selected directory aliases");
-            assert!(matches!(acquire(&root), Err(Error::Input(_))));
+            assert!(matches!(acquire(&root, &candidate), Err(Error::Input(_))));
         }
         fs::remove_dir_all(root).expect("fixture removes");
     }
@@ -538,6 +563,10 @@ mod tests {
     /// Each target's executable bytes, distinct so staging proves which it took.
     fn platform_executable(target: ReleaseTarget) -> Vec<u8> {
         format!("#!/bin/sh\n# {}\n", target.as_str()).into_bytes()
+    }
+
+    fn write_candidate(path: &Path, target: ReleaseTarget) {
+        fs::write(path, platform_executable(target)).expect("candidate executable writes");
     }
 
     fn write_package(root: &Path, tree: &proof::PackageTree) {
@@ -621,17 +650,6 @@ mod tests {
                             &proofs[index],
                         ),
                     )
-                    .with_debug(target.debug_path().map(|path| {
-                        inline(
-                            &format!("targets/{target}/{path}"),
-                            0o644,
-                            if target == ReleaseTarget::Aarch64AppleDarwin {
-                                b"symbol fixture".as_slice()
-                            } else {
-                                b"Windows PDB fixture".as_slice()
-                            },
-                        )
-                    }))
                 })
                 .collect(),
         ))
