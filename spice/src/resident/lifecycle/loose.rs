@@ -31,9 +31,8 @@ pub(super) struct Loose {
     exited: BTreeSet<CanonicalUuid>,
     /// Lanes left loose, by the state they were left in.
     lanes: BTreeMap<CanonicalUuid, LooseLane>,
-    /// The system config native Git reads, once resolved: the resident's
-    /// Ambient never changes, so neither does the file.
-    native_system: Option<Option<PathBuf>>,
+    /// The system config native Git reported before reconciliation began.
+    native_system: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,6 +42,14 @@ struct LooseLane {
 }
 
 impl Loose {
+    pub(super) const fn new(native_system: Option<PathBuf>) -> Self {
+        Self {
+            exited: BTreeSet::new(),
+            lanes: BTreeMap::new(),
+            native_system,
+        }
+    }
+
     /// Judge `lane`'s worktree at the next reconciliation.
     pub(super) fn exited(&mut self, lane: CanonicalUuid) {
         self.exited.insert(lane);
@@ -90,18 +97,7 @@ impl Loose {
                 continue;
             }
             let root = Path::new(&row.worktree);
-            let native_system = match self.native_system(root, ambient) {
-                Ok(native_system) => native_system,
-                Err(error) => {
-                    let _ = writeln!(
-                        diagnostic,
-                        "lifecycle native Git system config unresolved lane={lane}: {error}"
-                    );
-                    self.exited.insert(lane);
-                    continue;
-                }
-            };
-            match spice::task_git::loose_work(root, ambient, native_system.as_deref()) {
+            match spice::task_git::loose_work(root, ambient, self.native_system.as_deref()) {
                 Ok(work) => self.judge(lane, work.is_loose().then(|| work.fingerprint())),
                 Err(error) => {
                     let _ = writeln!(
@@ -112,21 +108,6 @@ impl Loose {
                 }
             }
         }
-    }
-
-    fn native_system(
-        &mut self,
-        root: &Path,
-        ambient: &spice::ambient::Ambient,
-    ) -> Result<Option<PathBuf>, String> {
-        if let Some(native_system) = &self.native_system {
-            return Ok(native_system.clone());
-        }
-        let environment = ambient.environment().map_err(|error| error.to_string())?;
-        let native_system = spice::git_shadow::native_system_config(root, &environment)
-            .map_err(|error| error.to_string())?;
-        self.native_system = Some(native_system.clone());
-        Ok(native_system)
     }
 
     /// Record the loose state `lane` was left in, if any.
