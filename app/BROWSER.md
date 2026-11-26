@@ -293,6 +293,12 @@ strip-wide divider or accent rail crosses them. Check each kind's
 [accent](OVERVIEW.md#drafts-and-oops-intake) in both themes; Draft is inert
 for Ask.
 
+With the composer closed, the operator launcher must show its complete circular
+rim and shadow over the command bar's primary page material. The closed
+top-layer dialog begins after the launcher, so no dialog paint or clip may
+cross it. Opening restores the sheet behind the launcher without moving the
+launcher or any destination, DRAFT or HELP tab. Repeat at phone width.
+
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
 and no Escape reopening during close. Empty/whitespace content

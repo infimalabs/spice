@@ -9,7 +9,9 @@ reduced motion removes it. Dismissal returns focus to a surviving launcher.
 
 Attached accent rails use the **closed-edge** recipe: radius equals thickness.
 Message cards, work total/task tabs and quota-account accents share it. Closed,
-the composer strip paints nothing but its hanging tabs.
+the composer's top-layer box begins at its hanging tabs; its fixed operator
+launcher stands outside that paint and clip over the primary page material.
+Opening restores the translucent sheet behind the unmoved launcher and tabs.
 Structural dividers stay square. Standalone cards, media, dialogs, round
 controls, pills and focus rings keep their radii; joined controls round only
 outside endpoints.

@@ -92,11 +92,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
-  width: var(--app-compose-anchor-width, 36rem);
+  width: calc(var(--app-compose-anchor-width, 36rem) - var(--app-compose-launcher-inline));
   height: auto;
   max-height: 100dvh;
   padding: 0;
-  overflow: clip;
+  overflow: visible;
   border: 0;
   border-inline-end: var(--app-control-edge-width) solid color-mix(in srgb, var(--control-line-soft) calc(100% * var(--app-compose-sheet-opacity)), transparent);
   border-radius: 0 0 var(--app-closed-edge-radius) var(--app-closed-edge-radius);
@@ -114,12 +114,16 @@
 .app-compose-dialog[data-expanded="true"] {
   grid-template-rows: auto minmax(0, 1fr);
   inset-block-end: 0;
+  width: var(--app-compose-anchor-width, 36rem);
   min-width: var(--app-compose-open-min);
+  overflow: clip;
   border-radius: 0;
 }
-/* The operator launcher and the active sheet meet the left browser chrome;
-   only their shared inset separates the launcher face from that edge. */
-#app-compose-dialog { left: 0 !important; right: auto !important; }
+/* Closed, the top-layer sheet begins at the tabs: the fixed operator launcher
+   stands outside its paint and clip over the primary page. Opening restores
+   the sheet's full left edge behind the launcher without moving either one. */
+#app-compose-dialog { left: var(--app-compose-launcher-inline) !important; right: auto !important; }
+#app-compose-dialog[data-expanded="true"] { left: 0 !important; }
 .app-compose-dialog[data-presented="true"] {
   --app-compose-sheet-opacity: 1;
   box-shadow: var(--shadow);
@@ -222,24 +226,30 @@
   border: 0;
 }
 /* The strip: a horizontal destination track between the operator launcher and
-   the utility tabs. Choosing a destination opens the sheet on it. */
+   the utility tabs. Closed, the dialog itself begins here so its top-layer
+   surface cannot paint behind or clip the launcher. Open, the full sheet
+   resumes and this row keeps the same viewport position. */
 .app-compose-modes-row {
   position: absolute;
   z-index: 3;
   inset-block-start: 0;
-  inset-inline-start: var(--app-compose-launcher-inline);
+  inset-inline-start: 0;
   display: grid;
   box-sizing: border-box;
-  width: calc(100% - var(--app-compose-launcher-inline) - var(--app-compose-utility-width));
+  width: calc(100% - var(--app-compose-utility-width));
   height: var(--app-compose-tab-block);
   padding: 0 6px;
 }
+.app-compose-dialog[data-expanded="true"] .app-compose-modes-row {
+  inset-inline-start: var(--app-compose-launcher-inline);
+  width: calc(100% - var(--app-compose-launcher-inline) - var(--app-compose-utility-width));
+}
 /* The human-side launcher is the Spice launcher's exact left-hand mirror.
-   The operator's face names the destination and fills the whole button
-   inside a hairline rim: at this size every pixel goes to the image. The
-   small badge carries the personal inbox count without covering the face. */
+   Fixed in the popover's top layer, it stands outside the closed dialog box:
+   the primary page shows around its complete rim and shadow. Opening grows
+   the translucent sheet behind it without moving the control. */
 .app-inbox-button {
-  position: absolute;
+  position: fixed;
   z-index: calc(var(--app-closed-edge-layer) + 2);
   inset-block-start: var(--app-spice-anchor-inset-block);
   inset-inline-start: var(--app-spice-anchor-inset-inline);
