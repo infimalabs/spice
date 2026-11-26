@@ -234,18 +234,20 @@
   cursor: pointer;
 }
 /* The human-side launcher is the Spice launcher's exact left-hand mirror.
-   Its existing operator avatar names the destination; the small badge carries
-   the personal inbox count without enlarging the face. */
+   The operator's face names the destination and fills the whole button
+   inside a hairline rim: at this size every pixel goes to the image. The
+   small badge carries the personal inbox count without covering the face. */
 .app-inbox-button {
   position: absolute;
   z-index: calc(var(--app-closed-edge-layer) + 2);
   inset-block-start: var(--app-spice-anchor-inset-block);
   inset-inline-start: var(--app-spice-anchor-inset-inline);
+  border-width: 1px;
 }
 .app-inbox-button > .operator-avatar {
   flex-basis: auto;
-  width: calc(100% - 4px);
-  height: calc(100% - 4px);
+  width: 100%;
+  height: 100%;
   border: 0;
   font-size: var(--app-type-control);
 }

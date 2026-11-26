@@ -310,7 +310,7 @@ fn inbox_launcher(
             aria-controls="app-compose-dialog"
             title={label}
             onclick={action.reform(|_: MouseEvent| ())}>
-            {super::super::view::render_operator_avatar(
+            {super::super::view::render_operator_face(
                 runtime.and_then(AppRuntime::own_identity),
             )}
             if waiting > 0 {

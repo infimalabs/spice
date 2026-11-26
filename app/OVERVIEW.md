@@ -243,7 +243,8 @@ dependency, and there is no separate OOPS lifecycle state or action.
 
 The global composer is the left companion to the right Spice sidebar. Its
 circular operator-avatar launcher exactly mirrors the Spice button's size and
-browser-edge position; a small badge carries the personal inbox's open count.
+browser-edge position. The operator's face fills it inside a hairline rim,
+without an initials band; a small badge carries the personal inbox's open count.
 Beside it, one accent rail joins the horizontal **Ask**, **Task**, **Plan**, and
 **Design** track to proper **Draft** and **Help** tabs.
 

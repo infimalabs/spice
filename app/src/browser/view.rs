@@ -383,9 +383,21 @@ fn team_name(team: &crate::runtime::LaneRow) -> String {
     format!("{host} team")
 }
 
+/// The operator's avatar: the Gravatar banded with the initials badge, or the
+/// initials alone.
 pub(super) fn render_operator_avatar(
     principal: Option<&wire::principal::PrincipalDisplay>,
 ) -> Html {
+    render_avatar(principal, true)
+}
+
+/// The operator's avatar without the initials band over a Gravatar, for a
+/// control too small to spare any of the image.
+pub(super) fn render_operator_face(principal: Option<&wire::principal::PrincipalDisplay>) -> Html {
+    render_avatar(principal, false)
+}
+
+fn render_avatar(principal: Option<&wire::principal::PrincipalDisplay>, badge: bool) -> Html {
     let label = principal
         .and_then(|identity| identity.name.as_deref())
         .unwrap_or("Your");
@@ -397,7 +409,7 @@ pub(super) fn render_operator_avatar(
                     src={format!("https://gravatar.com/avatar/{}?s=160&d=retro", gravatar.as_str())}
                     alt={format!("{label} Gravatar")}
                 />
-                if let Some(initials) = initials {
+                if let Some(initials) = initials.filter(|_| badge) {
                     <span class="operator-avatar-badge" aria-hidden="true">{initials}</span>
                 }
             </span>
