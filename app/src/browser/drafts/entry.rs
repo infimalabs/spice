@@ -270,13 +270,55 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                         {"Control or Command plus Shift and Enter broadcasts this message and its direct images to every occupied agent in the fleet."}
                     </span>
                 </form>
-                {utility_tabs(&mode, &draft, busy, props.inbox_waiting)}
+                {utility_tabs(&mode, &draft, busy)}
+                {inbox_launcher(runtime, props.inbox_waiting, presentation.expanded, &expand, &close)}
                 // The Principals section names itself by its own heading.
                 <div class="app-compose-inbox" hidden={!presentation.expanded}>
                     {props.inbox.clone()}
                 </div>
             </dialog>
         </div>
+    }
+}
+
+/// The operator's face opens the human side, mirroring the Spice launcher on
+/// the system side. Its badge carries the personal inbox's open count.
+fn inbox_launcher(
+    runtime: Option<&AppRuntime>,
+    waiting: usize,
+    expanded: bool,
+    open: &Callback<()>,
+    close: &Callback<()>,
+) -> Html {
+    let action = if expanded {
+        close.clone()
+    } else {
+        open.clone()
+    };
+    let state = if expanded { "Close" } else { "Open" };
+    let messages = match waiting {
+        0 => "no messages waiting".to_owned(),
+        1 => "1 message waiting".to_owned(),
+        count => format!("{count} messages waiting"),
+    };
+    let label = format!("{state} your inbox - {messages}");
+    html! {
+        <button type="button" class="app-spice-button app-inbox-button"
+            aria-label={label.clone()}
+            aria-haspopup="dialog"
+            aria-expanded={expanded.to_string()}
+            aria-controls="app-compose-dialog"
+            title={label}
+            onclick={action.reform(|_: MouseEvent| ())}>
+            {super::super::view::render_operator_avatar(
+                runtime.and_then(AppRuntime::own_identity),
+            )}
+            if waiting > 0 {
+                <span class="app-count-badge app-inbox-button-count" role="status">
+                    {waiting}
+                </span>
+            }
+        </button>
     }
 }
 
@@ -1001,29 +1043,13 @@ fn send_message(
 
 /// Outside the masked form so this layer clears both accents. Tabs run from
 /// the inline end inward; Help remains available during admission, while Draft
-/// explicitly seals itself. The count of open principal inputs rides beside
-/// them so the closed strip announces it.
-fn utility_tabs(
-    mode: &UseStateHandle<Mode>,
-    draft: &UseStateHandle<bool>,
-    busy: bool,
-    waiting: usize,
-) -> Html {
-    let label = match waiting {
-        0 => None,
-        1 => Some("1 message waiting for you".to_owned()),
-        count => Some(format!("{count} messages waiting for you")),
-    };
+/// explicitly seals itself. The mirrored operator launcher carries the open
+/// principal-input count.
+fn utility_tabs(mode: &UseStateHandle<Mode>, draft: &UseStateHandle<bool>, busy: bool) -> Html {
     html! {
         <div class="app-compose-utility-tabs">
             <crate::browser::help::HelpTrigger />
             {draft_control(mode, draft, busy)}
-            if let Some(label) = label {
-                <span class="app-count-badge app-compose-inbox-count" role="status"
-                    aria-label={label.clone()} title={label}>
-                    {waiting.to_string()}
-                </span>
-            }
         </div>
     }
 }

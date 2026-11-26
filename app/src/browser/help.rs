@@ -434,7 +434,7 @@ fn render_sheet(
         ),
         (
             "Spice",
-            "Resident, inbox, jobs, and agents",
+            "Resident, providers, jobs, and agents",
             AppRoute::Spice,
         ),
     ];
