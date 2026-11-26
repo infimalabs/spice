@@ -125,9 +125,9 @@ fn acquire(root: &Path, candidate_path: &Path) -> Result<AcquiredPackage, Error>
     .map_err(|error| Error::input(error.to_string()))?;
     let candidate_version = &document.product_version;
     let current = spice::version::product();
-    if candidate_version.precedence(current).is_le() {
+    if candidate_version != current {
         return Err(Error::input(format!(
-            "package version {candidate_version} is not newer than installed appliance version {current}"
+            "package version {candidate_version} does not match candidate version {current}"
         )));
     }
     let target = current_target()?;
@@ -459,6 +459,32 @@ mod tests {
     }
 
     #[test]
+    fn package_version_must_match_the_invoking_candidate() {
+        let root =
+            std::env::temp_dir().join(format!("spice-package-version-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).expect("fixture root creates");
+        let current = spice::version::product();
+        let major = current
+            .as_str()
+            .split('.')
+            .next()
+            .expect("canonical version has a major component");
+        let other =
+            ProductVersion::parse(&format!("1{major}.0.0")).expect("distinct version parses");
+        let tree = package_with_version(&other);
+        write_package(&root, &tree);
+        let target = current_target().unwrap();
+        let candidate = root.join("candidate-spice");
+        write_candidate(&candidate, target);
+
+        let error = acquire(&root, &candidate).expect_err("mismatched version refuses");
+        fs::remove_dir_all(root).expect("fixture removes");
+        assert!(
+            matches!(error, Error::Input(message) if message.contains("does not match candidate version"))
+        );
+    }
+
+    #[test]
     fn verified_generation_stages_only_admitted_platform_assets() {
         let root = std::env::temp_dir().join(format!(
             "spice-package-delegate-{}-{}",
@@ -583,6 +609,10 @@ mod tests {
     }
 
     fn complete_package() -> proof::PackageTree {
+        package_with_version(spice::version::product())
+    }
+
+    fn package_with_version(version: &ProductVersion) -> proof::PackageTree {
         const TARGETS: [ReleaseTarget; 3] = [
             ReleaseTarget::Aarch64AppleDarwin,
             ReleaseTarget::X86_64UnknownLinuxMusl,
@@ -613,14 +643,7 @@ mod tests {
             targets: manifest_targets,
         })
         .expect("manifest encodes");
-        let current = spice::version::product();
-        let major = current
-            .as_str()
-            .split('.')
-            .next()
-            .expect("canonical version has a major component");
-        let version = ProductVersion::parse(&format!("1{major}.0.0"))
-            .expect("synthetic package advances the current major");
+        let version = version.clone();
         let notes = b"Release notes\n";
         let notes_identity = Digest::compute(Domain::DistReleaseNotes, b"notes evidence");
         proof::build_package(proof::PackageInput::new(
