@@ -477,7 +477,6 @@ pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
     overlay
 }
 
-
 /// The extension a lane writes beside its overlay and loads with
 /// `--extension`, so the provider reads each steered message as the lane
 /// wrote it.

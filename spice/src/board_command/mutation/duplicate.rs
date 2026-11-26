@@ -2,7 +2,6 @@
 //! sibling's.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use board::duplicate::{DuplicateKinship, DuplicateProbe, DuplicateScore, DuplicateStanding};
 use board::similarity::FREQUENCY_WINDOW;
@@ -10,12 +9,9 @@ use board::similarity::FREQUENCY_WINDOW;
 use super::*;
 
 /// One creation's screen against the board: the relations it declares, the
-/// warnings its write carries, and the guard that refuses a sibling committed
-/// after the screen read.
+/// warnings its write carries, and the cursor that invalidates the fitted
+/// duplicate corpus when another task head changes.
 pub(super) struct DuplicateScreen {
-    probe: DuplicateProbe,
-    created: wire::TaskStamp,
-    exempt: Arc<Exemption>,
     cursor: Option<wire::Seq>,
     pub(super) related: Vec<wire::TaskStamp>,
     pub(super) warnings: Vec<wire::intent::DuplicateWarning>,
@@ -46,7 +42,7 @@ pub(super) fn screen(
     let observed = bus
         .task_snapshot()
         .map_err(|error| store_fault("board::heads-unreadable", error.to_string()))?;
-    let exempt = Arc::new(Exemption::of(&observed, statement));
+    let exempt = Exemption::of(&observed, statement);
     let live = observed
         .tasks()
         .iter()
@@ -130,9 +126,6 @@ pub(super) fn screen(
         })
         .collect();
     Ok(DuplicateScreen {
-        probe,
-        created: statement.born.clone(),
-        exempt,
         cursor: observed.cursor(),
         related,
         warnings,
@@ -140,13 +133,10 @@ pub(super) fn screen(
 }
 
 impl DuplicateScreen {
-    /// Retry the screen when any sibling born after its read, outside the
-    /// exempt chain, now matches. The retry must apply the same warning,
-    /// relation requirement, or fresh refusal as an initially visible sibling.
+    /// Retry the screen when any task head changes after its read. Task-head
+    /// changes can alter corpus membership, window order, or candidate status,
+    /// so the old fitted profile cannot decide whether a retry is unnecessary.
     pub(super) fn guard(&self, write: &mut JournalWrite) {
-        let probe = self.probe.clone();
-        let created = self.created.clone();
-        let exempt = Arc::clone(&self.exempt);
         let screened = self.cursor;
         write.guard(JournalGuard::new(move |read| {
             let Some(current) = read.cursor()? else {
@@ -158,30 +148,15 @@ impl DuplicateScreen {
             let Some(first) = first else {
                 return Ok(());
             };
-            for heads in read.changed_task_heads(first, current)? {
-                let sibling = heads.statement().body();
-                if sibling.born == created
-                    || sibling.revision < first
-                    || heads.workflow().body().status.is_deleted()
-                {
-                    continue;
-                }
-                let Some(kinship) = exempt.kinship(sibling) else {
-                    continue;
-                };
-                if let Some(score) = probe.score(sibling)
-                    && DuplicateStanding::of(&created, &sibling.born, score.cosine, kinship)
-                        .is_some()
-                {
-                    return Err(GuardError::refused(format!(
-                        "task::duplicate-screen-moved: {} {:?} committed after duplicate screening with cosine {:.2}",
-                        sibling.handle(heads.workflow().body().phase),
-                        sibling.title,
-                        score.cosine,
-                    )));
-                }
-            }
-            Ok(())
+            let Some(heads) = read.changed_task_heads(first, current)?.into_iter().next() else {
+                return Ok(());
+            };
+            let statement = heads.statement().body();
+            Err(GuardError::refused(format!(
+                "task::duplicate-screen-moved: {} {:?} changed after duplicate screening",
+                statement.handle(heads.workflow().body().phase),
+                statement.title,
+            )))
         }));
     }
 }

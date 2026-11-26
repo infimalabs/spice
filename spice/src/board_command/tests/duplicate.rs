@@ -99,6 +99,24 @@ fn sibling(bus: &Bus, epoch: CanonicalUuid, seat: &Seat) -> TaskStamp {
     born
 }
 
+fn withdraw(bus: &Bus, epoch: CanonicalUuid, task: &TaskHandle) {
+    let visible = board(bus, epoch, Actor::TEST_PRINCIPAL);
+    let heads = at(&visible, task);
+    let outcome = issue(
+        bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        CommandKind::TaskDelete,
+        transition_witnesses(heads),
+        &TaskDelete {
+            task: task.clone(),
+            reason: "fixture corpus change".to_owned(),
+            force_claimed: false,
+        },
+    );
+    assert_committed(outcome);
+}
+
 #[test]
 fn a_fresh_independent_duplicate_refuses_whole_even_when_related() {
     let (root, bus, epoch, seats) = fixture("duplicate-fresh", 1);
@@ -271,6 +289,28 @@ fn a_post_screen_sibling_gets_the_same_duplicate_standing_after_retry() {
         }
         clean(&root, bus);
     }
+}
+
+#[test]
+fn a_post_screen_deletion_refits_before_returning_warnings() {
+    let (root, bus, epoch, seats) = fixture("duplicate-race-deleted", 1);
+    let first = sibling(&bus, epoch, &seats[0]);
+    let born = born_after(15 * 60 + 1);
+    let add = duplicated();
+    let command = admitted(epoch, Actor::TEST_PRINCIPAL, &born, &add);
+    let outcome = mutation::task_add_with(&bus, &command, &add, None, || {
+        withdraw(&bus, epoch, &handle(&first));
+    });
+
+    let CommandAnswer::Task(answer) = assert_committed(outcome) else {
+        panic!("task add answers its task");
+    };
+    assert!(
+        answer.duplicates.is_empty(),
+        "the retry must refit without the deleted sibling: {:?}",
+        answer.duplicates
+    );
+    clean(&root, bus);
 }
 
 #[test]
