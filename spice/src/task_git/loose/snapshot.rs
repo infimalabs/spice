@@ -78,9 +78,8 @@ fn native_config(
         .head_name()
         .map_err(|error| fault("git::head-unreadable", "read HEAD name", error))?;
     let mut environment = |name: &str| native_variable(ambient, name, shadow.as_deref());
-    let system = shadow
-        .as_ref()
-        .and_then(|_| gix::config::Source::System.storage_location(&mut environment))
+    let system = gix::config::Source::System
+        .storage_location(&mut environment)
         .map(|path| gix::config::file::Metadata::from(gix::config::Source::System).at(path));
     let mut sources = system.into_iter().chain(
         gix::config::source::Kind::Global
@@ -136,7 +135,10 @@ fn native_variable(
     generated_shadow: Option<&Path>,
 ) -> Option<OsString> {
     if name == "GIT_CONFIG_SYSTEM" {
-        return generated_shadow.map(Path::as_os_str).map(OsString::from);
+        return generated_shadow
+            .map(Path::as_os_str)
+            .or_else(|| ambient.get(name))
+            .map(OsString::from);
     }
     if name == "GIT_CONFIG_COUNT"
         || name.starts_with("GIT_CONFIG_KEY_")

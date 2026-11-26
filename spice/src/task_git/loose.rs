@@ -358,6 +358,39 @@ mod tests {
     }
 
     #[test]
+    fn unshadowed_system_pairing_uses_the_ambient_system_config() {
+        let scratch = Scratch::new();
+        let root = &scratch.0;
+        crate::test_repository::initialize(root);
+        fs::write(root.join("tracked"), "baseline").expect("write tracked fixture");
+        crate::test_repository::stage_all(root);
+        let baseline = crate::test_repository::commit(root, "baseline");
+        fs::write(root.join("tracked"), "local").expect("write local commit");
+        crate::test_repository::stage(root, &["tracked"]);
+        let head = crate::test_repository::commit(root, "local");
+        fs::write(root.join(".git/HEAD"), "ref: refs/heads/topic\n")
+            .expect("select fixture branch");
+        fs::write(root.join(".git/refs/heads/topic"), format!("{head}\n"))
+            .expect("write fixture branch");
+        fs::write(
+            root.join(".git/refs/heads/baseline"),
+            format!("{baseline}\n"),
+        )
+        .expect("write integration baseline");
+        let system = root.join("system.config");
+        fs::write(
+            &system,
+            "[branch \"topic\"]\n\tremote = .\n\tmerge = refs/heads/baseline\n",
+        )
+        .expect("write native system pairing");
+        let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", system.as_os_str())]);
+
+        let work = snapshot::read(root, &ambient).expect("system pairing snapshot reads");
+        assert_eq!(work.unlanded.total, 1);
+        assert_eq!(work.unlanded.baseline, Some(baseline.to_string()));
+    }
+
+    #[test]
     fn configured_remote_without_a_fetch_url_refuses() {
         let scratch = Scratch::new();
         let root = &scratch.0;
