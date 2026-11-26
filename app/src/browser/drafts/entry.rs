@@ -168,7 +168,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     let presentation = use_presentation(&anchor, &dialog, expanded.clone());
     let close = presentation.close.clone();
     let expand = presentation.open.clone();
-    use_summons(props, &mode, &expanded, busy);
+    use_summons(props, &expanded, busy);
     use_mode_shortcuts(&mode, &expand, busy);
     // Whether a press would submit something, read again on every edit and
     // whenever quotes or images come or go without raising input.
@@ -803,15 +803,9 @@ pub(super) fn refocus_if_open() {
 }
 
 #[hook]
-fn use_summons(
-    props: &Props,
-    mode: &UseStateHandle<Mode>,
-    expanded: &UseStateHandle<bool>,
-    sending: bool,
-) {
+fn use_summons(props: &Props, expanded: &UseStateHandle<bool>, sending: bool) {
     let summons = props.controls.composer.creator_summons().cloned();
     let handled = use_mut_ref(|| None);
-    let mode = mode.clone();
     let expanded = expanded.clone();
     use_effect_with(
         (sending, summons.as_ref().map(|summons| summons.serial)),
@@ -822,7 +816,6 @@ fn use_summons(
             {
                 // Settlement is not another quote arrival.
                 *handled.borrow_mut() = Some(summons.serial);
-                mode.set(Mode::Task);
                 expanded.set(true);
                 crate::browser::watchband::focus_after_render(quote_textarea_id(
                     NEW_DRAFT_KEY,
