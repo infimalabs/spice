@@ -319,10 +319,11 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 ## macOS symbols
 
-On macOS, the xtask install and a package apply keep the executable's dSYM,
-and the receipt records the executable digest, the shared Mach-O UUID, and the
-source commit. Verify the installed pair, or symbolize a `sample(1)` report
-taken from the installed image; both forms are read-only:
+On macOS, the xtask install keeps the executable's dSYM, and the receipt
+records the executable digest, the shared Mach-O UUID, and the source commit.
+A release package apply installs the executable alone, since release evidence
+carries no symbols. Verify an installed pair, or symbolize a `sample(1)`
+report taken from the installed image; both forms are read-only:
 
 ```sh
 "$SPICE_BIN" --json install symbols
