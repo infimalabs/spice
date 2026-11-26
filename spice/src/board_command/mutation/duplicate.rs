@@ -101,7 +101,7 @@ pub(super) fn screen(
             "task::duplicate-fresh",
             Some(described(&statement.born, &fresh)),
             format!(
-                "another lane just created this work: join it with `spice task join {sibling}`, or post what this statement adds with `spice room post {sibling} TEXT`; no relation admits a duplicate within a minute of its sibling"
+                "another lane just created this work: ask the holder of {sibling} for an invitation, or post what this statement adds with `spice room post {sibling} TEXT`; no relation admits a duplicate within a minute of its sibling"
             ),
         ));
     }
@@ -115,7 +115,7 @@ pub(super) fn screen(
             "task::duplicate-unrelated",
             Some(described(&statement.born, &unrelated)),
             format!(
-                "reuse {sibling} (`spice task join {sibling}` or `spice room post {sibling} TEXT`), or retry with --related naming each sibling when this is distinct related work"
+                "reuse {sibling} by asking its holder for an invitation or posting what this statement adds with `spice room post {sibling} TEXT`, or retry with --related naming each sibling when this is distinct related work"
             ),
         ));
     }
