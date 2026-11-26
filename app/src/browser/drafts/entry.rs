@@ -230,7 +230,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
             data-base-accent={mode.base_accent().map(|accent| accent.to_string())}>
             {page_veil(&presentation, &close)}
             <dialog ref={dialog.clone()} open=true id="app-compose-dialog" popover="manual"
-                class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge app-closed-edge--block-end"
+                class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge"
                 data-expanded={presentation.expanded.to_string()}
                 data-presented={presentation.visible.to_string()}
                 data-inbox-waiting={props.inbox_waiting.to_string()}

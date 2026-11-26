@@ -1,6 +1,6 @@
 /* The global composer is the left overlay, the companion of the right-side
    Spice overlay. Closed, it is one strip under the command bar: the four
-   destinations on a horizontal thumb track, then the Draft and Help tabs.
+   destination tabs, then the Draft and Help tabs, beside the operator's face.
    Open, the same strip heads a full-height sheet holding the composition, its
    To row and action, and the principal inbox below them. */
 
@@ -130,7 +130,6 @@
       --app-compose-sheet-opacity var(--app-motion-settle) var(--app-ease-standard),
       box-shadow var(--app-motion-settle) var(--app-ease-standard);
   }
-  .app-compose-surface { transition: background-color var(--app-motion-settle) var(--app-ease-standard); }
   .app-compose-dialog :is(.app-compose-details, .app-compose-inbox) {
     transition: opacity var(--app-motion-settle) var(--app-ease-standard);
   }
@@ -139,16 +138,22 @@
     transition: opacity var(--app-motion-settle) var(--app-ease-standard), color var(--app-motion-fast) var(--app-ease-standard), background-color var(--app-motion-fast) var(--app-ease-standard);
   }
 }
+/* The sheet's material exists only as far as the sheet is presented: closed,
+   the operator face floats free on the header and the destination and utility
+   tabs hang from it on their own material, as the Spice corner's totals do.
+   Opening fades the surface in behind them. */
 .app-compose-surface {
   position: absolute;
   z-index: -1;
   inset: 0;
   border-radius: inherit;
-  background-color: var(--app-base-control);
+  background-color: var(--app-control-glass-paint);
   backdrop-filter: var(--overlay-frost);
+  opacity: var(--app-compose-sheet-opacity);
   pointer-events: none;
 }
-.app-compose-surface,
+/* Closed, the form shows only its strip; the cut below it fades in with the
+   sheet. */
 .app-compose-form {
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -162,7 +167,6 @@
   );
   mask-mode: alpha;
 }
-.app-compose-dialog[data-presented="true"] .app-compose-surface { background-color: var(--app-control-glass-paint); }
 /* While closing, inert keeps the open-only controls unavailable as their
    opacity fades. Settled closed state then hides them from paint and focus. */
 .app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-details, .app-compose-submit) { visibility: hidden; }

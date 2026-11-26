@@ -223,9 +223,9 @@ operator-avatar launcher mirrors the Spice button's size and browser-edge
 position, shows the operator's face edge to edge inside a hairline rim with no
 initials band, opens or closes the human side, and carries the personal inbox's
 open-count badge. Check that the editor's DOM identity, typed text and
-selection survive expansion, dismissal and conversion, and that the strip keeps
-the destination tabs and live Draft and Help; the sheet below is cut off and
-out of the Tab order.
+selection survive expansion, dismissal and conversion. Closed, the face floats
+free and the tabs hang alone, with no strip surface or edge; opening fades the
+glass in behind them, and the sheet is cut off and out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused and fades in the shared page veil; dismissal fades the veil out. Open,
 the sheet runs to the viewport's foot: editor, To row with Send/Create, then
