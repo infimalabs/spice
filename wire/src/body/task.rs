@@ -629,6 +629,19 @@ pub struct TaskEdited {
     pub intent: Option<crate::TaskIntentEdit>,
 }
 
+/// One task was declared related to others.
+///
+/// The relation is symmetric and unlabeled: it says only that the tasks are
+/// related, so it adds no dependency, requirement, preparation, allocation
+/// hold, or completion credit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRelated {
+    /// Task the declaring command named.
+    pub task: TaskStamp,
+    /// Tasks newly related to it, each distinct from it.
+    pub related: Vec<TaskStamp>,
+}
+
 /// A task was withdrawn from the board with a recorded reason.
 ///
 /// The journal is the authority and a fact is permanent, so a withdrawal is a

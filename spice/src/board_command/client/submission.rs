@@ -42,6 +42,19 @@ pub(super) fn filing_topic_argument(
         .transpose()
 }
 
+/// Every handle written for one repeatable argument, in order.
+pub(super) fn handle_arguments(
+    matches: &ArgMatches,
+    name: &str,
+) -> Result<Vec<TaskHandle>, <TaskHandle as std::str::FromStr>::Err> {
+    matches
+        .get_many::<String>(name)
+        .into_iter()
+        .flatten()
+        .map(|written| written.parse::<TaskHandle>())
+        .collect()
+}
+
 pub(super) fn client_add(
     repository: Host<'_>,
     contract: &Contract,
@@ -59,17 +72,15 @@ pub(super) fn client_add(
         .flatten()
         .cloned()
         .collect();
-    let depends = match matches
-        .get_many::<String>("depends")
-        .into_iter()
-        .flatten()
-        .map(|written| written.parse::<TaskHandle>())
-        .collect::<Result<Vec<_>, _>>()
-    {
+    let depends = match handle_arguments(matches, "depends") {
         Ok(depends) => depends,
         Err(error) => {
             return refusal("task::dependency-invalid", None, error.to_string());
         }
+    };
+    let related = match handle_arguments(matches, "related") {
+        Ok(related) => related,
+        Err(error) => return refusal("task::related-invalid", None, error.to_string()),
     };
     let resources = matches
         .get_many::<String>("resource")
@@ -122,6 +133,7 @@ pub(super) fn client_add(
         origin,
         flow: matches.get_one::<String>("flow").cloned(),
         depends,
+        related,
         claim,
         draft: matches.get_flag("draft"),
     };
@@ -356,6 +368,7 @@ fn capture_new_task(
         origin,
         flow: None,
         depends: Vec::new(),
+        related: Vec::new(),
         claim: true,
         draft: false,
     };

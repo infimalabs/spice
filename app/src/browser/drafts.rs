@@ -110,6 +110,7 @@ impl Controls {
                 Err(error) => results.settled(error),
             }
         });
+        let request = Box::new(request);
         if !admit_action(sender, ClientAction::Draft { request, respond }) {
             settled.emit(false);
             self.results.settled("The task change could not be queued.");

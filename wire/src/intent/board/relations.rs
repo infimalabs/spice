@@ -45,6 +45,8 @@ pub enum TaskRelationKind {
     Lifecycle,
     /// Current active claim ownership.
     Claim,
+    /// Declared unlabeled relations between tasks, in both directions.
+    Related,
 }
 
 /// Stable identity of one relationship node.

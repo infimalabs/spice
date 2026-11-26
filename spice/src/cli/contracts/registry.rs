@@ -564,12 +564,13 @@ pub(super) const CONTRACTS: &[Contract] = &[
     row!(
         ["task", "add"],
         "task add TITLE [--pitch TEXT] [--topic TOPIC] [--description DESCRIPTION] \
-         [--term TERM...] [--flow PHASES] [--depends HANDLE...] [--intent plan|design] [--preparation HANDLE] \
+         [--term TERM...] [--flow PHASES] [--depends HANDLE...] [--related HANDLE...] \
+         [--intent plan|design] [--preparation HANDLE] \
          [--requires-journal-schema SCHEMA] [--requires-trust-grant DIGEST] \
          [--resource RESOURCE...] [--origin ORIGIN] [--claim] [--draft]",
         PrincipalOrLane,
         Command,
-        [TaskAdded, TaskPhased, TaskEdited, ClaimWon],
+        [TaskAdded, TaskPhased, TaskEdited, TaskRelated, ClaimWon],
         [Resident, Toolful],
         TASK_GIT_TOOLS,
         Reply,
@@ -722,10 +723,10 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "task modify HANDLE [--title TITLE] [--pitch TEXT] [--description DESCRIPTION] \
          [--term TERM...] [--replace-term HANDLE=TEXT...] \
          [--remove-term HANDLE...] [--priority PRIORITY] [--topic TOPIC] \
-         [--intent INTENT] [--clear-intent] [--flow PHASES]",
+         [--intent INTENT] [--clear-intent] [--flow PHASES] [--related HANDLE...]",
         PrincipalOrLane,
         Command,
-        [TaskEdited],
+        [TaskEdited, TaskRelated],
         [Resident],
         Reply,
         "board::task_modify"

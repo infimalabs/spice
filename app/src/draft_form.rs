@@ -102,6 +102,7 @@ pub(crate) fn creation(
                 origin: None,
                 flow: None,
                 depends: Vec::new(),
+                related: Vec::new(),
                 intent,
                 preparation: None,
                 claim: false,
@@ -299,6 +300,7 @@ impl DraftForm {
             priority: None,
             topic: None,
             flow: None,
+            related: Vec::new(),
         };
         if request.title.is_none()
             && request.pitch.is_none()

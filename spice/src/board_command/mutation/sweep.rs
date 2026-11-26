@@ -176,6 +176,7 @@ fn sweep_add(
         origin: None,
         flow: Some(flow.to_owned()),
         depends: Vec::new(),
+        related: Vec::new(),
         claim: false,
         draft,
     }
@@ -286,6 +287,7 @@ fn commit_sweep(
     }
     let answer = wire::intent::TaskAnswer {
         diagnostic,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created,

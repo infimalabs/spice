@@ -163,7 +163,22 @@ fn a_dry_lane_hears_who_holds_the_work_its_session_boarded() {
     );
     let holder = Actor::Lane(seats[1].lane);
     claim_task(&bus, epoch, &seats[1], &holder, &boarded);
-    let foreign = todo_task(&bus, epoch, "DRAIN-board003", "Boarded by the operator");
+    // Distinct from the lane's fixture rows, so it is no duplicate of them.
+    let foreign = issue_add(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        "DRAIN-board003",
+        TaskAdd {
+            pitch: "Operators can then audit the release ledger alone.".to_owned(),
+            ..authored_add(
+                "Audit the release ledger",
+                "/board/test",
+                Some("todo"),
+                &["the release ledger is audited"],
+            )
+        },
+    );
     claim_task(
         &bus,
         epoch,

@@ -202,6 +202,7 @@ pub(super) fn client_require(
                 priority: None,
                 topic: None,
                 flow: None,
+                related: Vec::new(),
             })
             .expect("typed intent encodes"),
         ))

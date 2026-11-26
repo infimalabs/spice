@@ -340,6 +340,7 @@ fn file_answer(
 ) -> wire::intent::TaskAnswer {
     wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(post)),
         placement: None,
         created: Default::default(),

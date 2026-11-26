@@ -593,6 +593,7 @@ fn reconcile_client_recovery(
                     let body = if task_reply {
                         CommandAnswer::Task(Box::new(wire::intent::TaskAnswer {
                             diagnostic: None,
+                            duplicates: Vec::new(),
                             placement: None,
                             created: Default::default(),
                             ownership: None,

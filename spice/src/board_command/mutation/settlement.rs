@@ -377,6 +377,7 @@ fn settle(
     };
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(&post)),
         placement: None,
         created: Default::default(),

@@ -665,6 +665,7 @@ fn append_done(
     };
     Ok(wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         placement: None,
         created: Default::default(),
         taste: None,
@@ -1412,6 +1413,7 @@ fn review_answer(
 ) -> wire::intent::TaskAnswer {
     wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         placement: None,
         created: Default::default(),
         taste: None,

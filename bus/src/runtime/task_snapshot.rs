@@ -348,6 +348,17 @@ struct Indexes {
     task_origins: Arc<HashMap<journal::crossing::TaskStamp, TaskOrigin>>,
     duplicate_task_origins: Arc<HashSet<journal::crossing::TaskStamp>>,
     invalid_creator_teams: Arc<HashSet<journal::crossing::TaskStamp>>,
+    /// The actor whose fact created each task, kept after the task retires
+    /// so a settled task's creator still separates its siblings.
+    task_creators: Arc<HashMap<journal::crossing::TaskStamp, journal::crossing::Actor>>,
+    /// Each task's declared relations, recorded in both directions and kept
+    /// after either task retires.
+    related: Arc<
+        HashMap<
+            journal::crossing::TaskStamp,
+            std::collections::BTreeSet<journal::crossing::TaskStamp>,
+        >,
+    >,
     /// The reason each Design's collapse recorded, shared until a commit
     /// records another conclusion.
     collapse_reasons: Arc<HashMap<journal::crossing::TaskStamp, String>>,
@@ -420,6 +431,7 @@ impl Indexes {
             | FactKind::LaneParked
             | FactKind::LaneUnparked => self.observe_lane(row),
             FactKind::TaskAdded => self.observe_task_added(row),
+            FactKind::TaskRelated => self.observe_related(row),
             FactKind::TrustPended => self.observe_trust(row),
             FactKind::DesignNoticed => self.observe_design(row),
             FactKind::TaskDone
@@ -559,11 +571,29 @@ impl Indexes {
         {
             Arc::make_mut(&mut self.invalid_creator_teams).insert(added.task.clone());
         }
+        Arc::make_mut(&mut self.task_creators).insert(added.task.clone(), row.actor.clone());
         if Arc::make_mut(&mut self.task_origins)
             .insert(added.task.clone(), origin)
             .is_some()
         {
             Arc::make_mut(&mut self.duplicate_task_origins).insert(added.task);
+        }
+    }
+
+    fn observe_related(&mut self, row: &journal::crossing::Envelope<journal::crossing::AnyFact>) {
+        let Some(declared) = row.fact.read::<journal::crossing::body::TaskRelated>() else {
+            return;
+        };
+        let related = Arc::make_mut(&mut self.related);
+        for other in &declared.related {
+            related
+                .entry(declared.task.clone())
+                .or_default()
+                .insert(other.clone());
+            related
+                .entry(other.clone())
+                .or_default()
+                .insert(declared.task.clone());
         }
     }
 
@@ -1039,6 +1069,23 @@ impl TaskFacts {
     #[must_use]
     pub fn task_origin(&self, task: &journal::crossing::TaskStamp) -> Option<&TaskOrigin> {
         self.indexes.task_origins.get(task)
+    }
+
+    /// The actor whose fact created one task, settled or not.
+    #[must_use]
+    pub fn task_creator(
+        &self,
+        task: &journal::crossing::TaskStamp,
+    ) -> Option<&journal::crossing::Actor> {
+        self.indexes.task_creators.get(task)
+    }
+
+    /// Every task declared related to one task, in either direction.
+    pub fn related_tasks(
+        &self,
+        task: &journal::crossing::TaskStamp,
+    ) -> impl Iterator<Item = &journal::crossing::TaskStamp> {
+        self.indexes.related.get(task).into_iter().flatten()
     }
 
     /// Whether one task has more than one creation fact.

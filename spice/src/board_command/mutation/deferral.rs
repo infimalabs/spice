@@ -335,6 +335,7 @@ fn change_deferral<B: serde::Serialize + Clone>(
     };
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(selected)),
         placement: None,
         created: Default::default(),

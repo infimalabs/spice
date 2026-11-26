@@ -59,6 +59,21 @@ pub const DECISION_MATCH_FLOOR: f64 = 0.24;
 pub const ITEM_MATCH_FLOOR: f64 = NARROW_MATCH_FLOOR;
 /// Least cosine at which two concurrently claimed statements warn of overlap.
 pub const CLAIM_OVERLAP_FLOOR: f64 = 0.25;
+/// Least cosine at which an independent sibling's statement repeats a task
+/// being created closely enough that its creation answer warns of it: two
+/// [`NARROW_MATCH_FLOOR`] steps, at the corpus p99 pair.
+pub const DUPLICATE_WARNING_FLOOR: f64 = 2.0 * NARROW_MATCH_FLOOR;
+/// Least cosine at which an independent sibling's statement is the same work
+/// as a task being created, so a recent one refuses it: two
+/// [`DECISION_MATCH_FLOOR`] steps. Each later creation in observed lane races
+/// scores at least 0.489 against its race's first task, while the corpus
+/// median pair scores under 0.04.
+pub const DUPLICATE_FLOOR: f64 = 2.0 * DECISION_MATCH_FLOOR;
+/// Least cosine at which a sibling prepared under the same parent or
+/// controller as a task being created is the same work: one
+/// [`DECISION_MATCH_FLOOR`] step past [`DUPLICATE_FLOOR`], since outputs
+/// answering one request legitimately echo each other.
+pub const DUPLICATE_PREPARED_FLOOR: f64 = 3.0 * DECISION_MATCH_FLOOR;
 /// Power on a term's normalized conversation rarity in its weight: a term in
 /// every held message keeps about a third of its statement weight, and a term
 /// absent from conversation keeps all of it.

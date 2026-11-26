@@ -51,13 +51,21 @@ fn team_history_keeps_created_and_member_completed_work_across_pages() {
     let outsider_lane = Actor::Lane(outsider.lane);
     authorize_lane_creation(&bus, epoch, member);
 
-    let created = add(
+    // Distinct from the operator's fixture rows, so none is its duplicate.
+    let created = issue_add(
         &bus,
         epoch,
         member_lane.clone(),
         "HIST-created",
-        "Created by the team",
-        Some("todo"),
+        TaskAdd {
+            pitch: "Members can then audit the release ledger alone.".to_owned(),
+            ..authored_add(
+                "Audit the release ledger",
+                "/board/test",
+                Some("todo"),
+                &["the release ledger is audited"],
+            )
+        },
     );
     claim_and_complete_task(&bus, epoch, outsider, &outsider_lane, &created);
     let first = todo_task(&bus, epoch, "HIST-first", "Finished by a member");
