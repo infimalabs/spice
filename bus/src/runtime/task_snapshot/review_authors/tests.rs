@@ -133,6 +133,26 @@ fn a_shared_round_keeps_every_arrival_as_a_review_author() {
 }
 
 #[test]
+fn only_round_participants_with_local_commits_published_the_round() {
+    let mut index = ReviewAuthors::default();
+    let committer = author(1, 2);
+    let researcher = author(3, 4);
+    let mut published = participant(committer, 1);
+    published.git = Some(journal::crossing::body::GitBoundary {
+        head: "a".repeat(40),
+        integrated: "b".repeat(40),
+        upstream: None,
+        upstream_head: None,
+        local_commits: 2,
+    });
+    index.complete_round(&task(), &[published, participant(researcher, 2)]);
+
+    let completed = index.completed.get(&task()).expect("completed round");
+    assert_eq!(completed.authors, Ok(vec![committer, researcher]));
+    assert_eq!(completed.publishers, vec![committer.lane]);
+}
+
+#[test]
 fn concurrent_reviewers_each_resolve_to_their_own_claim() {
     let mut index = ReviewAuthors::default();
     let worker = author(1, 2);

@@ -58,12 +58,12 @@ pub(super) struct ReviewAuthors {
     finders: PersistentIndex<TaskStamp, Vec<(Seq, Actor)>>,
 }
 
-/// One completed phase: its authors, or why it has none, and whether its
+/// One completed phase: its authors, or why it has none, and the lanes whose
 /// completion published repository history.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CompletedPhase {
     authors: Result<Vec<ClaimAuthor>, AuthorshipFault>,
-    published: bool,
+    publishers: Vec<CanonicalUuid>,
 }
 
 impl ReviewAuthors {
@@ -127,21 +127,36 @@ impl ReviewAuthors {
             None => Err(AuthorshipFault::CompletionMismatched),
         };
         self.release(task, actor);
-        self.record_completed(task, CompletedPhase { authors, published });
+        let publishers = match &authors {
+            Ok(authors) if published => authors.iter().map(|author| author.lane).collect(),
+            _ => Vec::new(),
+        };
+        self.record_completed(
+            task,
+            CompletedPhase {
+                authors,
+                publishers,
+            },
+        );
     }
 
-    /// Every durable participant authored one shared round.
+    /// Every durable participant authored one shared round; only those whose
+    /// arrival carried local commits published it.
     pub(super) fn complete_round(
         &mut self,
         task: &TaskStamp,
         participants: &[journal::crossing::body::RoundParticipant],
     ) {
-        let published = participants.iter().any(|participant| {
-            participant
-                .git
-                .as_ref()
-                .is_some_and(|boundary| boundary.local_commits > 0)
-        });
+        let publishers = participants
+            .iter()
+            .filter(|participant| {
+                participant
+                    .git
+                    .as_ref()
+                    .is_some_and(|boundary| boundary.local_commits > 0)
+            })
+            .map(|participant| participant.lane)
+            .collect();
         let authors = participants
             .iter()
             .map(|participant| ClaimAuthor {
@@ -156,7 +171,7 @@ impl ReviewAuthors {
             task,
             CompletedPhase {
                 authors: Ok(authors),
-                published,
+                publishers,
             },
         );
     }
@@ -264,19 +279,20 @@ impl TaskFacts {
 
     /// Every lane whose completion published `task`'s newest completed phase,
     /// in claim order; empty for an unpublished completion or one whose
-    /// authorship is undefined.
+    /// authorship is undefined. A shared round's participants who arrived
+    /// without local commits authored the round but published none of it.
     #[must_use]
     pub fn published_authors(&self, task: &TaskStamp) -> Vec<Actor> {
         self.indexes
             .review_authors
             .completed
             .get(task)
-            .filter(|completed| completed.published)
-            .and_then(|completed| completed.authors.as_ref().ok())
-            .map(|authors| {
-                authors
+            .map(|completed| {
+                completed
+                    .publishers
                     .iter()
-                    .map(|author| Actor::Lane(author.lane))
+                    .copied()
+                    .map(Actor::Lane)
                     .collect()
             })
             .unwrap_or_default()
