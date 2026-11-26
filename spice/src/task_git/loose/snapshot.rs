@@ -6,7 +6,24 @@ use gix::bstr::{BStr, ByteSlice as _};
 use super::*;
 
 pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
-    let repository = open(root, ambient)?;
+    read_with_system(root, ambient, None)
+}
+
+#[cfg(test)]
+pub(super) fn read_with_native_system(
+    root: &Path,
+    ambient: &Ambient,
+    system: &Path,
+) -> Result<LooseWork, Error> {
+    read_with_system(root, ambient, Some(system))
+}
+
+fn read_with_system(
+    root: &Path,
+    ambient: &Ambient,
+    native_system: Option<&Path>,
+) -> Result<LooseWork, Error> {
+    let repository = open(root, ambient, native_system)?;
     let head = repository
         .head()
         .map_err(|error| fault("git::head-unreadable", "read HEAD", error))?;
@@ -54,10 +71,14 @@ pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
     })
 }
 
-fn open(root: &Path, ambient: &Ambient) -> Result<gix::Repository, Error> {
+fn open(
+    root: &Path,
+    ambient: &Ambient,
+    native_system: Option<&Path>,
+) -> Result<gix::Repository, Error> {
     let mut repository = gix::open_opts(root, gix::open::Options::isolated())
         .map_err(|error| fault("git::repository-unreadable", "open worktree", error))?;
-    let config = native_config(&repository, ambient)?;
+    let config = native_config(&repository, ambient, native_system)?;
     {
         let mut snapshot = repository.config_snapshot_mut();
         *snapshot = config;
@@ -71,15 +92,15 @@ fn open(root: &Path, ambient: &Ambient) -> Result<gix::Repository, Error> {
 fn native_config(
     repository: &gix::Repository,
     ambient: &Ambient,
+    native_system: Option<&Path>,
 ) -> Result<gix::config::File, Error> {
     let shadow = generated_shadow(ambient);
     let home = ambient.get("HOME").map(PathBuf::from);
     let branch = repository
         .head_name()
         .map_err(|error| fault("git::head-unreadable", "read HEAD name", error))?;
-    let mut environment = |name: &str| native_variable(ambient, name, shadow.as_deref());
-    let system = gix::config::Source::System
-        .storage_location(&mut environment)
+    let mut environment = |name: &str| native_variable(ambient, name);
+    let system = system_config(ambient, shadow.as_deref(), native_system)
         .map(|path| gix::config::file::Metadata::from(gix::config::Source::System).at(path));
     let mut sources = system.into_iter().chain(
         gix::config::source::Kind::Global
@@ -129,18 +150,27 @@ fn native_config(
     Ok(config)
 }
 
-fn native_variable(
+fn system_config(
     ambient: &Ambient,
-    name: &str,
     generated_shadow: Option<&Path>,
-) -> Option<OsString> {
-    if name == "GIT_CONFIG_SYSTEM" {
-        return generated_shadow
-            .map(Path::as_os_str)
-            .or_else(|| ambient.get(name))
-            .map(OsString::from);
+    native_system: Option<&Path>,
+) -> Option<PathBuf> {
+    let disabled = ambient
+        .get("GIT_CONFIG_NOSYSTEM")
+        .and_then(|value| gix::config::Boolean::try_from(OsString::from(value)).ok())
+        .is_some_and(|value| value.0);
+    if disabled {
+        return None;
     }
-    if name == "GIT_CONFIG_COUNT"
+    generated_shadow
+        .map(Path::to_path_buf)
+        .or_else(|| native_system.map(Path::to_path_buf))
+        .or_else(|| gix::config::Source::System.storage_location(&mut |_| None))
+}
+
+fn native_variable(ambient: &Ambient, name: &str) -> Option<OsString> {
+    if name == "GIT_CONFIG_SYSTEM"
+        || name == "GIT_CONFIG_COUNT"
         || name.starts_with("GIT_CONFIG_KEY_")
         || name.starts_with("GIT_CONFIG_VALUE_")
     {

@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn unshadowed_system_pairing_uses_the_ambient_system_config() {
+    fn unshadowed_system_pairing_ignores_the_ambient_override() {
         let scratch = Scratch::new();
         let root = &scratch.0;
         crate::test_repository::initialize(root);
@@ -383,9 +383,16 @@ mod tests {
             "[branch \"topic\"]\n\tremote = .\n\tmerge = refs/heads/baseline\n",
         )
         .expect("write native system pairing");
-        let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", system.as_os_str())]);
+        let override_config = root.join("override.config");
+        fs::write(
+            &override_config,
+            "[branch \"topic\"]\n\tremote = .\n\tmerge = refs/heads/missing\n",
+        )
+        .expect("write ignored system override");
+        let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", override_config.as_os_str())]);
 
-        let work = snapshot::read(root, &ambient).expect("system pairing snapshot reads");
+        let work = snapshot::read_with_native_system(root, &ambient, &system)
+            .expect("system pairing snapshot reads");
         assert_eq!(work.unlanded.total, 1);
         assert_eq!(work.unlanded.baseline, Some(baseline.to_string()));
     }
