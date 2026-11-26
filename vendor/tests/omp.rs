@@ -285,10 +285,28 @@ fn the_registered_shell_refuses_publishing_routes_before_launch() {
             );
         }
     }
+    for (command, route) in [
+        ("\"omp\" share", "omp share"),
+        ("\\o\\m\\p clip", "omp clip"),
+        ("o'm'p str\"e\"am", "omp stream"),
+        ("'omp' skill 'publish'", "omp skill publish"),
+        ("\"omp\" skills pub\\lish", "omp skills publish"),
+        ("omp griev\"a\"nces push", "omp grievances push"),
+        ("printf ready && \"gh\" g'i'st cre\\ate", "gh gist create"),
+    ] {
+        assert_eq!(
+            omp::ShellCall::parse(&arguments(command)),
+            Err(format!(
+                "shell refuses publishing command `{route}` in an omp seat"
+            )),
+            "{command}"
+        );
+    }
     for command in [
         "omp session pack",
         "omp config --help",
         "printf '%s' 'omp share'",
+        "printf '%s' '\"omp\" share'",
         "echo gh gist create",
     ] {
         assert!(
