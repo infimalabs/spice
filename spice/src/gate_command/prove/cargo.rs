@@ -329,7 +329,7 @@ fn require_reusable_shard(shard: &CargoGateShard) -> Result<(), ProveFailure> {
 }
 
 pub(super) fn request(request: Request<'_>) -> bool {
-    (request.missing && request.action.is_none())
+    (request.reuses_receipts() && request.action.is_none())
         || request.action.is_some_and(|action| {
             action == "rust-typecheck"
                 || action == "cargo-tests"
