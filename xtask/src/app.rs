@@ -31,8 +31,12 @@ const REMAPPED_CARGO_HOME: &str = "/spice/cargo/home";
 const REMAPPED_CARGO_SOURCES: &str = "/spice/cargo/sources";
 const REMAPPED_RUSTUP_HOME: &str = "/spice/rustup";
 const CARGO_CONFIG_NAMES: [&str; 2] = ["config", "config.toml"];
+/// Identity of the sources the compiler reads, carried inside the Wasm.
 const APP_SOURCE_IDENTITY_ENV: &str = "SPICE_APP_SOURCE_IDENTITY"; // env-policy: allow
 const APP_GENERATION_PLACEHOLDER: &str = "__SPICE_APP_GENERATION__";
+/// Replaced in the shell by the identity of every input, assets included.
+const APP_SOURCE_PLACEHOLDER: &str = "__SPICE_APP_SOURCE__";
+const SHELL_FILE: &str = "app.html";
 const GENERATED_MODULE_REFERENCES: usize = 2;
 const GENERATED_REFERENCES: [(&str, usize); 13] = [
     ("/app.module", 2),
@@ -123,7 +127,10 @@ pub(crate) fn app_from_to(
 ) -> Result<StagedApp, AppBuildError> {
     let sources = source::SourceSnapshot::capture(root)?;
     let source_identity = sources.identity().clone();
-    if let Some(identity) = current_generation_of(publish_root, &source_identity) {
+    let compiled_identity = sources.compiled().clone();
+    if let Some(identity) =
+        current_generation_of(publish_root, &source_identity, &compiled_identity)
+    {
         let generations = publish_root
             .join(spice::serve::APP_STAGE)
             .join(spice::serve::APP_STAGE_GENERATIONS);
@@ -147,8 +154,9 @@ pub(crate) fn app_from_to(
         root,
         publish_root,
         &source_identity,
+        &compiled_identity,
         output,
-        |stage, output| run_trunk(root, environment, stage, &source_identity, output),
+        |stage, output| run_trunk(root, environment, stage, &compiled_identity, output),
         || sources.verify_unchanged(root),
     )?;
     Ok(StagedApp {
@@ -161,6 +169,7 @@ fn app_at<W: Write>(
     source_root: &Path,
     publish_root: &Path,
     source_identity: &Digest,
+    compiled_identity: &Digest,
     output: &mut W,
     build: impl FnOnce(&Path, &mut W) -> Result<(), AppBuildError>,
     verify_sources: impl FnOnce() -> Result<(), AppBuildError>,
@@ -186,7 +195,7 @@ fn app_at<W: Write>(
         build(&temporary, output)?;
         renderer::stage(source_root, &temporary)?;
         verify_sources()?;
-        let identity = finalize_stage(&temporary, source_identity)?;
+        let identity = finalize_stage(&temporary, source_identity, compiled_identity)?;
         publish_generation(&stage, &temporary, &identity)?;
         writeln!(
             output,
@@ -211,25 +220,41 @@ fn app_at<W: Write>(
 
 /// The published generation compiled from exactly these sources, if any.
 ///
-/// Every generation carries the source identity it was compiled from inside
-/// its Wasm, and a compilation is reproducible, so a current generation that
-/// carries this identity is byte-for-byte what Trunk would publish again.
-/// Trunk's wasm-bindgen and wasm-opt passes cost seconds on every run even
-/// when Cargo has nothing to rebuild, which is what every refresh that touched
-/// no app source was paying. Any defect in the published stage answers `None`
-/// and the compiler runs as before.
-fn current_generation_of(publish_root: &Path, source_identity: &Digest) -> Option<Digest> {
+/// Every generation's shell names the identity of all its inputs, and its Wasm
+/// carries the identity of the inputs the compiler read; a compilation is
+/// reproducible, so a current generation naming both is byte-for-byte what
+/// Trunk would publish again. Trunk's wasm-bindgen and wasm-opt passes cost
+/// seconds on every run even when Cargo has nothing to rebuild, which is what
+/// every refresh that touched no app source was paying. Any defect in the
+/// published stage answers `None` and the compiler runs as before.
+fn current_generation_of(
+    publish_root: &Path,
+    source_identity: &Digest,
+    compiled_identity: &Digest,
+) -> Option<Digest> {
     let stage = spice::serve::AppSource::resolve(publish_root).ok()?;
     let generation = stage.current_generation().ok()?;
+    let shell = generation
+        .served(spice::serve::APP.asset_file(SHELL_FILE)?)
+        .ok()?;
     let wasm = generation
         .served(spice::serve::APP.asset(WASM_ROUTE)?)
         .ok()?;
-    carries_identity(wasm.bytes(), source_identity).then(|| generation.identity().clone())
+    (names_source(shell.bytes(), source_identity)
+        && carries_identity(wasm.bytes(), compiled_identity))
+    .then(|| generation.identity().clone())
 }
 
-fn carries_identity(wasm: &[u8], source_identity: &Digest) -> bool {
-    wasm.windows(source_identity.as_str().len())
-        .any(|window| window == source_identity.as_str().as_bytes())
+fn carries_identity(wasm: &[u8], identity: &Digest) -> bool {
+    wasm.windows(identity.as_str().len())
+        .any(|window| window == identity.as_str().as_bytes())
+}
+
+fn names_source(shell: &[u8], identity: &Digest) -> bool {
+    let attribute = format!("data-app-source=\"{identity}\"");
+    shell
+        .windows(attribute.len())
+        .any(|window| window == attribute.as_bytes())
 }
 
 /// The lock beside the stage that serializes every publication into it.
@@ -642,7 +667,7 @@ fn run_trunk(
     root: &Path,
     environment: &ReleaseEnvironment,
     stage: &Path,
-    source_identity: &Digest,
+    compiled_identity: &Digest,
     output: &mut impl Write,
 ) -> Result<(), AppBuildError> {
     let build_root = environment.build_root(root);
@@ -663,7 +688,7 @@ fn run_trunk(
         stage,
         rustflags,
         &worktree_identity,
-        source_identity,
+        compiled_identity,
     )
     .status()
     .map_err(AppBuildError::Launch)?;
@@ -700,7 +725,7 @@ fn trunk_command(
     stage: &Path,
     rustflags: String,
     worktree_identity: &Digest,
-    source_identity: &Digest,
+    compiled_identity: &Digest,
 ) -> Command {
     let target = app_target_directory(build_root, worktree_identity);
     let build = app_build_directory(build_root, worktree_identity);
@@ -715,7 +740,7 @@ fn trunk_command(
         .env("NO_COLOR", "true")
         .env("RUSTC_WORKSPACE_WRAPPER", "")
         .env("RUSTC_WRAPPER", "")
-        .env(APP_SOURCE_IDENTITY_ENV, source_identity.as_str())
+        .env(APP_SOURCE_IDENTITY_ENV, compiled_identity.as_str())
         .args([
             "build",
             "index.html",
@@ -734,14 +759,18 @@ fn trunk_command(
 /// is Trunk's bookkeeping, never a published app file.
 const TRUNK_DIST_LOCK: &str = ".trunk-lock";
 
-fn finalize_stage(stage: &Path, source_identity: &Digest) -> Result<Digest, AppBuildError> {
+fn finalize_stage(
+    stage: &Path,
+    source_identity: &Digest,
+    compiled_identity: &Digest,
+) -> Result<Digest, AppBuildError> {
     let lock = stage.join(TRUNK_DIST_LOCK);
     match fs::remove_file(&lock) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(source) => return Err(AppBuildError::Io { path: lock, source }),
     }
-    validate_wasm_source(stage, source_identity)?;
+    validate_wasm_source(stage, compiled_identity)?;
     let generated = stage.join("app.js");
     let module = stage.join("app.module");
     if module.exists() {
@@ -754,7 +783,7 @@ fn finalize_stage(stage: &Path, source_identity: &Digest) -> Result<Digest, AppB
         source,
     })?;
 
-    let html_path = stage.join("app.html");
+    let html_path = stage.join(SHELL_FILE);
     let html = fs::read_to_string(&html_path).map_err(|source| AppBuildError::Io {
         path: html_path.clone(),
         source,
@@ -767,7 +796,15 @@ fn finalize_stage(stage: &Path, source_identity: &Digest) -> Result<Digest, AppB
             html.contains("/app.module")
         )));
     }
-    let html = html.replace("/app.js", "/app.module");
+    let sources = html.matches(APP_SOURCE_PLACEHOLDER).count();
+    if sources != 1 {
+        return Err(AppBuildError::GeneratedStage(format!(
+            "app.html carried {sources} app source placeholders, expected one"
+        )));
+    }
+    let html = html
+        .replace("/app.js", "/app.module")
+        .replace(APP_SOURCE_PLACEHOLDER, source_identity.as_str());
     for (reference, expected) in GENERATED_REFERENCES {
         let observed = html.matches(reference).count();
         if observed != expected {
@@ -810,14 +847,14 @@ fn finalize_stage(stage: &Path, source_identity: &Digest) -> Result<Digest, AppB
     Ok(identity)
 }
 
-fn validate_wasm_source(stage: &Path, source_identity: &Digest) -> Result<(), AppBuildError> {
+fn validate_wasm_source(stage: &Path, compiled_identity: &Digest) -> Result<(), AppBuildError> {
     let wasm = read_regular(&stage.join(WASM_FILE))?;
-    if carries_identity(&wasm, source_identity) {
+    if carries_identity(&wasm, compiled_identity) {
         return Ok(());
     }
     Err(AppBuildError::GeneratedStage(format!(
-        "app_bg.wasm does not carry source identity {source_identity}; refusing a complete but \
-         foreign generation"
+        "app_bg.wasm does not carry compiled source identity {compiled_identity}; refusing a \
+         complete but foreign generation"
     )))
 }
 
