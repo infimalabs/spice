@@ -131,6 +131,9 @@ fn a_fresh_independent_duplicate_refuses_whole_even_when_related() {
         ] {
             assert!(observed.contains(&named), "{named} missing from {observed}");
         }
+        let guidance = diagnostic.detail().expect("the refusal guides the caller");
+        assert!(guidance.contains("ask the holder"));
+        assert!(!guidance.contains("task join"));
         assert_eq!(fact_count(&bus), facts, "a refused creation writes nothing");
     }
     clean(&root, bus);
@@ -142,10 +145,12 @@ fn a_recent_duplicate_commits_only_with_a_relation_both_tasks_list() {
     let first = sibling(&bus, epoch, &seats[0]);
     let born = born_after(61);
     let outcome = create(&bus, epoch, Actor::TEST_PRINCIPAL, &born, &duplicated());
-    assert!(
-        matches!(&outcome, Outcome::Refusal(refusal) if refusal.reason() == "task::duplicate-unrelated"),
-        "an unrelated recent duplicate must refuse: {outcome:?}"
-    );
+    let Outcome::Refusal(refusal) = &outcome else {
+        panic!("an unrelated recent duplicate must refuse: {outcome:?}");
+    };
+    assert_eq!(refusal.reason(), "task::duplicate-unrelated");
+    assert!(refusal.explanation().contains("asking its holder"));
+    assert!(!refusal.explanation().contains("task join"));
     let CommandAnswer::Task(answer) = assert_committed(create(
         &bus,
         epoch,
