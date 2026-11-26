@@ -49,6 +49,18 @@ published notes need repair. Publication requires `--notes FILE`, keeps only
 that authored region, regenerates the canonical commit inventory for the pinned
 source, and retains the resulting notes with its exact plan, assets, and
 checksum document.
+
+The publication assets include three standalone native executables, one
+target-specific deterministic STORE ZIP per executable, and `SHA256SUMS`.
+Publication first admits the complete all-target `proof::PackageTree`, then
+projects each ZIP in canonical path order with fixed timestamps and retained
+member modes. Every ZIP contains the common `release/package.json` plus only
+its target's executable, payload, proof receipt, and symbols—never another
+platform's artifacts or files outside the admitted tree. Every ZIP's SHA-256
+and byte length enter the immutable publication plan and the fresh-download
+check, so a consumer downloads only the current platform's sealed evidence
+and the documented package installer consumes exactly what publication
+admitted rather than a source-worktree reconstruction.
 Diagnostic proof and seal commands remain available, but their results never
 gate baseline publication.
 
