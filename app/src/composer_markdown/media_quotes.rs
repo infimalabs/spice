@@ -88,8 +88,10 @@ pub(super) fn image_preview_html(
         let target = super::escape_html_attribute(&media_quote.target.to_string());
         let name = super::escape_html_attribute(&media_quote.name);
         let action = super::escape_html_attribute(&format!("Quote {}", media_quote.name));
-        let draft_action =
-            super::escape_html_attribute(&format!("Quote {} into a new Draft", media_quote.name));
+        let draft_action = super::escape_html_attribute(&format!(
+            "Quote {} into the main composer",
+            media_quote.name
+        ));
         let (icon, draft_icon) = (super::QUOTE_ICON, super::DRAFT_QUOTE_ICON);
         let drawer = super::drawer_html(&format!(
             "<button type=\"button\" class=\"app-card-action app-card-action--draft-quote \

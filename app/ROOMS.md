@@ -179,9 +179,9 @@ Every message Play and Quote action uses the shared message control size and
 the same open-edge pair docked at the card's inline end. Play, Quote, and code
 Copy use explicit SVG geometry on the same icon grid rather than font glyphs.
 Agent-message, Design-publication, Markdown-image, and attachment-image Quote
-share one shape, two rounded opening-quote marks. Quote into new Draft follows
-Quote with those marks reduced and joined by a plus, and on an image seats
-directly beneath its Quote. Copy's overlapping squares stay within the extent
+share one shape, two rounded opening-quote marks. Quote into the main composer
+follows Quote with those marks reduced and joined by a plus, and on an image
+seats directly beneath its Quote. Copy's overlapping squares stay within the extent
 of the Play and Quote marks.
 Provider failures lead
 their exact error text with the card's relative age and name, without prose
