@@ -391,3 +391,52 @@ async fn development_directory_answers_gone_for_a_generation_it_no_longer_holds(
     task.abort();
     assert!(task.await.expect_err("aborted server task").is_cancelled());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn the_right_to_left_shell_is_the_current_shell_directed_rtl() {
+    let root = tempfile::Builder::new()
+        .prefix("spice-test-app-")
+        .tempdir()
+        .expect("fixture temp directory");
+    seed_app_generation(root.path(), "<!doctype html><html lang=\"en\">");
+    let app = CanvasAssets::DevelopmentDirectory(
+        crate::AppSource::resolve(root.path()).expect("fixture app resolves"),
+    );
+    let (server, _control) = Server::bind(Generation::new(
+        epoch(),
+        Capabilities::default(),
+        app_version(&app),
+        app,
+    ))
+    .await
+    .expect("binds");
+    let address = server.local_addr().expect("local address");
+    let task = tokio::spawn(server.up());
+    let host = address.to_string();
+    let shell = request(address, &host, "/").await;
+    let directed = request(address, &host, RTL_SHELL_ROUTE).await;
+    assert!(directed.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    let shell_body = std::str::from_utf8(response_body(&shell)).expect("UTF-8 shell");
+    assert!(shell_body.starts_with("<!doctype html><html lang=\"en\">"));
+    assert_eq!(
+        std::str::from_utf8(response_body(&directed)).expect("UTF-8 shell"),
+        shell_body.replacen("<html", "<html dir=\"rtl\"", 1),
+    );
+    assert_eq!(
+        response_header(&directed, "content-security-policy"),
+        response_header(&shell, "content-security-policy"),
+    );
+    let directed_etag = response_header(&directed, "etag").expect("directed ETag");
+    assert_ne!(Some(directed_etag), response_header(&shell, "etag"));
+    let revalidated = request_with_headers(
+        address,
+        &host,
+        RTL_SHELL_ROUTE,
+        &[("If-None-Match", directed_etag)],
+    )
+    .await;
+    assert!(revalidated.starts_with(b"HTTP/1.1 304 Not Modified\r\n"));
+
+    task.abort();
+    assert!(task.await.expect_err("aborted server task").is_cancelled());
+}
