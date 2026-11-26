@@ -44,7 +44,7 @@
 /* Each principal is one identity row with its controls stacked at the
    trailing edge; an open form, the one-time capability handoff, and the
    connected principal's inbox stand beneath across the full width. */
-.app-spice-principal-list {
+.app-spice-principals > .app-spice-principal-list {
   display: grid;
   gap: 10px;
   margin: 0;
