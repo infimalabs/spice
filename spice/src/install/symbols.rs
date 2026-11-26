@@ -574,6 +574,13 @@ mod tests {
         Scratch(root)
     }
 
+    fn repository(label: &str) -> (Scratch, Repository) {
+        let root = scratch(label);
+        crate::test_repository::initialize(&root);
+        let repository = Repository::discover(&root).expect("scratch repository discovers");
+        (root, repository)
+    }
+
     #[test]
     fn resolve_worktree_publishes_a_matching_sibling_dsym_and_ignores_a_mismatched_one() {
         let root = scratch("worktree");
@@ -631,19 +638,21 @@ mod tests {
     }
 
     #[test]
-    fn a_package_without_its_symbol_artifact_installs_the_executable_alone() {
-        let root = scratch("package");
-        fs::create_dir(root.join("release")).unwrap();
-        fs::write(root.join("release/package.json"), b"{}").unwrap();
-        let target_root = root.join("targets/aarch64-apple-darwin");
+    fn a_package_without_its_symbol_artifact_previews_and_applies_the_executable_alone() {
+        let (root, repository) = repository("package");
+        let package = root.join("package");
+        fs::create_dir_all(package.join("release")).unwrap();
+        fs::write(package.join("release/package.json"), b"{}").unwrap();
+        let target_root = package.join("targets/aarch64-apple-darwin");
         fs::create_dir_all(target_root.join("bin")).unwrap();
         let binary = target_root.join("bin/spice");
-        let executable = macho_with_uuid([0xAA; 16]);
+        let app = Digest::compute(Domain::DistArtifact, b"app generation");
+        let executable = super::super::canvas::linked(&app);
         fs::write(&binary, &executable).unwrap();
         let symbols = b"symbol fixture";
         fs::write(
             target_root.join("payload.json"),
-            darwin_payload(&executable, symbols),
+            darwin_payload(&executable, symbols, &app),
         )
         .unwrap();
         assert_eq!(
@@ -651,27 +660,47 @@ mod tests {
             Some(target_root.as_path()),
         );
 
-        // Release evidence omits the artifact the payload names.
-        assert!(
-            Source::resolve_package(&binary, &target_root)
-                .unwrap()
-                .is_none()
-        );
-
-        // A present artifact the payload does not bind still refuses.
+        // A present artifact the payload does not bind refuses before install
+        // state exists.
         let artifact = target_root.join("symbols/spice.symbols");
         fs::create_dir(artifact.parent().unwrap()).unwrap();
         fs::write(&artifact, b"foreign symbol").unwrap();
         assert!(matches!(
-            Source::resolve_package(&binary, &target_root),
+            super::super::preview(&repository, Some(&binary)),
             Err(InstallError::SymbolsRefused { .. })
         ));
+        assert!(!repository.common_dir().join(".spice-install").exists());
+        fs::remove_file(&artifact).unwrap();
+
+        // Release evidence omits the artifact the payload names. The real
+        // preview and digest-bound apply publish only the authenticated
+        // executable.
+        let preview =
+            super::super::preview(&repository, Some(&binary)).expect("package install previews");
+        assert!(preview.plan().symbols().is_none());
+        assert!(preview.plan().operations().iter().all(|operation| {
+            operation.path() != SYMBOLS_INFO_PATH && operation.path() != SYMBOLS_DWARF_PATH
+        }));
+        let expected = preview.digest().clone();
+        let receipt = super::super::apply(&repository, Some(&binary), &expected)
+            .expect("digest-bound package install applies");
+        assert_eq!(receipt.digest(), &expected);
+        assert!(receipt.plan().symbols().is_none());
+        assert!(receipt.plan().operations().iter().all(|operation| {
+            operation.path() != SYMBOLS_INFO_PATH && operation.path() != SYMBOLS_DWARF_PATH
+        }));
+        assert_eq!(
+            fs::read(repository.common_dir().join(super::super::BINARY_PATH)).unwrap(),
+            executable,
+        );
+        assert!(!repository.common_dir().join(SYMBOLS_PATH).exists());
     }
 
-    fn darwin_payload(executable: &[u8], symbols: &[u8]) -> Vec<u8> {
+    fn darwin_payload(executable: &[u8], symbols: &[u8], app: &Digest) -> Vec<u8> {
         use wire::manifest::{BuildPins, InventoryEntry, TARGET_PAYLOAD_VERSION, TargetPayload};
 
         let native = Digest::compute(Domain::DistArtifact, executable);
+        let canvas = rack::link::extract(executable).expect("fixture canvas extracts");
         let metadata = MacSymbolMetadata {
             path: "symbols/spice.symbols".to_owned(),
             mode: DATA_MODE,
@@ -705,8 +734,8 @@ mod tests {
             target: ReleaseTarget::Aarch64AppleDarwin,
             source: Digest::compute(Domain::DistSourceCommit, b"source"),
             archive: Digest::compute(Domain::DistSourceArchive, b"source archive"),
-            app: Digest::compute(Domain::DistArtifact, b"app generation"),
-            canvas: Digest::compute(Domain::DistArtifact, b"canvas archive"),
+            app: app.clone(),
+            canvas: Digest::compute(Domain::DistArtifact, canvas),
             native,
             symbols: Some(metadata),
             pins_digest: Digest::compute(
