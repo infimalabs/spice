@@ -44,17 +44,15 @@
   --app-compose-gap: 10px;
   --app-compose-launcher-inline: calc(var(--app-spice-anchor-inset-inline) + var(--app-header-control) + var(--app-spice-side-gap));
   --app-compose-utility-width: 7rem;
-  --app-compose-action: 64px;
+  --app-compose-action-inline: 72px;
+  --app-compose-action-block: 36px;
   --app-compose-tab-block: 36px;
-  --app-compose-accent-edge: var(--message-rail);
   --app-compose-editor-block: clamp(7.5rem, 26dvh, 14rem);
   --app-compose-line: 22px;
   --app-compose-writing-start: 12px;
   --app-compose-writing-end: var(--app-compose-writing-start);
   --app-compose-strip-block: 28px;
   --app-compose-open-min: min(var(--team-surface-min-inline), calc(100vw - var(--app-compose-inset) - var(--app-compose-end-inset)));
-  --app-closed-edge-color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-line));
-  --app-closed-edge-thickness: var(--app-compose-accent-edge);
   --app-closed-edge-layer: 4;
   --team-control-item-height: 28px;
   inset: 0 auto auto var(--app-commandbar-inset-start);
@@ -132,26 +130,6 @@
   mask-mode: alpha;
 }
 .app-compose-dialog[data-presented="true"] .app-compose-surface { background-color: var(--app-control-glass-paint); }
-/* One accent rail closes the strip, open or closed, so the sheet's edge never
-   blinks while it fades; the shared bottom rail would land at the viewport's
-   foot and stays off. */
-.app-compose-dialog::before {
-  position: absolute;
-  z-index: var(--app-closed-edge-layer);
-  inset: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge)) 0 auto;
-  block-size: var(--app-compose-accent-edge);
-  border-radius: var(--app-closed-edge-radius);
-  background: var(--app-closed-edge-color);
-  content: "";
-  pointer-events: none;
-}
-.app-compose-dialog.app-closed-edge::after { content: none; }
-@media (forced-colors: active) {
-  .app-compose-dialog::before {
-    forced-color-adjust: none;
-    background: CanvasText;
-  }
-}
 /* While closing, inert keeps the open-only controls unavailable as their
    opacity fades. Settled closed state then hides them from paint and focus. */
 .app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-details, .app-compose-submit) { visibility: hidden; }
@@ -206,9 +184,8 @@
   padding: var(--app-compose-tab-block) 0 var(--app-compose-gap);
   border: 0;
 }
-/* The strip: a horizontal destination track from the inline start, leaving
-   the inline end to the utility tabs. Choosing a destination opens the sheet
-   on it. */
+/* The strip: a horizontal destination track between the operator tab and the
+   utility tabs. Choosing a destination opens the sheet on it. */
 .app-compose-modes-row {
   position: absolute;
   z-index: 3;
@@ -218,7 +195,7 @@
   align-items: center;
   box-sizing: border-box;
   width: calc(100% - var(--app-compose-launcher-inline) - var(--app-compose-utility-width));
-  height: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge));
+  height: var(--app-compose-tab-block);
   padding: 0 6px;
 }
 .app-segment-slider.app-compose-modes {
@@ -233,21 +210,26 @@
   font: 600 var(--app-type-control)/1 var(--app-font, ui-sans-serif, system-ui, sans-serif);
   cursor: pointer;
 }
-/* The human-side launcher is the Spice launcher's exact left-hand mirror.
-   The operator's face names the destination and fills the whole button
-   inside a hairline rim: at this size every pixel goes to the image. The
-   small badge carries the personal inbox count without covering the face. */
+/* The operator launcher uses the same downward horn-tab material as Draft and
+   Help. Its face keeps the current destination accent while the avatar names
+   the human side and the small badge carries the personal inbox count. */
 .app-inbox-button {
+  --app-horn-tab-tint: var(--app-base-accent);
   position: absolute;
   z-index: calc(var(--app-closed-edge-layer) + 2);
-  inset-block-start: var(--app-spice-anchor-inset-block);
-  inset-inline-start: var(--app-spice-anchor-inset-inline);
-  border-width: 1px;
+  inset: 0 auto auto 0;
+  justify-content: center;
+  width: var(--app-compose-launcher-inline);
+  height: var(--app-compose-tab-block);
+  min-height: 0;
+  padding: 0;
+  border-color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-line));
+  color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-ink));
 }
 .app-inbox-button > .operator-avatar {
   flex-basis: auto;
-  width: 100%;
-  height: 100%;
+  width: calc(var(--app-compose-tab-block) - 6px);
+  height: calc(var(--app-compose-tab-block) - 6px);
   border: 0;
   font-size: var(--app-type-control);
 }
@@ -300,23 +282,24 @@
 .app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
 .app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
 .app-compose-dialog .app-compose-utility-tab:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
-/* The action, Send or Create, is lettered at the team controls' size. It
-   rests muted on its glass face; once a press would submit something it takes
-   the team SEND's ink and backlight. */
+/* The action, Send or Create, uses the app's compact button geometry. It rests
+   muted on its glass face; once a press would submit something it takes the
+   team SEND's ink and backlight. */
 .app-compose-submit {
   position: relative;
   grid-row: 2;
   grid-column: 2;
+  align-self: center;
   margin-inline-end: var(--app-compose-gap);
-  width: var(--app-compose-action);
+  width: var(--app-compose-action-inline);
   box-sizing: border-box;
-  height: var(--app-compose-action);
+  height: var(--app-compose-action-block);
   min-height: 0;
   display: grid;
   place-items: center;
-  padding: 0 4px;
+  padding: 0 8px;
   border: var(--team-control-edge);
-  border-radius: var(--app-radius-circle);
+  border-radius: var(--app-radius-control);
   background: var(--team-send-glass-face);
   box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), var(--team-control-rest), var(--team-send-glass-catch);
   color: var(--muted);
@@ -328,7 +311,7 @@
   isolation: isolate;
   overflow: hidden;
 }
-.app-compose-submit .team-send-label { font-size: 1.5em; }
+.app-compose-submit .team-send-label { font-size: 1em; }
 .app-compose-submit::before {
   position: absolute;
   z-index: -1;
@@ -380,7 +363,7 @@
   grid-row: 2;
   grid-column: 1;
   box-sizing: border-box;
-  min-block-size: var(--app-compose-action);
+  min-block-size: var(--app-compose-action-block);
   align-content: center;
   padding-inline-start: var(--app-compose-writing-start);
 }
