@@ -151,8 +151,9 @@ and subjects change together. A profile without a name reads as
 Below the composition, the open left overlay shows **Principals**; the right
 Spice view no longer carries it. The connected principal appears there once,
 as their own row marked `(you)`, and that row seats their personal inbox with
-its heading, open count, items, and controls. While the overlay is closed, its
-strip carries the open count beside **Draft** and **Help**.
+its heading, open count, items, and controls. The same principal's avatar is
+the left launcher, exactly mirroring the Spice button; its small badge carries
+the open count while the overlay is closed.
 The row and inbox stand whether or not this connection may list principals,
 and while the listing loads or is refused; until the principal directory
 arrives the row reads as loading. An operator-role principal also sees every

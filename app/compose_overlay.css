@@ -42,6 +42,7 @@
   --app-compose-sheet-opacity: 0;
   --app-compose-edge: var(--app-focus-ring-width);
   --app-compose-gap: 10px;
+  --app-compose-launcher-inline: calc(var(--app-spice-anchor-inset-inline) + var(--app-header-control) + var(--app-spice-side-gap));
   --app-compose-utility-width: 7rem;
   --app-compose-action: 64px;
   --app-compose-tab-block: 36px;
@@ -85,6 +86,9 @@
   min-width: var(--app-compose-open-min);
   border-radius: 0;
 }
+/* The operator launcher and the active sheet meet the left browser chrome;
+   only their shared inset separates the launcher face from that edge. */
+#app-compose-dialog { left: 0 !important; right: auto !important; }
 .app-compose-dialog[data-presented="true"] {
   --app-compose-sheet-opacity: 1;
   box-shadow: var(--shadow);
@@ -209,16 +213,13 @@
   position: absolute;
   z-index: 3;
   inset-block-start: 0;
-  inset-inline-start: 0;
+  inset-inline-start: var(--app-compose-launcher-inline);
   display: grid;
   align-items: center;
   box-sizing: border-box;
-  width: calc(100% - var(--app-compose-utility-width));
+  width: calc(100% - var(--app-compose-launcher-inline) - var(--app-compose-utility-width));
   height: calc(var(--app-compose-tab-block) - var(--app-compose-accent-edge));
   padding: 0 6px;
-}
-.app-compose-dialog:not([data-inbox-waiting="0"]) .app-compose-modes-row {
-  width: calc(100% - var(--app-compose-utility-width) - 2.4em);
 }
 .app-segment-slider.app-compose-modes {
   --app-segment-count: 4;
@@ -231,6 +232,28 @@
   padding: 0 6px;
   font: 600 var(--app-type-control)/1 var(--app-font, ui-sans-serif, system-ui, sans-serif);
   cursor: pointer;
+}
+/* The human-side launcher is the Spice launcher's exact left-hand mirror.
+   Its existing operator avatar names the destination; the small badge carries
+   the personal inbox count without enlarging the face. */
+.app-inbox-button {
+  position: absolute;
+  z-index: calc(var(--app-closed-edge-layer) + 2);
+  inset-block-start: var(--app-spice-anchor-inset-block);
+  inset-inline-start: var(--app-spice-anchor-inset-inline);
+}
+.app-inbox-button > .operator-avatar {
+  flex-basis: auto;
+  width: calc(100% - 4px);
+  height: calc(100% - 4px);
+  border: 0;
+  font-size: var(--app-type-control);
+}
+.app-inbox-button-count {
+  position: absolute;
+  inset-block-start: -4px;
+  inset-inline-end: -4px;
+  pointer-events: none;
 }
 /* Utility tabs hang from the strip's inline end, one layer above its rail.
    Only the outside lower corners round. Draft wears the sheet's accent when
@@ -275,13 +298,6 @@
 .app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
 .app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
 .app-compose-dialog .app-compose-utility-tab:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
-/* Messages waiting for the operator count beside the strip's tabs. */
-.app-compose-dialog .app-compose-inbox-count {
-  position: absolute;
-  inset-block-start: 4px;
-  inset-inline-start: -2.2em;
-  pointer-events: none;
-}
 /* The action, Send or Create, is lettered at the team controls' size. It
    rests muted on its glass face; once a press would submit something it takes
    the team SEND's ink and backlight. */
@@ -449,17 +465,15 @@
   padding-block-end: var(--app-compose-gap);
 }
 .app-compose-dialog [hidden] { display: none !important; }
-/* A phone's header leaves the closed strip one chip wide: it names the current
-   destination and the waiting count, and opening restores the whole track,
-   Draft, and Help. */
+/* A phone's closed strip keeps the mirrored operator launcher and one selected
+   destination; opening restores the whole track, Draft, and Help. */
 @media (max-width: 560px) {
   .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
   .app-compose-modes > .app-choice-chip { padding-inline: 3px; font-size: var(--app-type-compact); }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-modes-row { width: var(--app-compose-anchor-width); }
-  .app-compose-dialog[data-expanded="false"]:not([data-inbox-waiting="0"]) .app-compose-modes-row {
-    width: calc(var(--app-compose-anchor-width) - 2.4em);
+  .app-compose-dialog[data-expanded="false"] .app-compose-modes-row {
+    width: calc(var(--app-compose-anchor-width) - var(--app-compose-launcher-inline));
   }
   .app-compose-dialog[data-expanded="false"] .app-segment-slider.app-compose-modes { --app-segment-count: 1; --app-segment-stop: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-modes > .app-choice-chip:not([aria-pressed="true"]) { display: none; }

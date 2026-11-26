@@ -241,22 +241,18 @@ repository-owned OOPS Design. A pass refines the report into an
 acceptance-bearing output the operator decides. The construction reference creates no execution
 dependency, and there is no separate OOPS lifecycle state or action.
 
-The global composer is the left overlay, the companion of the right Spice
-sidebar. Closed, it is one strip under the header: a horizontal glass track of
-**Ask**, **Task**, **Plan**, and **Design**, the principal inbox's open count,
-then the **Draft** and **Help** tabs, over one accent rail. **DRAFT** and
-**HELP** are plain bold uppercase tab labels; only the outside tabs round.
-Choosing a destination, its shortcut, or a quote opens the strip into a
-full-height sheet: the writing area, the To row with circular Send/Create,
-then **Principals** and the personal inbox, which scrolls on its own. The sheet
-is non-modal and casts no veil, so the Spice sidebar may stand open beside it;
-a press outside both, or Escape (newest overlay first), dismisses it. Opening
-and closing fade the laid-out sheet below the strip without moving it. The
-strip prefers the Spice menu's width, compresses to one work-total lane, and
-the open sheet widens to at least one lane. On a phone the closed strip shows
-only the current destination and the open count, and where both overlays do
-not fit, an open Spice sidebar hides the left overlay until it closes.
-Dismissal leaves focus outside.
+The global composer is the left companion to the right Spice sidebar. Its
+circular operator-avatar launcher exactly mirrors the Spice button's size and
+browser-edge position; a small badge carries the personal inbox's open count.
+Beside it, one accent rail joins the horizontal **Ask**, **Task**, **Plan**, and
+**Design** track to proper **Draft** and **Help** tabs.
+
+Choosing the launcher, a destination, its shortcut, or a quote expands that
+same composer into a full-height sheet: writing, the To row with Send/Create,
+then **Principals** and the independently scrolling personal inbox. On desktop
+the non-modal sheets coexist. On a phone, Spice temporarily hides the left
+sheet and closing Spice restores it. Opening and dismissal preserve the
+laid-out composer and return focus outside.
 
 **Ask** is the default; expanded, its writing line reads **Ask or steer
 (required)**. Beside **To**, a wrapping row offers **Best-matched
