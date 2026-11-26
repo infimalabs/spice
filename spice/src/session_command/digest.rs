@@ -86,7 +86,7 @@ pub(super) fn fold_history(report: &RecallView, history_source: &HistorySource) 
             INBOX,
         ),
     }
-    page.exempt("Held claim", held(held_work));
+    page.exempt("Held claim", held(held_work, repository.as_ref()));
     page.whole(
         "Unknown",
         unknowns
@@ -107,6 +107,14 @@ pub(super) fn fold_history(report: &RecallView, history_source: &HistorySource) 
     if let Some(repository) = repository {
         let (dirty, total) = uncommitted(repository);
         page.section("Uncommitted", dirty, total, "git status --short");
+        if let Some(baseline) = &repository.unlanded_baseline {
+            page.section(
+                "Unlanded commits",
+                repository.unlanded.clone(),
+                repository.unlanded_total,
+                &format!("git log --oneline {baseline}..HEAD"),
+            );
+        }
         page.whole("Commits", repository.commits.clone(), "git log --oneline");
     }
     let mut seen = BTreeSet::new();
@@ -306,12 +314,15 @@ fn ask(row: &OutstandingAskView) -> String {
     )
 }
 
-fn held(held_work: &HeldWorkView) -> Vec<String> {
+fn held(held_work: &HeldWorkView, repository: Option<&RepositoryGlanceView>) -> Vec<String> {
     let Some(claim) = held_work.own_claim.as_ref() else {
-        return vec![held_work.own_claim_unread.as_ref().map_or_else(
-            || "none; take work with `spice task next`".to_owned(),
-            |refusal| format!("unknown, not none: {refusal}"),
-        )];
+        if let Some(refusal) = &held_work.own_claim_unread {
+            return vec![format!("unknown, not none: {refusal}")];
+        }
+        return match repository.filter(|repository| repository.is_loose()) {
+            Some(repository) => loose(repository),
+            None => vec!["none; take work with `spice task next`".to_owned()],
+        };
     };
     let mut rows = vec![format!(
         "{} [{}] {}: {}",
@@ -333,6 +344,36 @@ fn held(held_work: &HeldWorkView) -> Vec<String> {
         rows.push(format!("description: {description}"));
     }
     rows.extend(claim.term.iter().map(|row| format!("term: {row}")));
+    rows
+}
+
+/// The claimless lane's implicit task: settle the work its worktree holds
+/// before it takes any other.
+fn loose(repository: &RepositoryGlanceView) -> Vec<String> {
+    let mut held = Vec::new();
+    if repository.dirty_total > 0 {
+        held.push(format!("{} uncommitted paths", repository.dirty_total));
+    }
+    if repository.unlanded_total > 0 {
+        held.push(format!("{} unlanded commits", repository.unlanded_total));
+    }
+    if let Some(operation) = &repository.operation {
+        held.push(format!("an unfinished {operation}"));
+    }
+    let mut rows = vec![
+        format!(
+            "none, but this worktree holds loose work: {}; settle it before taking other work",
+            held.join(", ")
+        ),
+        format!("keep it: {}", spice::task_git::UNOWNED_WORK_REMEDY),
+        "uncommitted changes need `spice gate prove` before they are committed; unlanded commits already passed the commit gates".to_owned(),
+        "discard only abandoned work, with `git restore` and `git clean`".to_owned(),
+    ];
+    if let Some(operation) = &repository.operation {
+        rows.push(format!(
+            "first finish the {operation} with `git {operation} --continue` or abandon it with `git {operation} --abort`"
+        ));
+    }
     rows
 }
 
@@ -562,6 +603,12 @@ mod tests {
                 commits: (0..rows)
                     .map(|index| format!("abc{index} subject"))
                     .collect(),
+                unlanded: (0..rows)
+                    .map(|index| format!("def{index} unlanded"))
+                    .collect(),
+                unlanded_total: rows,
+                unlanded_baseline: Some("0123456789ab".to_owned()),
+                operation: None,
                 unreadable: None,
             }),
             unknowns: Vec::new(),
@@ -610,6 +657,40 @@ mod tests {
             folds(&fold(&report, &[])),
             ["- … 3 more: `git status --short`"]
         );
+    }
+
+    #[test]
+    fn a_claimless_briefing_makes_loose_work_the_held_task() {
+        let mut report = recall(2, 40);
+        report.held_work.own_claim = None;
+        let page = fold(&report, &[]);
+        let held = section(&page, "Held claim");
+        assert!(
+            held.contains("2 uncommitted paths, 2 unlanded commits"),
+            "{held}"
+        );
+        assert!(held.contains("spice task capture"), "{held}");
+        assert!(!held.contains("spice task next"), "{held}");
+        assert!(
+            page.contains("## Unlanded commits\n- def0 unlanded"),
+            "{page}"
+        );
+
+        let repository = report.repository.as_mut().expect("fixture repository");
+        repository.dirty_total = 0;
+        repository.unlanded_total = 0;
+        repository.operation = Some("rebase".to_owned());
+        let held = section(&fold(&report, &[]), "Held claim").to_owned();
+        assert!(held.contains("an unfinished rebase"), "{held}");
+        assert!(held.contains("git rebase --abort"), "{held}");
+
+        report
+            .repository
+            .as_mut()
+            .expect("fixture repository")
+            .operation = None;
+        let held = section(&fold(&report, &[]), "Held claim").to_owned();
+        assert!(held.contains("take work with `spice task next`"), "{held}");
     }
 
     #[test]

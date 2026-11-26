@@ -30,8 +30,11 @@ pub(crate) struct Environment {
     /// The working directory this process was asked from: it names the
     /// repository whose capture and authorities a session view reads.
     cwd: Option<PathBuf>,
-    /// How a briefing glances at a checkout's uncommitted paths and commits.
-    checkout: fn(&std::path::Path) -> model::RepositoryGlanceView,
+    /// How a briefing glances at a checkout's working state, under the
+    /// process environment its Git reads inherit.
+    checkout: fn(&std::path::Path, &spice::ambient::Ambient) -> model::RepositoryGlanceView,
+    /// The process environment a briefing's Git reads inherit.
+    ambient: spice::ambient::Ambient,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +65,14 @@ impl Environment {
             home: home.map(PathBuf::from),
             cwd,
             checkout: glance::repository,
+            ambient: spice::ambient::Ambient::default(),
         }
+    }
+
+    /// The same session state, with Git reads inheriting `ambient`.
+    pub(crate) fn with_ambient(mut self, ambient: spice::ambient::Ambient) -> Self {
+        self.ambient = ambient;
+        self
     }
 
     /// The same ambient session state, asked from another working directory:

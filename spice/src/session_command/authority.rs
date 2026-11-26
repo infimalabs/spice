@@ -162,7 +162,10 @@ fn observe_current_authorities(
             }),
         lane: None,
     });
-    recall.repository = Some((environment.checkout)(repository.worktree_root()));
+    recall.repository = Some((environment.checkout)(
+        repository.worktree_root(),
+        &environment.ambient,
+    ));
     match LatchDebtView::read(repository.common_dir()) {
         Ok(debt) => recall.latch_debt = Some(debt),
         Err(error) => unknown(recall, "gate", "latch-ledger", &error),

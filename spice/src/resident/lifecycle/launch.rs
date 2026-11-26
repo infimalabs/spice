@@ -63,6 +63,9 @@ impl Runtime {
         match attempted {
             Ok(Attempted::Started) => {
                 self.backoff.release(pending.lane);
+                if pending.trigger == Trigger::LooseWorktree {
+                    self.loose.woken(pending.lane);
+                }
                 let _ = writeln!(
                     diagnostic,
                     "lifecycle started trigger={} lane={}",
@@ -141,20 +144,23 @@ fn settle_launch(
                 Err(failure) => Err(failure),
             }
         }
-        Trigger::HeldClaim | Trigger::DrainQueue => match (launched, claim) {
-            (Ok(lane_surface::AutomaticWake::Started), _) => Ok(Attempted::Started),
-            (Ok(lane_surface::AutomaticWake::Unstarted(failure)) | Err(failure), Some(claim)) => {
-                release_unstarted(bus, host, claim, failure)
+        Trigger::HeldClaim | Trigger::LooseWorktree | Trigger::DrainQueue => {
+            match (launched, claim) {
+                (Ok(lane_surface::AutomaticWake::Started), _) => Ok(Attempted::Started),
+                (
+                    Ok(lane_surface::AutomaticWake::Unstarted(failure)) | Err(failure),
+                    Some(claim),
+                ) => release_unstarted(bus, host, claim, failure),
+                (Ok(lane_surface::AutomaticWake::Unstarted(failure)) | Err(failure), None) => {
+                    assert_ne!(
+                        trigger,
+                        Trigger::DrainQueue,
+                        "work launch retains its reserved claim"
+                    );
+                    Err(failure)
+                }
             }
-            (Ok(lane_surface::AutomaticWake::Unstarted(failure)) | Err(failure), None) => {
-                assert_eq!(
-                    trigger,
-                    Trigger::HeldClaim,
-                    "work launch retains its reserved claim"
-                );
-                Err(failure)
-            }
-        },
+        }
     }
 }
 

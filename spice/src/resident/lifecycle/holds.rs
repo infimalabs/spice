@@ -109,6 +109,27 @@ impl Runtime {
         }
     }
 
+    /// Advance the projection to `snapshot`, admitting each vendor hold
+    /// release through a fresh snapshot until none remains, and return the
+    /// snapshot the projection last advanced to.
+    pub(super) fn advance_releasing_vendor_holds(
+        &mut self,
+        bus: &Bus,
+        epoch: CanonicalUuid,
+        mut snapshot: bus::TaskSnapshot,
+    ) -> CommandResult<bus::TaskSnapshot> {
+        loop {
+            self.projection.advance(&snapshot)?;
+            if !self.release_changed_vendor_hold(bus, epoch, &snapshot)? {
+                return Ok(snapshot);
+            }
+            snapshot = bus.task_snapshot().map_err(|error| {
+                store_fault("lifecycle::snapshot-unreadable", &error.to_string())
+            })?;
+            self.synchronize_holds(&snapshot, self.projection.cursor())?;
+        }
+    }
+
     /// Release the first vendor hold whose refused session or operator
     /// direction set changed. The committed release is then admitted through
     /// the ordinary snapshot loop before another hold is considered.

@@ -1446,6 +1446,8 @@ mod landing;
 use landing::require_landing_within_footprint;
 mod launch;
 pub use launch::{LaunchAdvance, LaunchSkip};
+mod loose;
+pub use loose::{LooseWork, Unlanded, loose_work, unfinished_operation, unlanded};
 mod recovery;
 mod resolution;
 pub use recovery::{

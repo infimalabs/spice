@@ -102,6 +102,32 @@ fn inbox_and_held_claim_wakes_rank_by_recency_alone() {
 }
 
 #[test]
+fn loose_work_wakes_after_held_claims_and_before_new_work() {
+    let loose = |lane: u8| Target {
+        loose_worktree: true,
+        ..target(lane)
+    };
+    let work = Target {
+        drain_queue: Available::Ready,
+        ..target(2)
+    };
+    let held = Target {
+        held_claim: Available::Ready,
+        ..target(3)
+    };
+    assert_eq!(chosen(&[work, loose(1)]), (Trigger::LooseWorktree, lane(1)));
+    assert_eq!(chosen(&[loose(1), held]), (Trigger::HeldClaim, lane(3)));
+    assert_eq!(
+        chosen(&[Target {
+            drain_queue: Available::Ready,
+            ..loose(1)
+        }]),
+        (Trigger::LooseWorktree, lane(1)),
+        "a lane settles its loose work before it takes new work"
+    );
+}
+
+#[test]
 fn ordinary_work_wakes_before_a_lanes_own_last_resort() {
     let due = |lane: u8, claim: u64, last_resort, available| Target {
         last_claim: Some(Seq::new(claim).expect("claim position")),

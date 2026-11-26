@@ -233,8 +233,9 @@ pub(crate) struct BoardGlanceView {
     pub(crate) partial: bool,
 }
 
-/// The checkout's working state: uncommitted paths and the newest commits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// The checkout's working state: uncommitted paths, the newest commits, the
+/// commits the integration baseline lacks, and any unfinished Git operation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RepositoryGlanceView {
     /// `git status --porcelain` rows, at most the glance's ceiling.
@@ -242,9 +243,27 @@ pub(crate) struct RepositoryGlanceView {
     pub(crate) dirty_total: usize,
     /// `git log --oneline` rows, newest first.
     pub(crate) commits: Vec<String>,
+    /// The newest commits the integration baseline lacks, `git log
+    /// --oneline` rows newest first, at most the glance's ceiling.
+    pub(crate) unlanded: Vec<String>,
+    pub(crate) unlanded_total: usize,
+    /// The abbreviated integration baseline the unlanded commits are
+    /// measured from; absent when none are.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) unlanded_baseline: Option<String>,
+    /// The merge, rebase, cherry-pick, or revert left unfinished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) operation: Option<String>,
     /// Why `git` could not read the checkout; the rows are then empty.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) unreadable: Option<String>,
+}
+
+impl RepositoryGlanceView {
+    /// Whether the checkout holds work no landed commit carries.
+    pub(crate) fn is_loose(&self) -> bool {
+        self.dirty_total > 0 || self.unlanded_total > 0 || self.operation.is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
