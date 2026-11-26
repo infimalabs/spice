@@ -8,8 +8,9 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read as _;
 
-use super::dirty::DirtyPaths;
 use super::*;
+
+mod snapshot;
 
 /// Git operations that leave a worktree half-applied until continued or
 /// aborted, each with the per-worktree state path that marks it.
@@ -74,81 +75,11 @@ impl LooseWork {
 }
 
 /// Read the loose work of the worktree at `root`.
-pub fn loose_work(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
-    let root = Worktree::new(root, ambient);
-    let dirty = dirty_paths(root)?;
-    let dirty_fingerprint = dirty_fingerprint(root, &dirty)?;
-    let dirty = dirty.all().into_iter().map(str::to_owned).collect();
-    Ok(LooseWork {
-        head: required_read(root, &["rev-parse", "HEAD"], "read HEAD")?,
-        dirty,
-        dirty_fingerprint,
-        unlanded: unlanded_in(root, 0)?,
-        operation: operation_in(root)?,
-    })
+pub fn loose_work(root: &Path) -> Result<LooseWork, Error> {
+    snapshot::read(root)
 }
 
-/// Hash the index state and worktree bytes behind every dirty path without
-/// writing the index. Git's raw diffs carry staged object ids and mode/status
-/// changes; regular files and symlink targets carry unstaged and untracked
-/// content. Reads are streamed so one large loose file does not become one
-/// large allocation.
-fn dirty_fingerprint(root: Worktree<'_>, dirty: &DirtyPaths) -> Result<u64, Error> {
-    let mut hasher = DefaultHasher::new();
-    if !dirty.staged.is_empty() {
-        hash_raw_diff(
-            root,
-            &[
-                "diff",
-                "--cached",
-                "--raw",
-                "--no-abbrev",
-                "-z",
-                "HEAD",
-                "--",
-            ],
-            &mut hasher,
-        )?;
-    }
-    if !dirty.unstaged.is_empty() {
-        hash_raw_diff(
-            root,
-            &["diff", "--raw", "--no-abbrev", "-z", "--"],
-            &mut hasher,
-        )?;
-    }
-    for (kind, paths) in [(b'w', &dirty.unstaged), (b'u', &dirty.untracked)] {
-        kind.hash(&mut hasher);
-        for path in paths {
-            path.hash(&mut hasher);
-            hash_worktree_path(root, path, &mut hasher)?;
-        }
-    }
-    Ok(hasher.finish())
-}
-
-fn hash_raw_diff(
-    root: Worktree<'_>,
-    command: &[&str],
-    hasher: &mut DefaultHasher,
-) -> Result<(), Error> {
-    let args = [&["--no-optional-locks"][..], command].concat();
-    let output = run(root, &args)?;
-    if !output.success() {
-        return Err(Error::fault(
-            "git::command-failed",
-            output.detail("fingerprint loose index state"),
-        ));
-    }
-    output.stdout.hash(hasher);
-    Ok(())
-}
-
-fn hash_worktree_path(
-    root: Worktree<'_>,
-    path: &str,
-    hasher: &mut DefaultHasher,
-) -> Result<(), Error> {
+fn hash_worktree_path(root: &Path, path: &str, hasher: &mut DefaultHasher) -> Result<(), Error> {
     let absolute = root.join(path);
     let metadata = match fs::symlink_metadata(&absolute) {
         Ok(metadata) => metadata,
@@ -287,11 +218,83 @@ mod tests {
     }
 
     fn worktree_path_fingerprint(root: &Path, path: &str) -> u64 {
-        let ambient = Ambient::default();
         let mut hasher = DefaultHasher::new();
-        hash_worktree_path(Worktree::new(root, &ambient), path, &mut hasher)
-            .expect("worktree path hashes");
+        hash_worktree_path(root, path, &mut hasher).expect("worktree path hashes");
         hasher.finish()
+    }
+
+    #[test]
+    fn gix_snapshot_covers_clean_dirty_untracked_unlanded_and_failures() {
+        let scratch = Scratch::new();
+        let root = &scratch.0;
+        crate::test_repository::initialize(root);
+        fs::write(root.join(".gitignore"), "ignored\n").expect("write fixture ignore");
+        fs::write(root.join("tracked"), "first").expect("write tracked fixture");
+        crate::test_repository::stage_all(root);
+        let baseline = crate::test_repository::commit(root, "baseline");
+        fs::write(
+            root.join(".git/refs/heads/baseline"),
+            format!("{baseline}\n"),
+        )
+        .expect("write baseline reference");
+        let config = fs::read_to_string(root.join(".git/config")).expect("read fixture config");
+        fs::write(
+            root.join(".git/config"),
+            format!("{config}\n[branch \"main\"]\n\tremote = .\n\tmerge = refs/heads/baseline\n"),
+        )
+        .expect("configure local integration baseline");
+
+        let clean = snapshot::read(root).expect("clean snapshot reads");
+        assert!(!clean.is_loose());
+        assert_eq!(clean.unlanded.total, 0);
+
+        fs::write(root.join("tracked"), "next!").expect("write next tracked content");
+        crate::test_repository::stage(root, &["tracked"]);
+        crate::test_repository::commit(root, "local work");
+        let unlanded = snapshot::read(root).expect("unlanded snapshot reads");
+        assert!(unlanded.is_loose());
+        assert_eq!(unlanded.unlanded.total, 1);
+
+        fs::write(root.join("tracked"), "third").expect("write staged content");
+        crate::test_repository::stage(root, &["tracked"]);
+        let staged = snapshot::read(root).expect("staged snapshot reads");
+        assert_eq!(staged.dirty, ["tracked"]);
+
+        fs::write(root.join("tracked"), "other").expect("write unstaged same-length content");
+        let unstaged = snapshot::read(root).expect("unstaged snapshot reads");
+        assert_eq!(unstaged.dirty, ["tracked"]);
+        assert_ne!(unstaged.dirty_fingerprint, staged.dirty_fingerprint);
+
+        fs::write(root.join("untracked"), "loose").expect("write untracked content");
+        fs::write(root.join("ignored"), "ignored").expect("write ignored content");
+        let index_path = root.join(".git/index");
+        let index_before = fs::read(&index_path).expect("read index before inspection");
+        let untracked = snapshot::read(root).expect("untracked snapshot reads");
+        assert_eq!(untracked.dirty, ["tracked", "untracked"]);
+        assert_eq!(
+            fs::read(&index_path).expect("read index after inspection"),
+            index_before,
+            "inspection never writes the index"
+        );
+
+        fs::write(&index_path, "not an index").expect("corrupt fixture index");
+        assert!(snapshot::read(root).is_err(), "a corrupt index refuses");
+    }
+
+    #[test]
+    fn detached_head_still_reports_an_unfinished_operation() {
+        let scratch = Scratch::new();
+        let root = &scratch.0;
+        crate::test_repository::initialize(root);
+        fs::write(root.join("tracked"), "first").expect("write tracked fixture");
+        crate::test_repository::stage_all(root);
+        let head = crate::test_repository::commit(root, "baseline");
+        fs::write(root.join(".git/HEAD"), format!("{head}\n")).expect("detach fixture HEAD");
+        fs::create_dir(root.join(".git/rebase-merge")).expect("mark rebase in progress");
+
+        let work = snapshot::read(root).expect("detached operation snapshot reads");
+        assert_eq!(work.operation, Some("rebase"));
+        assert_eq!(work.unlanded, Unlanded::default());
     }
 
     #[test]
