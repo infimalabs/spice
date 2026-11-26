@@ -111,6 +111,7 @@ pub(super) fn attach_named_rows(
             .facts()
             .related_tasks(&task.statement.body.born)
             .filter_map(|related| observed.task_heads(related))
+            .filter(|heads| !heads.workflow().body().status.is_deleted())
             .map(|heads| {
                 let statement = heads.statement().body();
                 wire::intent::RelatedTask {

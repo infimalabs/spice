@@ -434,3 +434,81 @@ fn modify_relates_tasks_without_revising_either_statement() {
     );
     clean(&root, bus);
 }
+
+#[test]
+fn a_deleted_task_is_never_related() {
+    use wire::intent::{TaskRelationKind, TaskRelations};
+
+    let (root, bus, epoch, seats) = fixture("duplicate-related-deleted", 1);
+    let first = sibling(&bus, epoch, &seats[0]);
+    let other = born_after(30 * 60);
+    assert_committed(create(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &other,
+        &TaskAdd {
+            related: vec![handle(&first)],
+            ..authored_add(
+                "Render the release ledger as a table",
+                "/board/test",
+                Some("todo"),
+                &["the ledger renders one row per release"],
+            )
+        },
+    ));
+    let gone = born_after(31 * 60);
+    assert_committed(create(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &gone,
+        &authored_add(
+            "Archive stale lane transcripts nightly",
+            "/board/test",
+            Some("todo"),
+            &["transcripts older than a week move to the archive"],
+        ),
+    ));
+    withdraw(&bus, epoch, &handle(&first));
+    withdraw(&bus, epoch, &handle(&gone));
+    assert!(
+        named(&bus, epoch, &other).related.is_empty(),
+        "task show omits a deleted relation"
+    );
+    let (_, relations) = super::relations::answer(super::relations::read_relations(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        &TaskRelations {
+            roots: vec![other.clone()],
+            relations: vec![TaskRelationKind::Related],
+            depth: 2,
+            node_limit: 64,
+        },
+    ));
+    assert!(
+        relations.edges.is_empty(),
+        "task relations omits a deleted relation: {:?}",
+        relations.edges
+    );
+    let facts = fact_count(&bus);
+    let current = named(&bus, epoch, &other);
+    let outcome = issue(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        CommandKind::TaskEdit,
+        vec![statement_witness(&current)],
+        &TaskEdit {
+            related: vec![handle(&gone)],
+            ..only(&handle(&other))
+        },
+    );
+    assert!(
+        matches!(&outcome, Outcome::Refusal(refusal) if refusal.reason() == "task::related-unknown"),
+        "relating a deleted task is refused: {outcome:?}"
+    );
+    assert_eq!(fact_count(&bus), facts, "a refused relation writes nothing");
+    clean(&root, bus);
+}

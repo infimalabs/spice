@@ -2,8 +2,9 @@ use std::collections::BTreeSet;
 
 use super::*;
 
-/// The distinct existing tasks `related` names that are not yet related to
-/// `task`, in the order first named.
+/// The distinct live tasks `related` names that are not yet related to
+/// `task`, in the order first named. A deleted task is as unknown as an
+/// absent one.
 pub(super) fn admitted_relations(
     bus: &Bus,
     task: &wire::TaskStamp,
@@ -32,7 +33,10 @@ pub(super) fn admitted_relations(
                 "name a different task with --related",
             ));
         }
-        if observed.task_heads(&born).is_none() {
+        if observed
+            .task_heads(&born)
+            .is_none_or(|heads| heads.workflow().body().status.is_deleted())
+        {
             return Err(refusal(
                 "task::related-unknown",
                 Some(handle.to_string()),

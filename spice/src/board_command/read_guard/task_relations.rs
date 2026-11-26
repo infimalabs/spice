@@ -346,7 +346,11 @@ fn relationship_tasks(
                 observed
                     .facts()
                     .related_tasks(&task)
-                    .filter(|related| tasks.contains_key(*related))
+                    .filter(|related| {
+                        tasks
+                            .get(*related)
+                            .is_some_and(|heads| !heads.workflow().body().status.is_deleted())
+                    })
                     .cloned(),
             );
         }
@@ -543,8 +547,9 @@ fn candidates(
     candidates
 }
 
-/// One edge per declared relation of `task`. The relation is symmetric, so
-/// its edge runs from the earlier-born task whichever end the walk expands.
+/// One edge per declared relation of `task` to a live task. The relation is
+/// symmetric, so its edge runs from the earlier-born task whichever end the
+/// walk expands.
 fn add_related_candidates(
     candidates: &mut Vec<Candidate>,
     task: &TaskStamp,
@@ -553,7 +558,10 @@ fn add_related_candidates(
 ) {
     let source = TaskRelationNodeRef::Task { task: task.clone() };
     for related in facts.related_tasks(task) {
-        let Some(row) = tasks.get(related) else {
+        let Some(row) = tasks
+            .get(related)
+            .filter(|row| !row.workflow.body.status.is_deleted())
+        else {
             continue;
         };
         let target = task_node(row);
