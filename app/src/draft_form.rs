@@ -13,10 +13,10 @@
 //! Its images, admitted whole under the shared media bounds before anything is
 //! sent, become the Draft's image artifacts.
 //!
-//! This surface never authors a contract. Creation sends no acceptance, no
-//! Design questions, and no flow, so board policy routes every kind through
-//! its plan phase first, which forms the contract; the editor revises
-//! neither, leaving whatever the plan phase recorded untouched.
+//! This surface never authors an acceptance contract. Creation therefore
+//! records every kind as a Draft. Draft-on leaves it with the author; Draft-off
+//! hands it to the board's shared phase-zero validator, where missing acceptance
+//! keeps it submitted for triage rather than weakening the activation gate.
 
 use wire::intent::{BoardTask, TaskAdd, TaskEdit, TaskMedia};
 use wire::pitch::{PITCH_CHARS, PitchRefusal};

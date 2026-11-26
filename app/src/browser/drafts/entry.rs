@@ -722,8 +722,9 @@ fn mode_controls(mode: &UseStateHandle<Mode>, sending: bool) -> Html {
 }
 
 /// Draft shares the rail's top pair of tabs with Help. Pressed, Create records
-/// a Draft. It has no meaning for an Ask and seals itself while a submission
-/// is being admitted.
+/// an author-held Draft. Unpressed, Create submits that Draft for triage through
+/// the board's shared validator. It has no meaning for an Ask and seals itself
+/// while a submission is being admitted.
 fn draft_control(mode: &UseStateHandle<Mode>, draft: &UseStateHandle<bool>, sending: bool) -> Html {
     let toggle_draft = {
         let draft = draft.clone();
@@ -735,7 +736,7 @@ fn draft_control(mode: &UseStateHandle<Mode>, draft: &UseStateHandle<bool>, send
             title={match (**mode, **draft) {
                 (Mode::Message, _) => "Draft applies to Task, Plan and Design",
                 (_, true) => "Draft on: Create records a Draft to finish later",
-                (_, false) => "Draft off: Create makes the task available now",
+                (_, false) => "Draft off: Create submits the Draft for triage now",
             }}
             onclick={toggle_draft}>
             {"Draft"}
