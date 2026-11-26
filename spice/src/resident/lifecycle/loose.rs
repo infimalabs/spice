@@ -122,8 +122,9 @@ impl Loose {
     }
 
     /// Whether `lane` is owed a wake for the loose state it was left in.
+    /// A pending inspection suppresses any older state until that read settles.
     pub(super) fn due(&self, lane: CanonicalUuid) -> bool {
-        self.lanes.get(&lane).is_some_and(|known| !known.woken)
+        !self.exited.contains(&lane) && self.lanes.get(&lane).is_some_and(|known| !known.woken)
     }
 
     /// A fresh occupant started for `lane`'s loose state.
@@ -152,6 +153,36 @@ mod tests {
         "018f82d4-6f59-7d06-92e3-bce913116401"
             .parse()
             .expect("fixture UUID")
+    }
+
+    #[test]
+    fn a_pending_inspection_suppresses_an_older_wake_until_it_settles() {
+        let mut loose = Loose::default();
+        loose.judge(lane(), Some(1));
+        assert!(loose.due(lane()), "the known loose state is initially due");
+
+        loose.exited(lane());
+        assert!(
+            !loose.due(lane()),
+            "the unknown current state suppresses the older wake"
+        );
+
+        let retried = std::mem::take(&mut loose.exited);
+        assert_eq!(retried.into_iter().collect::<Vec<_>>(), vec![lane()]);
+        loose.judge(lane(), Some(1));
+        assert!(
+            loose.due(lane()),
+            "a successful unchanged retry restores an unwoken state"
+        );
+
+        loose.woken(lane());
+        loose.exited(lane());
+        let _ = std::mem::take(&mut loose.exited);
+        loose.judge(lane(), Some(1));
+        assert!(
+            !loose.due(lane()),
+            "a successful unchanged retry preserves settled deduplication"
+        );
     }
 
     #[test]
