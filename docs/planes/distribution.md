@@ -50,17 +50,16 @@ that authored region, regenerates the canonical commit inventory for the pinned
 source, and retains the resulting notes with its exact plan, assets, and
 checksum document.
 
-The publication assets include three standalone native executables, one
-target-specific deterministic STORE ZIP per executable, and `SHA256SUMS`.
-Publication first admits the complete all-target `proof::PackageTree`, then
-projects each ZIP in canonical path order with fixed timestamps and retained
-member modes. Every ZIP contains the common `release/package.json` plus only
-its target's executable, payload, proof receipt, and symbols—never another
-platform's artifacts or files outside the admitted tree. Every ZIP's SHA-256
-and byte length enter the immutable publication plan and the fresh-download
-check, so a consumer downloads only the current platform's sealed evidence
-and the documented package installer consumes exactly what publication
-admitted rather than a source-worktree reconstruction.
+The publication assets are the three standalone native executables, one
+deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Publication
+admits the complete all-target `proof::PackageTree`, then projects only the
+canonical `release/package.json` and each target's payload and proof receipt
+into the STORE ZIP in canonical path order with fixed timestamps and retained
+modes. Executables remain standalone, and symbols are not published. The
+evidence ZIP's SHA-256 and byte length enter the immutable publication plan and
+fresh-download check. A consumer downloads its platform executable plus the
+small shared evidence ZIP; `spice install --package` verifies the invoking
+candidate against that evidence without duplicating bulk bytes.
 Diagnostic proof and seal commands remain available, but their results never
 gate baseline publication.
 
@@ -161,9 +160,10 @@ unqualified `spice://` remains the CLI resource index.
 
 Every target's relocatable object defines `spicezip` and `spicezip_len`; the
 final-image readers locate exactly one rack section and recover the rack bytes
-from it. The Windows target inventory names `bin/spice.exe` and the matching
-`symbols/spice.pdb`; both are package members, while `proof.json` is the
-package's detached signature artifact.
+from it. The Windows target inventory names `bin/spice.exe` and its matching
+`symbols/spice.pdb`; both remain admitted stage artifacts, while `proof.json`
+is the detached signature artifact. Public release evidence carries the
+payload and proof, not the PDB.
 
 The Mach-O and ELF builds then derive symbols, strip, and sign where
 applicable. No step appends bytes after signing. The final image's section
@@ -1211,26 +1211,29 @@ installed asset does not, because retirements derive from the receipt.
 
 ### Package installation admits only its target
 
-`spice install --package PACKAGE` admits the canonical `release/package.json`,
-then reads only the running target's executable, `payload.json`, `proof.json`,
-and declared debug artifact. Their digests must match that target's index entry;
-the payload, executable, debug inventory and clean proof retain their evidence
-bindings. Selected paths and parent directories must be unlinked regular files
-and directories, with bounded member and aggregate sizes. The index must have
-mode `644`, and the package's product version must be newer than the running
-appliance's; an inadmissible package refuses `install::package-refused`.
+`spice install --package EVIDENCE` admits the canonical
+`release/package.json` from that evidence root, takes the invoking executable
+as the candidate, then reads only the running target's `payload.json` and
+`proof.json`. Their digests must match that target's index entry; the payload,
+candidate executable, and clean proof retain their evidence bindings. Selected
+paths and parent directories must be unlinked regular files and directories,
+with bounded member and aggregate sizes. The index must have mode `644`, the
+candidate must be a regular file, and the package's product version must be
+newer than the installed appliance's; inadmissible evidence or candidate bytes
+refuse `install::package-refused`.
 
-A package containing only that target and the index installs identically to
-the complete package. Other targets, `release/manifest.json`, and
-`release/notes.md` are not installation inputs and are neither enumerated nor
-hashed. Release publication constructs and validates the complete three-target
-tree through `proof::build_package`, including its closed member inventory.
-Installation uses only `proof::admit_package_index` and
-`proof::admit_package_target`; there is no separate whole-tree readmission API.
+Evidence containing only the package index and target documents is sufficient.
+Executables, debug artifacts, `release/manifest.json`, and `release/notes.md`
+are not evidence-directory inputs and are neither enumerated nor hashed.
+Release publication constructs and validates the complete three-target tree
+through `proof::build_package`, then publishes only the index, payloads, and
+receipts as shared evidence. Installation uses
+`proof::admit_package_index` and `proof::admit_package_target`; there is no
+separate whole-tree readmission API.
 
-Preview and apply run the verified selected executable. Its temporary staging
+Preview and apply run the verified invoking candidate. Its temporary staging
 directory remains owner-only, while staged files retain their authenticated
-modes, including the data mode required by Darwin symbol admission.
+modes.
 
 ### Native per-user lifecycle owner
 

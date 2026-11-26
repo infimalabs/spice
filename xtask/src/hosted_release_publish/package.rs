@@ -4,58 +4,41 @@ use std::path::Path;
 
 use sha2::{Digest as _, Sha256};
 use wire::ReleaseNotes;
-use wire::manifest::{
-    InventoryEntry, ProductVersion, ReleaseManifest, ReleaseTarget, TargetPayload,
-};
+use wire::manifest::{InventoryEntry, ProductVersion, ReleaseManifest, TargetPayload};
 use zip::write::SimpleFileOptions;
 
 use super::PublishError;
 
-const TARGETS: [ReleaseTarget; 3] = [
-    ReleaseTarget::Aarch64AppleDarwin,
-    ReleaseTarget::X86_64UnknownLinuxMusl,
-    ReleaseTarget::X86_64PcWindowsMsvc,
-];
+pub(super) const ASSET_NAME: &str = "spice-release-evidence.zip";
 const DATA_MODE: u32 = 0o644;
-const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_PACKAGE_BYTES: u64 = 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 512 * 1024 * 1024;
 const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 pub(super) struct CapturedPackage {
-    pub(super) name: String,
     pub(super) bytes: u64,
     pub(super) sha256: String,
 }
 
-/// Admit the complete sealed stage once, then publish one deterministic
-/// package projection per target without retaining another copy of its large
-/// native members.
+/// Admit the complete sealed stage once, then publish its small deterministic
+/// evidence projection without duplicating native executables or symbols.
 pub(super) fn capture(
     worktree: &Path,
     assets_root: &Path,
     version: &ProductVersion,
     notes: &ReleaseNotes,
-) -> Result<Vec<CapturedPackage>, PublishError> {
+) -> Result<CapturedPackage, PublishError> {
     let tree = package_tree(&worktree.join("dist/stage"), version, notes)?;
-    TARGETS
-        .into_iter()
-        .map(|target| {
-            let name = asset_name(target);
-            let path = assets_root.join(&name);
-            let members = target_members(tree.members(), target)?;
-            publish_archive(&path, &members)?;
-            let (bytes, sha256) = file_sha256(&path)?;
-            Ok(CapturedPackage {
-                name,
-                bytes,
-                sha256,
-            })
-        })
-        .collect()
-}
-
-pub(super) fn asset_name(target: ReleaseTarget) -> String {
-    format!("spice-{target}-package.zip")
+    let path = assets_root.join(ASSET_NAME);
+    let members = evidence_members(tree.members())?;
+    publish_archive(&path, &members)?;
+    let (bytes, sha256) = file_sha256(&path)?;
+    if bytes > MAX_PACKAGE_BYTES {
+        return Err(PublishError::Refused(format!(
+            "release evidence archive exceeds {MAX_PACKAGE_BYTES} bytes"
+        )));
+    }
+    Ok(CapturedPackage { bytes, sha256 })
 }
 
 fn package_tree(
@@ -85,16 +68,12 @@ fn package_tree(
             DATA_MODE,
             proof::PACKAGE_DOCUMENT_LIMIT,
         )?;
-        let debug = target
-            .debug_path()
-            .map(|path| {
-                inventory(&payload, path).and_then(|entry| artifact_member(stage, target, entry))
-            })
-            .transpose()?;
-        targets.push(
-            proof::PackageTargetInput::new(target, executable, payload_member, proof)
-                .with_debug(debug),
-        );
+        targets.push(proof::PackageTargetInput::new(
+            target,
+            executable,
+            payload_member,
+            proof,
+        ));
     }
     let notes_member = proof::PackageMember::admit_inline(
         "release/notes.md",
@@ -176,21 +155,23 @@ fn file_member(
     proof::PackageMember::admit_file(package, mode, file, limit).map_err(PublishError::Package)
 }
 
-fn target_members(
+fn evidence_members(
     members: &[proof::PackageMember],
-    target: ReleaseTarget,
 ) -> Result<Vec<&proof::PackageMember>, PublishError> {
-    let prefix = format!("targets/{target}/");
     let selected = members
         .iter()
         .filter(|member| {
-            member.path() == "release/package.json" || member.path().starts_with(&prefix)
+            let path = member.path();
+            path == "release/package.json"
+                || path
+                    .strip_prefix("targets/")
+                    .is_some_and(|rest| rest.matches('/').count() == 1)
+                    && (path.ends_with("/payload.json") || path.ends_with("/proof.json"))
         })
         .collect::<Vec<_>>();
-    let expected = if target.debug_path().is_some() { 5 } else { 4 };
-    if selected.len() != expected {
+    if selected.len() != 7 {
         return Err(PublishError::Refused(format!(
-            "sealed {target} package has {} members, expected {expected}",
+            "sealed release evidence has {} members, expected 7",
             selected.len()
         )));
     }
@@ -296,55 +277,56 @@ mod tests {
     }
 
     #[test]
-    fn package_archive_is_deterministic_and_preserves_members_and_modes() {
+    fn evidence_archive_is_deterministic_small_and_closed() {
         let scratch = Scratch::new();
-        let executable = proof::PackageMember::admit_inline(
-            "targets/aarch64-apple-darwin/bin/spice",
-            0o755,
-            b"native",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("executable member");
-        let payload = proof::PackageMember::admit_inline(
-            "targets/aarch64-apple-darwin/payload.json",
-            0o644,
-            b"payload",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("payload member");
-        let proof = proof::PackageMember::admit_inline(
-            "targets/aarch64-apple-darwin/proof.json",
-            0o644,
-            b"proof",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("proof member");
-        let symbols = proof::PackageMember::admit_inline(
-            "targets/aarch64-apple-darwin/symbols/spice.symbols",
-            0o644,
-            b"symbols",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("symbol member");
-        let package = proof::PackageMember::admit_inline(
-            "release/package.json",
-            0o644,
-            b"{}",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("package member");
-        let unrelated = proof::PackageMember::admit_inline(
-            "targets/x86_64-unknown-linux-musl/bin/spice",
-            0o755,
-            b"linux",
-            proof::PACKAGE_DOCUMENT_LIMIT,
-        )
-        .expect("unrelated member");
-        let all = vec![unrelated, executable, package, proof, payload, symbols];
+        let mut all = Vec::new();
+        for target in [
+            "aarch64-apple-darwin",
+            "x86_64-unknown-linux-musl",
+            "x86_64-pc-windows-msvc",
+        ] {
+            for name in ["payload.json", "proof.json"] {
+                all.push(
+                    proof::PackageMember::admit_inline(
+                        format!("targets/{target}/{name}"),
+                        0o644,
+                        name.as_bytes(),
+                        proof::PACKAGE_DOCUMENT_LIMIT,
+                    )
+                    .expect("evidence member"),
+                );
+            }
+        }
+        all.push(
+            proof::PackageMember::admit_inline(
+                "release/package.json",
+                0o644,
+                b"{}",
+                proof::PACKAGE_DOCUMENT_LIMIT,
+            )
+            .expect("package member"),
+        );
+        all.push(
+            proof::PackageMember::admit_inline(
+                "targets/aarch64-apple-darwin/bin/spice",
+                0o755,
+                b"native",
+                proof::PACKAGE_DOCUMENT_LIMIT,
+            )
+            .expect("executable member"),
+        );
+        all.push(
+            proof::PackageMember::admit_inline(
+                "targets/aarch64-apple-darwin/symbols/spice.symbols",
+                0o644,
+                b"symbols",
+                proof::PACKAGE_DOCUMENT_LIMIT,
+            )
+            .expect("symbol member"),
+        );
         let first = scratch.0.join("first.zip");
         let second = scratch.0.join("second.zip");
-        let members =
-            target_members(&all, ReleaseTarget::Aarch64AppleDarwin).expect("target members");
+        let members = evidence_members(&all).expect("evidence members");
         publish_archive(&first, &members).expect("first archive");
         let mut reversed = members;
         reversed.reverse();
@@ -356,7 +338,7 @@ mod tests {
 
         let file = File::open(first).expect("archive opens");
         let mut archive = zip::ZipArchive::new(file).expect("archive reads");
-        assert_eq!(archive.len(), 5);
+        assert_eq!(archive.len(), 7);
         let mut first_member = archive.by_index(0).expect("first member");
         assert_eq!(
             first_member.name().expect("first member name").as_ref(),
@@ -367,16 +349,14 @@ mod tests {
         first_member.read_to_end(&mut bytes).expect("member reads");
         assert_eq!(bytes, b"{}");
         drop(first_member);
-        let second_member = archive.by_index(1).expect("second member");
-        assert_eq!(
-            second_member.name().expect("second member name").as_ref(),
-            "targets/aarch64-apple-darwin/bin/spice"
-        );
-        assert_eq!(second_member.unix_mode(), Some(0o100755));
-        drop(second_member);
         assert!(
             archive
-                .by_name("targets/x86_64-unknown-linux-musl/bin/spice")
+                .by_name("targets/aarch64-apple-darwin/bin/spice")
+                .is_err()
+        );
+        assert!(
+            archive
+                .by_name("targets/aarch64-apple-darwin/symbols/spice.symbols")
                 .is_err()
         );
         let extracted = scratch.0.join("extracted");
@@ -386,21 +366,9 @@ mod tests {
             b"{}"
         );
         assert_eq!(
-            fs::read(extracted.join("targets/aarch64-apple-darwin/bin/spice"))
-                .expect("executable extracts"),
-            b"native"
+            fs::read(extracted.join("targets/aarch64-apple-darwin/payload.json"))
+                .expect("payload extracts"),
+            b"payload.json"
         );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            assert_eq!(
-                fs::metadata(extracted.join("targets/aarch64-apple-darwin/bin/spice"))
-                    .expect("executable metadata")
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o755
-            );
-        }
     }
 }

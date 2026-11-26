@@ -89,7 +89,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     (
         "install",
         "package",
-        "Read the release package at this path",
+        "Read sealed release evidence from this directory",
     ),
     (
         "install",

@@ -40,8 +40,8 @@ impl PublishRequest {
 }
 
 /// Create or resume all hosted native stages, publish their exact executables
-/// and target-specific sealed packages, then read the public release back from
-/// fresh storage.
+/// and shared sealed evidence, then read the public release back from fresh
+/// storage.
 ///
 /// A new request reads `main` once and pins that commit. While it is pending,
 /// an invocation must name the pinned commit to resume it or abandon it; a

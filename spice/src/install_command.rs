@@ -76,27 +76,7 @@ pub(crate) fn run(matches: &clap::ArgMatches, ambient: &Ambient) -> Answer {
         }
     };
     if let Some(package) = matches.get_one::<String>("package") {
-        if matches!(request, Request::Unapply) {
-            return request.package_failure(crate::install_package::Error::input(
-                "a package source cannot be combined with --unapply; the installed receipt owns reversal",
-            ));
-        }
-        let apply = match &request {
-            Request::Apply(digest) => Some(digest.as_str()),
-            Request::Plan => None,
-            Request::Unapply => unreachable!("package unapply returned above"),
-        };
-        let json = matches.get_flag("json");
-        if apply.is_none() && !json {
-            return match crate::install_package::preview(&repository, Path::new(package)) {
-                Ok(outcome) => Answer::Plan(package_preview(package, outcome)),
-                Err(error) => request.package_failure(error),
-            };
-        }
-        return match crate::install_package::run(&repository, Path::new(package), apply, json) {
-            Ok(status) => Answer::Child(status),
-            Err(error) => request.package_failure(error),
-        };
+        return run_package(matches, ambient, &request, &repository, package);
     }
     match request {
         Request::Plan => {
@@ -140,6 +120,40 @@ pub(crate) fn run(matches: &clap::ArgMatches, ambient: &Ambient) -> Answer {
             ))
         }
         Request::Unapply => Answer::Receipt(unapply_with_keeper(&repository, ambient)),
+    }
+}
+
+fn run_package(
+    matches: &clap::ArgMatches,
+    ambient: &Ambient,
+    request: &Request,
+    repository: &Repository,
+    package: &str,
+) -> Answer {
+    if matches!(request, Request::Unapply) {
+        return request.package_failure(crate::install_package::Error::input(
+            "a package source cannot be combined with --unapply; the installed receipt owns reversal",
+        ));
+    }
+    let candidate = match executable(ambient) {
+        Ok(candidate) => candidate,
+        Err(outcome) => return Answer::Plan(outcome),
+    };
+    let apply = match request {
+        Request::Apply(digest) => Some(digest.as_str()),
+        Request::Plan => None,
+        Request::Unapply => unreachable!("package unapply returned above"),
+    };
+    let json = matches.get_flag("json");
+    if apply.is_none() && !json {
+        return match crate::install_package::preview(repository, Path::new(package), &candidate) {
+            Ok(outcome) => Answer::Plan(package_preview(package, outcome)),
+            Err(error) => request.package_failure(error),
+        };
+    }
+    match crate::install_package::run(repository, Path::new(package), &candidate, apply, json) {
+        Ok(status) => Answer::Child(status),
+        Err(error) => request.package_failure(error),
     }
 }
 
@@ -397,11 +411,11 @@ fn package_failure<B>(error: &crate::install_package::Error) -> Outcome<B> {
             wire::RefusalDiagnostic::new(
                 "install::package-refused".to_owned(),
                 Some("sealed-package".to_owned()),
-                Some("one exact current-platform release package closure".to_owned()),
+                Some("one exact release candidate plus its sealed evidence".to_owned()),
                 Some(error.to_string()),
             )
             .with_detail(
-                "select the explicit local root of a canonical sealed release package and retry; no repository authority changed",
+                "select the explicit local root of canonical release evidence, invoke its matching downloaded candidate, and retry; no repository authority changed",
             ),
         )),
     }
@@ -562,7 +576,7 @@ fn install_refusal_remedy(error: &InstallError) -> String {
             inspect_path(path),
         ),
         InstallError::SymbolsRefused { path, .. } => format!(
-            "inspect the package symbol input with `{}`; re-acquire the release package so its executable, payload, and `symbols/spice.symbols` come from one sealed build, then rerun `spice install --package`",
+            "inspect the optional symbol input with `{}`; remove it or acquire symbols from the same build as this executable, then rerun this executable's install preview",
             inspect_path(path),
         ),
         InstallError::BinaryContextChanged => format!(

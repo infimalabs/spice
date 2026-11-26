@@ -118,6 +118,27 @@ fn selected_targets_require_their_index_digests_and_source_bound_clean_proof() {
 }
 
 #[test]
+fn runtime_package_can_omit_bound_debug_artifacts() {
+    let fixture = fixture();
+    let mut input = fixture.input();
+    for target in &mut input.targets {
+        target.debug = None;
+    }
+    let package = build_package_index(input.clone()).expect("runtime index builds");
+    assert!(
+        package
+            .document()
+            .targets
+            .iter()
+            .all(|target| target.debug_path.is_none())
+    );
+    let document = admit_package_index(package.bytes()).expect("runtime index admits");
+    for target in &input.targets {
+        assert_eq!(admit_package_target(&document, target), Ok(()));
+    }
+}
+
+#[test]
 fn canonical_package_identity_matches_inline_and_file_backed_members() {
     let inline_fixture = fixture();
     let index = build_package_index(inline_fixture.input()).expect("fixture index builds");
@@ -228,7 +249,7 @@ fn debug_artifacts_must_match_their_target_payload() {
 }
 
 #[test]
-fn publication_requires_all_targets_and_their_declared_debug_artifacts() {
+fn publication_requires_all_targets() {
     let fixture = fixture();
     let mut input = fixture.input();
     input.targets.pop();
@@ -236,15 +257,6 @@ fn publication_requires_all_targets_and_their_declared_debug_artifacts() {
         build_package(input),
         Err(PackageError::TargetCount(count)) if count == TARGETS.len() - 1
     ));
-
-    for index in [0, 2] {
-        let mut input = fixture.input();
-        input.targets[index].debug = None;
-        assert!(matches!(
-            build_package(input),
-            Err(PackageError::Binding { .. })
-        ));
-    }
 }
 
 #[test]
