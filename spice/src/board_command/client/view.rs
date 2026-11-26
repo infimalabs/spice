@@ -100,7 +100,7 @@ impl Standing {
 pub(crate) struct BoardRow {
     pub(crate) handle: TaskHandle,
     pub(crate) standing: Standing,
-    pub(crate) phase: String,
+    pub(crate) phase: wire::Phase,
     /// An open Design's pass-cycle state, as the resident judged it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cycle: Option<wire::rooms::DesignCycle>,
@@ -131,7 +131,7 @@ impl std::fmt::Display for BoardRow {
             "{}  {:<7}  {}",
             self.handle,
             self.standing.label(),
-            self.phase
+            self.phase.as_str()
         )?;
         if let Some(cycle) = self.cycle {
             write!(formatter, " ({})", cycle.label())?;
@@ -234,6 +234,40 @@ pub(crate) struct ViewRequest {
     output: Option<String>,
 }
 
+/// Every projected entry paired once with the presentation fields retained on
+/// its board task. The vectors are built in the same order; pairing them here
+/// turns every emitted-row title and ownership lookup into direct access.
+struct Presentation<'a> {
+    entry: &'a Entry,
+    task: &'a BoardTask,
+}
+
+struct PresentationIndex<'a> {
+    rows: Vec<Presentation<'a>>,
+}
+
+impl<'a> PresentationIndex<'a> {
+    fn new(board: &'a BoardAnswer, entries: &'a [Entry]) -> Result<Self, Outcome<CommandAnswer>> {
+        if entries.len() != board.tasks.len() {
+            return Err(protocol_fault(
+                "board::presentation-index-invalid",
+                "board task and validated entry counts differ",
+            ));
+        }
+        let mut rows = Vec::with_capacity(entries.len());
+        for (entry, task) in entries.iter().zip(&board.tasks) {
+            if entry.born() != &task.statement.body.born {
+                return Err(protocol_fault(
+                    "board::presentation-index-invalid",
+                    "board tasks and validated entries are ordered differently",
+                ));
+            }
+            rows.push(Presentation { entry, task });
+        }
+        Ok(Self { rows })
+    }
+}
+
 /// Execute one `board` invocation.
 pub(crate) fn board_view(
     matches: &ArgMatches,
@@ -296,10 +330,11 @@ pub(in crate::board_command) fn project_board(
     }
     let entries = actor_entries(board)?;
     let standings = Standings::measure(board, &entries);
+    let presentations = PresentationIndex::new(board, &entries)?;
     match &request.family {
-        Some(family) => family_page(board, &entries, &standings, family, request)
+        Some(family) => family_page(board, presentations, &standings, family, request)
             .map(|page| BoardView::Family(Box::new(page))),
-        None => posture(board, &entries, &standings, request)
+        None => posture(board, presentations, &standings, request)
             .map(|posture| BoardView::Posture(Box::new(posture))),
     }
 }
@@ -486,28 +521,26 @@ fn standing(
 
 fn row(
     board: &BoardAnswer,
-    entry: &Entry,
+    presentation: &Presentation<'_>,
     standing: Standing,
     budget: &wire::output::Budget,
 ) -> BoardRow {
-    let task = board
-        .tasks
-        .iter()
-        .find(|task| &task.statement.body.born == entry.born());
+    let entry = presentation.entry;
+    let task = presentation.task;
     BoardRow {
         handle: entry.handle().clone(),
         standing,
-        phase: entry.workflow().phase.as_str().to_owned(),
+        phase: entry.workflow().phase,
         cycle: board.design_cycles.get(entry.born()).copied(),
         topic: entry.topic().cloned(),
-        ownership: task.and_then(|task| task.ownership.clone()),
+        ownership: task.ownership.clone(),
         lanes: entry
             .active_claims()
             .map(|held| held.claim().lane)
             .collect(),
         target: entry.completion().target(&entry.workflow().phase).get(),
         arrived: entry.completion().arrivals.len(),
-        title: budget.clip(task.map_or("", |task| task.presentation_title.as_str())),
+        title: budget.clip(&task.presentation_title),
         pitch: entry.statement().pitch.clone(),
     }
 }
@@ -516,14 +549,14 @@ fn row(
 fn admit(
     board: &BoardAnswer,
     standings: &Standings,
-    ordered: &[&Entry],
+    ordered: &[Presentation<'_>],
     request: &ViewRequest,
 ) -> Result<Bounded<BoardRow>, Outcome<CommandAnswer>> {
     let start = match &request.after {
         None => 0,
         Some(after) => ordered
             .iter()
-            .position(|entry| entry.handle() == after)
+            .position(|presentation| presentation.entry.handle() == after)
             .ok_or_else(|| {
                 refusal(
                     "board::cursor-unknown",
@@ -533,12 +566,17 @@ fn admit(
             })?,
     };
     let mut admission = Admission::new(request.budget);
-    for (index, entry) in ordered[start..].iter().enumerate() {
+    for (index, presentation) in ordered[start..].iter().enumerate() {
         if admission.is_closed() {
             admission.withhold(ordered.len() - start - index);
             break;
         }
-        let row = row(board, entry, standings.of(entry), &request.budget);
+        let row = row(
+            board,
+            presentation,
+            standings.of(presentation.entry),
+            &request.budget,
+        );
         admission
             .offer(row)
             .map_err(|error| protocol_fault("board::row-unencodable", error.to_string()))?;
@@ -548,22 +586,27 @@ fn admit(
 
 fn posture(
     board: &BoardAnswer,
-    entries: &[Entry],
+    mut presentations: PresentationIndex<'_>,
     standings: &Standings,
     request: &ViewRequest,
 ) -> Result<Posture, Outcome<CommandAnswer>> {
-    let rows = actor_rows(board, entries);
-    let mut counts = PostureCounts {
-        open: rows.len(),
-        drafts: actor_drafts(board, entries),
-        ..PostureCounts::default()
-    };
+    let mut counts = PostureCounts::default();
     let mut claim = None;
-    let mut work = Vec::new();
-    for entry in &rows {
+    presentations.rows.retain(|presentation| {
+        let entry = presentation.entry;
+        if !entry.workflow().status.is_pending() || !actor_route_matches(board, presentation.task) {
+            return false;
+        }
+        if entry.is_draft() {
+            counts.drafts += 1;
+            return false;
+        }
+        counts.open += 1;
         let standing = standings.of(entry);
         match standing {
-            Standing::Claimed => claim = Some(row(board, entry, standing, &request.budget)),
+            Standing::Claimed => {
+                claim = Some(row(board, presentation, standing, &request.budget));
+            }
             Standing::Active => counts.active += 1,
             Standing::Ready => counts.ready += 1,
             Standing::Review => counts.review += 1,
@@ -574,19 +617,19 @@ fn posture(
             Standing::AwaitingDecision => counts.awaiting_decision += 1,
             Standing::Pending => counts.pending += 1,
         }
-        if matches!(
+        matches!(
             standing,
             Standing::Ready
                 | Standing::Review
                 | Standing::AwaitingDecision
                 | Standing::Workflow
                 | Standing::Blocked
-        ) {
-            work.push(*entry);
-        }
-    }
-    work.sort_by(|left, right| standings.order(left, right));
-    let work = admit(board, standings, &work, request)?;
+        )
+    });
+    presentations
+        .rows
+        .sort_by(|left, right| standings.order(left.entry, right.entry));
+    let work = admit(board, standings, &presentations.rows, request)?;
     let mut text = format!(
         "board for {} at cursor {}: {} open on this route\n\
          active {} ready {} review {} awaiting-decision {} blocked {} waiting {} deferred {} stale {} \
@@ -622,18 +665,20 @@ fn posture(
 
 fn family_page(
     board: &BoardAnswer,
-    entries: &[Entry],
+    mut presentations: PresentationIndex<'_>,
     standings: &Standings,
     family: &str,
     request: &ViewRequest,
 ) -> Result<FamilyPage, Outcome<CommandAnswer>> {
-    let mut members = entries
-        .iter()
-        .filter(|entry| entry.workflow().status.is_pending() && in_family(entry.handle(), family))
-        .collect::<Vec<_>>();
-    members.sort_by(|left, right| standings.order(left, right));
-    let tasks = admit(board, standings, &members, request)?;
-    let mut text = format!("board {family}: {} tasks", members.len());
+    presentations.rows.retain(|presentation| {
+        presentation.entry.workflow().status.is_pending()
+            && in_family(presentation.entry.handle(), family)
+    });
+    presentations
+        .rows
+        .sort_by(|left, right| standings.order(left.entry, right.entry));
+    let tasks = admit(board, standings, &presentations.rows, request)?;
+    let mut text = format!("board family {family} at cursor {}", board.cursor);
     push_rows(&mut text, &tasks);
     Ok(FamilyPage {
         family: family.to_owned(),
