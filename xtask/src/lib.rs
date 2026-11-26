@@ -50,7 +50,9 @@ pub use verify_error::{GateArmError, VerifyError};
 // off the wasm target; the workspace wasm check compiles this crate too.
 #[cfg(not(target_arch = "wasm32"))]
 pub use develop::refresh_install;
-pub use hosted_release_publish::{PublishError, PublishRequest, publish_hosted_release};
+pub use hosted_release_publish::{
+    PublishEffect, PublishError, PublishRequest, publish_hosted_release,
+};
 pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{

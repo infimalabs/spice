@@ -22,7 +22,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE|--abandon COMMIT>|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -445,21 +445,30 @@ fn run_publish_hosted_release(
         .map(|argument| argument.to_str())
         .collect::<Option<Vec<_>>>()
         .ok_or_else(usage_error)?;
-    let request = match arguments.as_slice() {
-        ["--notes", notes] => xtask::PublishRequest::New {
+    let (arguments, effect) = match arguments.as_slice() {
+        [request @ .., "--stage-only"] => (request, xtask::PublishEffect::StageOnly),
+        request => (request, xtask::PublishEffect::Publish),
+    };
+    let request = match (arguments, effect) {
+        (["--notes", notes], _) => xtask::PublishRequest::New {
             notes: PathBuf::from(notes),
         },
-        [commit, "--notes", notes] if !commit.starts_with('-') => xtask::PublishRequest::Resume {
-            commit: (*commit).to_owned(),
-            notes: PathBuf::from(notes),
-        },
-        ["--abandon", commit] => xtask::PublishRequest::Abandon((*commit).to_owned()),
+        ([commit, "--notes", notes], _) if !commit.starts_with('-') => {
+            xtask::PublishRequest::Resume {
+                commit: (*commit).to_owned(),
+                notes: PathBuf::from(notes),
+            }
+        }
+        (["--abandon", commit], xtask::PublishEffect::Publish) => {
+            xtask::PublishRequest::Abandon((*commit).to_owned())
+        }
         _ => {
             eprintln!("{}", help());
             return Err(usage_error().into());
         }
     };
-    xtask::publish_hosted_release(&request, output, &mut io::stderr().lock()).map_err(Into::into)
+    xtask::publish_hosted_release(&request, effect, output, &mut io::stderr().lock())
+        .map_err(Into::into)
 }
 
 fn run_stage_target(

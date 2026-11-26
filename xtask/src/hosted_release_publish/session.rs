@@ -10,6 +10,9 @@ use super::{PublishError, PublishRequest, plan::PLAN_FILE};
 
 const SCHEMA: u16 = 1;
 const PENDING: &str = "pending.json";
+/// Present only while a session's persisted plan has reached no publication
+/// effect: a stage-only request writes it, publishing withdraws it first.
+const UNPUBLISHED: &str = "unpublished";
 const COMMIT_HEX_LENGTH: usize = 40;
 
 /// Every publication under one Git-common lock, and the one pinned commit a
@@ -117,8 +120,9 @@ impl Publications {
     }
 
     /// Drop the pending request pinned to exactly `commit`, with its recorded
-    /// preflight, while no publication plan exists: before any tag or release
-    /// mutation. Once a plan exists, publication converges only by resumption.
+    /// preflight, while it cannot have reached a tag or release mutation: it
+    /// has no publication plan, or only a stage-only request persisted one.
+    /// Otherwise publication converges only by resumption.
     pub(super) fn abandon(&self, commit: &str) -> Result<(), PublishError> {
         match self.pending()? {
             Some(pinned) if pinned == commit => {}
@@ -130,7 +134,7 @@ impl Publications {
             }
         }
         let session = self.session(commit);
-        if fs::symlink_metadata(session.root.join(PLAN_FILE)).is_ok() {
+        if session.publication_may_have_started()? {
             return Err(PublishError::Refused(format!(
                 "the request for {commit} already admitted its publication plan and may have \
                  mutated the release; resume it with `spice dev xtask -- publish-hosted-release \
@@ -215,6 +219,25 @@ impl PublicationSession {
         &self.source_commit
     }
 
+    /// Whether this session holds a plan that a publishing request may have
+    /// carried into tag or release effects.
+    pub(super) fn publication_may_have_started(&self) -> Result<bool, PublishError> {
+        Ok(exists(&self.root.join(PLAN_FILE))? && !exists(&self.root.join(UNPUBLISHED))?)
+    }
+
+    pub(super) fn mark_unpublished(&self) -> Result<(), PublishError> {
+        publish(&self.root.join(UNPUBLISHED), &[])
+    }
+
+    pub(super) fn withdraw_unpublished(&self) -> Result<(), PublishError> {
+        let path = self.root.join(UNPUBLISHED);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(PublishError::Io { path, source }),
+        }
+    }
+
     pub(super) fn inputs_run(&self) -> Result<Option<u64>, PublishError> {
         let Some(bytes) = read_optional(&self.record_path)? else {
             return Ok(None);
@@ -249,6 +272,17 @@ fn canonical_commit(commit: &str) -> bool {
         && commit
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn exists(path: &Path) -> Result<bool, PublishError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(PublishError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, PublishError> {
@@ -396,6 +430,51 @@ mod tests {
             publications
                 .admit(&resume(pinned.clone()))
                 .expect("a planned pin still resumes"),
+            Some(pinned)
+        );
+    }
+
+    #[test]
+    fn a_stage_only_plan_abandons_until_a_publishing_request_crosses_it() {
+        use crate::hosted_release_publish::{PublishEffect, conclude};
+
+        let scratch = Scratch::new();
+        let pinned = "a".repeat(COMMIT_HEX_LENGTH);
+        let publications = scratch.publications().expect("request");
+        let stage_only = |session: &PublicationSession| {
+            let unpublished = !session.publication_may_have_started().expect("observe");
+            fs::write(session.root.join(PLAN_FILE), b"admitted plan").expect("persist plan");
+            conclude(PublishEffect::StageOnly, session, unpublished, || {
+                panic!("stage-only reached a publication effect")
+            })
+            .expect("stage only");
+        };
+
+        let session = publications.begin(&pinned).expect("pin");
+        stage_only(&session);
+        publications
+            .abandon(&pinned)
+            .expect("a stage-only plan abandons");
+        assert!(!session.root.exists(), "the abandoned stage survived");
+
+        let session = publications.begin(&pinned).expect("pin again");
+        stage_only(&session);
+        let unpublished = !session.publication_may_have_started().expect("observe");
+        let mut published = false;
+        conclude(PublishEffect::Publish, &session, unpublished, || {
+            published = true;
+            refused(publications.abandon(&pinned), "resume it");
+            Err(PublishError::Refused("provider interrupted".into()))
+        })
+        .expect_err("the interrupted publication surfaces");
+        assert!(published, "publishing never reached its effect");
+
+        stage_only(&session);
+        refused(publications.abandon(&pinned), "resume it");
+        assert_eq!(
+            publications
+                .admit(&resume(pinned.clone()))
+                .expect("a crossed plan still resumes"),
             Some(pinned)
         );
     }

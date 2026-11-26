@@ -365,10 +365,18 @@ attaches to recorded healthy or successful runs and dispatches only a missing
 target, a target whose provider run ended in failure, or a target whose
 attested result does not decode under the current client's schema. It reports
 all three outcomes before failing, so one failed platform never hides or
-redispatches successful siblings. `publish-hosted-release --abandon COMMIT`
+redispatches successful siblings. Either form accepts a trailing
+`--stage-only`: it runs the same pin, preflight, native staging, and plan
+capture, persists the plan with its complete asset inventory under the
+session's `assets` directory, reports each asset's SHA-256, name, and length,
+and stops before the first tag or release mutation. The request stays pinned;
+a later ordinary resume re-captures the plan, refuses if any byte moved, and
+publishes exactly the staged assets. `publish-hosted-release --abandon COMMIT`
 drops a pin naming exactly that commit, with its recorded preflight, only while
-no publication plan exists; once the plan is admitted, before the first tag or
-release mutation, the request converges only by resumption. A changed
+no publishing invocation can have reached a tag or release mutation: no plan
+exists, or only `--stage-only` persisted it. A publishing invocation withdraws
+that stage-only mark before its first effect, after which the request
+converges only by resumption. A changed
 bound identity refuses before a provider dispatch: only a new dispatch requires
 `main` to carry the source's workflow blob, while an attached run is admitted
 against the blob its own workflow commit carries, so a later landing never
