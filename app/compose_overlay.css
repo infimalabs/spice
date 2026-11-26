@@ -124,6 +124,17 @@
    the sheet's full left edge behind the launcher without moving either one. */
 #app-compose-dialog { left: var(--app-compose-launcher-inline) !important; right: auto !important; }
 #app-compose-dialog[data-expanded="true"] { left: 0 !important; }
+/* The closed popover keeps its full laid-out sheet for stable opening
+   geometry, but only the controls painted in its header may participate in
+   hit testing. Without this boundary, transparent sheet pixels intercept the
+   page beneath them. */
+.app-compose-dialog[data-expanded="false"] { pointer-events: none; }
+.app-compose-dialog[data-expanded="false"] :is(
+  .app-compose-modes-row,
+  .app-compose-utility-tabs,
+  .app-inbox-button,
+  .app-compose-pending-open
+) { pointer-events: auto; }
 .app-compose-dialog[data-presented="true"] {
   --app-compose-sheet-opacity: 1;
   box-shadow: var(--shadow);
