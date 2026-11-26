@@ -510,9 +510,11 @@
 /* A phone's closed strip keeps the mirrored operator launcher and one selected
    destination; opening restores the whole track, Draft, and Help. The track is
    too narrow for equal tabs, so each destination starts from its label and the
-   spare width pads them all alike. */
+   spare width pads them all alike; a slimmer inset lets the four labels fit
+   down to a 320px viewport. */
 @media (max-width: 560px) {
   .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
+  .app-compose-modes-row { padding: 0 4px; }
   .app-compose-dialog .app-compose-mode { flex-basis: auto; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
