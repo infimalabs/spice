@@ -4,7 +4,7 @@ use gix::bstr::{BStr, ByteSlice as _};
 
 use super::*;
 
-pub(super) fn read(root: &Path) -> Result<LooseWork, Error> {
+pub(super) fn read(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
     let repository = open(root)?;
     let head = repository
         .head()
@@ -38,9 +38,10 @@ pub(super) fn read(root: &Path) -> Result<LooseWork, Error> {
             "gix could not decode the worktree index",
         )
     })??;
+    let shadow = generated_shadow(ambient);
     let baseline = branch
         .as_deref()
-        .map(|branch| integration_baseline(&repository, branch))
+        .map(|branch| integration_baseline(&repository, branch, shadow.as_deref()))
         .transpose()?
         .flatten();
     Ok(LooseWork {
@@ -60,6 +61,14 @@ fn open(root: &Path) -> Result<gix::Repository, Error> {
     permissions.config.env = false;
     gix::open_opts(root, gix::open::Options::default().permissions(permissions))
         .map_err(|error| fault("git::repository-unreadable", "open worktree", error))
+}
+
+fn generated_shadow(ambient: &Ambient) -> Option<PathBuf> {
+    let path = PathBuf::from(ambient.get("GIT_CONFIG_SYSTEM")?);
+    fs::read(&path)
+        .ok()
+        .filter(|content| crate::git_shadow::is_generated_shadow(content))
+        .map(|_| path)
 }
 
 fn dirty_state(
@@ -185,10 +194,11 @@ fn staged_fingerprint(change: &gix::diff::index::Change) -> u64 {
 fn integration_baseline(
     repository: &gix::Repository,
     branch: &str,
+    shadow: Option<&Path>,
 ) -> Result<Option<String>, Error> {
     let config = repository.config_snapshot();
-    let remote = config_value(&config, &format!("branch.{branch}.remote"))?;
-    let merge = config_value(&config, &format!("branch.{branch}.merge"))?;
+    let remote = config_value(&config, branch, "remote", shadow)?;
+    let merge = config_value(&config, branch, "merge", shadow)?;
     let pairing = match (remote, merge) {
         (None, None) => None,
         (Some(remote), Some(merge)) => Some((remote, merge)),
@@ -205,7 +215,11 @@ fn integration_baseline(
         }
     };
     let Some((remote, merge)) = pairing else {
-        return Ok(has_remote(repository, "origin").then(|| "refs/remotes/origin/HEAD".to_owned()));
+        return if remote_has_url(repository, "origin")? {
+            Ok(Some("refs/remotes/origin/HEAD".to_owned()))
+        } else {
+            Ok(None)
+        };
     };
     let branch = merge.strip_prefix("refs/heads/").ok_or_else(|| {
         Error::fault(
@@ -216,7 +230,7 @@ fn integration_baseline(
     if remote == "." {
         return Ok(Some(format!("refs/heads/{branch}")));
     }
-    if !has_remote(repository, &remote) {
+    if !remote_has_url(repository, &remote)? {
         return Err(Error::fault(
             "git::remote-invalid",
             format!("branch tracks remote {remote}, which this repository does not define"),
@@ -225,16 +239,55 @@ fn integration_baseline(
     Ok(Some(format!("refs/remotes/{remote}/{branch}")))
 }
 
-fn config_value(config: &gix::config::Snapshot<'_>, key: &str) -> Result<Option<String>, Error> {
-    config
-        .string(key)
-        .map(|value| {
-            value
-                .to_str()
-                .map(str::to_owned)
-                .map_err(|error| Error::fault("git::pairing-invalid", error.to_string()))
+fn config_value(
+    config: &gix::config::Snapshot<'_>,
+    branch: &str,
+    name: &str,
+    shadow: Option<&Path>,
+) -> Result<Option<String>, Error> {
+    let mut value = None;
+    let Some(sections) = config
+        .plumbing()
+        .sections_by_name_and_filter("branch", |metadata| {
+            shadow.is_none_or(|shadow| metadata.path.as_deref() != Some(shadow))
         })
-        .transpose()
+    else {
+        return Ok(None);
+    };
+    for section in sections {
+        if section.header().subsection_name() != Some(branch.as_bytes().as_bstr()) {
+            continue;
+        }
+        if let Some(candidate) = section.value(name) {
+            value = Some(
+                candidate
+                    .to_str()
+                    .map(str::to_owned)
+                    .map_err(|error| Error::fault("git::pairing-invalid", error.to_string()))?,
+            );
+        }
+    }
+    Ok(value)
+}
+
+fn remote_has_url(repository: &gix::Repository, name: &str) -> Result<bool, Error> {
+    if !has_remote(repository, name) {
+        return Ok(false);
+    }
+    let remote = repository.find_remote(name).map_err(|error| {
+        fault(
+            "git::remote-invalid",
+            "read configured integration remote",
+            error,
+        )
+    })?;
+    if remote.url(gix::remote::Direction::Fetch).is_none() {
+        return Err(Error::fault(
+            "git::remote-invalid",
+            format!("remote {name} has no fetch URL"),
+        ));
+    }
+    Ok(true)
 }
 
 fn has_remote(repository: &gix::Repository, name: &str) -> bool {

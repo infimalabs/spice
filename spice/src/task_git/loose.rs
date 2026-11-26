@@ -75,8 +75,8 @@ impl LooseWork {
 }
 
 /// Read the loose work of the worktree at `root`.
-pub fn loose_work(root: &Path) -> Result<LooseWork, Error> {
-    snapshot::read(root)
+pub fn loose_work(root: &Path, ambient: &Ambient) -> Result<LooseWork, Error> {
+    snapshot::read(root, ambient)
 }
 
 fn hash_worktree_path(root: &Path, path: &str, hasher: &mut DefaultHasher) -> Result<(), Error> {
@@ -227,6 +227,7 @@ mod tests {
     fn gix_snapshot_covers_clean_dirty_untracked_unlanded_and_failures() {
         let scratch = Scratch::new();
         let root = &scratch.0;
+        let ambient = Ambient::default();
         crate::test_repository::initialize(root);
         fs::write(root.join(".gitignore"), "ignored\n").expect("write fixture ignore");
         fs::write(root.join("tracked"), "first").expect("write tracked fixture");
@@ -244,24 +245,24 @@ mod tests {
         )
         .expect("configure local integration baseline");
 
-        let clean = snapshot::read(root).expect("clean snapshot reads");
+        let clean = snapshot::read(root, &ambient).expect("clean snapshot reads");
         assert!(!clean.is_loose());
         assert_eq!(clean.unlanded.total, 0);
 
         fs::write(root.join("tracked"), "next!").expect("write next tracked content");
         crate::test_repository::stage(root, &["tracked"]);
         crate::test_repository::commit(root, "local work");
-        let unlanded = snapshot::read(root).expect("unlanded snapshot reads");
+        let unlanded = snapshot::read(root, &ambient).expect("unlanded snapshot reads");
         assert!(unlanded.is_loose());
         assert_eq!(unlanded.unlanded.total, 1);
 
         fs::write(root.join("tracked"), "third").expect("write staged content");
         crate::test_repository::stage(root, &["tracked"]);
-        let staged = snapshot::read(root).expect("staged snapshot reads");
+        let staged = snapshot::read(root, &ambient).expect("staged snapshot reads");
         assert_eq!(staged.dirty, ["tracked"]);
 
         fs::write(root.join("tracked"), "other").expect("write unstaged same-length content");
-        let unstaged = snapshot::read(root).expect("unstaged snapshot reads");
+        let unstaged = snapshot::read(root, &ambient).expect("unstaged snapshot reads");
         assert_eq!(unstaged.dirty, ["tracked"]);
         assert_ne!(unstaged.dirty_fingerprint, staged.dirty_fingerprint);
 
@@ -269,7 +270,7 @@ mod tests {
         fs::write(root.join("ignored"), "ignored").expect("write ignored content");
         let index_path = root.join(".git/index");
         let index_before = fs::read(&index_path).expect("read index before inspection");
-        let untracked = snapshot::read(root).expect("untracked snapshot reads");
+        let untracked = snapshot::read(root, &ambient).expect("untracked snapshot reads");
         assert_eq!(untracked.dirty, ["tracked", "untracked"]);
         assert_eq!(
             fs::read(&index_path).expect("read index after inspection"),
@@ -278,13 +279,17 @@ mod tests {
         );
 
         fs::write(&index_path, "not an index").expect("corrupt fixture index");
-        assert!(snapshot::read(root).is_err(), "a corrupt index refuses");
+        assert!(
+            snapshot::read(root, &ambient).is_err(),
+            "a corrupt index refuses"
+        );
     }
 
     #[test]
     fn detached_head_still_reports_an_unfinished_operation() {
         let scratch = Scratch::new();
         let root = &scratch.0;
+        let ambient = Ambient::default();
         crate::test_repository::initialize(root);
         fs::write(root.join("tracked"), "first").expect("write tracked fixture");
         crate::test_repository::stage_all(root);
@@ -292,9 +297,87 @@ mod tests {
         fs::write(root.join(".git/HEAD"), format!("{head}\n")).expect("detach fixture HEAD");
         fs::create_dir(root.join(".git/rebase-merge")).expect("mark rebase in progress");
 
-        let work = snapshot::read(root).expect("detached operation snapshot reads");
+        let work = snapshot::read(root, &ambient).expect("detached operation snapshot reads");
         assert_eq!(work.operation, Some("rebase"));
         assert_eq!(work.unlanded, Unlanded::default());
+    }
+
+    #[test]
+    fn native_pairing_ignores_the_shadow_for_a_dotted_branch() {
+        let scratch = Scratch::new();
+        let root = &scratch.0;
+        crate::test_repository::initialize(root);
+        fs::write(root.join("tracked"), "baseline").expect("write tracked fixture");
+        crate::test_repository::stage_all(root);
+        let baseline = crate::test_repository::commit(root, "baseline");
+        fs::write(root.join("tracked"), "local").expect("write local commit");
+        crate::test_repository::stage(root, &["tracked"]);
+        let head = crate::test_repository::commit(root, "local");
+        fs::write(root.join(".git/HEAD"), "ref: refs/heads/topic.1\n")
+            .expect("select dotted fixture branch");
+        fs::write(root.join(".git/refs/heads/topic.1"), format!("{head}\n"))
+            .expect("write dotted fixture branch");
+        fs::write(
+            root.join(".git/refs/heads/baseline"),
+            format!("{baseline}\n"),
+        )
+        .expect("write integration baseline");
+
+        let pairing = root.join("pairing.config");
+        fs::write(
+            &pairing,
+            "[branch \"topic.1\"]\n\tremote = .\n\tmerge = refs/heads/baseline\n",
+        )
+        .expect("write native pairing");
+        let native = root.join("native.config");
+        fs::write(
+            &native,
+            format!(
+                "[includeIf \"onbranch:topic.1\"]\n\tpath = {}\n",
+                pairing.display()
+            ),
+        )
+        .expect("write conditional native config");
+        let shadow = root.join("shadow.config");
+        fs::write(
+            &shadow,
+            crate::git_shadow::shadow_content("topic.1", native.to_str().expect("utf8 fixture")),
+        )
+        .expect("write generated shadow");
+        let config = fs::read_to_string(root.join(".git/config")).expect("read fixture config");
+        fs::write(
+            root.join(".git/config"),
+            format!("{config}\n[include]\n\tpath = {}\n", shadow.display()),
+        )
+        .expect("load fixture shadow");
+        let ambient = Ambient::new([("GIT_CONFIG_SYSTEM", shadow.as_os_str())]);
+
+        let work = snapshot::read(root, &ambient).expect("native pairing snapshot reads");
+        assert_eq!(work.unlanded.total, 1);
+        assert_eq!(work.unlanded.baseline, Some(baseline.to_string()));
+    }
+
+    #[test]
+    fn configured_remote_without_a_fetch_url_refuses() {
+        let scratch = Scratch::new();
+        let root = &scratch.0;
+        crate::test_repository::initialize(root);
+        fs::write(root.join("tracked"), "baseline").expect("write tracked fixture");
+        crate::test_repository::stage_all(root);
+        crate::test_repository::commit(root, "baseline");
+        let config = fs::read_to_string(root.join(".git/config")).expect("read fixture config");
+        fs::write(
+            root.join(".git/config"),
+            format!(
+                "{config}\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n[remote \"origin\"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+            ),
+        )
+        .expect("configure URL-less remote");
+
+        assert!(
+            snapshot::read(root, &Ambient::default()).is_err(),
+            "a configured remote without a fetch URL refuses"
+        );
     }
 
     #[test]
