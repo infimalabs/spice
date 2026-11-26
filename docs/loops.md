@@ -100,31 +100,23 @@ flowchart LR
   head without upstream, plus tracked, staged and non-ignored untracked dirt.
   Parked objects have no stash or preservation ref; a pruned object refuses the
   next claim without changing board or lane.
-- Claims replay commits oldest first, then restore the snapshot without committing
-  it. The restored delta remains staged, or unmerged on conflict. At that owned
-  handoff, snapshot replay retires its synthetic Git controls without changing
-  HEAD, the index, or claimant files. A conflicting real commit pauses replay;
-  the snapshot waits until completion retries.
-- Resolve snapshot conflicts and `git add` the chosen content. If the resulting
-  tree is already HEAD and the worktree is clean, retry task completion without
-  manufacturing a commit. Any remaining delta needs an explicit commit through
-  the ordinary pre-commit gate; the parked snapshot object is never an admitted
-  task commit.
-- Snapshot replay records its input, HEAD and Git configuration first. An
-  interruption between the pick and its cleanup seal is recovered by
-  reconstructing the expected controls in an isolated Git directory and
-  corroborating them; the delta is never replayed into claimant files, and
-  changed HEAD, configuration or foreign controls refuse.
-- Failed snapshot cleanup keeps its pending identity and installed content; fix
-  the filesystem failure and retry the task boundary, and cleanup resumes
-  without replaying the settled delta. If claim preparation failed before a
-  claim was granted, resolve and stage conflicts, then `spice task capture
-  HANDLE` that parked task: sealed recovery preserves staged, unstaged and
+- Claims replay commits oldest first, then restore the snapshot uncommitted.
+  Conflicts pause with the snapshot waiting; resolved content stays staged or
+  unmerged. If the resolved tree is HEAD and clean, completion retries without
+  a synthetic commit. Any remaining delta needs the ordinary pre-commit gate;
+  a parked snapshot is never an admitted task commit.
+- Snapshot replay seals its input, HEAD, and Git configuration first. Recovery
+  reconstructs interrupted controls in an isolated Git directory and
+  corroborates them; it never replays the delta into claimant files, and
+  changed HEAD, configuration, or foreign controls refuse.
+- Failed cleanup retains its pending identity and content, then resumes without
+  replaying the settled delta. A pre-claim failure recovers only through
+  `spice task capture HANDLE`: sealed recovery preserves staged, unstaged, and
   untracked content, accepts a resolution already equal to HEAD, and never
-  replays the snapshot twice. `task next` refuses this pending handoff; use the
-  named capture recovery first.
-- Do not delete unknown controls or fabricate allocator merge authority. A failed
-  pick with no conflicts retains its input and requires a clean worktree to retry.
+  replays twice. `task next` refuses until that named recovery completes.
+- Unknown controls are never deleted and allocator merge authority is never
+  fabricated. A failed pick without conflicts retains its input and requires a
+  clean worktree to retry.
 - `task free`, self-deferral and plan completion park work. Peer deferral changes
   scheduling, never possession; deferring another holder's open Design
   [asks it to free](invariants/identity.md#work-deferral-stops-an-open-design).
@@ -299,10 +291,12 @@ flowchart TD
   wakes and before drain-queue wakes. Its briefing names that work under
   `Held claim`. It asks the occupant to capture the work into a task or discard
   it, and notes that dirty work needs gate proof before commit while unlanded
-  commits already passed the commit gates. The resident wakes the lane once per
-  distinct loose state. A clean exit clears the record, so the same state can
-  wake the lane again later. The record is process-local, so a resident
-  restart judges the lane again only after its next exit.
+  commits already passed the commit gates. A failed Git or filesystem
+  inspection stays pending for the next reconciliation and launches no
+  occupant. The resident wakes the lane once per distinct loose state. A clean
+  exit clears the record, so the same state can wake the lane again later. The
+  record is process-local, so a resident restart judges the lane again only
+  after its next exit.
 - No supervisor request is published until the lane's worktree is admitted as a
   root inside the resident's own Git common directory. A lane naming another
   repository's worktree parks with a refusal; the resident and its other lanes

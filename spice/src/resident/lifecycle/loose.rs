@@ -93,6 +93,7 @@ impl Loose {
                         diagnostic,
                         "lifecycle loose worktree unread lane={lane}: {error}"
                     );
+                    self.exited.insert(lane);
                 }
             }
         }
