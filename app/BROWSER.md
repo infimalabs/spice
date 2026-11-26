@@ -292,6 +292,13 @@ strip-wide divider or accent rail crosses them. Check each kind's
 [accent](OVERVIEW.md#drafts-and-oops-intake) in both themes; Draft is inert
 for Ask.
 
+Compare CREATE, SEND and FULL SEND with a team SEND: each is the same 72px
+circle with the same edge, transmitted-glass face, catch, typography and press
+material. Switch Ask, Task, Plan and Design; the dialog, editor, reserved
+action row, circular action and inbox rectangles must not move or resize. Ask
+shows To inside that reserved row; work modes hide it without collapsing the
+row.
+
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
 and no Escape reopening during close. Empty/whitespace content

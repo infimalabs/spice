@@ -562,8 +562,9 @@ fn names_whole_roster(runtime: Option<&AppRuntime>, recipients: &BTreeSet<Canoni
     all_named && members > 1 && recipients.len() == members
 }
 
-/// Ask keeps its recipient choice. Work's title, pitch and longer context stay
-/// in the one composer above; only the intent remains a hidden form choice.
+/// The action row always reserves Ask's recipient footprint, so switching a
+/// destination cannot resize the sheet. Work's title, pitch and longer context
+/// stay in the one composer above; only the intent remains a hidden form choice.
 fn details(
     runtime: Option<&AppRuntime>,
     recipients: &UseStateHandle<BTreeSet<CanonicalUuid>>,
@@ -571,7 +572,7 @@ fn details(
 ) -> Html {
     let message = mode == Mode::Message;
     html! {
-        <div class="app-compose-details" hidden={!message}>
+        <div class="app-compose-details">
             {recipient_field(runtime, recipients, message)}
             <input type="hidden" name="intent" value={mode.intent()} />
         </div>
