@@ -446,11 +446,13 @@ fn render(
 /// not sent to Stencil for shaping. `dev.autoqa` is false, so the model is not
 /// told to file tool-issue reports, which `omp grievances push` uploads.
 /// The seat's stdin carries only Spice-rendered text, so omp's `/share` and
-/// `/collab` are unreachable; their command-line forms are not. The bash
-/// rules denying `PUBLISHING_COMMANDS` are absolute under the seat's yolo
-/// approval, and project config cannot loosen an overlay's deny. These are
-/// settings and approval gates, not containment: a process eval spawns, an
-/// omp binary named by path, or a hand-written network call is outside them.
+/// `/collab` are unreachable. [`ShellCall::parse`] refuses their command-line
+/// publication routes before the registered host shell launches anything, and
+/// the overlay's bash rules deny the same routes if omp's built-in bash becomes
+/// reachable. The overlay denies are absolute under yolo approval and project
+/// config cannot loosen them. These are settings and command gates, not
+/// containment: a process eval spawns, an omp binary named by path, or a
+/// hand-written network call is outside them.
 #[must_use]
 pub fn config_overlay(auto_compact_threshold_tokens: u64, lsp: bool) -> String {
     let mut overlay = format!("compaction:\n  thresholdTokens: {auto_compact_threshold_tokens}\n");
@@ -1205,6 +1207,70 @@ pub struct ShellCall {
     /// only a seated occupant.
     pub until: Option<OutputPattern>,
 }
+/// Name a publishing route when it appears where the shell will start one
+/// command, including after a compound-command separator.
+///
+/// This is deliberately a narrow gate over the commands a seat promises to
+/// refuse, not a shell parser or network sandbox. Quoted text is skipped so an
+/// admitted command may print these spellings without being refused.
+fn publishing_command(command: &str) -> Option<&'static str> {
+    let bytes = command.as_bytes();
+    let mut at_start = true;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut index = 0;
+
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if escaped {
+            escaped = false;
+            index += 1;
+            continue;
+        }
+        if byte == b'\\' && quote != Some(b'\'') {
+            escaped = true;
+            index += 1;
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = Some(byte);
+            index += 1;
+            continue;
+        }
+        if matches!(byte, b';' | b'|' | b'&' | b'\n' | b'(' | b'{') {
+            at_start = true;
+            index += 1;
+            continue;
+        }
+        if at_start && byte.is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+        if at_start {
+            let remaining = &command[index..];
+            for route in PUBLISHING_COMMANDS {
+                if let Some(suffix) = remaining.strip_prefix(route)
+                    && suffix.as_bytes().first().is_none_or(|&next| {
+                        next.is_ascii_whitespace()
+                            || matches!(next, b';' | b'|' | b'&' | b'(' | b')' | b'{' | b'}')
+                    })
+                {
+                    return Some(route);
+                }
+            }
+            at_start = false;
+        }
+        index += 1;
+    }
+    None
+}
 
 impl ShellCall {
     /// Read a call from the arguments a `host_tool_call` frame carried.
@@ -1224,6 +1290,11 @@ impl ShellCall {
             .get("command")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| "shell needs a command".to_owned())?;
+        if let Some(route) = publishing_command(command) {
+            return Err(format!(
+                "shell refuses publishing command `{route}` in an omp seat"
+            ));
+        }
         let service = arguments
             .get("service")
             .and_then(serde_json::Value::as_bool)
