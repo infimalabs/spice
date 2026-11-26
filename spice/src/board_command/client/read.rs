@@ -7,7 +7,9 @@ use environment::{environment_status, requirement_lines};
 mod list;
 pub(super) use list::actor_route_matches;
 #[cfg(test)]
-pub(in crate::board_command) use list::{TaskListOptions, TaskListStatus, task_list};
+pub(in crate::board_command) use list::{
+    TaskListOptions, TaskListStatus, task_list, task_list_answer,
+};
 use list::{TaskListPageOptions, task_list_page};
 mod nets;
 use nets::{design_net_lines, task_show_maturity};
@@ -67,7 +69,10 @@ pub(super) fn client_list(repository: Host<'_>, matches: &ArgMatches) -> Outcome
         Err(outcome) => return outcome,
     };
     match task_list_page(&board, &options) {
-        Ok(text) => text_reply(&board, text),
+        Ok(answer) => Outcome::Reply(Reply {
+            position: ReplyPosition::Snapshot(board.cursor),
+            body: CommandAnswer::TaskList(Box::new(answer)),
+        }),
         Err(outcome) => outcome,
     }
 }
@@ -171,7 +176,7 @@ pub(super) fn client_show(
             };
             Outcome::Reply(Reply {
                 position,
-                body: CommandAnswer::Text(TextAnswer { text }),
+                body: CommandAnswer::TaskShow(Box::new(task_show_answer(task, text))),
             })
         }
         Outcome::Reply(_) => protocol_fault(
@@ -180,6 +185,24 @@ pub(super) fn client_show(
         ),
         Outcome::Refusal(refusal) => Outcome::Refusal(refusal),
         Outcome::Fault(fault) => Outcome::Fault(fault),
+    }
+}
+
+pub(in crate::board_command) fn task_show_answer(
+    task: &BoardTask,
+    text: String,
+) -> wire::intent::TaskShowAnswer {
+    wire::intent::TaskShowAnswer {
+        text,
+        handle: task.statement.body.handle.clone(),
+        title: task.presentation_title().to_owned(),
+        phase: task.workflow.body.phase,
+        status: task.status_word().to_owned(),
+        claim: task
+            .active_claims()
+            .map(|held| held.claim.body.actor.clone())
+            .collect(),
+        terms: task.statement.body.term.clone(),
     }
 }
 
