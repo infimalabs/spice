@@ -220,7 +220,8 @@ surfaces.
 
 The global composer is the left overlay's strip under the header. Its circular
 operator-avatar launcher mirrors the Spice button's size and browser-edge
-position, opens or closes the human side, and carries the personal inbox's
+position, shows the operator's face edge to edge inside a hairline rim with no
+initials band, opens or closes the human side, and carries the personal inbox's
 open-count badge without enlarging the face. Check that the editor's DOM
 identity, typed text and selection survive expansion, dismissal and
 conversion, and that the strip keeps the destination track and live Draft and
