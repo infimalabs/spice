@@ -13,9 +13,10 @@ use super::*;
 pub(super) mod authority;
 pub(super) mod proposal;
 
-/// Recapture only a disposable routing observation for an automatic creation.
-/// The unchanged request still carries every caller-authored witness. Explicit
-/// placement previews and violated source or authority assumptions never retry.
+/// Recapture a disposable routing or duplicate-screen observation for an
+/// automatic creation. The unchanged request still carries every
+/// caller-authored witness. Explicit placement previews and violated source or
+/// authority assumptions never retry.
 pub(super) fn automatic(
     mut create: impl FnMut() -> Outcome<CommandAnswer>,
 ) -> Outcome<CommandAnswer> {
@@ -24,7 +25,9 @@ pub(super) fn automatic(
         if matches!(&outcome, Outcome::Refusal(Refusal::Bare { diagnostic })
             if diagnostic.reason() == "task::routing-snapshot-moved"
                 || (diagnostic.reason() == "board::witness-moved"
-                    && diagnostic.observed() == Some("task::routing-generation-moved")))
+                    && diagnostic.observed().is_some_and(|observed|
+                        observed == "task::routing-generation-moved"
+                            || observed.starts_with("task::duplicate-screen-moved:"))))
         {
             continue;
         }

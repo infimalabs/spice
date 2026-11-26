@@ -42,6 +42,21 @@ fn handle(born: &TaskStamp) -> TaskHandle {
     )
 }
 
+fn admitted(
+    epoch: CanonicalUuid,
+    actor: Actor,
+    born: &TaskStamp,
+    add: &TaskAdd,
+) -> wire::AdmittedCommand {
+    fixture_command(
+        epoch,
+        actor,
+        CommandKind::TaskAdd,
+        vec![Witness::Absence { task: born.clone() }],
+        add,
+    )
+}
+
 /// The board as one read naming `task` answers it, relations included.
 fn named(bus: &Bus, epoch: CanonicalUuid, task: &TaskStamp) -> BoardTask {
     let Outcome::Reply(Reply {
@@ -193,6 +208,64 @@ fn an_old_duplicate_commits_with_a_warning_naming_it() {
     assert_eq!(&*warning.cosine, "1.00");
     assert_eq!(warning.creator, Some(Actor::Lane(seats[0].lane)));
     clean(&root, bus);
+}
+
+#[test]
+fn a_post_screen_sibling_gets_the_same_duplicate_standing_after_retry() {
+    enum Expected {
+        Fresh,
+        Unrelated,
+        Warned,
+    }
+
+    for (fixture_name, age, expected) in [
+        ("duplicate-race-fresh", 60, Expected::Fresh),
+        ("duplicate-race-unrelated", 61, Expected::Unrelated),
+        ("duplicate-race-warned", 15 * 60 + 1, Expected::Warned),
+    ] {
+        let (root, bus, epoch, seats) = fixture(fixture_name, 1);
+        let seat = &seats[0];
+        authorize_lane_creation(&bus, epoch, seat);
+        let first = born_after(0);
+        let born = born_after(age);
+        let add = duplicated();
+        let command = admitted(epoch, Actor::TEST_PRINCIPAL, &born, &add);
+        let outcome = mutation::task_add_with(&bus, &command, &add, None, || {
+            assert_committed(create(
+                &bus,
+                epoch,
+                Actor::Lane(seat.lane),
+                &first,
+                &duplicated(),
+            ));
+        });
+
+        match expected {
+            Expected::Fresh => assert!(
+                matches!(&outcome, Outcome::Refusal(refusal) if refusal.reason() == "task::duplicate-fresh"),
+                "a post-screen fresh sibling must refuse after retry: {outcome:?}"
+            ),
+            Expected::Unrelated => assert!(
+                matches!(&outcome, Outcome::Refusal(refusal) if refusal.reason() == "task::duplicate-unrelated"),
+                "a post-screen recent sibling must require a relation after retry: {outcome:?}"
+            ),
+            Expected::Warned => {
+                let CommandAnswer::Task(answer) = assert_committed(outcome) else {
+                    panic!("task add answers its task");
+                };
+                let [warning] = answer.duplicates.as_slice() else {
+                    panic!(
+                        "one warning names the post-screen sibling: {:?}",
+                        answer.duplicates
+                    );
+                };
+                assert_eq!(warning.task, handle(&first));
+                assert_eq!(&*warning.cosine, "1.00");
+                assert_eq!(warning.creator, Some(Actor::Lane(seat.lane)));
+            }
+        }
+        clean(&root, bus);
+    }
 }
 
 #[test]
