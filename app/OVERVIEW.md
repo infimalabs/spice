@@ -8,8 +8,8 @@ serves both Work and Spice. Contents swap without replaying the transition;
 reduced motion removes it. Dismissal returns focus to a surviving launcher.
 
 Attached accent rails use the **closed-edge** recipe: radius equals thickness.
-Message cards, work total/task tabs and quota-account accents share it. The
-closed composer strip's lower outer corners round without a strip-wide rail.
+Message cards, work total/task tabs and quota-account accents share it. Closed,
+the composer strip paints nothing but its hanging tabs.
 Structural dividers stay square. Standalone cards, media, dialogs, round
 controls, pills and focus rings keep their radii; joined controls round only
 outside endpoints.
