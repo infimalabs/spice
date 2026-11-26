@@ -68,6 +68,7 @@ pub(in crate::resident) fn account_exit(
     if renewal {
         return Ok(());
     }
+    lifecycle.observe_exit(exit.lane);
     match word {
         LastWord::Failure(failure) => {
             lifecycle.observe_vendor_failure(bus, epoch, exit, &failure, diagnostic)

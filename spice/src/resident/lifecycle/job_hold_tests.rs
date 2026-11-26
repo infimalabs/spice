@@ -11,6 +11,7 @@ fn vacant_holder() -> Target<'static> {
         pending_inbox: false,
         inbox_reminder_only: false,
         held_claim: Available::At(instant(3)),
+        loose_worktree: false,
         drain_queue: Available::Ready,
         last_resort: false,
         task: None,

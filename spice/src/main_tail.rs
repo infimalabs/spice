@@ -6,6 +6,7 @@ pub(crate) fn session_environment(ambient: &Ambient) -> session_command::Environ
         |name| ambient.get(name).map(OsStr::to_os_string),
         std::env::current_dir().ok(),
     )
+    .with_ambient(ambient.clone())
 }
 
 /// The session state a process whose variables `variable` reads would see

@@ -178,6 +178,7 @@ mod tests {
             home: Some(scratch.0.clone()),
             cwd: Some(scratch.0.clone()),
             checkout: crate::session_command::glance::unread,
+            ambient: spice::ambient::Ambient::default(),
         };
 
         let unnamed = resolve_inputs(&[], &environment).expect_err("no subject is named");

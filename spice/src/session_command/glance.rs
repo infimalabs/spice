@@ -122,8 +122,9 @@ pub(super) fn directions(retired: Vec<RetiredDirection>) -> Vec<RetiredDirection
         .collect()
 }
 
-/// Uncommitted paths and the newest commits of one checkout.
-pub(super) fn repository(root: &Path) -> RepositoryGlanceView {
+/// Uncommitted paths, the newest commits, the commits the integration
+/// baseline lacks, and any unfinished Git operation of one checkout.
+pub(super) fn repository(root: &Path, ambient: &spice::ambient::Ambient) -> RepositoryGlanceView {
     let read = || -> Result<RepositoryGlanceView, String> {
         let status = git(
             root,
@@ -137,6 +138,10 @@ pub(super) fn repository(root: &Path) -> RepositoryGlanceView {
             root,
             &["log", "-n", &COMMIT_ROWS.to_string(), "--format=%h %s"],
         )?;
+        let unlanded = spice::task_git::unlanded(root, ambient, COMMIT_ROWS)
+            .map_err(|error| error.to_string())?;
+        let operation = spice::task_git::unfinished_operation(root, ambient)
+            .map_err(|error| error.to_string())?;
         Ok(RepositoryGlanceView {
             dirty_total: dirty.len(),
             dirty: dirty
@@ -145,25 +150,28 @@ pub(super) fn repository(root: &Path) -> RepositoryGlanceView {
                 .map(str::to_owned)
                 .collect(),
             commits: log.lines().map(str::to_owned).collect(),
+            unlanded_baseline: unlanded
+                .baseline
+                .filter(|_| unlanded.total > 0)
+                .map(|baseline| baseline.chars().take(12).collect()),
+            unlanded: unlanded.rows,
+            unlanded_total: unlanded.total,
+            operation: operation.map(str::to_owned),
             unreadable: None,
         })
     };
     read().unwrap_or_else(|error| RepositoryGlanceView {
-        dirty: Vec::new(),
-        dirty_total: 0,
-        commits: Vec::new(),
         unreadable: Some(error),
+        ..RepositoryGlanceView::default()
     })
 }
 
 /// The working-state glance of a checkout no briefing reads.
 #[cfg(test)]
-pub(super) fn unread(_root: &Path) -> RepositoryGlanceView {
+pub(super) fn unread(_root: &Path, _ambient: &spice::ambient::Ambient) -> RepositoryGlanceView {
     RepositoryGlanceView {
-        dirty: Vec::new(),
-        dirty_total: 0,
-        commits: Vec::new(),
         unreadable: Some("working state is not read in process".to_owned()),
+        ..RepositoryGlanceView::default()
     }
 }
 

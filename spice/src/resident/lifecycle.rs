@@ -30,6 +30,7 @@ use super::{lane_surface, supervisor};
 mod availability;
 mod holds;
 mod launch;
+mod loose;
 mod materialization;
 mod parks;
 use crate::board_command::RetainedMatch;
@@ -58,6 +59,7 @@ const RETRY_SECONDS: i64 = 5;
 pub(super) enum Trigger {
     PendingInbox,
     HeldClaim,
+    LooseWorktree,
     DrainQueue,
 }
 
@@ -66,6 +68,7 @@ impl Trigger {
         match self {
             Self::PendingInbox => "pending-inbox",
             Self::HeldClaim => "held-claim",
+            Self::LooseWorktree => "loose-worktree",
             Self::DrainQueue => "drain-queue",
         }
     }
@@ -105,6 +108,9 @@ struct Target<'a> {
     /// Every wake-capable pending item is a repeat peer presentation.
     inbox_reminder_only: bool,
     held_claim: Available,
+    /// A vacant claimless lane owed a wake for the loose work its worktree
+    /// was left holding.
+    loose_worktree: bool,
     drain_queue: Available,
     /// The work the drain-queue trigger would claim is in this lane's
     /// last-resort class: its own independent handoff or review, or a row it freed.
@@ -234,6 +240,7 @@ pub(super) struct Runtime {
     /// continues the author's session, another session takes it, or it expires.
     held_findings: BTreeSet<Seq>,
     continuations: Continuations,
+    loose: loose::Loose,
 }
 
 /// Exact admitted command generation that released automatic lifecycle work.
@@ -343,6 +350,7 @@ impl Runtime {
             projection: Projection::new(),
             held_findings: BTreeSet::new(),
             continuations: Continuations::default(),
+            loose: loose::Loose::default(),
         }
     }
 
@@ -408,16 +416,7 @@ impl Runtime {
         }
         self.projection
             .observe_roles(super::principal_surface::roles(bus)?);
-        loop {
-            self.projection.advance(&snapshot)?;
-            if !self.release_changed_vendor_hold(bus, epoch, &snapshot)? {
-                break;
-            }
-            snapshot = bus.task_snapshot().map_err(|error| {
-                store_fault("lifecycle::snapshot-unreadable", &error.to_string())
-            })?;
-            self.synchronize_holds(&snapshot, self.projection.cursor())?;
-        }
+        let snapshot = self.advance_releasing_vendor_holds(bus, epoch, snapshot)?;
         let (_, owners) = crate::board_command::ownership::capture(resident.repository, &snapshot)
             .map_err(typed_outcome)?;
         let mut targets = project_targets(
@@ -429,6 +428,8 @@ impl Runtime {
             profiles,
             &owners,
         )?;
+        self.loose
+            .project(&mut targets, &snapshot, &config.ambient, diagnostic);
         let retained = project_retained_targets(&snapshot, &self.projection, paths, now)?;
         let retained_lanes = retained
             .iter()
@@ -651,6 +652,16 @@ impl Runtime {
                 occupant,
                 Some(snapshot),
                 unlaunched_claim(snapshot, lane),
+            ),
+            // Loose work is the lane's own implicit task: a fresh occupant
+            // launches under no claim, and its briefing names the work.
+            Trigger::LooseWorktree => begin_work(
+                resident,
+                seats,
+                (trigger, lane),
+                occupant,
+                Some(snapshot),
+                None,
             ),
             Trigger::DrainQueue => {
                 let claim = crate::board_command::claim_automatic(
@@ -897,6 +908,8 @@ fn resolve(targets: &[Target], backoff: &Backoff, now: Instant) -> Resolution {
             (Trigger::PendingInbox, Available::Ready)
         } else if target.held_claim != Available::None {
             (Trigger::HeldClaim, target.held_claim)
+        } else if target.loose_worktree {
+            (Trigger::LooseWorktree, Available::Ready)
         } else {
             (Trigger::DrainQueue, target.drain_queue)
         };
@@ -913,6 +926,7 @@ fn resolve(targets: &[Target], backoff: &Backoff, now: Instant) -> Resolution {
     for trigger in [
         Trigger::PendingInbox,
         Trigger::HeldClaim,
+        Trigger::LooseWorktree,
         Trigger::DrainQueue,
     ] {
         if let Some((_, target, _)) = candidates
@@ -1004,6 +1018,7 @@ mod tests {
             pending_inbox: false,
             inbox_reminder_only: false,
             held_claim: Available::None,
+            loose_worktree: false,
             drain_queue: Available::None,
             last_resort: false,
             task: None,
