@@ -281,8 +281,8 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     }
 }
 
-/// The operator's face opens the human side, mirroring the Spice launcher on
-/// the system side. Its badge carries the personal inbox's open count.
+/// The operator's accented tab opens the human side. Its badge carries the
+/// personal inbox's open count.
 fn inbox_launcher(
     runtime: Option<&AppRuntime>,
     waiting: usize,
@@ -303,7 +303,7 @@ fn inbox_launcher(
     };
     let label = format!("{state} your inbox - {messages}");
     html! {
-        <button type="button" class="app-spice-button app-inbox-button"
+        <button type="button" class="app-horn-tab app-horn-tab--down app-inbox-button"
             aria-label={label.clone()}
             aria-haspopup="dialog"
             aria-expanded={expanded.to_string()}

@@ -242,10 +242,10 @@ acceptance-bearing output the operator decides. The construction reference creat
 dependency, and there is no separate OOPS lifecycle state or action.
 
 The global composer is the left companion to the right Spice sidebar. Its
-circular operator-avatar launcher exactly mirrors the Spice button's size and
-browser-edge position; a small badge carries the personal inbox's open count.
-Beside it, one accent rail joins the horizontal **Ask**, **Task**, **Plan**, and
-**Design** track to proper **Draft** and **Help** tabs.
+operator-avatar launcher is a tinted horn tab matching **Draft** and **Help**;
+a small badge carries the personal inbox's open count. Beside it, the
+horizontal **Ask**, **Task**, **Plan**, and **Design** selector carries the
+current destination accent without a strip-wide divider.
 
 Choosing the launcher, a destination, its shortcut, or a quote expands that
 same composer into a full-height sheet: writing, the To row with Send/Create,
@@ -278,8 +278,8 @@ in theme ink for an Ask's broadcast.
 horizontal glass selector. Kind, recipient, image count, and resizing preserve
 editor geometry; Ask's recipients wrap beside the action.
 See the [composer checks](BROWSER.md#draft-composer-parity).
-The strip's accent rail identifies Ask as neutral, Task green, Plan blue, and
-Design plum; the open sheet's inline-end edge mirrors the Spice sidebar's.
+The selected thumb and operator tab identify Ask as neutral, Task green, Plan
+blue, and Design plum; the open sheet's inline-end edge mirrors the Spice sidebar's.
 Quotes sit above the editor, and direct
 images use the team composers' bounded thumbnail strip over
 its lower inline end. Images can also be chosen, pasted, or dropped.

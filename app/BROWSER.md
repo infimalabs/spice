@@ -218,13 +218,13 @@ surfaces.
 
 ## Draft composer parity
 
-The global composer is the left overlay's strip under the header. Its circular
-operator-avatar launcher mirrors the Spice button's size and browser-edge
-position, opens or closes the human side, and carries the personal inbox's
-open-count badge without enlarging the face. Check that the editor's DOM
-identity, typed text and selection survive expansion, dismissal and
-conversion, and that the strip keeps the destination track and live Draft and
-Help over the accent rail; the sheet below is cut off and out of the Tab order.
+The global composer is the left overlay's strip under the header. Its tinted
+operator-avatar horn tab matches Draft and Help, opens or closes the human
+side, and carries the personal inbox's open-count badge. Check that the
+editor's DOM identity, typed text and selection survive expansion, dismissal
+and conversion, and that the strip keeps the destination track and live Draft
+and Help without a strip-wide divider; the sheet below is cut off and out of
+the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused. Open, the sheet runs to the viewport's foot: editor, To row with
 Send/Create, then Principals and the inbox scrolling on its own. Open Spice
