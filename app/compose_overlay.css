@@ -182,6 +182,11 @@
   );
   mask-mode: alpha;
 }
+/* The shared draft form's surface is sheet material too: closed, nothing
+   paints behind the hanging tabs or over the header controls beside them. */
+.app-compose-dialog .app-compose-form {
+  background: color-mix(in srgb, var(--control-surface-soft) calc(100% * var(--app-compose-sheet-opacity)), transparent);
+}
 /* While closing, inert keeps the open-only controls unavailable as their
    opacity fades. Settled closed state then hides them from paint and focus. */
 .app-compose-dialog[data-presented="false"]:not([inert]) :is(.app-compose-details, .app-compose-submit) { visibility: hidden; }
@@ -223,7 +228,6 @@
   min-width: var(--app-compose-open-min);
   min-height: var(--app-compose-tab-block);
   overflow: clip;
-  background: transparent;
   padding: 0;
 }
 .app-compose-form fieldset {
@@ -519,7 +523,9 @@
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
   .app-compose-dialog[data-expanded="false"] .app-compose-modes-row {
-    width: calc(var(--app-compose-anchor-width) - var(--app-compose-launcher-inline));
+    width: auto;
+    min-width: calc(var(--app-compose-anchor-width) + var(--app-compose-inset) - var(--app-compose-launcher-inline));
+    padding-inline-start: 0;
   }
   .app-compose-dialog[data-expanded="false"] .app-compose-mode:not([aria-pressed="true"]) { display: none; }
   .app-compose-dialog[data-expanded="false"] .app-compose-mode[aria-pressed="true"] { border-radius: 0 0 var(--app-radius-card) var(--app-radius-card); }
