@@ -401,7 +401,7 @@ impl Request {
 fn package_failure<B>(error: &crate::install_package::Error) -> Outcome<B> {
     use crate::install_package::Error;
     match error {
-        Error::Environment { .. } => {
+        Error::Environment { .. } | Error::Installed(_) => {
             environment_fault("install::package-environment-failed", error.to_string())
         }
         Error::Unreadable { .. } => {

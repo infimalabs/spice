@@ -224,6 +224,10 @@ New install receipts retain that authenticated product version for later
 upgrade policy. Receipts from every supported older schema cross forward with
 the version explicitly unknown; Spice never infers authority that history did
 not record.
+Before package preview or apply delegates to the candidate, a known installed
+product version refuses a strictly older candidate. The same version may
+converge and a newer candidate may upgrade; an unknown migrated version does
+not invent a downgrade boundary.
 
 Each hosted release publishes three standalone platform executables, one
 deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Download only the
