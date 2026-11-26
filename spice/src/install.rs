@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use wire::manifest::ProductVersion;
 use wire::{Digest, Domain};
 
 use crate::repository::Repository;
@@ -81,6 +82,7 @@ pub use symbols::SymbolProvenance;
 const VERSION_COUNTERS: &str = ::std::include_str!("../../dist/version/counters");
 const PLAN_VERSION: u16 = wire::counter::registry_counter_u16(VERSION_COUNTERS, "install");
 const RECORD_VERSION: u16 = wire::counter::registry_counter_u16(VERSION_COUNTERS, "install");
+const PRODUCT_VERSION_PLAN_VERSION: u16 = 3;
 
 /// The receipt, relative to the state root it lives in.
 pub const RECORD_PATH: &str = "appliance/install/receipt.json";
@@ -164,6 +166,10 @@ pub enum LifecycleOwnerStanding {
 #[serde(deny_unknown_fields)]
 pub struct InstallPlan {
     version: u16,
+    /// Product release that prepared this plan. Historical receipts from
+    /// schemas before [`PRODUCT_VERSION_PLAN_VERSION`] retain this as unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    product_version: Option<ProductVersion>,
     repository: RepositoryIdentity,
     record: BoundDestination,
     operations: Vec<Operation>,
@@ -195,6 +201,13 @@ impl InstallPlan {
     #[must_use]
     pub const fn version(&self) -> u16 {
         self.version
+    }
+
+    /// Authenticated product release that prepared this plan, when its source
+    /// schema carried that authority.
+    #[must_use]
+    pub const fn product_version(&self) -> Option<&ProductVersion> {
+        self.product_version.as_ref()
     }
 
     /// Operations in their sole application order.
@@ -717,6 +730,7 @@ fn build_plan_over(
     let (retirements, orphans) = derive_retirements(repository, installed, &operations)?;
     let plan = InstallPlan {
         version: PLAN_VERSION,
+        product_version: Some(crate::version::product().clone()),
         repository: RepositoryIdentity::capture(repository),
         record,
         operations,

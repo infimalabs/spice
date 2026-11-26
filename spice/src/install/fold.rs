@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use wire::Digest;
+use wire::manifest::ProductVersion;
 
 use super::{
     AssetTag, GeneratedImage, InstallError, InstallPlan, LifecycleOwnerStanding, Location, Orphan,
@@ -165,6 +166,8 @@ impl InstallRetirementSummary {
 #[serde(deny_unknown_fields)]
 pub struct InstallPlanSummary {
     version: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    product_version: Option<ProductVersion>,
     operation_count: usize,
     operations: Vec<InstallOperationSummary>,
     retirements: Vec<InstallRetirementSummary>,
@@ -214,6 +217,7 @@ impl InstallPlanSummary {
         let lifecycle_owner = plan.lifecycle_owner.clone();
         Self {
             version: plan.version,
+            product_version: plan.product_version.clone(),
             operation_count: plan.operation_count() + usize::from(lifecycle_owner.is_some()),
             operations,
             retirements,
@@ -228,6 +232,13 @@ impl InstallPlanSummary {
     #[must_use]
     pub const fn version(&self) -> u16 {
         self.version
+    }
+
+    /// Authenticated product release that prepared this plan, absent when a
+    /// retained historical schema carried no such authority.
+    #[must_use]
+    pub const fn product_version(&self) -> Option<&ProductVersion> {
+        self.product_version.as_ref()
     }
 
     /// Number of durable publication and retirement stages.

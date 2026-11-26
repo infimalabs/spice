@@ -3,10 +3,10 @@
 use super::*;
 
 mod v1;
-
+mod v2;
 type Crossing = fn(&Repository, &mut InstallRecord) -> Result<(), InstallError>;
 
-const CROSSINGS: &[(u16, Crossing)] = &[(v1::FROM, v1::cross)];
+const CROSSINGS: &[(u16, Crossing)] = &[(v1::FROM, v1::cross), (v2::FROM, v2::cross)];
 
 /// Whether `version` has one uninterrupted path into this executable's schema.
 pub(super) fn supports(mut version: u16) -> bool {

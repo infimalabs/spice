@@ -515,6 +515,7 @@ fn write_schema_one(repository: &Repository) -> Vec<u8> {
         .expect("receipt exists");
     record.version = 1;
     record.plan.version = 1;
+    record.plan.product_version = None;
     record.plan.record =
         bind_destination(&repository.state_root(), RECORD_PATH).expect("schema-one receipt binds");
     record.plan_digest = record.plan.digest().expect("schema-one plan digests");
@@ -527,7 +528,106 @@ fn write_schema_one(repository: &Repository) -> Vec<u8> {
     bytes
 }
 
-/// The public predecessor's settled receipt crosses forward before planning;
+fn write_schema_two(repository: &Repository) -> Vec<u8> {
+    install_without_binary(repository);
+    let LoadedRecord { mut record, .. } = read_record(repository)
+        .expect("receipt reads")
+        .expect("receipt exists");
+    record.version = 2;
+    record.plan.version = 2;
+    record.plan.product_version = None;
+    record.plan_digest = record.plan.digest().expect("schema-two plan digests");
+    let bytes = wire::encode(&record).expect("record encodes");
+    fs::write(
+        record_path(repository).expect("record path resolves"),
+        &bytes,
+    )
+    .expect("schema-two receipt publishes");
+    bytes
+}
+
+#[test]
+fn a_schema_two_receipt_migrates_to_unknown_before_refresh_records_this_product() {
+    let (_scratch, repository) = repository("schema-two-product-version");
+    let historical = write_schema_two(&repository);
+    let original = wire::decode::<InstallRecord>(&historical).expect("schema-two receipt decodes");
+    let (
+        LoadedRecord {
+            record: migrated, ..
+        },
+        requires_publish,
+    ) = read_record_for_transition(&repository)
+        .expect("schema-two receipt reads")
+        .expect("schema-two receipt exists");
+    assert!(requires_publish);
+    let mut expected = original;
+    expected.version = RECORD_VERSION;
+    expected.plan.version = PLAN_VERSION;
+    expected.plan_digest = expected.plan.digest().expect("migrated plan digests");
+    assert_eq!(
+        migrated, expected,
+        "the crossing changes only schema identity and its derived digest"
+    );
+
+    let (inspected, forward_repair) = super::super::inspect(&repository)
+        .expect("schema-two receipt inspects")
+        .expect("schema-two receipt exists");
+    assert!(forward_repair);
+    assert_eq!(inspected.plan().product_version(), None);
+    assert_eq!(
+        fs::read(record_path(&repository).expect("record path resolves")).unwrap(),
+        historical,
+        "inspection must not publish the in-memory migration"
+    );
+
+    let prepared = prepare(&repository, None, None).expect("schema-two receipt prepares");
+    assert_eq!(
+        prepared.plan().product_version(),
+        Some(crate::version::product())
+    );
+    let receipt =
+        apply_prepared_record(&repository, None, prepared).expect("forward refresh applies");
+    assert_eq!(
+        receipt.plan().product_version(),
+        Some(crate::version::product())
+    );
+    let (reloaded, forward_repair) = super::super::inspect(&repository)
+        .expect("refreshed receipt inspects")
+        .expect("refreshed receipt exists");
+    assert!(!forward_repair);
+    assert_eq!(
+        reloaded.plan().product_version(),
+        Some(crate::version::product())
+    );
+}
+
+#[test]
+fn a_schema_two_receipt_cannot_claim_product_version_authority() {
+    let (_scratch, repository) = repository("schema-two-forged-product-version");
+    let historical = write_schema_two(&repository);
+    let mut record =
+        wire::decode::<InstallRecord>(&historical).expect("schema-two receipt decodes");
+    record.plan.product_version = Some(crate::version::product().clone());
+    record.plan_digest = record.plan.digest().expect("forged plan digests");
+    let forged = wire::encode(&record).expect("forged receipt encodes");
+    fs::write(
+        record_path(&repository).expect("record path resolves"),
+        &forged,
+    )
+    .expect("forged receipt publishes");
+
+    assert!(matches!(
+        super::super::inspect(&repository),
+        Err(InstallError::InvalidRecord(_))
+    ));
+    assert_eq!(
+        fs::read(record_path(&repository).expect("record path resolves")).unwrap(),
+        forged,
+        "refusal must not mutate the receipt"
+    );
+}
+
+/// The oldest public receipt crosses every retained step before planning;
 /// apply then runs only the canonical current-schema refresh and its reversal
 /// remains executable.
 #[test]
@@ -540,6 +640,10 @@ fn a_schema_one_receipt_rolls_forward_through_current_apply() {
     let receipt =
         apply_prepared_record(&repository, None, prepared).expect("forward refresh applies");
     assert_eq!(receipt.status(), InstallStatus::Complete);
+    assert_eq!(
+        receipt.plan().product_version(),
+        Some(crate::version::product())
+    );
 
     let LoadedRecord { record, .. } = read_record(&repository)
         .expect("migrated receipt reads")

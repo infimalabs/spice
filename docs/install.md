@@ -220,6 +220,11 @@ before applying, without Cargo, `xtask`, or a source checkout. It admits the
 package index, then its platform's payload and proof receipt, and refuses a
 candidate whose identity or product version does not match that evidence.
 
+New install receipts retain that authenticated product version for later
+upgrade policy. Receipts from every supported older schema cross forward with
+the version explicitly unknown; Spice never infers authority that history did
+not record.
+
 Each hosted release publishes three standalone platform executables, one
 deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Download only the
 current platform's executable plus the small shared evidence ZIP, verify both
