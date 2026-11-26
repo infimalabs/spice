@@ -13,26 +13,30 @@ use super::*;
 pub(super) mod authority;
 pub(super) mod proposal;
 
-/// Recapture a disposable routing or duplicate-screen observation for an
-/// automatic creation. The unchanged request still carries every
-/// caller-authored witness. Explicit placement previews and violated source or
-/// authority assumptions never retry.
+const AUTOMATIC_ATTEMPTS: usize = 2;
+
+/// Recapture one disposable routing or duplicate-screen observation for an
+/// automatic creation, then return a second movement refusal rather than
+/// spinning under continuous board activity. The unchanged request still
+/// carries every caller-authored witness. Explicit placement previews and
+/// violated source or authority assumptions never retry.
 pub(super) fn automatic(
     mut create: impl FnMut() -> Outcome<CommandAnswer>,
 ) -> Outcome<CommandAnswer> {
-    loop {
+    for attempt in 0..AUTOMATIC_ATTEMPTS {
         let outcome = create();
-        if matches!(&outcome, Outcome::Refusal(Refusal::Bare { diagnostic })
+        let moved = matches!(&outcome, Outcome::Refusal(Refusal::Bare { diagnostic })
             if diagnostic.reason() == "task::routing-snapshot-moved"
                 || (diagnostic.reason() == "board::witness-moved"
                     && diagnostic.observed().is_some_and(|observed|
                         observed == "task::routing-generation-moved"
-                            || observed.starts_with("task::duplicate-screen-moved:"))))
-        {
+                            || observed.starts_with("task::duplicate-screen-moved:"))));
+        if moved && attempt + 1 < AUTOMATIC_ATTEMPTS {
             continue;
         }
         return outcome;
     }
+    unreachable!("the positive automatic attempt bound always returns")
 }
 
 /// Exact authored fields, kept separate from their normalized scoring terms.
@@ -377,5 +381,35 @@ pub(super) fn routed(
             tree_lag,
             unmatched,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn persistent_movement_returns_after_the_second_automatic_attempt() {
+        let attempts = Cell::new(0);
+        let outcome = automatic(|| {
+            attempts.set(attempts.get() + 1);
+            Outcome::Refusal(Refusal::bare(wire::RefusalDiagnostic::new(
+                "board::witness-moved",
+                Some("current durable heads".to_owned()),
+                None,
+                Some("task::duplicate-screen-moved: sibling changed".to_owned()),
+            )))
+        });
+
+        assert_eq!(attempts.get(), AUTOMATIC_ATTEMPTS);
+        assert!(
+            matches!(&outcome, Outcome::Refusal(refusal)
+                if refusal.reason() == "board::witness-moved"
+                    && refusal.diagnostic().and_then(wire::RefusalDiagnostic::observed)
+                        == Some("task::duplicate-screen-moved: sibling changed")),
+            "the second authoritative movement returns: {outcome:?}"
+        );
     }
 }
