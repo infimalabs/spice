@@ -140,9 +140,9 @@ pub(super) fn screen(
 }
 
 impl DuplicateScreen {
-    /// Refuse the write when a sibling born after the screen's read, outside
-    /// the exempt chain, now matches: of two racing creations, the second to
-    /// commit sees the first.
+    /// Retry the screen when any sibling born after its read, outside the
+    /// exempt chain, now matches. The retry must apply the same warning,
+    /// relation requirement, or fresh refusal as an initially visible sibling.
     pub(super) fn guard(&self, write: &mut JournalWrite) {
         let probe = self.probe.clone();
         let created = self.created.clone();
@@ -171,10 +171,10 @@ impl DuplicateScreen {
                 };
                 if let Some(score) = probe.score(sibling)
                     && DuplicateStanding::of(&created, &sibling.born, score.cosine, kinship)
-                        == Some(DuplicateStanding::Refused)
+                        .is_some()
                 {
                     return Err(GuardError::refused(format!(
-                        "task::duplicate-raced: {} {:?} committed first with cosine {:.2}; read it and reuse or relate it",
+                        "task::duplicate-screen-moved: {} {:?} committed after duplicate screening with cosine {:.2}",
                         sibling.handle(heads.workflow().body().phase),
                         sibling.title,
                         score.cosine,
