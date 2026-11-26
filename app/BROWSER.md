@@ -218,13 +218,14 @@ surfaces.
 
 ## Draft composer parity
 
-The global composer is the left overlay's strip under the header. Its tinted
-operator-avatar horn tab matches Draft and Help, opens or closes the human
-side, and carries the personal inbox's open-count badge. Check that the
-editor's DOM identity, typed text and selection survive expansion, dismissal
-and conversion, and that the strip keeps the destination track and live Draft
-and Help without a strip-wide divider; the sheet below is cut off and out of
-the Tab order.
+The global composer is the left overlay's strip under the header. Its circular
+operator-avatar launcher mirrors the Spice button's size and browser-edge
+position, shows the operator's face edge to edge inside a hairline rim with no
+initials band, opens or closes the human side, and carries the personal inbox's
+open-count badge. Check that the editor's DOM identity, typed text and
+selection survive expansion, dismissal and conversion, and that the strip keeps
+the destination tabs and live Draft and Help without a strip-wide divider; the
+sheet below is cut off and out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused. Open, the sheet runs to the viewport's foot: editor, To row with
 Send/Create, then Principals and the inbox scrolling on its own. Open Spice
@@ -283,12 +284,12 @@ by paste or drop. Only Ask adds To and its
 subdued Best-matched choice; work changes the textarea's title/pitch/context
 template, never adding a Pitch, Topic or second context field.
 
-Compare the operator, DRAFT and HELP tabs with the hanging totals: only their
-outside lower corners round, and each tab owns its lower border. No
-strip-wide divider or accent rail crosses the destination track. The
-four-stop glass track's groove radius matches its thumb. Draft wears the
-kind's accent when on and is inert for Ask. Ask is neutral; Task, Plan and
-Design use green, blue and plum in both themes.
+Compare the destination, DRAFT and HELP tabs with the hanging totals: only
+each run's outside lower corners round, and each tab owns its lower border. No
+strip-wide divider or accent rail crosses the destination tabs. The pressed
+destination, and Draft when on, wear the kind's accent; Draft is inert for
+Ask. Ask is neutral; Task, Plan and Design use green, blue and plum in both
+themes.
 
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
