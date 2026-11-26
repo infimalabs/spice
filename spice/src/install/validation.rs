@@ -18,6 +18,11 @@ pub(super) fn validate_plan_at_version(
             plan.version
         )));
     }
+    if version < PRODUCT_VERSION_PLAN_VERSION && plan.product_version.is_some() {
+        return Err(InstallError::InvalidRecord(
+            "install product version predates its schema authority".to_owned(),
+        ));
+    }
     validate_operation_inventory(plan, content)?;
     validate_plan_destinations(plan, content)
 }
