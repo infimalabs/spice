@@ -366,12 +366,18 @@ target, a target whose provider run ended in failure, or a target whose
 attested result does not decode under the current client's schema. It reports
 all three outcomes before failing, so one failed platform never hides or
 redispatches successful siblings. Either form accepts a trailing
-`--stage-only`: it runs the same pin, preflight, native staging, and plan
-capture, persists the plan with its complete asset inventory under the
-session's `assets` directory, reports each asset's SHA-256, name, and length,
-and stops before the first tag or release mutation. The request stays pinned;
-a later ordinary resume re-captures the plan, refuses if any byte moved, and
-publishes exactly the staged assets. `publish-hosted-release --abandon COMMIT`
+`--stage-only`: it runs the same pin, preflight, and native staging. Each
+platform executes the complete proof battery in its provider-specific sealed
+environment and returns its detached receipt with the staged bytes. The
+publisher admits those receipts and composes the manifest pointer and
+immutable objects before package and plan capture; plan capture never depends
+on a mutable manifest left by an earlier local rehearsal. It persists the plan
+with its complete asset inventory under the session's `assets` directory,
+reports each asset's SHA-256, name, and length, and stops before the first tag
+or release mutation. The request stays pinned; a later ordinary resume
+re-admits the receipts and re-captures the plan, refuses if any byte moved, and
+publishes exactly the staged assets.
+`publish-hosted-release --abandon COMMIT`
 drops a pin naming exactly that commit, with its recorded preflight, only while
 no publishing invocation can have reached a tag or release mutation: no plan
 exists, or only `--stage-only` persisted it. A publishing invocation withdraws

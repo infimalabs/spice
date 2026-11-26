@@ -307,8 +307,14 @@ fn admit_stage(
         .ok_or_else(|| differs("symbol inventory"))?;
     let native_path = object_path(stage, &native.digest, native.mode);
     let symbol_path = object_path(stage, &symbols.digest, symbols.mode);
+    let receipt_relative = PathBuf::from(format!(
+        "proofs/{}/{}/receipt.json",
+        payload.source, payload.target
+    ));
+    let receipt_path = stage.join(&receipt_relative);
     let native_bytes = read_exact(&native_path, native.bytes)?;
     let symbol_bytes = read_exact(&symbol_path, symbols.bytes)?;
+    let receipt_bytes = read_limited(&receipt_path, PAYLOAD_LIMIT)?;
     dist::admit_finalized_darwin(&payload_bytes, &native_bytes, &symbol_bytes)
         .map_err(|error| differs(&error.to_string()))?;
 
@@ -317,6 +323,7 @@ fn admit_stage(
         PathBuf::from(RESULT_PATH),
         relative(stage, &native_path)?,
         relative(stage, &symbol_path)?,
+        receipt_relative.clone(),
     ]);
     let mut observed = BTreeSet::new();
     collect_files(stage, stage, &mut observed)?;
@@ -324,11 +331,18 @@ fn admit_stage(
         return Err(differs("file set"));
     }
 
-    let mut artifacts = vec![crate::hosted::Artifact {
-        path: PAYLOAD_PATH.to_owned(),
-        bytes: payload_bytes.len() as u64,
-        digest: Digest::compute(Domain::DistArtifact, &payload_bytes),
-    }];
+    let mut artifacts = vec![
+        crate::hosted::Artifact {
+            path: PAYLOAD_PATH.to_owned(),
+            bytes: payload_bytes.len() as u64,
+            digest: Digest::compute(Domain::DistArtifact, &payload_bytes),
+        },
+        crate::hosted::Artifact {
+            path: receipt_relative.to_string_lossy().replace('\\', "/"),
+            bytes: receipt_bytes.len() as u64,
+            digest: Digest::compute(Domain::DistArtifact, &receipt_bytes),
+        },
+    ];
     for (entry, path) in [(native, native_path), (symbols, symbol_path)] {
         artifacts.push(crate::hosted::Artifact {
             path: relative(stage, &path)?.to_string_lossy().replace('\\', "/"),

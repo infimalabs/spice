@@ -18,7 +18,7 @@ pub(super) const PLAN_FILE: &str = "plan.json";
 const SCHEMA: u16 = 1;
 const EXECUTABLE_MODE: u32 = 0o755;
 const SHA256_HEX_LENGTH: usize = 64;
-const TARGETS: [ReleaseTarget; 3] = [
+pub(super) const TARGETS: [ReleaseTarget; 3] = [
     ReleaseTarget::Aarch64AppleDarwin,
     ReleaseTarget::X86_64UnknownLinuxMusl,
     ReleaseTarget::X86_64PcWindowsMsvc,
@@ -188,14 +188,12 @@ fn source_identities_match(
         && payload_archive == source_archive
 }
 
-fn capture_target(
+pub(super) fn admit_target_payload(
     worktree: &Path,
-    assets_root: &Path,
     inputs: &ResultManifest,
     target: ReleaseTarget,
-) -> Result<PublicationAsset, PublishError> {
-    let stage = worktree.join("dist/stage");
-    let payload_path = stage.join(format!("targets/{target}/payload.json"));
+) -> Result<(Vec<u8>, TargetPayload), PublishError> {
+    let payload_path = worktree.join(format!("dist/stage/targets/{target}/payload.json"));
     let payload_bytes = read(&payload_path)?;
     let payload: TargetPayload = wire::decode(&payload_bytes).map_err(PublishError::Decode)?;
     if wire::encode(&payload).map_err(PublishError::Encode)? != payload_bytes
@@ -214,11 +212,22 @@ fn capture_target(
             "staged {target} payload differs from the admitted release inputs"
         )));
     }
+    Ok((payload_bytes, payload))
+}
+
+fn capture_target(
+    worktree: &Path,
+    assets_root: &Path,
+    inputs: &ResultManifest,
+    target: ReleaseTarget,
+) -> Result<PublicationAsset, PublishError> {
+    let (_payload_bytes, payload) = admit_target_payload(worktree, inputs, target)?;
     let executable = payload
         .inventory
         .iter()
         .find(|entry| entry.path == target.executable_path())
         .ok_or_else(|| PublishError::Refused(format!("staged {target} has no executable")))?;
+    let stage = worktree.join("dist/stage");
     let object = stage.join(format!(
         "objects/{}-{:04o}",
         executable.digest, executable.mode

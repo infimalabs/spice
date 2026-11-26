@@ -18,6 +18,7 @@ const USAGE: &str = concat!(
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
+    "prove-staged-target TARGET|",
     "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
@@ -117,6 +118,9 @@ fn main() -> ExitCode {
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("publish-hosted-release") => {
             run_publish_hosted_release(arguments.collect(), &mut output)
+        }
+        Some(value) if value == OsStr::new("prove-staged-target") => {
+            run_prove_staged_target(arguments.collect(), &mut output)
         }
         Some(value) if value == OsStr::new("stage-target") => run_stage_target(
             arguments.collect(),
@@ -420,6 +424,24 @@ fn run_verify_staged_darwin(arguments: Vec<OsString>) -> CommandResult {
         return Err(usage_error().into());
     };
     xtask::verify_staged_darwin(Path::new(stage)).map_err(Into::into)
+}
+
+fn run_prove_staged_target(arguments: Vec<OsString>, output: &mut impl io::Write) -> CommandResult {
+    let [target] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let target = match target.to_str() {
+        Some("x86_64-unknown-linux-musl") => wire::manifest::ReleaseTarget::X86_64UnknownLinuxMusl,
+        Some("aarch64-apple-darwin") => wire::manifest::ReleaseTarget::Aarch64AppleDarwin,
+        _ => {
+            eprintln!("{}", help());
+            return Err(usage_error().into());
+        }
+    };
+    xtask::prove_staged_target(target, output)
+        .map(|_| ())
+        .map_err(Into::into)
 }
 
 fn run_hosted_release(

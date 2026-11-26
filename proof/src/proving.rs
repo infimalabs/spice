@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
+use windows_execution::hosted::client::HostedExecution;
 use wire::manifest::{ProofStanding, ReleaseTarget};
 
 use crate::config::Config;
@@ -20,7 +21,7 @@ use crate::environment::{EnvironmentError, SealedEnvironment};
 use crate::evidence::{AdmittedReceipt, EvidenceError, VerifiedEvidence, verify_admitted};
 use crate::layout::{InputError, Layout, LayoutError, ReceiptInput};
 use crate::payload::{AdmittedPayload, PayloadError, admit};
-use crate::replay::{ReplayError, ReplayVerdict, replay};
+use crate::replay::{ReplayError, ReplayVerdict, replay, replay_hosted_windows};
 
 #[cfg(test)]
 pub(crate) mod fixture;
@@ -66,6 +67,17 @@ impl Staged {
             SealedEnvironment::selected(self.target, config, &self.payload, workspace, limits)
                 .map_err(ProofError::Environment)?;
         self.bind(environment.target(), || replay(&environment))
+    }
+
+    /// Admit one already provider-authenticated hosted Windows battery.
+    pub(crate) fn replay_hosted_windows(
+        self,
+        execution: &HostedExecution,
+        offset: usize,
+    ) -> Result<Proved, ProofError> {
+        self.bind(ReleaseTarget::X86_64PcWindowsMsvc, || {
+            replay_hosted_windows(execution, offset)
+        })
     }
 
     /// Bind the environment target before `run` executes, then admit only a
