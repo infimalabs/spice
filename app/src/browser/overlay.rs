@@ -12,6 +12,8 @@ use wasm_bindgen::prelude::*;
 use yew::prelude::*;
 
 type Dismissal = Rc<RefCell<Callback<()>>>;
+/// A stalled animation frame must not leave an opened surface invisible.
+const PRESENT_FALLBACK_MILLIS: u32 = 50;
 
 /// The document's Escape owners, most recently activated last.
 struct EscapeStack {
@@ -314,24 +316,33 @@ pub(super) fn use_close_transition(
     );
 }
 
-/// Present one frame after the mounted layer appears, producing a real opening
-/// transition even when content was selected before the layer could render.
+/// Present after the mounted layer appears, producing a real opening transition.
+/// Browsers can suspend animation frames for hidden or occluded pages, so a
+/// bounded task fallback keeps the mounted surface usable.
 #[hook]
 pub(super) fn use_present(pending: bool, presented: UseStateHandle<bool>) {
     use_effect_with(pending, move |pending| {
-        let frame = pending.then(|| {
+        let presentation = pending.then(|| {
             let window = web_sys::window().expect("app presentation has a browser window");
-            let show = presented.clone();
-            let callback = Closure::once(move |_: f64| show.set(true));
+            let show_on_frame = presented.clone();
+            let frame_callback = Closure::once(move |_: f64| show_on_frame.set(true));
             let frame = window
-                .request_animation_frame(callback.as_ref().unchecked_ref())
-                .expect("app window accepts a presentation frame");
-            (window, frame, callback)
+                .request_animation_frame(frame_callback.as_ref().unchecked_ref())
+                .ok();
+            let show_on_fallback = presented.clone();
+            let fallback =
+                gloo_timers::callback::Timeout::new(PRESENT_FALLBACK_MILLIS, move || {
+                    show_on_fallback.set(true);
+                });
+            (window, frame, frame_callback, fallback)
         });
         move || {
-            if let Some((window, frame, callback)) = frame {
-                let _ = window.cancel_animation_frame(frame);
-                drop(callback);
+            if let Some((window, frame, frame_callback, fallback)) = presentation {
+                if let Some(frame) = frame {
+                    let _ = window.cancel_animation_frame(frame);
+                }
+                drop(frame_callback);
+                drop(fallback);
             }
         }
     });
