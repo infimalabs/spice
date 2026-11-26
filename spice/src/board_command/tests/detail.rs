@@ -357,6 +357,64 @@ fn task_show_collapses_prose_and_full_prints_it_whole() {
 }
 
 #[test]
+fn task_show_full_surfaces_author_validation_only_in_review() {
+    let (root, bus, epoch, _) = fixture("task-show-review-validation", 0);
+    let task = add_born(
+        &bus,
+        epoch,
+        stamp("task-show-review-validation"),
+        "Show review evidence",
+    );
+    let answer = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let mut row = at(&answer, &task).clone();
+    row.workflow.body.phase = wire::Phase::Review;
+    let steps = [wire::intent::TaskDetailStep {
+        position: Seq::new(1_001).expect("fixture position"),
+        at: "2026-10-02T00:00:00.000Z".parse().expect("fixture instant"),
+        author: Actor::TEST_PRINCIPAL,
+        step: wire::intent::TaskStep::Done {
+            phase: wire::Phase::Todo,
+            validation: "gate 20/20\nartifact://proof-one".to_owned(),
+            disposition: None,
+        },
+    }];
+    let show = |full| {
+        task_show_bounded(
+            &answer,
+            &row,
+            &[],
+            TaskShowHistory {
+                steps: &steps,
+                ..TaskShowHistory::default()
+            },
+            None,
+            TaskShowLocal::default(),
+            &TaskShowOptions {
+                full,
+                context: false,
+                history: false,
+                limit: None,
+                max_bytes: None,
+                max_text: None,
+                after: None,
+            },
+        )
+        .expect("task detail has no cursor")
+    };
+
+    let bounded = show(false);
+    assert!(!bounded.contains("gate 20/20"), "{bounded}");
+    assert!(!bounded.contains("artifact://proof-one"), "{bounded}");
+
+    let full = show(true);
+    assert!(
+        full.contains("validation todo:\n  gate 20/20\n  artifact://proof-one"),
+        "{full}"
+    );
+    clean(&root, bus);
+}
+
+#[test]
 fn task_show_context_uses_aggregate_detail_budget_and_exact_continuation() {
     let (root, bus, epoch, _) = fixture("task-show-context-budget", 0);
     let task = add_born(
