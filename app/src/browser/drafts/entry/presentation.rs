@@ -1,6 +1,6 @@
 //! One left overlay whose expanded pixels fade beneath its persistent strip.
-//! It stays non-modal in the top layer, so the right-side Spice overlay can
-//! stand open beside it.
+//! It stays non-modal in the top layer above the shared page veil, so the
+//! right-side Spice overlay can stand open beside it.
 
 use super::*;
 use crate::browser::overlay;
@@ -83,8 +83,8 @@ pub(super) fn use_presentation(
     }
 }
 
-/// A press anywhere but the sheet and its companions dismisses it, as a veil
-/// would without hiding the page beneath.
+/// A press anywhere but the sheet and its companions dismisses it. The shared
+/// veil supplies the visible target; this also covers raised companion edges.
 #[hook]
 fn use_outside_press(active: bool, close: Callback<()>) {
     use_effect_with(active, move |&active| {
