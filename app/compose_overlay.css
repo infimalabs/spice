@@ -421,9 +421,15 @@
 .app-compose-form :is(label, .app-compose-recipient) > span { color: var(--muted); font-size: var(--app-type-fact); }
 .app-compose-form .app-compose-recipient { display: flex; flex-wrap: wrap-reverse; align-content: flex-start; align-items: center; column-gap: 6px; row-gap: 4px; min-width: 0; block-size: var(--app-compose-action-block); max-block-size: var(--app-compose-action-block); overflow: hidden auto; overscroll-behavior: contain; }
 .app-compose-recipients { display: contents; }
-.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 20px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
+.app-compose-form .app-compose-recipient-choice { display: inline-flex; flex: none; align-items: center; gap: 4px; box-sizing: border-box; block-size: 20px; min-block-size: 0; margin: 0; padding: 0 8px; border: var(--app-edge); border-radius: 999px; background: transparent; color: var(--app-base-muted); font: inherit; font-size: var(--app-type-fact); white-space: nowrap; cursor: pointer; }
 .app-compose-form .app-compose-recipient-choice input { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.app-compose-recipient-choice:is([aria-pressed="true"], :has(input:checked)) { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+/* A chosen recipient is a solid accent pill, unmistakable beside the muted
+   outlines of the others. */
+.app-compose-form .app-compose-recipient-choice:is([aria-pressed="true"], :has(input:checked)) {
+  border-color: var(--app-base-accent);
+  background: var(--app-base-accent);
+  color: var(--app-base-control);
+}
 .app-compose-recipient-choice:has(input:focus-visible) { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
 /* Direct images keep the team composers' strip: one bounded row that grows
    from the writing area's lower inline end and scrolls past its bound. It

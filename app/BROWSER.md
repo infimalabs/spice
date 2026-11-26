@@ -218,17 +218,15 @@ surfaces.
 
 ## Draft composer parity
 
-The global composer is the left overlay's strip under the header. Its circular
-operator-avatar launcher mirrors the Spice button's size and browser-edge
-position, shows the operator's face edge to edge inside a hairline rim with no
-initials band, opens or closes the human side, and carries the personal inbox's
-open-count badge. Check that the editor's DOM identity, typed text and
-selection survive expansion, dismissal and conversion. Closed, the face shows
+The global composer is the left overlay's strip under the header; its operator
+launcher follows the [composer doctrine](OVERVIEW.md#drafts-and-oops-intake)
+and opens or closes the human side. Check that the editor's DOM identity, typed
+text and selection survive expansion, dismissal and conversion. Closed, the face shows
 its whole rim and shadow on the bare header and the tabs hang alone, with
 no strip surface, edge or clip; opening fades the glass in behind them, moving
 neither face nor tab, and the sheet is cut off and out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
-focused and fades in the shared page veil; dismissal fades the veil out. Open,
+focused and fades in the shared page veil. Open,
 the sheet runs to the viewport's foot: editor, To row with Send/Create, then
 Principals and the inbox scrolling on its own. Open Spice beside it on a
 desktop viewport: the left sheet and right sidebar both stand above exactly
@@ -241,8 +239,9 @@ work the same. On a phone the closed strip shows the operator launcher and
 current destination; with both overlays requested, Spice takes the screen and
 the left sheet returns when it closes. In both themes and inline directions,
 look for a bright hook in either gutter, an inner edge, doubled ring or seam. By
-keyboard, each agent checkbox announces its name and state, Best-matched is
-pressed only with none chosen, and choosing never resizes the dialog. Several
+keyboard, each agent checkbox announces its name and state, Best match is
+pressed only with none chosen, chosen pills are solid accent among muted
+outlines, and choosing never resizes a pill or the dialog. Several
 chosen agents each get one card and one toast names every outcome; a refusal
 keeps the composition with only refused agents chosen.
 A durably accepted best-matched Ask must close the sheet,
@@ -250,8 +249,7 @@ open that response's exact primary composer in Chat, reveal a hidden team and
 focus its writing field; Back restores the preceding route. Repeat the Ask
 while already on that agent's route: focus must still reach its writing field,
 without another history entry. Chosen agents or a broadcast must not hand off.
-While the response is pending, keep
-the route; refusal or transport failure must retain the composition. If the
+While the response is pending, keep the route. If the
 accepted lane is absent from the current roster, keep the current route under
 the accepted-for-agent toast rather than opening a broken target.
 Once any submit is locally admitted the dialog is busy: its composition
@@ -275,16 +273,16 @@ restores SEND. Press Command-Shift-Enter on an Ask: the dialog goes pending,
 each occupied agent gets one authored-body card, and acceptance clears the
 composer. Other modes leave composition and board unchanged.
 
-Switch all four kinds with text, quotes and images present; the sheet, editor
-and action dimensions must survive every mode change, resizing and media
-addition, and Ask's wrapping recipients stay beside the action on each browser.
-Quotes stay above the editor. Images use the
-team composers' bounded, scrolling thumbnail strip over its lower inline end,
-clearing writing space only while present; each thumbnail opens and removes as
-in a team composer. Its attachment chooser is touch-only; desktop adds images
-by paste or drop. Only Ask adds To and its
-subdued Best-matched choice; work changes the textarea's title/pitch/context
-template, never adding a Pitch, Topic or second context field.
+Switch all four kinds with text, quotes and images present: the dialog,
+editor, reserved action row, circular action and inbox rectangles must not
+move or resize through any mode change, resizing or media addition. Only Ask
+shows To and Best match in that row; work modes hide them without collapsing
+it and change the textarea's title/pitch/context template, never adding a
+Pitch, Topic or second context field. Quotes stay above the editor. Images use
+the team composers' bounded, scrolling thumbnail strip over its lower inline
+end, clearing writing space only while present; each thumbnail opens and
+removes as in a team composer. Its attachment chooser is touch-only; desktop
+adds images by paste or drop.
 
 Compare the destination, DRAFT and HELP tabs with the hanging totals: only
 each run's outside lower corners round, each tab owns its lower border, and no
@@ -294,10 +292,7 @@ for Ask.
 
 Compare CREATE, SEND and FULL SEND with a team SEND: each is the same 72px
 circle with the same edge, transmitted-glass face, catch, typography and press
-material. Switch Ask, Task, Plan and Design; the dialog, editor, reserved
-action row, circular action and inbox rectangles must not move or resize. Ask
-shows To inside that reserved row; work modes hide it without collapsing the
-row.
+material.
 
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
@@ -333,7 +328,7 @@ created Draft's description carries each quote link, with its reply, before the
 text in shard order; task detail presents them as the resident resolved them,
 and the Draft's editor resumes from the whole description. Check by quoting a
 chat message in Task mode, creating it, and finding the quoted source in its
-task detail; quoting in Ask, Plan or Design keeps that mode.
+task detail.
 Each quote arrival opens the creator only once. After changing its mode,
 submission settlement must not replay that arrival: an accepted Message stays
 in Message mode, refused Plan/Design work retains its mode and editor focus,
