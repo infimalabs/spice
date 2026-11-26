@@ -93,6 +93,7 @@ fn page(
         },
     )
     .expect("a room page renders")
+    .text
 }
 
 /// The observation numbers one page shows, in its order.

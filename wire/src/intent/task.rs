@@ -823,6 +823,14 @@ pub struct TaskShowAnswer {
     pub claim: Vec<Actor>,
     /// Current acceptance terms.
     pub terms: Vec<String>,
+    /// Workflow steps the page admitted, newest first; present only when
+    /// history was requested, so an absent array never reads as no history.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub history: Option<Vec<super::TaskDetailStep>>,
 }
 
 /// One typed row in a task-list page.

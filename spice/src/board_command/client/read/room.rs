@@ -173,6 +173,7 @@ impl TaskShowRoom {
                             .map(|line| format!("  {line}"))
                             .collect::<Vec<_>>()
                             .join("\n"),
+                        step: None,
                     }
                 })
                 .collect(),
