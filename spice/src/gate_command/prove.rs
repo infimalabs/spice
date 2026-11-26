@@ -52,24 +52,15 @@ const RUNNER_VERSION: u64 = 1;
 struct Request<'a> {
     action: Option<&'a str>,
     missing: bool,
-    /// Prove every registered action the whole staged tree owes, reusing any
-    /// current receipt, instead of only what the staged change selects.
-    all: bool,
 }
 
 impl Request<'_> {
     const fn inspect(self) -> bool {
-        self.action.is_none() && !self.missing && !self.all
+        self.action.is_none() && !self.missing
     }
 
-    /// The fingerprint manifest records the staged change's selection, which
-    /// neither a single action nor the whole tree shares.
     const fn uses_fingerprint(self) -> bool {
-        self.action.is_none() && !self.all
-    }
-
-    const fn reuses_receipts(self) -> bool {
-        self.missing || self.all
+        self.action.is_none()
     }
 }
 
@@ -462,21 +453,14 @@ pub(crate) fn prove(
     let request = Request {
         action: matches.get_one::<String>("ACTION").map(String::as_str),
         missing: matches.get_flag("missing"),
-        all: matches.get_flag("all"),
     };
-    if let Some(action) = request.action {
-        if request.all {
-            return refusal(
-                "gate::prove-all-with-action",
-                format!("--all proves every registered action, so it cannot name {action:?}"),
-            );
-        }
-        if !registered_request(action) {
-            return refusal(
-                "gate::prove-action-unregistered",
-                format!("{action:?} is not a registered gate action or Cargo shard"),
-            );
-        }
+    if let Some(action) = request.action
+        && !registered_request(action)
+    {
+        return refusal(
+            "gate::prove-action-unregistered",
+            format!("{action:?} is not a registered gate action or Cargo shard"),
+        );
     }
     match run(request, live, ambient) {
         Ok(mut report) => {
@@ -491,10 +475,8 @@ pub(crate) fn prove(
 }
 
 /// Counts first, then each action this run proved, then the next command.
-/// Already-proven actions are counted; `--verbose` lists them with identities,
-/// and `--all` always does, because its output is the whole tree's receipt list.
+/// Already-proven actions are counted; `--verbose` lists them with identities.
 fn summary(report: &ProveReport, request: Request<'_>, verbose: bool) -> String {
-    let verbose = verbose || request.all;
     let published =
         |action: &&ProveActionReport| matches!(action.disposition, ProveDisposition::Published);
     let proved = report.actions.iter().filter(published).count();
@@ -537,17 +519,18 @@ fn summary(report: &ProveReport, request: Request<'_>, verbose: bool) -> String 
         summary.closing("detail", &prove_command(request, "--verbose"));
     }
     summary.snapshot(&report.snapshot);
-    if request.action.is_some() {
-        let aggregate = Request {
-            action: None,
-            missing: false,
-            all: false,
-        };
-        summary.closing("next", &prove_command(aggregate, ""));
-    } else if !request.all {
-        // A whole-tree proof certifies the tree as it stands; it owes no commit.
-        summary.closing("next", "git commit");
-    }
+    let next = if request.action.is_some() {
+        prove_command(
+            Request {
+                action: None,
+                missing: false,
+            },
+            "",
+        )
+    } else {
+        "git commit".to_owned()
+    };
+    summary.closing("next", &next);
     summary.finish()
 }
 
@@ -559,9 +542,6 @@ fn prove_command(request: Request<'_>, flag: &str) -> String {
     }
     if request.missing {
         command.push_str(" --missing");
-    }
-    if request.all {
-        command.push_str(" --all");
     }
     if !flag.is_empty() {
         command.push(' ');
@@ -648,9 +628,6 @@ fn prove_leased(
                 return Err(error);
             }
         }
-    } else if request.all {
-        spice::change_gate::prepare_whole_tree_actions_from_anchor(ambient, anchor)
-            .map_err(ProveFailure::selection)?
     } else {
         spice::change_gate::prepare_staged_actions_from_anchor(ambient, anchor)
             .map_err(ProveFailure::selection)?
@@ -837,13 +814,7 @@ fn prepare_actions(
     let mut present = Vec::new();
     let mut pending = Vec::new();
     for prepared in prepared_actions {
-        classify_prepared(
-            store,
-            request.reuses_receipts(),
-            prepared,
-            &mut present,
-            &mut pending,
-        )?;
+        classify_prepared(store, request.missing, prepared, &mut present, &mut pending)?;
     }
 
     if let Some(action) = request.action

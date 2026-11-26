@@ -74,23 +74,14 @@ fn cargo_selectors_are_explicit_and_keep_canonical_report_order() {
     assert!(cargo_request(Request {
         action: Some("rust-typecheck"),
         missing: false,
-        all: false,
     }));
     assert!(cargo_request(Request {
         action: Some("cargo:test:fixture::lib:fixture"),
         missing: false,
-        all: false,
     }));
     assert!(!cargo_request(Request {
         action: Some("formatters"),
         missing: true,
-        all: false,
-    }));
-    // A whole-tree proof owes every Cargo shard without naming one.
-    assert!(cargo_request(Request {
-        action: None,
-        missing: false,
-        all: true,
     }));
     assert_eq!(
         proof_action_order("taste", "cargo:typecheck:fixture::lib:fixture"),
