@@ -7,6 +7,7 @@
 //! resident timer worker.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use board::Entry;
@@ -340,7 +341,15 @@ pub(super) struct Resident<'a> {
 }
 
 impl Runtime {
+    #[cfg(test)]
     pub(super) fn new(config: &lane::Config) -> Self {
+        Self::with_native_system(config, None)
+    }
+
+    pub(super) fn with_native_system(
+        config: &lane::Config,
+        native_system: Option<PathBuf>,
+    ) -> Self {
         Self {
             backoff: Backoff::default(),
             launching: BTreeSet::new(),
@@ -350,7 +359,7 @@ impl Runtime {
             projection: Projection::new(),
             held_findings: BTreeSet::new(),
             continuations: Continuations::default(),
-            loose: loose::Loose::default(),
+            loose: loose::Loose::new(native_system),
         }
     }
 

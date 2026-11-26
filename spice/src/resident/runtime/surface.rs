@@ -55,6 +55,18 @@ impl SurfaceRuntimes {
         config: &SurfaceConfig,
         paths: &RuntimePaths,
     ) -> CommandResult<Self> {
+        let environment = config.ambient.environment().map_err(|error| {
+            environment_fault("resident::environment-invalid", &error.to_string())
+        })?;
+        let native_system =
+            spice::git_shadow::native_system_config(repository.worktree_root(), &environment)
+                .map_err(|error| {
+                    environment_fault(
+                        "resident::native-system-config-unavailable",
+                        &error.to_string(),
+                    )
+                })?;
+        let lifecycle = lifecycle::Runtime::with_native_system(&config.lane, native_system);
         let timer_commits = bus.reader().subscribe();
         let timers = timers::Runtime::start(config.steering.clone(), paths.supervisors.clone())?;
         let extension = quota::pin_extension(&paths.runtime).map_err(|error| {
@@ -68,7 +80,6 @@ impl SurfaceRuntimes {
         );
         let quota_triggers = quota::Triggers::start(bus)?;
         quota.request();
-        let lifecycle = lifecycle::Runtime::new(&config.lane);
         let taste_adjudication = if config.judge_enabled {
             Some(taste_surface::start_adjudication(&config.ambient)?)
         } else {
