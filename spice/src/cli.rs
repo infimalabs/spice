@@ -560,7 +560,16 @@ under Design, and give its --pitch the end state it pursues.
 Each --term value states one proposition with an unambiguous positive side;
 participants vote on it, and it passes to answer rather than becoming an
 implementation completion criterion. Put an open-ended research prompt in the
-room with `spice room contribute HANDLE --ask TEXT` instead.";
+room with `spice room contribute HANDLE --ask TEXT` instead.
+
+--related may repeat. Each handle creates one symmetric unlabeled relation,
+without dependency, allocation hold, requirement, or completion credit.";
+
+/// Statement edits may add symmetric task relations without changing workflow.
+const TASK_MODIFY_HELP: &str = "\
+--related may repeat. Each handle creates one symmetric unlabeled relation,
+without dependency, allocation hold, requirement, or completion credit.";
+
 /// Portable task definitions deliberately exclude repository authority.
 const TASK_INTERCHANGE_HELP: &str = "\
 Export writes one versioned, bounded document containing recreatable public
@@ -586,6 +595,7 @@ fn leaf_help(path: &[&str]) -> Option<&'static str> {
             "Cancel one live steering directive by its UUID. The operator may cancel any directive; a lane may cancel only its own typed task invitation. Cancellation invalidates the invitation key and permits a replacement request immediately.",
         ),
         ["task", "add"] => Some(TASK_ADD_HELP),
+        ["task", "modify"] => Some(TASK_MODIFY_HELP),
         ["task", "export" | "import"] => Some(TASK_INTERCHANGE_HELP),
         ["task", "artifact", "list"] => Some(ARTIFACT_LIST_HELP),
         ["task", "artifact", "show"] => Some(ARTIFACT_SHOW_HELP),

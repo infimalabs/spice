@@ -633,6 +633,50 @@ fn release_notes_exposes_one_read_only_history_target() {
 }
 
 #[test]
+fn task_relation_arguments_are_repeatable_on_add_and_modify() {
+    let parser = command();
+    for (argv, expected) in [
+        (
+            vec![
+                "spice",
+                "task",
+                "add",
+                "Related work",
+                "--related",
+                "TASK-first",
+                "--related",
+                "TASK-second",
+            ],
+            ["TASK-first", "TASK-second"],
+        ),
+        (
+            vec![
+                "spice",
+                "task",
+                "modify",
+                "TASK-new",
+                "--related",
+                "TASK-first",
+                "--related",
+                "TASK-second",
+            ],
+            ["TASK-first", "TASK-second"],
+        ),
+    ] {
+        let matches = parser
+            .clone()
+            .try_get_matches_from(argv)
+            .expect("repeatable task relations parse");
+        let related = selected_matches(&matches)
+            .get_many::<String>("related")
+            .expect("related values are registered")
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(related, expected);
+    }
+}
+
+#[test]
 fn contract_syntax_drives_argument_registration() {
     let parser = command();
     for argv in [
