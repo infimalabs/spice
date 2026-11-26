@@ -250,8 +250,11 @@ Beside it, **Ask**, **Task**, **Plan**, and **Design** hang as tabs matching
 Task green, Plan blue, Design plum.
 
 Choosing the launcher, a destination, its shortcut, or a quote expands that
-same composer into a full-height sheet: writing, the To row with Send/Create,
-then **Principals** and the independently scrolling personal inbox. One shared
+same composer into a full-height sheet: writing, the reserved action row, then
+**Principals** and the independently scrolling personal inbox. CREATE, SEND
+and FULL SEND use the same 72px circular control and material as team SEND.
+Ask shows To within the action row; switching to Task, Plan or Design hides To
+without moving or resizing the sheet, editor, action or inbox. One shared
 page veil dims Chat beneath either side view and remains until the last closes;
 the left sheet owns its material while both are open. On desktop the non-modal
 left and right sheets coexist above that veil. On a phone, Spice temporarily

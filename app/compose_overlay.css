@@ -78,7 +78,7 @@
   --app-compose-launcher-inline: calc(var(--app-spice-anchor-inset-inline) + var(--app-header-control) + var(--app-spice-side-gap));
   --app-compose-utility-width: 7rem;
   --app-compose-action-inline: 72px;
-  --app-compose-action-block: 36px;
+  --app-compose-action-block: 72px;
   --app-compose-tab-block: 36px;
   --app-compose-editor-block: clamp(7.5rem, 26dvh, 14rem);
   --app-compose-line: 22px;
@@ -327,9 +327,9 @@
 .app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
 .app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
 .app-compose-dialog :is(.app-compose-utility-tab, .app-compose-mode):focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
-/* The action, Send or Create, uses the app's compact button geometry. It rests
-   muted on its glass face; once a press would submit something it takes the
-   team SEND's ink and backlight. */
+/* The global action is the team SEND control in the global sheet: one fixed
+   circular footprint for CREATE, SEND and FULL SEND in every mode. Applicability
+   still controls its ink and backlight; mode never changes its geometry. */
 .app-compose-submit {
   position: relative;
   grid-row: 2;
@@ -337,16 +337,20 @@
   align-self: center;
   margin-inline-end: var(--app-compose-gap);
   width: var(--app-compose-action-inline);
+  min-width: var(--app-compose-action-inline);
+  max-width: var(--app-compose-action-inline);
   box-sizing: border-box;
   height: var(--app-compose-action-block);
-  min-height: 0;
+  min-height: var(--app-compose-action-block);
+  max-height: var(--app-compose-action-block);
   display: grid;
   place-items: center;
-  padding: 0 8px;
-  border: var(--team-control-edge);
-  border-radius: var(--app-radius-control);
+  padding: 0;
+  border: var(--app-control-edge-width) solid color-mix(in srgb, var(--app-semantic-ink) 24%, transparent);
+  border-radius: var(--app-radius-circle);
   background: var(--team-send-glass-face);
   box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), var(--team-control-rest), var(--team-send-glass-catch);
+  backdrop-filter: blur(1.5px) saturate(1.15);
   color: var(--muted);
   font: 700 var(--app-type-primary-action)/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: -.025em;
@@ -356,7 +360,7 @@
   isolation: isolate;
   overflow: hidden;
 }
-.app-compose-submit .team-send-label { font-size: 1em; }
+.app-compose-submit .team-send-label { font-size: 1.5em; }
 .app-compose-submit::before {
   position: absolute;
   z-index: -1;
@@ -369,15 +373,15 @@
   pointer-events: none;
   transition: opacity var(--app-motion-settle) var(--app-ease-standard);
 }
-.app-compose-submit[data-lit="true"]:not(:disabled) {
-  color: var(--ink);
-  backdrop-filter: blur(1.5px) saturate(1.15);
-}
+.app-compose-submit[data-lit="true"]:not(:disabled) { color: var(--app-semantic-ink); }
 .app-compose-submit[data-lit="true"]:not(:disabled)::before { opacity: .58; }
 .app-compose-submit[data-lit="true"]:not(:disabled):is(:hover, :focus-visible)::before { opacity: .72; }
 .app-compose-submit[data-lit="true"]:not(:disabled):active::before { opacity: .46; }
 .app-compose-submit:not(:disabled):hover { background-color: color-mix(in srgb, var(--app-highlight-source) 7.5%, transparent); }
-.app-compose-submit:not(:disabled):active { box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), inset 0 3px 5px color-mix(in srgb, var(--app-shadow-source) 48%, transparent); }
+.app-compose-submit:not(:disabled):active {
+  transform: translateY(1.5px);
+  box-shadow: var(--app-compose-command-ring, 0 0 0 0 transparent), var(--team-control-contact), var(--team-send-glass-catch);
+}
 .app-compose-submit:disabled { color: var(--muted); cursor: not-allowed; }
 .app-compose-submit:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) {
