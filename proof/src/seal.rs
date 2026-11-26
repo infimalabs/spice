@@ -6,6 +6,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use windows_execution::hosted::client::HostedExecution;
 use wire::manifest::ProofReceipt;
 use wire::{Digest, ProofEvidence};
 
@@ -35,6 +36,22 @@ pub fn seal(
     limits: Limits,
 ) -> Result<ProofEvidence, SealError> {
     let proved = Staged::admit(layout)?.replay(config, workspace, limits)?;
+    publish_receipt(&proved, publish)
+}
+
+/// Publish detached evidence from a provider-authenticated Windows batch whose
+/// current proof battery starts at `offset`.
+///
+/// # Errors
+///
+/// Refuses any moved command or output, non-clean replay, or receipt
+/// publication failure.
+pub fn seal_hosted_windows(
+    layout: &Layout,
+    execution: &HostedExecution,
+    offset: usize,
+) -> Result<ProofEvidence, SealError> {
+    let proved = Staged::admit(layout)?.replay_hosted_windows(execution, offset)?;
     publish_receipt(&proved, publish)
 }
 

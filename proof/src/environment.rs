@@ -469,6 +469,7 @@ impl Error for EnvironmentError {
 
 #[cfg(test)]
 mod tests {
+
     use wire::manifest::ReleaseTarget;
 
     use super::{

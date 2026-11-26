@@ -136,5 +136,5 @@ pub use replay::{
     Battery, Check, CheckKind, CheckStanding, CheckVerdict, ReceiptError, ReplayError,
     ReplayFailure, ReplayVerdict, replay,
 };
-pub use seal::{SealError, seal};
+pub use seal::{SealError, seal, seal_hosted_windows};
 pub use vendor_set::{PROOF_IMAGE_REPOSITORY, VENDOR_SET_LABEL, VendorSet, VendorSetError};

@@ -26,6 +26,8 @@ mod share_darwin;
 mod share_darwin_stage;
 #[cfg(not(target_arch = "wasm32"))]
 mod source_archive;
+#[cfg(not(target_arch = "wasm32"))]
+mod stage_proof;
 mod verify_error;
 mod verify_execution;
 mod verify_timing;
@@ -74,6 +76,8 @@ pub use share_darwin_stage::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use source_archive::source_archive;
+#[cfg(not(target_arch = "wasm32"))]
+pub use stage_proof::{StageProofError, prove_staged_target};
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{

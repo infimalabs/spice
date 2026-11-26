@@ -159,7 +159,7 @@ jobs:
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           rm -rf "$RUNNER_TEMP/proof-image"
 
-      - name: Stage in the sealed image
+      - name: Stage and prove in the sealed image
         env:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
           SPICE_RELEASE_CANVAS: ${{ runner.temp }}/input/canvas.zip
@@ -170,9 +170,16 @@ jobs:
           common="$(git rev-parse --git-common-dir)"
           mkdir -p "$common/.spice"
           printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
-          "$RUNNER_TEMP/bootstrap-target/debug/xtask" stage-target x86_64-unknown-linux-musl --unsigned --sealed \
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          "$xtask" stage-target x86_64-unknown-linux-musl --unsigned --sealed \
             2>&1 | tee "$RUNNER_TEMP/stage.log"
-          echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/stage.exit"
+          status="${PIPESTATUS[0]}"
+          if [[ "$status" == 0 ]]; then
+            "$xtask" prove-staged-target x86_64-unknown-linux-musl \
+              2>&1 | tee -a "$RUNNER_TEMP/stage.log"
+            status="${PIPESTATUS[0]}"
+          fi
+          echo "$status" > "$RUNNER_TEMP/stage.exit"
 
       - name: Smoke staged Linux payload version
         run: |

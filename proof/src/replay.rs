@@ -1,9 +1,11 @@
 //! Exhaustive sealed replay of the generated proof battery.
 
+use std::cell::Cell;
 use std::error::Error;
 use std::fmt;
 
-use windows_execution::protocol::Command as HostedCommand;
+use windows_execution::hosted::client::HostedExecution;
+use windows_execution::protocol::{Command as HostedCommand, Completion as HostedCompletion};
 use wire::manifest::{
     PROOF_RECEIPT_VERSION, ProofEnvironment, ProofReceipt, ProofStanding, ReleaseTarget,
     TargetPayload,
@@ -120,6 +122,12 @@ impl Battery {
     #[must_use]
     pub const fn digest(&self) -> &Digest {
         &self.digest
+    }
+
+    /// Commands the hosted Windows runner must execute after staging.
+    #[must_use]
+    pub fn hosted_commands(&self) -> Vec<HostedCommand> {
+        self.checks.iter().map(hosted_command).collect()
     }
 }
 
@@ -365,17 +373,7 @@ impl ReplayVerdict {
 /// inside the one typed [`ReplayVerdict`].
 pub fn replay(environment: &SealedEnvironment) -> Result<ReplayVerdict, ReplayError> {
     let battery = Battery::current();
-    let commands = battery
-        .checks
-        .iter()
-        .map(|check| HostedCommand {
-            program: match check.program() {
-                "cargo" => "@cargo".to_owned(),
-                program => program.to_owned(),
-            },
-            arguments: check.arguments().to_vec(),
-        })
-        .collect::<Vec<_>>();
+    let commands = battery.hosted_commands();
     let executor = environment
         .battery(&commands)
         .map_err(|source| ReplayError::from_start(CheckKind::Gate, source))?;
@@ -391,6 +389,109 @@ pub fn replay(environment: &SealedEnvironment) -> Result<ReplayVerdict, ReplayEr
                 .push_str(&format!("; battery scratch cleanup also failed: {cleanup}"));
             Err(error)
         }
+    }
+}
+
+/// Admit and classify the battery outputs following `offset` in one
+/// provider-authenticated hosted Windows execution.
+///
+/// # Errors
+///
+/// Refuses any command, output count, completion, or capture that is not the
+/// exact current battery.
+pub fn replay_hosted_windows(
+    execution: &HostedExecution,
+    offset: usize,
+) -> Result<ReplayVerdict, ReplayError> {
+    let battery = Battery::current();
+    let commands = battery.hosted_commands();
+    let expected = offset.checked_add(commands.len()).ok_or_else(|| {
+        ReplayError::execution(CheckKind::Gate, "hosted output offset overflow".to_owned())
+    })?;
+    if execution.result.request.commands.len() != expected
+        || execution.result.outputs.len() != expected
+        || execution.outputs.len() != expected
+    {
+        return Err(ReplayError::execution(
+            CheckKind::Gate,
+            format!(
+                "hosted Windows proof expected {expected} commands and outputs, observed commands={} protocol-outputs={} outputs={}",
+                execution.result.request.commands.len(),
+                execution.result.outputs.len(),
+                execution.outputs.len()
+            ),
+        ));
+    }
+    if execution.result.request.commands[offset..] != commands {
+        return Err(ReplayError::execution(
+            CheckKind::Gate,
+            "hosted Windows proof command inventory moved".to_owned(),
+        ));
+    }
+    let executor = CompletedWindows {
+        execution,
+        offset,
+        next: Cell::new(0),
+    };
+    run_with(&executor, &battery)
+}
+
+fn hosted_command(check: &Check) -> HostedCommand {
+    HostedCommand {
+        program: match check.program() {
+            "cargo" => "@cargo".to_owned(),
+            program => program.to_owned(),
+        },
+        arguments: check.arguments().to_vec(),
+    }
+}
+
+struct CompletedWindows<'a> {
+    execution: &'a HostedExecution,
+    offset: usize,
+    next: Cell<usize>,
+}
+
+impl Executor for CompletedWindows<'_> {
+    fn target(&self) -> ReleaseTarget {
+        ReleaseTarget::X86_64PcWindowsMsvc
+    }
+
+    fn environment(&self) -> ProofEnvironment {
+        ProofEnvironment::hosted_windows(self.execution.result.identity.clone())
+    }
+
+    fn execute(&self, check: &Check) -> Result<Execution, String> {
+        let member = self.next.get();
+        self.next.set(member + 1);
+        let index = self.offset + member;
+        if self.execution.result.request.commands[index] != hosted_command(check) {
+            return Err(format!(
+                "hosted Windows proof member {} moved",
+                check.kind().as_str()
+            ));
+        }
+        let observed = &self.execution.outputs[index];
+        let protocol = &self.execution.result.outputs[index];
+        Ok(Execution {
+            completion: match observed.completion {
+                HostedCompletion::Exited { code } => ExecutionCompletion::Exited {
+                    success: code == 0,
+                    code: Some(code),
+                },
+                HostedCompletion::TimedOut => ExecutionCompletion::TimedOut { code: Some(124) },
+            },
+            stdout: crate::container::Captured {
+                bytes: observed.stdout.clone(),
+                truncated: protocol.stdout.truncated,
+                complete: true,
+            },
+            stderr: crate::container::Captured {
+                bytes: observed.stderr.clone(),
+                truncated: protocol.stderr.truncated,
+                complete: true,
+            },
+        })
     }
 }
 
@@ -813,6 +914,13 @@ mod tests {
                 ),
             ]
         );
+
+        let hosted = battery.hosted_commands();
+        assert_eq!(hosted.len(), battery.checks().len());
+        for (hosted, check) in hosted.iter().zip(battery.checks()) {
+            assert_eq!(hosted.program, "@cargo");
+            assert_eq!(hosted.arguments, check.arguments());
+        }
     }
 
     /// One clean test run, in the words the installed libtest harness uses.

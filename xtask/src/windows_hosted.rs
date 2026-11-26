@@ -284,8 +284,10 @@ fn windows_hosted_stage_controlled(
         program: "@cargo".to_owned(),
         arguments,
     };
+    let mut commands = vec![command];
+    commands.extend(proof::Battery::current().hosted_commands());
     let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
-        vec![command],
+        commands,
         Path::new("dist/stage"),
         inputs,
         attach,
@@ -298,6 +300,20 @@ fn windows_hosted_stage_controlled(
     error_output
         .write_all(&first.stderr)
         .map_err(WindowsHostedError::Output)?;
+    if execution.exit_code() == 0 {
+        let repository = spice::repository::Repository::discover(Path::new("."))
+            .map_err(|error| WindowsHostedError::ProviderResponse(error.to_string()))?;
+        let layout = proof::Layout::new(
+            repository.worktree_root(),
+            repository.worktree_root().join("dist/stage/proofs"),
+            wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc,
+        );
+        proof::seal_hosted_windows(&layout, &execution, 1).map_err(|error| {
+            WindowsHostedError::ProviderResponse(format!(
+                "hosted Windows proof receipt refused: {error}"
+            ))
+        })?;
+    }
     Ok(execution)
 }
 

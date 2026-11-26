@@ -100,7 +100,8 @@ jobs:
           git config user.name spice-hosted
           git config user.email hosted@invalid
           git add -A -f -- .
-          git commit -q -m "canonical source $SOURCE_COMMIT"
+          GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
+            git commit -q -m "canonical source $SOURCE_COMMIT"
           test "$(git ls-tree -r -z --full-tree HEAD | shasum -a 256 | cut -d' ' -f1)" = "$TREE"
       - name: Admit request and runner image
         shell: bash
@@ -273,8 +274,12 @@ jobs:
           PY
           "$RUNNER_TEMP/bootstrap-target/release/xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
           tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
-          cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
-          tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$RUNNER_TEMP/bootstrap-target/release" xtask
+          finalizer="$RUNNER_TEMP/finalizer"
+          mkdir -p "$finalizer"
+          cp "$RUNNER_TEMP/bootstrap-target/release/xtask" "$finalizer/"
+          cp "$RUNNER_TEMP/bootstrap-target/release/spice" "$finalizer/"
+          cp -R target/proof-native-darwin "$finalizer/"
+          tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .
 
       - name: Upload unsigned stage transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -442,7 +447,7 @@ jobs:
     name: Finalize macOS
     needs: sign
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 45
     permissions:
       actions: read
       contents: none
@@ -465,19 +470,53 @@ jobs:
           name: macos-finalizer-${{ inputs.challenge }}
           path: ${{ runner.temp }}/transport
 
-      - name: Rebind and verify exact signed stage
+      - name: Download canonical release input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: input-${{ inputs.release_inputs_challenge }}
+          run-id: ${{ inputs.release_inputs_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/input
+
+      - name: Restore exact proof source
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/input/source.tar"
+          test "$(shasum -a 256 "$archive" | cut -d' ' -f1)" = '${{ inputs.archive_sha256 }}'
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          tar -xmf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          test "$(python3 -c 'import json; print(json.load(open("dist/build.json"))["source"]["commit"])')" = '${{ inputs.source_commit }}'
+          git init -q
+          git config core.autocrlf false
+          git config user.name spice-hosted
+          git config user.email hosted@invalid
+          git add -A -f -- .
+          GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
+            git commit -q -m 'canonical source ${{ inputs.source_commit }}'
+          test "$(git ls-tree -r -z --full-tree HEAD | shasum -a 256 | cut -d' ' -f1)" = '${{ inputs.tree }}'
+
+      - name: Rebind, prove, and verify exact signed stage
         shell: bash
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/finalize"
-          mkdir -p "$work"
+          finalizer="$work/finalizer"
+          stage="$GITHUB_WORKSPACE/dist/stage"
+          mkdir -p "$work" "$finalizer"
           tar -xzf "$RUNNER_TEMP/transport/unsigned-stage.tar.gz" -C "$work"
-          tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$work"
-          chmod 0555 "$work/xtask"
+          tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$finalizer"
+          chmod 0555 "$finalizer/xtask" "$finalizer/spice"
           native="$RUNNER_TEMP/transport/native/native"
-          "$work/xtask" verify-staged-darwin "$work/unsigned-stage"
-          "$work/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$work/stage"
-          "$work/xtask" verify-staged-darwin "$work/stage"
+          "$finalizer/xtask" verify-staged-darwin "$work/unsigned-stage"
+          "$finalizer/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$stage"
+          "$finalizer/xtask" verify-staged-darwin "$stage"
+          runner="$finalizer/proof-native-darwin/bin/spice-proof-darwin-runner"
+          plan=$("$finalizer/spice" config proof.runner "$runner" \
+            | sed -n 's/^digest = "\([0-9a-f]*\)"$/\1/p')
+          test -n "$plan"
+          "$finalizer/spice" config proof.runner "$runner" --apply="$plan" >/dev/null
+          "$finalizer/xtask" prove-staged-target aarch64-apple-darwin
           codesign --verify --deep --strict --verbose=2 "$native"
           notarization_attempts=30
           notarization_delay=10
@@ -492,7 +531,7 @@ jobs:
             sleep "$notarization_delay"
           done
           python3 - \
-            "$work/stage/result.json" \
+            "$stage/result.json" \
             '${{ inputs.challenge }}' \
             '${{ inputs.source_commit }}' \
             '${{ inputs.source }}' \
@@ -523,7 +562,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/finalize/stage
+          path: ${{ github.workspace }}/dist/stage
           if-no-files-found: error
           retention-days: 1
 

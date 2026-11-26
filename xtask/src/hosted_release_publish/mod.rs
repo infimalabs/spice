@@ -12,6 +12,7 @@ use crate::windows_hosted::{
 
 mod package;
 mod plan;
+mod proof_stage;
 mod provider;
 mod session;
 
@@ -107,6 +108,7 @@ pub fn publish_hosted_release(
     }
     session.record_inputs(inputs.manifest())?;
     hosted_release_stage_with_inputs(inputs.manifest().run_id, &inputs, output, error_output)?;
+    proof_stage::materialize(&worktree, &inputs, output)?;
     let plan = PublicationPlan::capture(&worktree, session.root(), &inputs, &notes)?;
     plan.persist(session.root())?;
     conclude(effect, &session, unpublished, || {
