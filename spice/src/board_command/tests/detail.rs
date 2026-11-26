@@ -62,7 +62,8 @@ fn task_show_separates_current_context_and_bounded_history() {
             after: None,
         },
     )
-    .expect("current task detail has no cursor");
+    .expect("current task detail has no cursor")
+    .text;
     for required in [
         "handle ",
         "title Bound one task read",
@@ -103,7 +104,7 @@ fn task_show_separates_current_context_and_bounded_history() {
             },
         })
         .collect::<Vec<_>>();
-    let history = task_show_bounded(
+    let page = task_show_bounded(
         &answer,
         row,
         &[],
@@ -124,11 +125,31 @@ fn task_show_separates_current_context_and_bounded_history() {
         },
     )
     .expect("first history page has no cursor");
+    let typed = page.history.expect("a history read carries typed steps");
+    let history = page.text;
     assert_eq!(history.matches("    evidence-").count(), 20, "{history}");
+    assert_eq!(
+        typed,
+        steps.iter().rev().take(20).cloned().collect::<Vec<_>>(),
+        "typed steps are the admitted text page, newest first"
+    );
     assert!(history.contains("continue: spice task show"), "{history}");
     assert!(history.contains("--after"), "{history}");
     assert!(!history.contains("history: "), "{history}");
+    clean(&root, bus);
+}
 
+#[test]
+fn task_show_context_page_clips_oversized_origin_context() {
+    let (root, bus, epoch, _) = fixture("task-show-context-clip", 0);
+    let task = add_born(
+        &bus,
+        epoch,
+        stamp("task-show-context-clip"),
+        "Clip one origin context",
+    );
+    let answer = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let row = at(&answer, &task);
     let oversized = "x".repeat(5_000);
     let context = task_show_bounded(
         &answer,
@@ -147,9 +168,9 @@ fn task_show_separates_current_context_and_bounded_history() {
             after: None,
         },
     )
-    .expect("context page has no cursor");
+    .expect("context page has no cursor")
+    .text;
     assert!(context.contains("spice doc ledger"), "{context}");
-
     assert!(!context.contains(&oversized), "{context}");
     clean(&root, bus);
 }
@@ -199,6 +220,7 @@ fn task_show_counts_the_history_it_collapses() {
             },
         )
         .expect("unpaged detail has no cursor")
+        .text
     };
     let collapsed = show(false);
     assert!(
@@ -247,6 +269,7 @@ fn task_show_labels_design_items_as_questions() {
             },
         )
         .expect("Design detail has no cursor")
+        .text
     };
     let handle = &design.statement.body.handle;
     let collapsed = show(false);
@@ -319,6 +342,7 @@ fn task_show_collapses_prose_and_full_prints_it_whole() {
             },
         )
         .expect("task detail has no cursor")
+        .text
     };
     let handle = &row.statement.body.handle;
     let collapsed = show(false, false);
@@ -400,6 +424,7 @@ fn task_show_full_surfaces_author_validation_only_in_review() {
             },
         )
         .expect("task detail has no cursor")
+        .text
     };
 
     let bounded = show(false);
@@ -441,7 +466,8 @@ fn task_show_context_uses_aggregate_detail_budget_and_exact_continuation() {
             after: None,
         },
     )
-    .expect("first context page has no cursor");
+    .expect("first context page has no cursor")
+    .text;
     assert!(
         bounded.contains("continue: spice task show")
             && bounded.contains("--context")
@@ -889,7 +915,8 @@ fn task_show_names_lanes_by_roster_name_while_exports_keep_bare_actors() {
             after: None,
         },
     )
-    .expect("history renders");
+    .expect("history renders")
+    .text;
 
     assert!(
         text.lines()

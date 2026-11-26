@@ -39,8 +39,11 @@ replies go to stdout, refusals and faults to stderr.
 
 Task reads keep their human rendering in `body.text` and also expose stable
 fields for scripts. `task show` adds `handle`, `title`, `phase`, `status`,
-`claim`, and `terms`; `task list` adds a `tasks` array whose page-admitted rows
-carry `handle`, `phase`, `status`, and `topic` (`null` when unplaced).
+`claim`, and `terms`, and with `--history` a `history` array of the
+page-admitted workflow steps, newest first, each with `position`, `at`,
+`author`, and a `step` tagged by `kind`; `task list` adds a `tasks` array
+whose page-admitted rows carry `handle`, `phase`, `status`, and `topic`
+(`null` when unplaced).
 
 Text renders journal positions as condensed base-52 codes; text operands
 (`--after`, thread references) admit only those codes. A new journal begins at

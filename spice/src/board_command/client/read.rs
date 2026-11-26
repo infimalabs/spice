@@ -2,6 +2,10 @@ use super::*;
 use crate::numeric_option;
 use wire::principal::PrincipalDirectory;
 
+mod detail;
+use detail::{
+    TaskShowDetailRow, TaskShowDetailSection, bounded_detail_lines, task_show_continuation,
+};
 mod environment;
 use environment::{environment_status, requirement_lines};
 mod list;
@@ -163,7 +167,7 @@ pub(super) fn client_show(
             } else {
                 None
             };
-            let text = match task_show_bounded(
+            let answer = match task_show_bounded(
                 &board,
                 task,
                 &artifacts,
@@ -175,12 +179,12 @@ pub(super) fn client_show(
                 },
                 &options,
             ) {
-                Ok(text) => text,
+                Ok(answer) => answer,
                 Err(outcome) => return outcome,
             };
             Outcome::Reply(Reply {
                 position,
-                body: CommandAnswer::TaskShow(Box::new(task_show_answer(task, text))),
+                body: CommandAnswer::TaskShow(Box::new(answer)),
             })
         }
         Outcome::Reply(_) => protocol_fault(
@@ -195,6 +199,7 @@ pub(super) fn client_show(
 pub(in crate::board_command) fn task_show_answer(
     task: &BoardTask,
     text: String,
+    history: Option<Vec<wire::intent::TaskDetailStep>>,
 ) -> wire::intent::TaskShowAnswer {
     wire::intent::TaskShowAnswer {
         text,
@@ -207,6 +212,7 @@ pub(in crate::board_command) fn task_show_answer(
             .map(|held| held.claim.body.actor.clone())
             .collect(),
         terms: task.statement.body.term.clone(),
+        history,
     }
 }
 
@@ -494,6 +500,7 @@ pub(in crate::board_command) fn task_show_with_origin(
         },
     )
     .expect("unpaged task detail has no unknown cursor")
+    .text
 }
 
 /// Local journal evidence that enriches one task detail beyond board heads.
@@ -568,7 +575,7 @@ pub(in crate::board_command) fn task_show_bounded(
     origin_context: Option<&str>,
     local: TaskShowLocal<'_>,
     options: &TaskShowOptions,
-) -> Result<String, Outcome<CommandAnswer>> {
+) -> Result<wire::intent::TaskShowAnswer, Outcome<CommandAnswer>> {
     let statement = &task.statement.body;
     let environment = board.environment();
     let mut lines = task_header_lines(board, task);
@@ -639,8 +646,9 @@ pub(in crate::board_command) fn task_show_bounded(
         lines.extend(preceding_validation_lines(task, history));
     }
     lines.extend(artifact_lines(&statement.handle, artifacts));
+    let mut steps = Vec::new();
     if options.context || options.history {
-        lines.extend(bounded_detail_lines(
+        let (detail, admitted) = bounded_detail_lines(
             board,
             task,
             history,
@@ -648,11 +656,17 @@ pub(in crate::board_command) fn task_show_bounded(
             local.room,
             options,
             options.budget(),
-        )?);
+        )?;
+        lines.extend(detail);
+        steps = admitted;
     }
     lines.extend(phase_guidance_lines(task));
     lines.push(next_command_line(board, task)?);
-    Ok(lines.join("\n"))
+    Ok(task_show_answer(
+        task,
+        lines.join("\n"),
+        options.history.then_some(steps),
+    ))
 }
 
 /// The `depends:` section, then `related:` when the task names relations.
@@ -718,183 +732,6 @@ fn artifact_lines(handle: &wire::TaskHandle, artifacts: &[artifact::Artifact]) -
     lines
 }
 
-fn task_show_context_lines(
-    task: &BoardTask,
-    history: TaskShowHistory<'_>,
-    origin_context: Option<&str>,
-    budget: wire::output::Budget,
-) -> Vec<String> {
-    let statement = &task.statement.body;
-    let workflow = &task.workflow.body;
-    let mut lines = vec![
-        format!("origin {}", statement.provenance),
-        task_flow_line(&workflow.flow),
-        format!("review {}", workflow.review_str()),
-        format!("version {}", statement.revision),
-        format!("claim_thread {}", claim_thread(task)),
-    ];
-    lines.extend(
-        acknowledgment_lines(&statement.provenance, history.acknowledgments)
-            .into_iter()
-            .map(|line| budget.clip(&line).to_string()),
-    );
-    if let Some(origin_context) = origin_context {
-        let clipped = budget.clip(origin_context);
-        lines.extend(clipped.text.lines().map(str::to_owned));
-        if let Some(withheld) = clipped.withheld_bytes {
-            lines.push(format!(
-                "origin_context withheld {withheld} bytes; recover with the session context commands below"
-            ));
-        }
-    }
-    lines.extend(creation_context_lines(statement));
-    lines.extend(claim_context_lines(task));
-    lines.push(format!(
-        "spice doc ledger {} --output {}-ledger.md",
-        statement.handle, statement.handle
-    ));
-    lines.extend(git_context_lines(task));
-    lines.extend(parked_commit_lines(task));
-    lines
-}
-
-#[derive(Clone, Copy, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-enum TaskShowDetailSection {
-    Context,
-    Closure,
-    Step,
-    Room,
-}
-
-#[derive(serde::Serialize)]
-struct TaskShowDetailRow {
-    cursor: String,
-    section: TaskShowDetailSection,
-    text: String,
-}
-
-fn bounded_detail_lines(
-    board: &BoardAnswer,
-    task: &BoardTask,
-    history: TaskShowHistory<'_>,
-    origin_context: Option<&str>,
-    room: Option<TaskShowRoom>,
-    options: &TaskShowOptions,
-    budget: wire::output::Budget,
-) -> Result<Vec<String>, Outcome<CommandAnswer>> {
-    let mut rows = Vec::new();
-    if options.context {
-        rows.extend(
-            task_show_context_lines(task, history, origin_context, budget)
-                .into_iter()
-                .enumerate()
-                .map(|(index, text)| TaskShowDetailRow {
-                    cursor: format!("context:{index}"),
-                    section: TaskShowDetailSection::Context,
-                    text,
-                }),
-        );
-    }
-    if options.history {
-        if let Some(closure) = history.closure {
-            rows.push(TaskShowDetailRow {
-                cursor: format!("closure:{}", closure.position),
-                section: TaskShowDetailSection::Closure,
-                text: closure_lines_bounded(board, closure, history.principals, budget).join("\n"),
-            });
-        }
-        let mut steps = history.steps.iter().collect::<Vec<_>>();
-        steps.sort_by_key(|step| std::cmp::Reverse(step.position));
-        rows.extend(steps.into_iter().map(|step| TaskShowDetailRow {
-            cursor: format!("step:{}", step.position),
-            section: TaskShowDetailSection::Step,
-            text: render_task_step(board, step, history.principals, budget),
-        }));
-    }
-    if resumes_in_room(options) {
-        rows.clear();
-    } else if let Some(after) = &options.after {
-        let Some(index) = rows.iter().position(|row| row.cursor == *after) else {
-            return Err(refusal(
-                "task::show-after-unknown",
-                Some(after.clone()),
-                "name a detail cursor present in the selected context or history",
-            ));
-        };
-        rows = rows.split_off(index);
-    }
-
-    let mut admission = wire::output::Admission::new(budget);
-    for row in rows {
-        admission
-            .offer(row)
-            .expect("a task detail text row always serializes");
-    }
-    let room_empty = room.as_ref().is_some_and(TaskShowRoom::is_empty);
-    if let Some(room) = room {
-        room.offer(&mut admission);
-    }
-    let page = admission
-        .finish(|resume| task_show_continuation(&task.statement.body.handle, options, resume));
-    let mut lines = Vec::new();
-    let mut steps_started = false;
-    let mut room_started = false;
-    for row in page.rows {
-        if matches!(row.section, TaskShowDetailSection::Step) && !steps_started {
-            lines.push("workflow:".to_owned());
-            steps_started = true;
-        }
-        if matches!(row.section, TaskShowDetailSection::Room) && !room_started {
-            lines.push("room:".to_owned());
-            room_started = true;
-        }
-        lines.push(row.text);
-    }
-    if room_empty {
-        lines.extend(["room:".to_owned(), "  -".to_owned()]);
-    }
-    if let Some(omission) = page.omission {
-        lines.push(omission.to_string());
-    }
-    Ok(lines)
-}
-
-fn render_task_step(
-    board: &BoardAnswer,
-    step: &wire::intent::TaskDetailStep,
-    principals: Option<&PrincipalDirectory>,
-    budget: wire::output::Budget,
-) -> String {
-    let author = actor_label(board, principals, &step.author);
-    let mut rendered = format!("  {}", step_heading(step, &author));
-    if let Some(text) = step_text(step) {
-        let text = budget.clip(text);
-        push_indented(&mut rendered, &text.text);
-        if let Some(withheld) = text.withheld_bytes {
-            rendered.push_str(&format!("\n    … [+{withheld} bytes]"));
-        }
-    }
-    if let Some(disposition) = step_disposition(step, |stamp| stamp_name(board, stamp)) {
-        push_indented(&mut rendered, &disposition);
-    }
-    if let Some(followups) = step_followups(step, |stamp| stamp_name(board, stamp)) {
-        push_indented(&mut rendered, &followups);
-    }
-    rendered
-}
-
-/// Append `text` under a history row's heading, four columns in.
-fn push_indented(rendered: &mut String, text: &str) {
-    for line in text.lines() {
-        rendered.push('\n');
-        if !line.is_empty() {
-            rendered.push_str("    ");
-            rendered.push_str(line);
-        }
-    }
-}
-
 /// `actor` as task show text names it: a lane by its roster name before the
 /// lane actor, a born principal by its short name when `principals` were read,
 /// and anything else, including an unnamed lane, by its identity alone.
@@ -918,72 +755,6 @@ fn actor_label(
         || actor.to_string(),
         |principals| principals.named(actor).to_string(),
     )
-}
-
-fn closure_lines_bounded(
-    board: &BoardAnswer,
-    closure: &wire::intent::TaskDetailClosure,
-    principals: Option<&PrincipalDirectory>,
-    budget: wire::output::Budget,
-) -> Vec<String> {
-    let displaced = closure
-        .claimed
-        .as_ref()
-        .map_or_else(String::new, |actor| format!(" claim-freed={actor}"));
-    let mut lines = vec![format!(
-        "closed {} {} {} phase={}{displaced}",
-        closure.position,
-        closure.at,
-        actor_label(board, principals, &closure.author),
-        closure.phase
-    )];
-    let validation = budget.clip(&closure.validation);
-    lines.extend(validation.text.lines().map(|line| {
-        if line.is_empty() {
-            String::new()
-        } else {
-            format!("    {line}")
-        }
-    }));
-    if let Some(withheld) = validation.withheld_bytes {
-        lines.push(format!("    … [+{withheld} bytes]"));
-    }
-    lines
-}
-
-fn task_show_continuation(
-    handle: &TaskHandle,
-    options: &TaskShowOptions,
-    resume: wire::output::Resume<'_, TaskShowDetailRow>,
-) -> wire::SpiceCommand {
-    let (row, widened) = match resume {
-        wire::output::Resume::At(row) => (row, None),
-        wire::output::Resume::Widened { record, bytes } => (record, Some(bytes)),
-        wire::output::Resume::Export(row) => (row, Some(wire::output::INTERACTIVE.maximum().bytes)),
-    };
-    let limits = options.budget().resume();
-    let mut arguments = vec!["show".to_owned(), handle.to_string()];
-    if options.full {
-        arguments.push("--full".to_owned());
-    }
-    if options.context {
-        arguments.push("--context".to_owned());
-    }
-    if options.history {
-        arguments.push("--history".to_owned());
-    }
-    arguments.extend([
-        "--limit".to_owned(),
-        limits.rows.to_string(),
-        "--max-bytes".to_owned(),
-        widened.unwrap_or(limits.bytes).to_string(),
-        "--max-text".to_owned(),
-        limits.text.to_string(),
-        "--after".to_owned(),
-        row.cursor.clone(),
-    ]);
-    wire::SpiceCommand::new("task", arguments)
-        .expect("task show continuation has structural arguments")
 }
 
 /// One line per distinct steering key naming every task fact it caused.

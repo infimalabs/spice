@@ -192,7 +192,7 @@ fn active_todo_task_show_prints_the_parser_owned_done_command() {
     let claimed = board(&bus, epoch, Actor::Lane(seats[0].lane));
     let row = at(&claimed, &task);
     let shown = task_show(&claimed, row, &[]);
-    let typed = task_show_answer(row, shown.clone());
+    let typed = task_show_answer(row, shown.clone(), None);
     assert_eq!(typed.handle, task);
     assert_eq!(typed.title, "Render the active todo next action");
     assert_eq!(typed.phase.as_str(), "todo");
@@ -761,14 +761,17 @@ fn task_list_typed_rows_match_the_bounded_text_page() {
         "{}",
         listed.text
     );
+    assert_eq!(
+        listed.tasks.len(),
+        2,
+        "typed rows match the admitted text page"
+    );
     for task in &listed.tasks {
         assert!(
             listed.text.contains(task.handle.as_str()),
             "{}",
             listed.text
         );
-        assert!(!task.phase.as_str().is_empty());
-        assert!(!task.status.is_empty());
         assert!(task.topic.is_some());
     }
     let json = serde_json::to_value(&listed).expect("typed task list encodes");
