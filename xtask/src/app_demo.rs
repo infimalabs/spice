@@ -435,9 +435,20 @@ fn published_endpoint(discovery: &Path) -> Result<Option<String>, AppDemoError> 
 }
 
 fn announce_endpoint(endpoint: &str, output: &mut impl Write) -> Result<(), AppDemoError> {
-    writeln!(output, "[app-demo] endpoint={endpoint}")
+    write_endpoint(endpoint, output)
         .and_then(|()| output.flush())
         .map_err(|error| fail(format!("app-demo output failed: {error}")))
+}
+
+/// The right-to-left layout surface, then the endpoint whose line marks
+/// readiness, so a reader waiting on readiness already holds both.
+fn write_endpoint(endpoint: &str, output: &mut impl Write) -> io::Result<()> {
+    writeln!(
+        output,
+        "[app-demo] rtl={endpoint}{}",
+        spice::serve::canvas::RTL_SHELL_ROUTE
+    )?;
+    writeln!(output, "[app-demo] endpoint={endpoint}")
 }
 
 fn report_demo_answer(
@@ -466,7 +477,7 @@ fn report_demo_answer(
     )
     .map_err(|error| fail(format!("app-demo output failed: {error}")))?;
     if let Some(endpoint) = pending {
-        writeln!(output, "[app-demo] endpoint={endpoint}")
+        write_endpoint(endpoint, output)
             .map_err(|error| fail(format!("app-demo output failed: {error}")))?;
     }
     output
@@ -760,7 +771,7 @@ mod tests {
         announce_endpoint(endpoint, &mut output).unwrap();
         assert_eq!(
             std::str::from_utf8(&output.bytes[..output.visible]).unwrap(),
-            "[app-demo] endpoint=http://127.0.0.1:43123\n"
+            "[app-demo] rtl=http://127.0.0.1:43123/rtl/\n[app-demo] endpoint=http://127.0.0.1:43123\n"
         );
         report_demo_answer(answer, Some(endpoint), &mut output).unwrap();
 

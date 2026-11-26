@@ -20,7 +20,7 @@ pub const ARCHIVE_EXTENSION: &str = "zip";
 const SHELL_GENERATION: &str = "data-app-generation=\"";
 
 pub(crate) use assets::CanvasAnswer;
-pub use assets::{BUILD_ROUTE, CanvasAssets, EmbeddedArchive};
+pub use assets::{BUILD_ROUTE, CanvasAssets, EmbeddedArchive, RTL_SHELL_ROUTE};
 
 /// The app generation a rack carries: the one its shell qualifies routes with.
 ///

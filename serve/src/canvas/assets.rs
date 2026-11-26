@@ -51,6 +51,31 @@ pub(crate) struct CanvasAsset {
     pub(crate) document: Option<Arc<[u8]>>,
 }
 
+impl CanvasAsset {
+    /// This shell document with `dir="rtl"` on its root element, under its
+    /// own ETag; `None` when the document carries no root element.
+    pub(crate) fn right_to_left(self) -> Option<Self> {
+        const ROOT: &str = "<html";
+        let document = self.document?;
+        let html = std::str::from_utf8(&document).ok()?;
+        let at = html.find(ROOT)? + ROOT.len();
+        let directed: Arc<[u8]> =
+            Arc::from(format!("{} dir=\"rtl\"{}", &html[..at], &html[at..]).into_bytes());
+        let etag = HeaderValue::from_str(&format!(
+            "{}-rtl\"",
+            self.etag.to_str().ok()?.strip_suffix('"')?
+        ))
+        .ok()?;
+        Some(Self {
+            body: Bytes::from_owner(Arc::clone(&directed)),
+            content_type: self.content_type,
+            etag,
+            gzip: false,
+            document: Some(directed),
+        })
+    }
+}
+
 impl CanvasAssets {
     /// The generation the shell route serves now.
     ///
@@ -119,6 +144,10 @@ impl std::fmt::Display for CanvasAssets {
 
 /// The HTTP route answering the linked rack's build record.
 pub const BUILD_ROUTE: &str = "/build.json";
+
+/// The current shell with `dir="rtl"` on its root element, loading the same
+/// generation's assets, so layout geometry can be read right to left.
+pub const RTL_SHELL_ROUTE: &str = "/rtl/";
 
 /// The admitted rack of an installed executable, its app members indexed once.
 #[derive(Clone)]

@@ -24,7 +24,7 @@ use tokio::sync::{Mutex, Notify, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::Discovery;
-use crate::canvas::{CanvasAnswer, CanvasAssets};
+use crate::canvas::{CanvasAnswer, CanvasAssets, RTL_SHELL_ROUTE};
 
 mod capabilities;
 mod control;
@@ -636,15 +636,16 @@ async fn app(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
 ) -> Response {
-    let renderer = uri
-        .path()
+    let route = uri.path();
+    let renderer = route
         .rsplit('/')
         .next()
         .and_then(wire::manifest::renderer::File::parse_filename);
     if socket::admit_asset_headers(&state, &headers, renderer.is_some()).is_err() {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let asset = match state.app.answer(uri.path()) {
+    let right_to_left = route == RTL_SHELL_ROUTE;
+    let asset = match state.app.answer(if right_to_left { "/" } else { route }) {
         Ok(CanvasAnswer::Asset(asset)) => asset,
         Ok(CanvasAnswer::NotFound) => return StatusCode::NOT_FOUND.into_response(),
         Ok(CanvasAnswer::Gone(served)) => return gone(&served),
@@ -657,6 +658,18 @@ async fn app(
             )
                 .into_response();
         }
+    };
+    let asset = if right_to_left {
+        let Some(directed) = asset.right_to_left() else {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "app unavailable: app.html carried no root element to direct",
+            )
+                .into_response();
+        };
+        directed
+    } else {
+        asset
     };
     if asset.gzip && !admits_gzip(&headers) {
         let mut response = StatusCode::NOT_ACCEPTABLE.into_response();
