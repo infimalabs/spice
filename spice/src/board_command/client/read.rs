@@ -607,7 +607,28 @@ pub(in crate::board_command) fn task_show_bounded(
             lines.push(collapsed_history(&statement.handle, history));
         }
     }
-    lines.push("depends:".to_owned());
+    lines.extend(edge_lines(board, task));
+    lines.extend(artifact_lines(&statement.handle, artifacts));
+    if options.context || options.history {
+        lines.extend(bounded_detail_lines(
+            board,
+            task,
+            history,
+            origin_context,
+            local.room,
+            options,
+            options.budget(),
+        )?);
+    }
+    lines.extend(phase_guidance_lines(task));
+    lines.push(next_command_line(board, task)?);
+    Ok(lines.join("\n"))
+}
+
+/// The `depends:` section, then `related:` when the task names relations.
+fn edge_lines(board: &BoardAnswer, task: &BoardTask) -> Vec<String> {
+    let statement = &task.statement.body;
+    let mut lines = vec!["depends:".to_owned()];
     // A Design waits on each construction root it released, so those rows
     // read as prerequisites beside the statement's own edges.
     let released = if wire::intent::is_open_design(statement.intent, &task.workflow.body) {
@@ -637,21 +658,15 @@ pub(in crate::board_command) fn task_show_bounded(
             lines.push(format!("{} released", render_dependency(board, dependency)));
         }
     }
-    lines.extend(artifact_lines(&statement.handle, artifacts));
-    if options.context || options.history {
-        lines.extend(bounded_detail_lines(
-            board,
-            task,
-            history,
-            origin_context,
-            local.room,
-            options,
-            options.budget(),
-        )?);
+    if !task.related.is_empty() {
+        lines.push("related:".to_owned());
+        lines.extend(
+            task.related
+                .iter()
+                .map(|related| format!("  - {} {}", related.task, related.title)),
+        );
     }
-    lines.extend(phase_guidance_lines(task));
-    lines.push(next_command_line(board, task)?);
-    Ok(lines.join("\n"))
+    lines
 }
 
 /// The `artifacts:` section: each artifact with the command that shows it.

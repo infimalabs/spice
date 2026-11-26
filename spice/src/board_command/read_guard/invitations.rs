@@ -89,7 +89,8 @@ pub(super) fn attach_invitations(
 }
 
 /// Fill the rows a named-task read carries beyond the open board: each named
-/// task's invitations and, with `history`, the record of its named tasks.
+/// task's invitations and declared relations and, with `history`, the record
+/// of its named tasks.
 pub(super) fn attach_named_rows(
     bus: &Bus,
     observed: &bus::TaskSnapshot,
@@ -106,6 +107,18 @@ pub(super) fn attach_named_rows(
         }
         named.insert(task.statement.body.born.clone());
         attach_invitations(bus, task, &answer.addresses, at)?;
+        task.related = observed
+            .facts()
+            .related_tasks(&task.statement.body.born)
+            .filter_map(|related| observed.task_heads(related))
+            .map(|heads| {
+                let statement = heads.statement().body();
+                wire::intent::RelatedTask {
+                    task: statement.handle(heads.workflow().body().phase),
+                    title: statement.title.clone(),
+                }
+            })
+            .collect();
     }
     if history {
         let record = task_detail::task_record(observed.facts(), &named);

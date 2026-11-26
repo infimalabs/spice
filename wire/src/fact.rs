@@ -360,6 +360,8 @@ vocabulary! {
     TaskSubmitted = "task::submitted" by CommandDoor;
     /// An unsettled task statement changed.
     TaskEdited = "task::edited" by CommandDoor;
+    /// One task was declared related to others.
+    TaskRelated = "task::related" by CommandDoor;
     /// A task was withdrawn from the board with a recorded reason.
     TaskDeleted = "task::deleted" by CommandDoor;
     /// The operator closed a task as completed with a recorded validation.
@@ -629,10 +631,13 @@ impl FactKind {
     /// family changes.
     #[must_use]
     pub const fn task_relation_kinds(self) -> &'static [crate::intent::TaskRelationKind] {
-        use crate::intent::TaskRelationKind::{Controller, Dependency, Lifecycle, Origin, Review};
+        use crate::intent::TaskRelationKind::{
+            Controller, Dependency, Lifecycle, Origin, Related, Review,
+        };
 
         match self {
             Self::TaskAdded => &[Origin, Dependency, Controller, Lifecycle],
+            Self::TaskRelated => &[Related],
             Self::ExecutionAuthorized => &[Dependency],
             Self::TaskPhased
             | Self::TaskDone
@@ -645,7 +650,9 @@ impl FactKind {
             | Self::TaskDeleted
             | Self::TaskClosed
             | Self::TaskConcluded
-            | Self::OutputControlled => &[Origin, Dependency, Controller, Review, Lifecycle],
+            | Self::OutputControlled => {
+                &[Origin, Dependency, Controller, Review, Lifecycle, Related]
+            }
             _ => &[],
         }
     }

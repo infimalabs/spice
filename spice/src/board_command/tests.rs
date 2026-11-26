@@ -265,6 +265,7 @@ fn adding(title: impl Into<String>, pitch: impl Into<String>) -> TaskAdd {
         origin: None,
         flow: None,
         depends: Vec::new(),
+        related: Vec::new(),
         intent: None,
         preparation: None,
         claim: false,
@@ -285,6 +286,7 @@ fn only(task: &TaskHandle) -> TaskEdit {
         priority: None,
         topic: None,
         flow: None,
+        related: Vec::new(),
     }
 }
 
@@ -1378,6 +1380,7 @@ use dependencies::{dependency_witnesses, todo_task};
 // The empty-drain readout a steered lane receives measures the parked board
 // with the same split task status reports, so both are pinned on one board.
 mod drain_readout;
+mod duplicate;
 mod task_creation_flow;
 mod wake_claim;
 // A completion that enters a continuing phase without publishing mints the

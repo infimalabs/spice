@@ -876,6 +876,8 @@ fn client_modify(
         let topic = submission::topic_argument(matches)?;
         let intent = intent_edit(matches)?;
         let flow = matches.get_one::<String>("flow").cloned();
+        let related = submission::handle_arguments(matches, "related")
+            .map_err(|error| refusal("task::related-invalid", None, error.to_string()))?;
         if title.is_none()
             && pitch.is_none()
             && description.is_none()
@@ -884,11 +886,12 @@ fn client_modify(
             && topic.is_none()
             && intent.is_none()
             && flow.is_none()
+            && related.is_empty()
         {
             return Err(refusal(
                 "task::edit-empty",
                 None,
-                "name at least one of --title, --pitch, --description, --term, --replace-term, --remove-term, --priority, --topic, --intent, --clear-intent, or --flow",
+                "name at least one of --title, --pitch, --description, --term, --replace-term, --remove-term, --priority, --topic, --intent, --clear-intent, --flow, or --related",
             ));
         }
         let mut expected = vec![statement_witness(heads)];
@@ -927,6 +930,7 @@ fn client_modify(
                 priority,
                 topic,
                 flow,
+                related,
             })
             .expect("typed intent encodes"),
         ))

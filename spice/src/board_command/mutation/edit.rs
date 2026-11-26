@@ -51,12 +51,110 @@ pub(in crate::board_command) fn task_edit(
             "the OOPS Design keeps its intent and topic; amend its text instead",
         );
     }
+    let related = match super::related::admitted_relations(bus, entry.born(), &edit.related) {
+        Ok(related) => related,
+        Err(outcome) => return outcome,
+    };
+    if names_only_relations(edit) {
+        return publish_relations(bus, command, edit, entry, related, &snapshot);
+    }
     let (statement, publication) =
         match prepare_correction(bus, &snapshot, entry, command, edit, repository) {
             Ok(prepared) => prepared,
             Err(outcome) => return outcome,
         };
-    publish_correction(bus, command, edit, statement, publication, &snapshot)
+    publish_correction(
+        bus,
+        command,
+        edit,
+        statement,
+        publication,
+        related,
+        &snapshot,
+    )
+}
+
+/// Whether `edit` declares relations and moves nothing else.
+fn names_only_relations(edit: &TaskEdit) -> bool {
+    let TaskEdit {
+        task: _,
+        title,
+        pitch,
+        description,
+        term,
+        requirements,
+        intent,
+        priority,
+        topic,
+        flow,
+        related,
+    } = edit;
+    !related.is_empty()
+        && title.is_none()
+        && pitch.is_none()
+        && description.is_none()
+        && term.is_none()
+        && requirements.is_none()
+        && intent.is_none()
+        && priority.is_none()
+        && topic.is_none()
+        && flow.is_none()
+}
+
+/// Record new relations alone, leaving the statement at its revision.
+fn publish_relations(
+    bus: &Bus,
+    command: &wire::AdmittedCommand,
+    edit: &TaskEdit,
+    entry: &Entry,
+    related: Vec<wire::TaskStamp>,
+    snapshot: &ValidatedSnapshot,
+) -> Outcome<CommandAnswer> {
+    if related.is_empty() {
+        return refusal(
+            "task::related-unchanged",
+            Some(entry.handle().to_string()),
+            "every named task is already related; read task show for its relations",
+        );
+    }
+    let at = match current_instant() {
+        Ok(at) => at,
+        Err(outcome) => return outcome,
+    };
+    let origin = match task_origin(entry.born()) {
+        Ok(origin) => origin,
+        Err(outcome) => return outcome,
+    };
+    let mut write = JournalWrite::new(command.actor().clone(), origin, at, Producer::CommandDoor);
+    guard(&mut write, command.expected().to_vec());
+    if let Err(outcome) =
+        super::related::append_relations(&mut write, entry.born(), related, FactCause::Root)
+    {
+        return outcome;
+    }
+    let answer = wire::intent::TaskAnswer {
+        diagnostic: None,
+        duplicates: Vec::new(),
+        ownership: Some(snapshot.ownership(entry)),
+        placement: None,
+        created: Default::default(),
+        taste: None,
+        completion_contract: None,
+        task: entry.handle().clone(),
+        status: "related".to_owned(),
+        completion: None,
+        claim: None,
+        closed: Vec::new(),
+        next: next_action(snapshot, entry),
+    };
+    if let Err(error) = write.command_result(
+        request(command, edit.clone()),
+        command.epoch(),
+        answer.clone(),
+    ) {
+        return store_fault("task::edit-receipt", error.to_string());
+    }
+    committed(bus, write, CommandAnswer::Task(Box::new(answer)))
 }
 
 fn prepare_correction(
@@ -416,6 +514,7 @@ fn publish_correction(
     edit: &TaskEdit,
     statement: TaskHead,
     publication: CorrectionPublication,
+    related: Vec<wire::TaskStamp>,
     snapshot: &ValidatedSnapshot,
 ) -> Outcome<CommandAnswer> {
     let CorrectionPublication {
@@ -451,6 +550,14 @@ fn publish_correction(
         Ok(fact) => fact,
         Err(error) => return store_fault("task::edit-build", error.to_string()),
     };
+    if let Err(outcome) = super::related::append_relations(
+        &mut write,
+        &statement.born,
+        related,
+        FactCause::Pending(edited),
+    ) {
+        return outcome;
+    }
     if let Some(route) = route {
         let RoutePublication {
             workflow,
@@ -491,6 +598,7 @@ fn publish_correction(
     requirement_change.write_lease(&mut write, edited);
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(ownership),
         placement: None,
         created: Default::default(),

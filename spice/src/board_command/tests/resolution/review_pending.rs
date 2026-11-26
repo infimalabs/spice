@@ -352,6 +352,9 @@ fn manually_linked_review_origin_work_uses_the_parent_review() {
     ] {
         let born = stamp(name);
         let mut add = correction_add("Manual correction", flow);
+        // Unlike the reviewed target's fixture statement, so it is no duplicate.
+        add.pitch = "Reviewers can then land the requested repair apart.".to_owned();
+        add.term = vec!["the requested repair lands".to_owned()];
         add.origin = origin;
         assert_committed(issue(
             &review.bus,

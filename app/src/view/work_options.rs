@@ -18,14 +18,16 @@ pub(crate) enum WorkLens {
     Origin,
     Review,
     Lifecycle,
+    Related,
 }
 
 impl WorkLens {
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::Dependency,
         Self::Origin,
         Self::Review,
         Self::Lifecycle,
+        Self::Related,
     ];
 
     #[cfg(any(target_arch = "wasm32", rust_analyzer))]
@@ -36,6 +38,7 @@ impl WorkLens {
             Self::Origin => TaskRelationKind::Origin,
             Self::Review => TaskRelationKind::Review,
             Self::Lifecycle => TaskRelationKind::Lifecycle,
+            Self::Related => TaskRelationKind::Related,
         }
     }
 
@@ -47,6 +50,7 @@ impl WorkLens {
             Self::Origin => "Lineage",
             Self::Review => "Reviews",
             Self::Lifecycle => "Lifecycle",
+            Self::Related => "Related",
         }
     }
 
@@ -58,6 +62,7 @@ impl WorkLens {
             Self::Origin => "origin",
             Self::Review => "review",
             Self::Lifecycle => "lifecycle",
+            Self::Related => "related",
         }
     }
 

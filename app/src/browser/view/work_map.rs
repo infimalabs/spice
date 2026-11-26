@@ -37,6 +37,9 @@ impl WorkLens {
             Self::Lifecycle => {
                 "Historical task transitions remain ordered by durable fact position."
             }
+            Self::Related => {
+                "Declared relations join tasks without dependency, hold, or completion credit."
+            }
         }
     }
 }
@@ -304,6 +307,7 @@ fn render_controls(state: &WorkMapState, truncation: Option<&TaskRelationTruncat
                     {lens_button(state, WorkLens::Origin)}
                     {lens_button(state, WorkLens::Review)}
                     {lens_button(state, WorkLens::Lifecycle)}
+                    {lens_button(state, WorkLens::Related)}
                 </section>
                 if state.lens == WorkLens::Dependency {
                     <div class="work-map-control-group work-map-direction app-control-rail" aria-label="Dependency direction">
@@ -541,7 +545,7 @@ fn settled_tone(deleted: bool) -> TaskTone {
 /// listed; task-to-task relationship lenses have none and list nothing.
 fn render_relationship_list(presentation: &lens::Presentation, active_lens: WorkLens) -> Html {
     let (title, note) = match active_lens {
-        WorkLens::Dependency => return Html::default(),
+        WorkLens::Dependency | WorkLens::Related => return Html::default(),
         WorkLens::Origin => (
             "Lineage evidence",
             "ACK and origin identities stay explicit",

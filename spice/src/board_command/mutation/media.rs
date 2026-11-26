@@ -50,6 +50,7 @@ pub(in crate::board_command) fn task_media(
         position: ReplyPosition::Snapshot(snapshot.cursor),
         body: CommandAnswer::Task(Box::new(wire::intent::TaskAnswer {
             diagnostic: None,
+            duplicates: Vec::new(),
             ownership: Some(snapshot.ownership(entry)),
             placement: None,
             created: Default::default(),

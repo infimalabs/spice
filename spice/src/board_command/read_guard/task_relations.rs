@@ -135,7 +135,7 @@ pub(in crate::board_command) fn read_task_relations(
         if !walk.expanded.insert(task.clone()) {
             continue;
         }
-        let candidates = candidates(
+        let mut candidates = candidates(
             &task,
             &relations,
             &tasks,
@@ -144,6 +144,9 @@ pub(in crate::board_command) fn read_task_relations(
             &review_records,
             &lifecycle,
         );
+        if relations.contains(&TaskRelationKind::Related) {
+            add_related_candidates(&mut candidates, &task, &tasks, observed.facts());
+        }
         walk.admit(depth, candidates, request);
     }
     if let Err(outcome) = attach_origin_requests(bus, &mut walk.nodes) {
@@ -338,6 +341,15 @@ fn relationship_tasks(
         if relations.contains(&TaskRelationKind::Controller) {
             add_controller_neighbors(&mut neighbors, statement, &tasks, &reverse.controllers);
         }
+        if relations.contains(&TaskRelationKind::Related) {
+            neighbors.extend(
+                observed
+                    .facts()
+                    .related_tasks(&task)
+                    .filter(|related| tasks.contains_key(*related))
+                    .cloned(),
+            );
+        }
         for neighbor in neighbors {
             selected.insert(neighbor.clone());
             if current_depth < depth {
@@ -529,6 +541,36 @@ fn candidates(
         }
     }
     candidates
+}
+
+/// One edge per declared relation of `task`. The relation is symmetric, so
+/// its edge runs from the earlier-born task whichever end the walk expands.
+fn add_related_candidates(
+    candidates: &mut Vec<Candidate>,
+    task: &TaskStamp,
+    tasks: &BTreeMap<TaskStamp, &BoardTask>,
+    facts: &bus::TaskFacts,
+) {
+    let source = TaskRelationNodeRef::Task { task: task.clone() };
+    for related in facts.related_tasks(task) {
+        let Some(row) = tasks.get(related) else {
+            continue;
+        };
+        let target = task_node(row);
+        let (from, to) = if task < related {
+            (source.clone(), target.identity())
+        } else {
+            (target.identity(), source.clone())
+        };
+        candidates.push(Candidate {
+            edge: TaskRelationEdge {
+                relation: TaskRelationKind::Related,
+                from,
+                to,
+            },
+            target,
+        });
+    }
 }
 
 fn add_controller_candidates(

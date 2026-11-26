@@ -685,14 +685,25 @@ fn default_reads_show_a_draft_only_to_the_operator_and_its_origin_thread() {
         None,
         &[],
     );
-    let lane_draft = add_draft(
+    // Distinct work: an independent near-copy of the operator's draft would
+    // be refused as a duplicate.
+    let lane_born = stamp("DRAFT-lane0001");
+    assert_committed(issue(
         &bus,
         epoch,
         Actor::Lane(seats[0].lane),
-        "DRAFT-lane0001",
-        None,
-        &[],
-    );
+        CommandKind::TaskAdd,
+        vec![Witness::Absence {
+            task: lane_born.clone(),
+        }],
+        &TaskAdd {
+            title: "Survey release notes for renamed flags".to_owned(),
+            pitch: "Maintainers can then retire stale aliases in one pass.".to_owned(),
+            description: None,
+            ..draft_add("DRAFT-lane0001", None, &[])
+        },
+    ));
+    let lane_draft = draft_handle(&lane_born);
 
     let operator = board(&bus, epoch, Actor::TEST_PRINCIPAL);
     let author = board(&bus, epoch, Actor::Lane(seats[0].lane));

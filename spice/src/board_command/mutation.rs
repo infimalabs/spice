@@ -3,6 +3,7 @@ use super::*;
 pub(super) mod activation;
 mod claim;
 mod deferral;
+mod duplicate;
 mod edit;
 mod file;
 mod invite;
@@ -10,6 +11,7 @@ mod join;
 mod media;
 mod oops;
 mod placement;
+mod related;
 mod requirements;
 mod review_flow;
 mod settlement;
@@ -504,6 +506,10 @@ fn create_task(
     {
         return outcome;
     }
+    let duplicates = match duplicate::screen(bus, command, &prepared.statement, &add.related) {
+        Ok(screen) => screen,
+        Err(outcome) => return outcome,
+    };
     let draft = add.draft || prepared.statement.preparation.is_some();
     if draft && add.claim {
         return refusal(
@@ -550,6 +556,7 @@ fn create_task(
             post,
             dependency_witnesses,
             claim: added_claim,
+            duplicates,
         },
     )
 }
@@ -639,12 +646,13 @@ pub(super) fn task_review_roots(review: &TaskReview) -> Vec<wire::TaskStamp> {
 
 /// One creation admitted against its snapshot: the prepared heads, the entry
 /// the task stands as once born, the dependency witnesses that guard the
-/// write, and any claim taken in the same transaction.
+/// write, any claim taken in the same transaction, and its duplicate screen.
 struct AdmittedCreation<'a> {
     prepared: PreparedTask,
     post: Entry,
     dependency_witnesses: Vec<Witness>,
     claim: Option<PreparedClaim<'a>>,
+    duplicates: duplicate::DuplicateScreen,
 }
 
 fn commit_prepared_task<B>(
@@ -662,6 +670,7 @@ where
         post,
         dependency_witnesses,
         claim: added_claim,
+        duplicates,
     } = creation;
     let origin_context = if added_claim.is_some() {
         match task_steering_origin_output(bus, &snapshot.facts, &post) {
@@ -700,6 +709,7 @@ where
     expected.extend(dependency_witnesses);
     guard(&mut write, expected);
     prepared.guard(&mut write);
+    duplicates.guard(&mut write);
     if let Some(claim) = &added_claim {
         claim.guard(&mut write, snapshot, command);
     } else {
@@ -708,10 +718,19 @@ where
     let task = prepared.task.clone();
     let diagnostic = prepared.diagnostic();
     let status = prepared.workflow.phase.to_string();
-    let placement = match append_prepared_task(&mut write, prepared, FactCause::Root) {
-        Ok((_, placement)) => placement,
+    let born = prepared.born.clone();
+    let (birth, placement) = match append_prepared_task(&mut write, prepared, FactCause::Root) {
+        Ok(appended) => appended,
         Err(outcome) => return outcome,
     };
+    if let Err(outcome) = related::append_relations(
+        &mut write,
+        &born,
+        duplicates.related,
+        FactCause::Pending(birth),
+    ) {
+        return outcome;
+    }
     if let Some(claim) = added_claim
         && let Err(outcome) = claim.append(&mut write, command, &post)
     {
@@ -719,6 +738,7 @@ where
     }
     let answer = wire::intent::TaskAnswer {
         diagnostic,
+        duplicates: duplicates.warnings,
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created: Default::default(),
@@ -1119,6 +1139,7 @@ pub(super) fn task_note(
     }
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(entry)),
         placement: None,
         created: Default::default(),
@@ -1328,6 +1349,7 @@ fn commit_dependency_edit(
     });
     let answer = wire::intent::TaskAnswer {
         diagnostic: None,
+        duplicates: Vec::new(),
         ownership: Some(snapshot.ownership(entry)),
         placement: None,
         created: Default::default(),

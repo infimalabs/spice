@@ -279,7 +279,7 @@ pub(crate) enum ClientAction {
     },
     /// Create or file an operator Draft, or revise a task statement.
     Draft {
-        request: DraftRequest,
+        request: Box<DraftRequest>,
         respond: TaskResponse,
     },
     /// Conclude one open Design done or collapsed at the heads its view was

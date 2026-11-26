@@ -432,6 +432,7 @@ fn requirement_edits_bind_statement_and_claim_witnesses_to_the_same_task() {
         priority: None,
         topic: None,
         flow: None,
+        related: Vec::new(),
     };
     let command = |expected| Command {
         v: WireVersion::CURRENT,

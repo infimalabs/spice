@@ -9,6 +9,7 @@ pub mod allocate;
 pub mod claim;
 pub mod config;
 pub mod control;
+pub mod duplicate;
 pub mod graph;
 pub mod handout;
 #[cfg(not(target_arch = "wasm32"))]

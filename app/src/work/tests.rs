@@ -62,6 +62,7 @@ pub(crate) fn task(value: i64, topic: &str) -> BoardTask {
         claims: Vec::new(),
         original_claimed_at: None,
         invitations: Vec::new(),
+        related: Vec::new(),
         explicit_release: false,
         design_cycle: wire::rooms::DesignCycleFacts::default(),
         collapse_reason: None,

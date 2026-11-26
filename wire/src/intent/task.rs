@@ -61,6 +61,10 @@ pub struct TaskAdd {
     /// Handles this task must follow.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends: Vec<TaskHandle>,
+    /// Existing tasks this one is declared related to, without dependency,
+    /// requirement, allocation hold, or completion credit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<TaskHandle>,
     /// Declared Plan or Design intent the task opens with.
     #[serde(
         default,
@@ -294,6 +298,9 @@ pub struct TaskEdit {
         deserialize_with = "crate::optional::present"
     )]
     pub flow: Option<String>,
+    /// Existing tasks this one is newly declared related to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<TaskHandle>,
 }
 
 /// One explicit task-requirement mutation.
@@ -863,6 +870,10 @@ pub struct TaskAnswer {
         deserialize_with = "crate::optional::present"
     )]
     pub diagnostic: Option<Box<str>>,
+    /// Independent siblings older than the relation window whose statement
+    /// matched the created one, strongest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicates: Vec<DuplicateWarning>,
 }
 
 /// One durable long-running task completion handoff.
@@ -1133,6 +1144,27 @@ pub struct ClaimWarning {
     pub lane: CanonicalUuid,
     /// Rare exact identifiers both statements name, then their strongest
     /// shared weighted terms.
+    pub surface: Vec<String>,
+}
+
+/// One independent sibling whose statement repeats a task being created.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DuplicateWarning {
+    /// The sibling task.
+    pub task: TaskHandle,
+    /// The sibling's title.
+    pub title: String,
+    /// Actor that created the sibling, when recorded.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub creator: Option<Actor>,
+    /// Cosine between the two statements, to two decimals.
+    pub cosine: Box<str>,
+    /// The strongest weighted terms both statements share.
     pub surface: Vec<String>,
 }
 

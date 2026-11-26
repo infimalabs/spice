@@ -587,6 +587,7 @@ fn imported_add(
                 .join(","),
         ),
         depends,
+        related: Vec::new(),
         intent: task.intent,
         preparation,
         claim: false,

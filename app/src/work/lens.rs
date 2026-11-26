@@ -882,6 +882,7 @@ const fn edge_label(relation: TaskRelationKind) -> &'static str {
         TaskRelationKind::Review => "review",
         TaskRelationKind::Lifecycle => "transition",
         TaskRelationKind::Claim => "held by",
+        TaskRelationKind::Related => "related",
     }
 }
 

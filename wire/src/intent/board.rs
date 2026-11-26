@@ -460,6 +460,10 @@ pub struct BoardTask {
     /// on reads that name the task; empty on whole-board reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invitations: Vec<crate::TaskInvitation>,
+    /// Every task joined to this one by a declared unlabeled relation, in
+    /// identity order, on reads that name the task; empty on whole-board reads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<RelatedTask>,
     /// Whether the current freed claim came from an explicit release command.
     #[serde(default, skip_serializing_if = "is_false")]
     pub explicit_release: bool,
@@ -508,6 +512,15 @@ pub struct BoardTask {
         deserialize_with = "crate::optional::present"
     )]
     pub parked_commits: Option<crate::body::TaskParkedCommits>,
+}
+
+/// One task a declared relation joins to another. The relation carries no
+/// dependency, requirement, hold, or completion credit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelatedTask {
+    pub task: TaskHandle,
+    pub title: String,
 }
 
 /// Current heads needed to witness one `task next` decision.
@@ -717,6 +730,7 @@ impl BoardTask {
             claims,
             original_claimed_at: None,
             invitations: Vec::new(),
+            related: Vec::new(),
             explicit_release: false,
             design_cycle: crate::rooms::DesignCycleFacts::default(),
             design_coverage: None,

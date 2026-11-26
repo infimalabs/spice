@@ -757,6 +757,7 @@ fn command_receipts_refuse_body_and_answer_shapes_from_another_binding() {
                     origin: None,
                     flow: None,
                     depends: Vec::new(),
+                    related: Vec::new(),
                     claim: false,
                     draft: false,
                 },
@@ -1072,6 +1073,7 @@ fn initial_write(command_id: CanonicalUuid, observed: Arc<Mutex<Vec<ThreadId>>>)
                     origin: Some(origin),
                     flow: None,
                     depends: Vec::new(),
+                    related: Vec::new(),
                     claim: false,
                     draft: false,
                 },
@@ -1339,6 +1341,7 @@ fn result(task: &TaskHandle, status: &str) -> intent::TaskAnswer {
         closed: Vec::new(),
         next: None,
         diagnostic: None,
+        duplicates: Vec::new(),
     }
 }
 

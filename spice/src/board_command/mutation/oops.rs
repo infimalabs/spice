@@ -253,6 +253,7 @@ fn prepare_oops_design(
         origin: add.origin.clone(),
         flow: Some("design".to_owned()),
         depends: Vec::new(),
+        related: Vec::new(),
         claim: false,
         draft: false,
     };
@@ -293,6 +294,7 @@ fn prepare_oops_report(
         origin: add.origin.clone(),
         flow: Some("plan,review".to_owned()),
         depends: Vec::new(),
+        related: Vec::new(),
         claim: false,
         draft: true,
     };
@@ -345,6 +347,10 @@ fn commit_oops_intake(
     generation: wire::OopsGenerationHead,
 ) -> Outcome<CommandAnswer> {
     let OopsRows { design, report } = rows;
+    let duplicates = match super::duplicate::screen(bus, command, &report.statement, &[]) {
+        Ok(screen) => screen,
+        Err(outcome) => return outcome,
+    };
     let post = prepared_entry(&report);
     let next = match report.diagnostic() {
         Some(_) if report.placement.is_some() => {
@@ -361,6 +367,7 @@ fn commit_oops_intake(
     guard(&mut write, command.expected().to_vec());
     snapshot.guard_ownership(&mut write);
     report.guard(&mut write);
+    duplicates.guard(&mut write);
     if let Some(design) = &design {
         design.guard(&mut write);
     }
@@ -413,6 +420,7 @@ fn commit_oops_intake(
     };
     let answer = wire::intent::TaskAnswer {
         diagnostic,
+        duplicates: duplicates.warnings,
         ownership: Some(snapshot.ownership(&post)),
         placement,
         created,

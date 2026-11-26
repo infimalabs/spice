@@ -321,6 +321,7 @@ fn board_task(
         claims: Vec::new(),
         original_claimed_at: None,
         invitations: Vec::new(),
+        related: Vec::new(),
         explicit_release: false,
         design_cycle: wire::rooms::DesignCycleFacts::default(),
         design_coverage: None,

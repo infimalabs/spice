@@ -224,6 +224,7 @@ fn statement_edit(
             priority: None,
             topic: None,
             flow: None,
+            related: Vec::new(),
         })
         .expect("typed intent encodes"),
     )
