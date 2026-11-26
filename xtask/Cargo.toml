@@ -23,6 +23,7 @@ sill = { path = "../sill" }
 spice = { path = "../spice" }
 toml = "1.1.4"
 wire = { path = "../wire" }
+zip = { version = "9.3", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 signal-hook = "0.3.18"

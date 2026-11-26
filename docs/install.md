@@ -221,6 +221,27 @@ then this platform's executable, payload, proof receipt, and symbols against
 the identities and modes the index binds, and refuses a package whose version
 is not newer than its own:
 
+Each hosted release publishes one deterministic STORE ZIP per supported target:
+
+- `spice-aarch64-apple-darwin-package.zip`
+- `spice-x86_64-unknown-linux-musl-package.zip`
+- `spice-x86_64-pc-windows-msvc-package.zip`
+
+Download only the ZIP matching the current platform. Each ZIP contains the
+common sealed package index and only that platform's executable, payload,
+proof receipt, and symbols. Verify it against the release's `SHA256SUMS`, then
+extract it before previewing:
+
+```sh
+PACKAGE_ARCHIVE=spice-aarch64-apple-darwin-package.zip # select this platform
+mkdir spice-release-package
+unzip "$PACKAGE_ARCHIVE" -d spice-release-package
+```
+
+On Windows, use
+`Expand-Archive spice-x86_64-pc-windows-msvc-package.zip
+spice-release-package`; the extracted root has the same package layout.
+
 ```sh
 "$SPICE_BIN" install --package /absolute/path/to/spice-release-package || exit
 "$SPICE_BIN" install --package /absolute/path/to/spice-release-package --apply=DIGEST_PRINTED_BY_PREVIEW || exit

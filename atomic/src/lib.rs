@@ -10,7 +10,7 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -261,6 +261,15 @@ impl Write for StagedWrite {
             .as_mut()
             .expect("a staged write always has an open file")
             .flush()
+    }
+}
+
+impl Seek for StagedWrite {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.file
+            .as_mut()
+            .expect("a staged write always has an open file")
+            .seek(position)
     }
 }
 

@@ -10,6 +10,7 @@ use crate::windows_hosted::{
     landed_commit,
 };
 
+mod package;
 mod plan;
 mod provider;
 mod session;
@@ -38,8 +39,9 @@ impl PublishRequest {
     }
 }
 
-/// Create or resume all hosted native stages, publish their exact executables,
-/// and read the public release back from fresh storage.
+/// Create or resume all hosted native stages, publish their exact executables
+/// and target-specific sealed packages, then read the public release back from
+/// fresh storage.
 ///
 /// A new request reads `main` once and pins that commit. While it is pending,
 /// an invocation must name the pinned commit to resume it or abandon it; a
@@ -119,6 +121,8 @@ fn current_worktree() -> Result<PathBuf, PublishError> {
 pub enum PublishError {
     Hosted(crate::HostedReleaseError),
     HostedClient(crate::WindowsHostedError),
+    Package(proof::PackageError),
+    Archive(zip::result::ZipError),
     Refused(String),
     Io {
         path: PathBuf,
@@ -146,6 +150,8 @@ impl fmt::Display for PublishError {
         match self {
             Self::Hosted(error) => error.fmt(formatter),
             Self::HostedClient(error) => error.fmt(formatter),
+            Self::Package(error) => error.fmt(formatter),
+            Self::Archive(error) => error.fmt(formatter),
             Self::Refused(detail) => detail.fmt(formatter),
             Self::Io { path, source } => write!(formatter, "{}: {source}", path.display()),
             Self::Atomic { path, source } => write!(formatter, "{}: {source}", path.display()),
@@ -164,6 +170,8 @@ impl Error for PublishError {
         match self {
             Self::Hosted(error) => Some(error),
             Self::HostedClient(error) => Some(error),
+            Self::Package(error) => Some(error),
+            Self::Archive(error) => Some(error),
             Self::Io { source, .. } | Self::Launch { source, .. } | Self::Output(source) => {
                 Some(source)
             }
@@ -183,5 +191,17 @@ impl From<crate::HostedReleaseError> for PublishError {
 impl From<crate::WindowsHostedError> for PublishError {
     fn from(error: crate::WindowsHostedError) -> Self {
         Self::HostedClient(error)
+    }
+}
+
+impl From<proof::PackageError> for PublishError {
+    fn from(error: proof::PackageError) -> Self {
+        Self::Package(error)
+    }
+}
+
+impl From<zip::result::ZipError> for PublishError {
+    fn from(error: zip::result::ZipError) -> Self {
+        Self::Archive(error)
     }
 }

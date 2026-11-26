@@ -10,6 +10,7 @@ use wire::manifest::{ReleaseTarget, TARGET_PAYLOAD_VERSION, TargetPayload};
 use wire::{Digest, Domain};
 
 use super::PublishError;
+use super::package;
 
 pub(super) const CHECKSUMS: &str = "SHA256SUMS";
 /// The admitted plan a request persists before any tag or release mutation.
@@ -77,6 +78,7 @@ impl PublicationPlan {
         let inputs = release_inputs.manifest();
         let build = spice::version::build_info(release_inputs.tree(), dist::Build::Staged)
             .map_err(PublishError::Refused)?;
+        let version = build.product.clone();
         let source = build.source.ok_or_else(|| {
             PublishError::Refused("release source has no immutable commit".into())
         })?;
@@ -98,9 +100,16 @@ impl PublicationPlan {
             path: assets_root.clone(),
             source,
         })?;
-        let mut assets = Vec::with_capacity(TARGETS.len() + 1);
+        let mut assets = Vec::with_capacity(TARGETS.len() * 2 + 1);
         for target in TARGETS {
             assets.push(capture_target(worktree, &assets_root, inputs, target)?);
+        }
+        for package in package::capture(worktree, &assets_root, &version, notes)? {
+            assets.push(PublicationAsset {
+                name: package.name,
+                bytes: package.bytes,
+                sha256: package.sha256,
+            });
         }
         let checksums = checksum_document(&assets);
         publish(&assets_root.join(CHECKSUMS), checksums.as_bytes())?;
@@ -109,7 +118,6 @@ impl PublicationPlan {
             bytes: checksums.len() as u64,
             sha256: sha256(checksums.as_bytes()),
         });
-        let version = build.product;
         let tag = format!("v{version}");
         Ok(Self {
             schema: SCHEMA,
@@ -127,11 +135,15 @@ impl PublicationPlan {
                 "publication plan schema or tag moved".into(),
             ));
         }
-        if self.assets.len() != TARGETS.len() + 1
+        if self.assets.len() != TARGETS.len() * 2 + 1
             || TARGETS
                 .iter()
                 .zip(&self.assets)
                 .any(|(target, asset)| asset.name != asset_name(*target))
+            || TARGETS
+                .iter()
+                .zip(&self.assets[TARGETS.len()..TARGETS.len() * 2])
+                .any(|(target, asset)| asset.name != package::asset_name(*target))
             || self
                 .assets
                 .last()
@@ -335,9 +347,24 @@ mod tests {
                     sha256: "3".repeat(64),
                 },
                 PublicationAsset {
-                    name: CHECKSUMS.to_owned(),
+                    name: package::asset_name(ReleaseTarget::Aarch64AppleDarwin),
                     bytes: 6,
                     sha256: "4".repeat(64),
+                },
+                PublicationAsset {
+                    name: package::asset_name(ReleaseTarget::X86_64UnknownLinuxMusl),
+                    bytes: 7,
+                    sha256: "5".repeat(64),
+                },
+                PublicationAsset {
+                    name: package::asset_name(ReleaseTarget::X86_64PcWindowsMsvc),
+                    bytes: 8,
+                    sha256: "6".repeat(64),
+                },
+                PublicationAsset {
+                    name: CHECKSUMS.to_owned(),
+                    bytes: 9,
+                    sha256: "7".repeat(64),
                 },
             ],
         }
@@ -380,6 +407,17 @@ mod tests {
             &source_commit,
             &archive,
         ));
+    }
+
+    #[test]
+    fn publication_plan_requires_the_complete_sealed_package() {
+        let mut missing = plan();
+        missing.assets.remove(TARGETS.len());
+        assert!(matches!(missing.admit(), Err(PublishError::Refused(_))));
+
+        let mut renamed = plan();
+        renamed.assets[TARGETS.len()].name = "another-package.zip".to_owned();
+        assert!(matches!(renamed.admit(), Err(PublishError::Refused(_))));
     }
 
     #[test]
