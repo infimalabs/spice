@@ -242,10 +242,12 @@ acceptance-bearing output the operator decides. The construction reference creat
 dependency, and there is no separate OOPS lifecycle state or action.
 
 The global composer is the left companion to the right Spice sidebar. Its
-operator-avatar launcher is a tinted horn tab matching **Draft** and **Help**;
-a small badge carries the personal inbox's open count. Beside it, the
-horizontal **Ask**, **Task**, **Plan**, and **Design** selector carries the
-current destination accent without a strip-wide divider.
+circular operator-avatar launcher exactly mirrors the Spice button's size and
+browser-edge position. The operator's face fills it inside a hairline rim,
+without an initials band; a small badge carries the personal inbox's open count.
+Beside it, **Ask**, **Task**, **Plan**, and **Design** hang as tabs matching
+**Draft** and **Help**, the current destination wearing its accent, without a
+strip-wide divider.
 
 Choosing the launcher, a destination, its shortcut, or a quote expands that
 same composer into a full-height sheet: writing, the To row with Send/Create,

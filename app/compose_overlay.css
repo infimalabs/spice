@@ -184,52 +184,34 @@
   padding: var(--app-compose-tab-block) 0 var(--app-compose-gap);
   border: 0;
 }
-/* The strip: a horizontal destination track between the operator tab and the
-   utility tabs. Choosing a destination opens the sheet on it. */
+/* The strip: a horizontal destination track between the operator launcher and
+   the utility tabs. Choosing a destination opens the sheet on it. */
 .app-compose-modes-row {
   position: absolute;
   z-index: 3;
   inset-block-start: 0;
   inset-inline-start: var(--app-compose-launcher-inline);
   display: grid;
-  align-items: center;
   box-sizing: border-box;
   width: calc(100% - var(--app-compose-launcher-inline) - var(--app-compose-utility-width));
   height: var(--app-compose-tab-block);
   padding: 0 6px;
 }
-.app-segment-slider.app-compose-modes {
-  --app-segment-count: 4;
-  block-size: var(--team-control-item-height);
-  max-inline-size: none;
-  border-radius: calc(var(--team-control-item-height) / 2);
-}
-.app-compose-modes > .app-choice-chip {
-  min-height: 0;
-  padding: 0 6px;
-  font: 600 var(--app-type-control)/1 var(--app-font, ui-sans-serif, system-ui, sans-serif);
-  cursor: pointer;
-}
-/* The operator launcher uses the same downward horn-tab material as Draft and
-   Help. Its face keeps the current destination accent while the avatar names
-   the human side and the small badge carries the personal inbox count. */
+/* The human-side launcher is the Spice launcher's exact left-hand mirror.
+   The operator's face names the destination and fills the whole button
+   inside a hairline rim: at this size every pixel goes to the image. The
+   small badge carries the personal inbox count without covering the face. */
 .app-inbox-button {
-  --app-horn-tab-tint: var(--app-base-accent);
   position: absolute;
   z-index: calc(var(--app-closed-edge-layer) + 2);
-  inset: 0 auto auto 0;
-  justify-content: center;
-  width: var(--app-compose-launcher-inline);
-  height: var(--app-compose-tab-block);
-  min-height: 0;
-  padding: 0;
-  border-color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-line));
-  color: color-mix(in srgb, var(--app-base-accent) 55%, var(--app-base-ink));
+  inset-block-start: var(--app-spice-anchor-inset-block);
+  inset-inline-start: var(--app-spice-anchor-inset-inline);
+  border-width: 1px;
 }
 .app-inbox-button > .operator-avatar {
   flex-basis: auto;
-  width: calc(var(--app-compose-tab-block) - 6px);
-  height: calc(var(--app-compose-tab-block) - 6px);
+  width: 100%;
+  height: 100%;
   border: 0;
   font-size: var(--app-type-control);
 }
@@ -240,9 +222,9 @@
   pointer-events: none;
 }
 /* Utility tabs hang from the strip's inline end, one layer above its rail.
-   Only the outside lower corners round. Draft wears the sheet's accent when
-   engaged but has no press in Ask; Help stays live while admission seals the
-   composition. */
+   Only the outside lower corners round. A pressed destination, and Draft when
+   engaged, wear the sheet's accent; Draft has no press in Ask, and Help stays
+   live while admission seals the composition. */
 .app-compose-dialog .app-compose-utility-tabs {
   position: absolute;
   z-index: calc(var(--app-closed-edge-layer) + 1);
@@ -253,7 +235,7 @@
   width: var(--app-compose-utility-width);
   height: var(--app-compose-tab-block);
 }
-.app-compose-dialog .app-compose-utility-tab {
+.app-compose-dialog :is(.app-compose-utility-tab, .app-compose-mode) {
   flex: 1 1 0;
   justify-content: center;
   min-width: 0;
@@ -267,7 +249,12 @@
 }
 .app-compose-dialog .app-compose-utility-tab:first-child { border-end-end-radius: var(--app-radius-card); }
 .app-compose-dialog .app-compose-utility-tab:last-child { border-end-start-radius: var(--app-radius-card); }
-.app-compose-dialog .app-compose-draft[aria-pressed="true"] {
+/* Destinations hang from the strip as one fused run of the same downward
+   horn tabs as Draft and Help; only the run's outside lower corners round. */
+.app-compose-modes { display: flex; min-width: 0; }
+.app-compose-dialog .app-compose-mode:first-child { border-end-start-radius: var(--app-radius-card); }
+.app-compose-dialog .app-compose-mode:last-child { border-end-end-radius: var(--app-radius-card); }
+.app-compose-dialog :is(.app-compose-mode, .app-compose-draft)[aria-pressed="true"] {
   border-color: var(--app-base-accent);
   background: color-mix(in srgb, var(--app-base-accent) 16%, var(--app-base-control));
   color: var(--app-base-ink);
@@ -281,7 +268,7 @@
 }
 .app-compose-dialog[data-admission-state="pending"] .app-compose-draft { cursor: progress; }
 .app-compose-dialog[data-admission-state="pending"] .app-help-trigger { cursor: pointer; }
-.app-compose-dialog .app-compose-utility-tab:focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
+.app-compose-dialog :is(.app-compose-utility-tab, .app-compose-mode):focus-visible { outline: var(--app-focus-ring-width) solid var(--focus); outline-offset: -2px; }
 /* The action, Send or Create, uses the app's compact button geometry. It rests
    muted on its glass face; once a press would submit something it takes the
    team SEND's ink and backlight. */
@@ -454,14 +441,13 @@
    destination; opening restores the whole track, Draft, and Help. */
 @media (max-width: 560px) {
   .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
-  .app-compose-modes > .app-choice-chip { padding-inline: 3px; font-size: var(--app-type-compact); }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
   .app-compose-dialog[data-expanded="false"] .app-compose-modes-row {
     width: calc(var(--app-compose-anchor-width) - var(--app-compose-launcher-inline));
   }
-  .app-compose-dialog[data-expanded="false"] .app-segment-slider.app-compose-modes { --app-segment-count: 1; --app-segment-stop: 0; }
-  .app-compose-dialog[data-expanded="false"] .app-compose-modes > .app-choice-chip:not([aria-pressed="true"]) { display: none; }
+  .app-compose-dialog[data-expanded="false"] .app-compose-mode:not([aria-pressed="true"]) { display: none; }
+  .app-compose-dialog[data-expanded="false"] .app-compose-mode[aria-pressed="true"] { border-radius: 0 0 var(--app-radius-card) var(--app-radius-card); }
 }
 /* Where the two overlays cannot stand side by side, the open Spice overlay
    takes the screen and the left one waits beneath it. */

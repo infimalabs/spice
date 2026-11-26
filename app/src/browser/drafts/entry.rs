@@ -118,15 +118,6 @@ impl Mode {
             Self::Design => "design",
         }
     }
-
-    const fn stop(self) -> usize {
-        match self {
-            Self::Message => 0,
-            Self::Task => 1,
-            Self::Plan => 2,
-            Self::Design => 3,
-        }
-    }
 }
 
 #[derive(Properties)]
@@ -281,8 +272,8 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
     }
 }
 
-/// The operator's accented tab opens the human side. Its badge carries the
-/// personal inbox's open count.
+/// The operator's face opens the human side, mirroring the Spice launcher on
+/// the system side. Its badge carries the personal inbox's open count.
 fn inbox_launcher(
     runtime: Option<&AppRuntime>,
     waiting: usize,
@@ -303,7 +294,7 @@ fn inbox_launcher(
     };
     let label = format!("{state} your inbox - {messages}");
     html! {
-        <button type="button" class="app-horn-tab app-horn-tab--down app-inbox-button"
+        <button type="button" class="app-spice-button app-inbox-button"
             aria-label={label.clone()}
             aria-haspopup="dialog"
             aria-expanded={expanded.to_string()}
@@ -695,16 +686,15 @@ fn submit_action(
     }
 }
 
-/// The strip's horizontal destination slider has the same four controls in
-/// every mode, so the strip never resizes under its moving thumb.
+/// The strip's destination tabs are the same four in every mode, so the strip
+/// never resizes as the destination changes.
 fn mode_controls(mode: &UseStateHandle<Mode>, sending: bool) -> Html {
     html! {
-        <div class="app-control-rail app-segment-slider app-compose-modes" role="group" aria-label="Compose as"
-            data-stop={mode.stop().to_string()}>
+        <div class="app-compose-modes" role="group" aria-label="Compose as">
             {for Mode::ALL.map(|choice| {
                 let mode = mode.clone();
                 html! {
-                    <button type="button" class="app-choice-chip" disabled={sending}
+                    <button type="button" class="app-horn-tab app-horn-tab--down app-compose-mode" disabled={sending}
                         aria-pressed={(*mode == choice).to_string()}
                         aria-keyshortcuts={choice.shortcut()}
                         onclick={Callback::from(move |_| mode.set(choice))}>{choice.label()}</button>
