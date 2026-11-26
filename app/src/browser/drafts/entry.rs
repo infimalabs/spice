@@ -637,13 +637,15 @@ fn submit_action(
             data-full-send={full_send.to_string()}
             data-full-broadcast={full_broadcast.to_string()} aria-busy={sending.then_some("true")}
             disabled={!ready || sending}>
+            // Distinct keys replace the label between words: patching one into
+            // the other would run FULL SEND's morph on CREATE's glyphs.
             if mode == Mode::Message {
-                <span class="team-send-label">
+                <span key="send" class="team-send-label">
                     <span class="team-send-full" aria-hidden="true">{"Full"}</span>
                     <span class="team-send-word">{"Send"}</span>
                 </span>
             } else {
-                <span class="team-send-label">
+                <span key="create" class="team-send-label">
                     <span class="app-compose-create-word">{"Create"}</span>
                 </span>
             }
