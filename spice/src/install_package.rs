@@ -8,10 +8,10 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
-use spice::install::InstallPreview;
+use spice::install::{self, InstallPreview};
 use spice::repository::Repository;
 use wire::Outcome;
-use wire::manifest::ReleaseTarget;
+use wire::manifest::{ProductVersion, ReleaseTarget};
 
 const MAX_MEMBER_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
@@ -27,6 +27,7 @@ pub(crate) fn run(
     json: bool,
 ) -> Result<ExitStatus, Error> {
     let acquired = acquire(source, candidate)?;
+    admit_upgrade(repository, &acquired.product_version)?;
     let staged = StagedPackage::new(&acquired)?;
     delegate(&staged, repository.worktree_root(), apply, json)
         .status()
@@ -44,6 +45,7 @@ pub(crate) fn preview(
     candidate: &Path,
 ) -> Result<Outcome<InstallPreview>, Error> {
     let acquired = acquire(source, candidate)?;
+    admit_upgrade(repository, &acquired.product_version)?;
     let staged = StagedPackage::new(&acquired)?;
     let output = delegate(&staged, repository.worktree_root(), None, true)
         .output()
@@ -91,6 +93,30 @@ fn launch_failure(staged: &StagedPackage, source: std::io::Error) -> Error {
         staged.executable(),
         source,
     )
+}
+
+fn admit_upgrade(repository: &Repository, candidate: &ProductVersion) -> Result<(), Error> {
+    let installed = install::inspect(repository).map_err(Error::Installed)?;
+    let installed = installed
+        .as_ref()
+        .and_then(|(receipt, _)| receipt.plan().product_version());
+    admit_product_upgrade(installed, candidate)
+}
+
+fn admit_product_upgrade(
+    installed: Option<&ProductVersion>,
+    candidate: &ProductVersion,
+) -> Result<(), Error> {
+    let Some(installed) = installed else {
+        return Ok(());
+    };
+    if candidate.precedence(installed).is_lt() {
+        return Err(Error::input(format!(
+            "package version {candidate} is older than installed version {installed}; \
+             downgrade refused before repository mutation"
+        )));
+    }
+    Ok(())
 }
 
 fn acquire(root: &Path, candidate_path: &Path) -> Result<AcquiredPackage, Error> {
@@ -156,6 +182,7 @@ fn acquire(root: &Path, candidate_path: &Path) -> Result<AcquiredPackage, Error>
     )
     .map_err(|error| Error::input(error.to_string()))?;
     let acquired = AcquiredPackage {
+        product_version: document.product_version,
         executable_path: selected.executable_path.clone(),
         payload_path,
         members: vec![package, executable, payload, receipt],
@@ -167,6 +194,7 @@ fn acquire(root: &Path, candidate_path: &Path) -> Result<AcquiredPackage, Error>
 
 #[derive(Debug)]
 struct AcquiredPackage {
+    product_version: ProductVersion,
     executable_path: String,
     payload_path: String,
     members: Vec<proof::PackageMember>,
@@ -390,6 +418,7 @@ impl Drop for StagedPackage {
 #[derive(Debug)]
 pub(crate) enum Error {
     Input(String),
+    Installed(install::InstallError),
     Environment {
         operation: &'static str,
         path: PathBuf,
@@ -420,6 +449,9 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Input(detail) => formatter.write_str(detail),
+            Self::Installed(source) => {
+                write!(formatter, "inspect installed product version: {source}")
+            }
             Self::Environment {
                 operation,
                 path,
@@ -433,7 +465,16 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Installed(source) => Some(source),
+            Self::Environment { source, .. } => Some(source),
+            Self::Unreadable { source, .. } => Some(source),
+            Self::Input(_) => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -482,6 +523,26 @@ mod tests {
         assert!(
             matches!(error, Error::Input(message) if message.contains("does not match candidate version"))
         );
+    }
+
+    #[test]
+    fn package_upgrade_refuses_only_known_product_downgrades() {
+        let installed = ProductVersion::parse("1.2.3").expect("installed version parses");
+        let older = ProductVersion::parse("1.2.2").expect("older version parses");
+        let same = ProductVersion::parse("1.2.3").expect("same version parses");
+        let newer = ProductVersion::parse("1.2.4").expect("newer version parses");
+
+        let error = admit_product_upgrade(Some(&installed), &older)
+            .expect_err("a known product downgrade refuses");
+        assert!(matches!(
+            error,
+            Error::Input(detail)
+                if detail.contains("older than installed version")
+                    && detail.contains("before repository mutation")
+        ));
+        admit_product_upgrade(Some(&installed), &same).expect("same version converges");
+        admit_product_upgrade(Some(&installed), &newer).expect("newer version upgrades");
+        admit_product_upgrade(None, &older).expect("unknown historical version is not inferred");
     }
 
     #[test]
