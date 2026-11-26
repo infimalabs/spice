@@ -39,7 +39,7 @@ pub(crate) const QUOTE_ICON: &str = "<svg class=\"app-card-action__icon\" \
     M13 14.75C13 10 15.4 6.6 19.4 5.2l.75 1.6C17.8 8 16.6 9.6 16.45 11.1A3.75 3.75 0 1 1 13 14.75Z\" \
     fill=\"currentColor\" /></svg>";
 
-/// The quote glyph, reduced and joined by a plus: quote into a new Draft.
+/// The quote glyph, reduced and joined by a plus: quote into the main composer.
 pub(crate) const DRAFT_QUOTE_ICON: &str = "<svg class=\"app-card-action__icon\" \
     width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\">\
     <path transform=\"translate(0 -1.5) scale(.72)\" \

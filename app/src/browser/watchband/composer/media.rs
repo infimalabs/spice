@@ -107,8 +107,8 @@ fn render_media_button(
                                 data-image-quote-action="draft"
                                 data-image-quote-target={media_quote.target.to_string()}
                                 data-image-quote-name={media_quote.name.clone()}
-                                title={format!("Quote {} into a new Draft", media_quote.name)}
-                                aria-label={format!("Quote {} into a new Draft", media_quote.name)}
+                                title={format!("Quote {} into the main composer", media_quote.name)}
+                                aria-label={format!("Quote {} into the main composer", media_quote.name)}
                             >{Html::from_html_unchecked(AttrValue::Static(crate::composer_markdown::DRAFT_QUOTE_ICON))}</button>
                             <button
                                 type="button"

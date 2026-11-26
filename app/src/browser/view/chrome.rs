@@ -499,7 +499,7 @@ pub(in crate::browser) struct Correspondent {
     pub(in crate::browser) speak: Callback<(SpeechControl, String)>,
     pub(in crate::browser) speech_owner: Option<SpeechOwner>,
     pub(in crate::browser) message_key: String,
-    /// Quote this card's source into its own composer or the New Draft creator.
+    /// Quote this card's source into its own composer or the main composer.
     pub(in crate::browser) quote: Option<Callback<crate::composer_drafts::QuoteDestination>>,
 }
 
@@ -698,7 +698,7 @@ pub(in crate::browser) fn render_action_drawer(panel: Html) -> Html {
     }
 }
 
-/// Quote into a new Draft from a drawer.
+/// Quote into the main composer from a drawer.
 pub(in crate::browser) fn render_draft_quote_action(
     quote: &Callback<crate::composer_drafts::QuoteDestination>,
     label: AttrValue,
@@ -806,7 +806,7 @@ fn card_actions(props: &CardActionsProps) -> Html {
                         </svg>
                     </button>
                     if let Some(quote) = &quote {
-                        {render_draft_quote_action(quote, AttrValue::Static("Quote into a new Draft"))}
+                        {render_draft_quote_action(quote, AttrValue::Static("Quote into the main composer"))}
                         <button
                             class="app-card-action app-card-action--quote" type="button" title="Quote this message"
                             aria-label="Quote this message"

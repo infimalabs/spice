@@ -246,8 +246,8 @@ circular operator-avatar launcher exactly mirrors the Spice button's size and
 browser-edge position. The operator's face fills it inside a hairline rim,
 without an initials band; a small badge carries the personal inbox's open count.
 Beside it, **Ask**, **Task**, **Plan**, and **Design** hang as tabs matching
-**Draft** and **Help**, the current destination wearing its accent, without a
-strip-wide divider.
+**Draft** and **Help**; the pressed one wears its kind's accent: Ask neutral,
+Task green, Plan blue, Design plum.
 
 Choosing the launcher, a destination, its shortcut, or a quote expands that
 same composer into a full-height sheet: writing, the To row with Send/Create,
@@ -278,15 +278,12 @@ the choice while retaining drafted quotes; work modes do not broadcast. A held
 stroke that would press Send/Create rings it as team SEND's command ring does,
 in theme ink for an Ask's broadcast.
 
-**Ask**, **Task**, **Plan**, and **Design** share one textarea and the strip's
-horizontal glass selector. Kind, recipient, image count, and resizing preserve
-editor geometry; Ask's recipients wrap beside the action.
-See the [composer checks](BROWSER.md#draft-composer-parity).
-The selected thumb and operator tab identify Ask as neutral, Task green, Plan
-blue, and Design plum; the open sheet's inline-end edge mirrors the Spice sidebar's.
-Quotes sit above the editor, and direct
-images use the team composers' bounded thumbnail strip over
-its lower inline end. Images can also be chosen, pasted, or dropped.
+All four kinds share one textarea; kind, recipient, image count, and resizing
+preserve editor geometry, and Ask's recipients wrap beside the action (see the
+[composer checks](BROWSER.md#draft-composer-parity)). The open sheet's
+inline-end edge mirrors the Spice sidebar's. Quotes sit above the editor;
+direct images use the team composers' bounded thumbnail strip over its lower
+inline end and can also be chosen, pasted, or dropped.
 
 Draft defaults off, is disabled for Ask, and holds until reload. Send/Create
 lights only when submission is possible: Ask needs text, a quote, or an image;

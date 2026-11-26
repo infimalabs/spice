@@ -150,7 +150,7 @@ cells.
 
 A message action rail reserves exactly one full-size opener. Closed, it is the
 only control in flow and only its upper-left and lower-left corners are rounded;
-Play, Copy, Quote into Draft, and Quote are clipped outside layout, pointer, and
+Play, Copy and both Quote actions are clipped outside layout, pointer, and
 focus participation. Opening slides the opener toward the left and reveals every
 action as a square button between it and the stationary card edge. Closing
 retracts the strip. The rail footprint and card box must not resize. Prose and
@@ -224,8 +224,8 @@ position, shows the operator's face edge to edge inside a hairline rim with no
 initials band, opens or closes the human side, and carries the personal inbox's
 open-count badge. Check that the editor's DOM identity, typed text and
 selection survive expansion, dismissal and conversion, and that the strip keeps
-the destination tabs and live Draft and Help without a strip-wide divider; the
-sheet below is cut off and out of the Tab order.
+the destination tabs and live Draft and Help; the sheet below is cut off and
+out of the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
 focused and fades in the shared page veil; dismissal fades the veil out. Open,
 the sheet runs to the viewport's foot: editor, To row with Send/Create, then
@@ -288,11 +288,10 @@ subdued Best-matched choice; work changes the textarea's title/pitch/context
 template, never adding a Pitch, Topic or second context field.
 
 Compare the destination, DRAFT and HELP tabs with the hanging totals: only
-each run's outside lower corners round, and each tab owns its lower border. No
-strip-wide divider or accent rail crosses the destination tabs. The pressed
-destination, and Draft when on, wear the kind's accent; Draft is inert for
-Ask. Ask is neutral; Task, Plan and Design use green, blue and plum in both
-themes.
+each run's outside lower corners round, each tab owns its lower border, and no
+strip-wide divider or accent rail crosses them. Check each kind's
+[accent](OVERVIEW.md#drafts-and-oops-intake) in both themes; Draft is inert
+for Ask.
 
 Check the opening/closing fade against Spice: no moving edge or rewrapped
 writing, immediate reduced-motion settlement, focus outside the closed strip,
@@ -320,15 +319,15 @@ Verify image artifacts and description in task detail, unchanged-media Save,
 whole-set refusal before creation, and Command- or Control-Enter submission.
 
 Every Quote control, on an agent message, a directive hunk, an image, or a
-room post, has a Quote into new Draft companion. It adds the same quote shard
-under the creator's key instead of the source's own composer, opens the main
-composer in Task mode, and focuses that shard; an ordinary Quote still drafts into
-its own composer. The creator renders and composes its shards exactly as a lane
-send does, so the created Draft's description carries each quote link, with its
-reply, before the text in shard order. Task detail presents those links as the
-resident resolved them, and the Draft's own editor resumes from the whole
-composed description. Check by quoting a chat message into a new Draft,
-creating it, and finding the quoted source in its task detail.
+room post, has a Quote into the main composer companion. It adds the same
+quote shard under the creator's key instead of the source's own composer,
+opens the main composer in whichever mode it already holds, and focuses that
+shard. The creator composes its shards exactly as a lane send does, so a
+created Draft's description carries each quote link, with its reply, before the
+text in shard order; task detail presents them as the resident resolved them,
+and the Draft's editor resumes from the whole description. Check by quoting a
+chat message in Task mode, creating it, and finding the quoted source in its
+task detail; quoting in Ask, Plan or Design keeps that mode.
 Each quote arrival opens the creator only once. After changing its mode,
 submission settlement must not replay that arrival: an accepted Message stays
 in Message mode, refused Plan/Design work retains its mode and editor focus,
