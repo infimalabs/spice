@@ -32,7 +32,7 @@ pub(super) use command_preview::use_command_modifier_preview;
 use composer::{AgentMessageCard, drop_on_lane, keyboard_submit, primary_composer_dragging};
 pub(in crate::browser) use composer::{
     ComposerTextarea, drop_images, focus_after_render, paste_images, quote_textarea_id,
-    render_image_indicators, render_quote_shards, team_quote_sources,
+    render_image_indicators, render_quote_shards, reveal_quote_after_render, team_quote_sources,
 };
 pub(super) use composer::{
     PRIMARY_TEXTAREA_PREFIX, PrimaryComposerDragState, agent_message_source_id, lane_composer_href,

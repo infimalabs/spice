@@ -379,19 +379,45 @@ pub(in crate::browser) fn team_quote_sources(
 pub(in crate::browser) fn focus_after_render(id: String) {
     spawn_local(async move {
         TimeoutFuture::new(0).await;
-        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-            return;
-        };
-        let Some(textarea) = document
-            .get_element_by_id(&id)
-            .and_then(|element| element.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
-        else {
-            return;
-        };
-        let options = web_sys::FocusOptions::new();
-        options.set_prevent_scroll(true);
-        let _ = textarea.focus_with_options(&options);
+        if let Some(textarea) = rendered_textarea(&id) {
+            focus_in_place(&textarea);
+        }
     });
+}
+
+/// Focus the Quote+ composer `id` once rendered, scrolling its stack so the
+/// whole shard starts the visible area: the quoted source stays beside the
+/// field the operator writes in, whatever an earlier focus revealed.
+pub(in crate::browser) fn reveal_quote_after_render(id: String) {
+    spawn_local(async move {
+        TimeoutFuture::new(0).await;
+        let Some(textarea) = rendered_textarea(&id) else {
+            return;
+        };
+        if let (Ok(Some(shard)), Ok(Some(stack))) = (
+            textarea.closest(".composer-shard"),
+            textarea.closest(".agent-composer-stack"),
+        ) {
+            let offset =
+                shard.get_bounding_client_rect().top() - stack.get_bounding_client_rect().top();
+            stack.set_scroll_top(stack.scroll_top() + offset.round() as i32);
+        }
+        focus_in_place(&textarea);
+    });
+}
+
+fn rendered_textarea(id: &str) -> Option<web_sys::HtmlTextAreaElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(id)?
+        .dyn_into::<web_sys::HtmlTextAreaElement>()
+        .ok()
+}
+
+fn focus_in_place(textarea: &web_sys::HtmlTextAreaElement) {
+    let options = web_sys::FocusOptions::new();
+    options.set_prevent_scroll(true);
+    let _ = textarea.focus_with_options(&options);
 }
 
 #[derive(Properties)]

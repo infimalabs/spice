@@ -835,7 +835,7 @@ fn use_summons(props: &Props, expanded: &UseStateHandle<bool>, sending: bool) {
                 // Settlement is not another quote arrival.
                 *handled.borrow_mut() = Some(summons.serial);
                 expanded.set(true);
-                crate::browser::watchband::focus_after_render(quote_textarea_id(
+                crate::browser::watchband::reveal_quote_after_render(quote_textarea_id(
                     NEW_DRAFT_KEY,
                     &summons.identity,
                 ));
