@@ -283,20 +283,17 @@ flowchart TD
   clean turn as the signal to finish, free, or defer the claim. An edge-only
   continuation strands work whenever a turn ends on a reply to an interjection.
   Its text escalates per claim and names task and grant waits before `defer`.
-- An occupant that exits holding no claim leaves its worktree as that lane's
-  implicit task. If the vacant, claimless lane's worktree has dirty or
-  untracked paths, commits its integration baseline lacks (read offline from
-  the last fetch), or an unfinished merge, rebase, cherry-pick, or revert, a
-  loose-worktree wake starts a fresh occupant. This wake ranks after held-claim
-  wakes and before drain-queue wakes. Its briefing names that work under
-  `Held claim`. It asks the occupant to capture the work into a task or discard
-  it, and notes that dirty work needs gate proof before commit while unlanded
-  commits already passed the commit gates. A failed Git or filesystem
-  inspection stays pending for the next reconciliation and launches no
-  occupant. The resident wakes the lane once per distinct loose state. A clean
-  exit clears the record, so the same state can wake the lane again later. The
-  record is process-local, so a resident restart judges the lane again only
-  after its next exit.
+- A claimless occupant exit leaves its worktree as the lane's implicit task. One
+  read-only gix repository snapshot derives dirty or untracked paths, commits
+  absent from the offline integration baseline, and unfinished merge, rebase,
+  cherry-pick, or revert state without starting Git or writing the index. If
+  any exists, a loose-worktree wake starts a fresh occupant after held-claim
+  wakes and before drain-queue wakes. Its briefing names the work under `Held
+  claim`, asks the occupant to capture or discard it, and distinguishes dirty
+  work needing gate proof from already-proved unlanded commits. A failed
+  repository or filesystem read stays pending and launches nobody. Each
+  distinct loose state wakes once; a clean exit clears it, while a resident
+  restart judges the process-local record again only after the next exit.
 - No supervisor request is published until the lane's worktree is admitted as a
   root inside the resident's own Git common directory. A lane naming another
   repository's worktree parks with a refusal; the resident and its other lanes

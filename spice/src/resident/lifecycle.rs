@@ -428,8 +428,7 @@ impl Runtime {
             profiles,
             &owners,
         )?;
-        self.loose
-            .project(&mut targets, &snapshot, &config.ambient, diagnostic);
+        self.loose.project(&mut targets, &snapshot, diagnostic);
         let retained = project_retained_targets(&snapshot, &self.projection, paths, now)?;
         let retained_lanes = retained
             .iter()
