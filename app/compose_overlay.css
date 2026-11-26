@@ -500,9 +500,12 @@
 }
 .app-compose-dialog [hidden] { display: none !important; }
 /* A phone's closed strip keeps the mirrored operator launcher and one selected
-   destination; opening restores the whole track, Draft, and Help. */
+   destination; opening restores the whole track, Draft, and Help. The track is
+   too narrow for equal tabs, so each destination starts from its label and the
+   spare width pads them all alike. */
 @media (max-width: 560px) {
   .app-compose-dialog.app-modal { --app-compose-utility-width: 5.5rem; }
+  .app-compose-dialog .app-compose-mode { flex-basis: auto; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tabs { width: 0; }
   .app-compose-dialog[data-expanded="false"] .app-compose-utility-tab { display: none; }
   .app-compose-dialog[data-expanded="false"] .app-compose-modes-row {
