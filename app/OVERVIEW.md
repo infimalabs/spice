@@ -249,10 +249,11 @@ current destination accent without a strip-wide divider.
 
 Choosing the launcher, a destination, its shortcut, or a quote expands that
 same composer into a full-height sheet: writing, the To row with Send/Create,
-then **Principals** and the independently scrolling personal inbox. On desktop
-the non-modal sheets coexist. On a phone, Spice temporarily hides the left
-sheet and closing Spice restores it. Opening and dismissal preserve the
-laid-out composer and return focus outside.
+then **Principals** and the independently scrolling personal inbox. The shared
+page veil dims Chat beneath it. On desktop the non-modal left and right sheets
+coexist above that veil. On a phone, Spice temporarily hides the left sheet
+and closing Spice restores it. Opening and dismissal preserve the laid-out
+composer and return focus outside.
 
 **Ask** is the default; expanded, its writing line reads **Ask or steer
 (required)**. Beside **To**, a wrapping row offers **Best-matched

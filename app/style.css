@@ -681,7 +681,7 @@ a.app-horn-tab { text-decoration: none; cursor: pointer; }
 .app-sidebar-layer {
   --app-side-view-width: var(--app-side-view-large);
   position: fixed;
-  z-index: 80;
+  z-index: var(--app-side-view-layer);
   inset: 0;
   display: grid;
   min-width: 0;

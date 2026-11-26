@@ -30,12 +30,31 @@
   min-width: min(var(--team-surface-min-inline), calc(100% - var(--app-compose-inset) + var(--app-commandbar-inset-start)));
   height: var(--app-header-control);
 }
+/* The expanded human-side sheet uses the shared page veil one layer below the
+   right sidebar. The composer's top-layer sheet therefore remains above it,
+   while an open right sidebar stays visible and interactive beside it. */
+.app-compose-backdrop {
+  position: fixed;
+  z-index: calc(var(--app-side-view-layer) - 1);
+  inset: 0;
+  width: 100%;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  cursor: default;
+  transition: var(--app-side-view-fade);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-compose-backdrop[data-presented="false"] { opacity: 0; }
+}
 .app-compose-entry:dir(rtl) {
   --app-compose-inset: calc(var(--app-spice-side-gap) + env(safe-area-inset-right, 0px) + var(--app-titlebar-inset-start, 0px));
   --app-compose-end-inset: calc(var(--app-shell-edge-inline) + env(safe-area-inset-left, 0px));
 }
-/* The sheet is a non-modal manual popover, so it stands above the Spice layer
-   without a veil and without making that layer inert. It is laid out once,
+/* The sheet is a non-modal manual popover, so it stands above the shared veil
+   without making the right-side Spice layer inert. It is laid out once,
    whole: closed, its lower pixels are transparent and the cut rests under the
    strip; opening fades them in, so nothing it holds moves or changes shape. */
 .app-compose-dialog.app-modal {
@@ -72,8 +91,8 @@
   isolation: isolate;
   font-family: var(--app-font, ui-sans-serif, system-ui, sans-serif);
 }
-/* No veil: the page beside the sheet stays visible, and a press there closes
-   the sheet. */
+/* The explicit shared veil owns page dimming and dismissal; the popover's
+   native backdrop stays absent so the right sidebar remains interactive. */
 .app-compose-dialog::backdrop { display: none; }
 /* Open, the sheet runs to the viewport's foot. It keeps the entry's width;
    only an entry squeezed below a lane's minimum widens to it, bounded by the

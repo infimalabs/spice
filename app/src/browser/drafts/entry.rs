@@ -237,6 +237,7 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
         <div ref={anchor} class="app-compose-entry"
             data-base-flavor={if mode.base_accent().is_some() { "accent" } else { "neutral" }}
             data-base-accent={mode.base_accent().map(|accent| accent.to_string())}>
+            {page_veil(&presentation, &close)}
             <dialog ref={dialog.clone()} open=true id="app-compose-dialog" popover="manual"
                 class="app-modal app-compose-dialog app-glass-control-surface app-closed-edge app-closed-edge--block-end"
                 data-expanded={presentation.expanded.to_string()}
@@ -278,6 +279,21 @@ pub(in crate::browser) fn ComposeEntry(props: &Props) -> Html {
                 </div>
             </dialog>
         </div>
+    }
+}
+
+/// The shared page veil follows the sheet's full open/close lifecycle.
+fn page_veil(presentation: &presentation::Presentation, close: &Callback<()>) -> Html {
+    if !presentation.expanded {
+        return Html::default();
+    }
+    html! {
+        <button type="button"
+            class="app-compose-backdrop app-overlay-veil"
+            data-presented={presentation.visible.to_string()}
+            inert={presentation.closing.then_some("true")}
+            aria-label="Close composer"
+            onclick={close.reform(|_: MouseEvent| ())} />
     }
 }
 

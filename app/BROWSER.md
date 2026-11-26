@@ -226,17 +226,18 @@ and conversion, and that the strip keeps the destination track and live Draft
 and Help without a strip-wide divider; the sheet below is cut off and out of
 the Tab order.
 Choosing the operator launcher or a destination opens the sheet with the editor
-focused. Open, the sheet runs to the viewport's foot: editor, To row with
-Send/Create, then Principals and the inbox scrolling on its own. Open Spice
-beside it on a desktop viewport: neither sheet masks the other, both stay
-interactive, a press inside either keeps both, a press on the page beside them
-closes the left one, and Escape closes the newest first. Opening the strip
-while Spice is open must work the same. On a phone the closed strip shows the
-operator launcher and current destination; with both overlays requested, Spice
-takes the screen and the left sheet returns when it closes. In both themes and
-inline directions, look for a bright hook in either gutter, an inner edge,
-doubled ring or seam. Opening must not move or rewrap the already-laid-out
-editor.
+focused and fades in the shared page veil; dismissal fades the veil out. Open,
+the sheet runs to the viewport's foot: editor, To row with Send/Create, then
+Principals and the inbox scrolling on its own. Open Spice beside it on a
+desktop viewport: the left sheet and right sidebar both stand above the veil,
+neither sheet masks the other, both stay interactive, a press inside either
+keeps both, a press on the page beside them closes the left one, and Escape
+closes the newest first. Opening the strip while Spice is open must work the
+same. On a phone the closed strip shows the operator launcher and current
+destination; with both overlays requested, Spice takes the screen and the left
+sheet returns when it closes. In both themes and inline directions, look for a
+bright hook in either gutter, an inner edge, doubled ring or seam. Opening must
+not move or rewrap the already-laid-out editor.
 By
 keyboard, each agent checkbox announces its name and state, Best-matched is
 pressed only with none chosen, and choosing never resizes the dialog. Several

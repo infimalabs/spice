@@ -15,6 +15,7 @@
   --app-round-control-size: 32px;
   --app-header-control: var(--app-round-control-size);
   --app-team-control-inline-size: 80px;
+  --app-side-view-layer: 80;
   --app-shell-edge-inline: 10px;
   --app-shell-edge-start: calc(var(--app-shell-edge-inline) + env(safe-area-inset-left, 0px));
   --app-shell-edge-end: calc(var(--app-shell-edge-inline) + env(safe-area-inset-right, 0px));
@@ -153,6 +154,7 @@ body:has(.shell),
 }
 .commandbar--mosaic .app-commandbar-content > .app-spice-button {
   position: absolute;
+  z-index: var(--app-side-view-layer);
   top: var(--app-spice-anchor-inset-block);
   inset-inline-end: var(--app-spice-anchor-inset-inline);
 }
