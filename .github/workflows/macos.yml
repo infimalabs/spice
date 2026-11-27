@@ -300,11 +300,14 @@ jobs:
           env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
             --target-dir "$release_target" --config "$debug_config" \
             --package xtask --bin xtask
-          SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh "$CARGO_TARGET_DIR"
+          SPICE_PROOF_CARGO="$cargo" \
+            dist/proof-runner/build.sh "$CARGO_TARGET_DIR" --seal-only
+          runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
           SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
             SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
             "$xtask" \
-            stage-target aarch64-apple-darwin --unsigned --proof-container "$PROOF_CONTAINER"
+            stage-target aarch64-apple-darwin --unsigned \
+            --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
 
           payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
           python3 - "$payload" "$EXPECTED_ARCHIVE" "$RUNNER_TEMP/unsigned-stage" <<'PY'

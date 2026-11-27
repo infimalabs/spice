@@ -481,18 +481,21 @@ and execute only in the fresh hosted Windows environment.
 
 **Invariant —** A native Darwin proof runner is sealed for exactly one
 worktree: `dist/proof-runner/build.sh` bakes that worktree's HEAD commit and
-vendor tree into the runner and binds it through `proof.runner`, which admits
-only the worktree configuration layer; a Git-common value is reported as a
-policy issue and never applied. A runner whose sealed commit differs from HEAD
-refuses by naming both commits and the reseal, and the staging preflight names
-the bound runner it asked. `spice dev xtask -- seal-darwin [--output DIR]
-[--unsigned]` is the one-command point-in-time build: it seals and binds this
-worktree's runner, cuts `dist/stage/source.tar` from HEAD so no earlier archive
-is reused, stages and signs the Darwin target from it, reports the commit and
-archive digest it compiled, and places the executable under `DIR`, writing
-only this worktree's `target/`, `dist/stage/`,
-Git-directory configuration, and `DIR`; the installed appliance, the resident,
-and other worktrees are untouched.
+vendor tree into the runner and ordinarily binds it through `proof.runner`,
+which admits only the worktree configuration layer; a Git-common value is
+reported as a policy issue and never applied. The hosted stage uses the
+script's explicit `--seal-only` mode because that fresh runner has no bootstrap
+appliance: it passes the exact sealed runner to the staging preflight, then the
+finalizer binds those bytes through the signed candidate before proof. A runner
+whose sealed commit differs from HEAD refuses by naming both commits and the
+reseal, and the staging preflight names the runner it asked.
+`spice dev xtask -- seal-darwin [--output DIR] [--unsigned]` is the one-command
+point-in-time build: it seals and binds this worktree's runner, cuts
+`dist/stage/source.tar` from HEAD so no earlier archive is reused, stages and
+signs the Darwin target from it, reports the commit and archive digest it
+compiled, and places the executable under `DIR`, writing only this worktree's
+`target/`, `dist/stage/`, Git-directory configuration, and `DIR`; the installed
+appliance, the resident, and other worktrees are untouched.
 
 **Invariant —** Proof replays the complete current battery against the
 candidate checkout: Linux mounts it read-only in the pinned OCI environment,
