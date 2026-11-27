@@ -30,12 +30,15 @@ COPY sysroot /opt/spice/msvc/sysroot
 COPY cargo-config.toml /tmp/windows-cross-cargo-config.toml
 COPY case-overlay.sh /tmp/windows-cross-case-overlay.sh
 
+# lld-link runs with /Brepro: the PE timestamp and the PDB signature become a
+# hash of the linked contents rather than the link time, so the same sources
+# link to the same bytes whether the Cargo target is fresh or reused.
 RUN mkdir /opt/spice/msvc/bin && \
     sh /tmp/windows-cross-case-overlay.sh /opt/spice/msvc/sysroot > /opt/spice/msvc/overlay.json && \
     rm /tmp/windows-cross-case-overlay.sh && \
     printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/clang --driver-mode=cl --target=x86_64-pc-windows-msvc /winsysroot /opt/spice/msvc/sysroot -vfsoverlay /opt/spice/msvc/overlay.json "$@"\n' \
         > /opt/spice/msvc/bin/cl.exe && \
-    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/lld-link /winsysroot:/opt/spice/msvc/sysroot /vfsoverlay:/opt/spice/msvc/overlay.json "$@"\n' \
+    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/lld-link /Brepro /winsysroot:/opt/spice/msvc/sysroot /vfsoverlay:/opt/spice/msvc/overlay.json "$@"\n' \
         > /opt/spice/msvc/bin/link.exe && \
     printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/llvm-lib "$@"\n' \
         > /opt/spice/msvc/bin/lib.exe && \

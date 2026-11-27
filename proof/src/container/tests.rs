@@ -43,6 +43,10 @@ struct Runtime {
     starts: bool,
     exec: Exec,
     vendor_set: String,
+    /// Named volumes the runtime holds, with the label each was created with.
+    volumes: Mutex<Vec<(String, String)>>,
+    /// Whether `volume create` refuses.
+    refuses_volumes: bool,
     events: Mutex<Vec<String>>,
 }
 
@@ -56,6 +60,8 @@ impl Runtime {
             vendor_set: crate::VendorSet::parse(std::path::Path::new("Cargo.lock"), FIXTURE_LOCK)
                 .expect("fixture vendor set")
                 .to_string(),
+            volumes: Mutex::default(),
+            refuses_volumes: false,
             events: Mutex::default(),
         }
     }
@@ -72,6 +78,46 @@ impl Runtime {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(event);
+    }
+
+    fn hold_volume(&self, name: &str, purpose: &str) {
+        self.volumes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((
+                name.to_owned(),
+                format!("org.spice.release-target={purpose}"),
+            ));
+    }
+
+    fn volume(&self, arguments: &[String]) -> Execution {
+        let argument = |index: usize| arguments.get(index).map_or("", String::as_str);
+        let mut volumes = self.volumes.lock().unwrap_or_else(PoisonError::into_inner);
+        match argument(1) {
+            "ls" => {
+                let label = argument(4).strip_prefix("label=").unwrap_or_default();
+                let names: String = volumes
+                    .iter()
+                    .filter(|(_, held)| held == label)
+                    .map(|(name, _)| format!("{name}\n"))
+                    .collect();
+                exited(0, names, "")
+            }
+            "rm" => {
+                volumes.retain(|(name, _)| name != argument(2));
+                drop(volumes);
+                self.record(format!("volume rm {}", argument(2)));
+                exited(0, format!("{}\n", argument(2)), "")
+            }
+            "create" if self.refuses_volumes => exited(1, "", "Error: volume store refused\n"),
+            "create" => {
+                volumes.push((argument(4).to_owned(), argument(3).to_owned()));
+                drop(volumes);
+                self.record(format!("volume create {}", argument(4)));
+                exited(0, format!("{}\n", argument(4)), "")
+            }
+            _ => exited(1, "", ""),
+        }
     }
 }
 
@@ -105,6 +151,16 @@ impl Launch for Runtime {
                         Store::Empty => exited(1, "", "Error: no such image\n"),
                     }
                 }
+            }
+            "volume" => self.volume(&arguments),
+            // A sealed release run: record the Cargo target it mounts.
+            "run" if argument(1) == "--rm" => {
+                let target = arguments
+                    .iter()
+                    .find(|argument| argument.ends_with("destination=/cargo-target"))
+                    .map_or("", String::as_str);
+                self.record(format!("sealed {target}"));
+                exited(0, "", "")
             }
             "run" if self.starts => {
                 self.record(format!("run {} {OWNER}", argument(3)));
@@ -523,6 +579,113 @@ fn attestation_must_answer_the_current_execution_challenge() {
         .expect_err("a marker from another execution cannot be replayed");
 
     assert!(matches!(error, ContainerError::RuntimeNotAttested { .. }));
+}
+
+const CROSS_IMAGE: &str = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+
+fn sealed_volume(name: &str) -> String {
+    format!("sealed type=volume,source={name},destination=/cargo-target")
+}
+
+fn linux_volume() -> String {
+    format!(
+        "spice-release-target-linux-stage-{}",
+        IMAGE.trim_start_matches("sha256:")
+    )
+}
+
+#[test]
+fn sealed_runs_reuse_one_persistent_target_per_purpose_and_image() {
+    let fixture = Fixture::new();
+    fixture
+        .runtime
+        .hold_volume("spice-release-target-linux-stage-superseded", "linux-stage");
+    fixture.runtime.hold_volume(
+        "spice-release-target-windows-cross-superseded",
+        "windows-cross",
+    );
+    let container = fixture.container();
+    let git_common = fixture.workspace.join(".git");
+    fs::create_dir_all(&git_common).expect("fixture Git common directory");
+    let out = fixture.root.join("windows-cross-out");
+
+    for _ in 0..2 {
+        let stage = container
+            .stage_release(&git_common, None, None, None)
+            .expect("sealed stage");
+        assert!(stage.success);
+    }
+    container
+        .cross_build_windows(super::WindowsCross {
+            cross_image: CROSS_IMAGE,
+            msvc_generation: "fixture",
+            git_common: &git_common,
+            out: &out,
+            delivered: None,
+            canvas: None,
+        })
+        .expect("sealed cross build");
+
+    let cross_volume = format!(
+        "spice-release-target-windows-cross-{}",
+        CROSS_IMAGE.trim_start_matches("sha256:")
+    );
+    assert_eq!(
+        fixture.runtime.events(),
+        [
+            "volume rm spice-release-target-linux-stage-superseded".to_owned(),
+            format!("volume create {}", linux_volume()),
+            sealed_volume(&linux_volume()),
+            sealed_volume(&linux_volume()),
+            "volume rm spice-release-target-windows-cross-superseded".to_owned(),
+            format!("volume create {cross_volume}"),
+            sealed_volume(&cross_volume),
+        ]
+    );
+}
+
+#[test]
+fn an_unavailable_persistent_target_compiles_in_fresh_scratch() {
+    let fixture = Fixture::with(Runtime {
+        refuses_volumes: true,
+        ..Runtime::docker()
+    });
+    let container = fixture.container();
+    let git_common = fixture.workspace.join(".git");
+    fs::create_dir_all(&git_common).expect("fixture Git common directory");
+
+    let stage = container
+        .stage_release(&git_common, None, None, None)
+        .expect("a refused volume never refuses the stage");
+
+    assert!(stage.success);
+    assert_eq!(
+        fixture.runtime.events(),
+        ["sealed type=volume,destination=/cargo-target"]
+    );
+}
+
+#[test]
+fn a_named_host_target_replaces_the_persistent_volume() {
+    let fixture = Fixture::new();
+    let container = fixture.container();
+    let git_common = fixture.workspace.join(".git");
+    fs::create_dir_all(&git_common).expect("fixture Git common directory");
+    let target = fixture.root.join("sealed-target");
+    fs::create_dir_all(&target).expect("fixture host target");
+
+    container
+        .stage_release(&git_common, None, None, Some(&target))
+        .expect("sealed stage");
+
+    let target = fs::canonicalize(&target).expect("canonical host target");
+    assert_eq!(
+        fixture.runtime.events(),
+        [format!(
+            "sealed type=bind,source={},destination=/cargo-target",
+            target.display()
+        )]
+    );
 }
 
 struct Fixture {

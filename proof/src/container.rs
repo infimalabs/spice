@@ -209,6 +209,15 @@ impl OciRuntime {
     pub fn binary(&self) -> &Path {
         &self.binary
     }
+
+    /// Whether this runtime's image builds attach a provenance attestation by
+    /// default. Docker's BuildKit does, and the attestation carries the build
+    /// time, so the image identity changes on every rebuild of unchanged
+    /// layers unless the build turns it off; Podman attaches none.
+    #[must_use]
+    pub const fn attaches_provenance(&self) -> bool {
+        matches!(self.kind, RuntimeKind::Docker)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

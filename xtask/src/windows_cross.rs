@@ -280,7 +280,7 @@ fn cross_build(
             error,
         }
     })?;
-    let container = proof::Container::new(admitted, source.workspace, limits)
+    let container = proof::Container::new(admitted.clone(), source.workspace, limits)
         .map_err(WindowsCrossError::Image)?;
     let proof_tag = proof::VendorSet::read(source.workspace.join("Cargo.lock"))
         .map_err(WindowsCrossError::VendorSet)?
@@ -290,7 +290,7 @@ fn cross_build(
     let build_root = environment.build_root(worktree).join(CROSS_ROOT);
     let context = cross_context(source.workspace, &build_root, &msvc)?;
     let cross_image = build_image(
-        &runtime,
+        &admitted,
         &context,
         &build_root,
         &proof_tag,
@@ -346,20 +346,26 @@ fn cross_context(
     Ok(context)
 }
 
+/// Build the cross image and return its identity. Without a provenance
+/// attestation, a rebuild whose layers are all cached keeps the same identity,
+/// so the bundle build key and the persistent Cargo target it names stay put.
 fn build_image(
-    runtime: &Path,
+    admitted: &proof::OciRuntime,
     context: &Path,
     build_root: &Path,
     proof_tag: &str,
     proof_image: &str,
     msvc_generation: &str,
 ) -> Result<String, WindowsCrossError> {
+    let runtime = admitted.binary();
     let identity = build_root.join("image.id");
     remove_if_present(&identity)?;
-    let arguments: Vec<OsString> = vec![
-        "build".into(),
-        "--platform".into(),
-        IMAGE_PLATFORM.into(),
+    let mut arguments: Vec<OsString> =
+        vec!["build".into(), "--platform".into(), IMAGE_PLATFORM.into()];
+    if admitted.attaches_provenance() {
+        arguments.push("--provenance=false".into());
+    }
+    arguments.extend([
         "--build-arg".into(),
         format!("proof_image_tag={proof_tag}").into(),
         "--build-arg".into(),
@@ -371,7 +377,7 @@ fn build_image(
         "--tag".into(),
         format!("{IMAGE_REPOSITORY}:{msvc_generation}").into(),
         context.into(),
-    ];
+    ]);
     let built = Command::new(runtime)
         .args(&arguments)
         .output()
