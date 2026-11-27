@@ -2,7 +2,6 @@
 
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -240,7 +239,12 @@ fn extract_oras(
 ) -> Result<(), PreparedArtifactError> {
     match format {
         OrasArchive::TarGz => extract_oras_tar(archive, destination),
+        #[cfg(windows)]
         OrasArchive::Zip => extract_oras_zip(archive, destination),
+        #[cfg(not(windows))]
+        OrasArchive::Zip => Err(PreparedArtifactError::Invalid(
+            "the zipped ORAS asset unpacks only on Windows hosts".to_owned(),
+        )),
     }
 }
 
@@ -274,6 +278,10 @@ fn extract_oras_tar(archive: &Path, destination: &Path) -> Result<(), PreparedAr
     ))
 }
 
+// Only the Windows ORAS asset is a zip. Keeping the inflating `zip` features
+// off every other host leaves the release tool resolving `zip` and `flate2`
+// exactly as the product binary does, so both share their compiled units.
+#[cfg(windows)]
 fn extract_oras_zip(archive: &Path, destination: &Path) -> Result<(), PreparedArtifactError> {
     let file = File::open(archive).map_err(|source| PreparedArtifactError::Io {
         path: archive.to_path_buf(),
@@ -288,7 +296,7 @@ fn extract_oras_zip(archive: &Path, destination: &Path) -> Result<(), PreparedAr
         path: destination.to_path_buf(),
         source,
     })?;
-    io::copy(&mut binary, &mut output).map_err(|source| PreparedArtifactError::Io {
+    std::io::copy(&mut binary, &mut output).map_err(|source| PreparedArtifactError::Io {
         path: destination.to_path_buf(),
         source,
     })?;
