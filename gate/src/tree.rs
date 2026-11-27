@@ -1051,6 +1051,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
+    // Only Unix exposes the inode and change time that distinguish a
+    // byte-identical replacement; a Windows copy keeps the length and mtime.
+    #[cfg(unix)]
     #[test]
     fn byte_identical_index_replacement_refuses_the_captured_source() {
         let fixture = test_repository::Fixture::repository("tree-index-replacement");

@@ -273,8 +273,10 @@ fn untracked_paths(worktree: &Path, selected: &BTreeSet<&str>) -> Result<Vec<Str
             evidence: format!("cannot assemble ignore rules: {source}"),
         })?;
     let mut found = Vec::new();
-    let mut pending = vec![PathBuf::new()];
-    while let Some(relative) = pending.pop() {
+    // Each pending directory carries its OS path relative to the worktree and
+    // its repository path, which always joins components with `/`.
+    let mut pending = vec![(PathBuf::new(), String::new())];
+    while let Some((relative, repo_relative)) = pending.pop() {
         let directory = worktree.join(&relative);
         let entries = fs::read_dir(&directory)
             .map_err(|error| TreeError::io("listing worktree directory", &directory, error))?;
@@ -288,9 +290,14 @@ fn untracked_paths(worktree: &Path, selected: &BTreeSet<&str>) -> Result<Vec<Str
             let file_type = entry.file_type().map_err(|error| {
                 TreeError::io("inspecting worktree entry", &entry.path(), error)
             })?;
-            let entry_relative = relative.join(&name);
-            let Some(entry_text) = entry_relative.to_str() else {
+            let Some(name_text) = name.to_str() else {
                 continue;
+            };
+            let entry_relative = relative.join(&name);
+            let entry_text = if repo_relative.is_empty() {
+                name_text.to_owned()
+            } else {
+                format!("{repo_relative}/{name_text}")
             };
             let mode = if file_type.is_dir() {
                 gix::index::entry::Mode::DIR
@@ -308,10 +315,10 @@ fn untracked_paths(worktree: &Path, selected: &BTreeSet<&str>) -> Result<Vec<Str
             }
             if file_type.is_dir() {
                 if !entry.path().join(".git").exists() {
-                    pending.push(entry_relative);
+                    pending.push((entry_relative, entry_text));
                 }
-            } else if !selected.contains(entry_text) {
-                found.push(entry_text.to_owned());
+            } else if !selected.contains(entry_text.as_str()) {
+                found.push(entry_text);
             }
         }
     }

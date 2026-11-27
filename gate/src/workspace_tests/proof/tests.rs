@@ -20,7 +20,12 @@ fn a_shard_pins_incremental_off_over_an_inherited_setting() {
     );
     assert_eq!(
         entries.get(OsStr::new(CARGO_BUILD_BUILD_DIR)),
-        Some(&OsString::from("/writable/target/cargo-build"))
+        Some(
+            &Path::new("/writable")
+                .join("target")
+                .join("cargo-build")
+                .into_os_string()
+        )
     );
 }
 
@@ -478,8 +483,9 @@ fn plan_source_analysis_is_unique_equivalent_and_source_version_bound() {
     fixture.write("src/lib.rs", "pub fn malformed( {\n");
     let malformed = plan().expect_err("malformed changed source must be refused");
     let malformed = malformed.to_string();
+    let source = Path::new("src").join("lib.rs");
     assert!(
-        malformed.contains("parse") && malformed.contains("src/lib.rs"),
+        malformed.contains("parse") && malformed.contains(&*source.to_string_lossy()),
         "unexpected malformed-source refusal: {malformed}"
     );
 }

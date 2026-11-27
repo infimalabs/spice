@@ -281,7 +281,18 @@ mod tests {
     use crate::toolchain::captured::Stream;
     use crate::toolchain::exit_status;
 
+    /// An absolute selected tree in the host's own path syntax, and one
+    /// compiler diagnostic located inside it.
+    #[cfg(unix)]
     const ROOT: &str = "/fixture/tree";
+    #[cfg(unix)]
+    const LOCATED: &[u8] =
+        b"error[E0308]: mismatched types\n  --> /fixture/tree/app/src/lib.rs:3:9\n";
+    #[cfg(windows)]
+    const ROOT: &str = r"C:\fixture\tree";
+    #[cfg(windows)]
+    const LOCATED: &[u8] =
+        b"error[E0308]: mismatched types\n  --> C:\\fixture\\tree\\app\\src\\lib.rs:3:9\n";
 
     fn stream(bytes: &[u8], truncated: bool) -> Option<Stream<'_>> {
         Some(Stream {
@@ -358,10 +369,7 @@ mod tests {
             CompileCapture::Prefix,
             &exited(101),
             stream(b"", false),
-            stream(
-                b"error[E0308]: mismatched types\n  --> /fixture/tree/app/src/lib.rs:3:9\n",
-                false,
-            ),
+            stream(LOCATED, false),
         ) else {
             panic!("a diagnosed compiler was admitted");
         };
