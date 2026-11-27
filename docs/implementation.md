@@ -239,16 +239,32 @@ repository declares one Apple-silicon host toolchain in
 [`dist/windows/msvc.toml`](../dist/windows/msvc.toml): exact xwin and LLVM
 releases and executable hashes; one closure digest over every Homebrew dylib
 those LLVM tools load and every clang builtin header; the Visual Studio
-channel and package manifest hashes; and exact CRT and SDK selectors.
+channel and package manifest hashes; and exact CRT and SDK selectors. Any
+other host that only materializes the CRT and SDK takes its exact xwin release,
+path, and hash from
+[`dist/windows/xwin-hosted.toml`](../dist/windows/xwin-hosted.toml), keyed
+by platform; a hosted release coordinator installs the pinned upstream x86_64
+Linux build there from its verified archive, and that file joins its
+generation digest.
 
-Microsoft licence acceptance belongs to each worktree's operator authority, not
-the tracked toolchain declaration. After recording an operator-authored
-directive that accepts the Microsoft Software License Terms for both the CRT
-and Windows SDK, write its steering key to the ignored local declaration:
+Microsoft licence acceptance stays out of the tracked toolchain declaration.
+The ignored local declaration names exactly one of two forms. On a release
+host, after recording an operator-authored directive that accepts the
+Microsoft Software License Terms for both the CRT and Windows SDK, write its
+steering key:
 
 ```toml
 # dist/windows/msvc.local.toml
 operator_acceptance = "KEY"
+```
+
+The hosted release coordinator instead writes the acceptance statement held
+in the repository secret `WINDOWS_MSVC_ACCEPTANCE`, which only a repository
+administrator can set:
+
+```toml
+# dist/windows/msvc.local.toml
+statement = "I accept the Microsoft Software License Terms for the Microsoft CRT and Windows SDK"
 ```
 
 After installing the declared Homebrew bottles (`xwin`, `llvm@20`, and
@@ -258,10 +274,11 @@ After installing the declared Homebrew bottles (`xwin`, `llvm@20`, and
 spice dev xtask -- windows-msvc
 ```
 
-The command resolves the local key against the repository journal and requires
-its original record to be a principal holding the operator role whose text
-accepts both named components; an absent, malformed, non-operator, or unrelated
-record refuses. It then verifies xwin before downloading Microsoft payloads,
+The command resolves a local key against the repository journal and requires
+its original record to be a principal holding the operator role; a statement
+stands as written. Either text must accept both named components; an absent,
+malformed, doubly named, non-operator, or unrelated acceptance refuses. It then
+verifies this host's pinned xwin before downloading Microsoft payloads,
 verifies both manifests before splatting, and publishes a read-only,
 content-addressed generation under the bootstrap Cargo home.
 

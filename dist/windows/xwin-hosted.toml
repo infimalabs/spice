@@ -1,0 +1,8 @@
+# Pinned xwin for each host other than the release host that
+# dist/windows/msvc.toml declares, keyed ARCH-OS as Rust names them. A hosted
+# release coordinator installs the upstream musl release at this path from its
+# verified archive before materializing the CRT and SDK.
+[x86_64-linux]
+version = "0.10.0"
+path = "/opt/spice/xwin/0.10.0/xwin"
+sha256 = "0cb5d482ccf9364d0e8f3349c96ec9d781a15cfd8b0c100f364c796599190415"

@@ -49,10 +49,14 @@ fn prepared_repository(repository: &str) -> String {
     format!("ghcr.io/{}/prepared", repository.to_ascii_lowercase())
 }
 
+/// GHCR authenticates a token alone, so one fixed username serves a release
+/// host's personal token and a workflow's installation token alike; the
+/// latter cannot read its own GitHub user.
+const GHCR_USERNAME: &str = "spice-release";
+
 /// Run `operation` while ORAS holds this machine's `gh` credential for GHCR,
 /// then log out again.
 fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let user = command_text("gh", &["api", "user", "--jq", ".login"])?;
     let token = command_text("gh", &["auth", "token"])?;
     let mut login = crate::prepared_artifact::exact_oras_command()
         .map_err(|error| error.to_string())?
@@ -60,7 +64,7 @@ fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T
             "login",
             "ghcr.io",
             "--username",
-            user.trim(),
+            GHCR_USERNAME,
             "--password-stdin",
         ])
         .stdin(Stdio::piped())

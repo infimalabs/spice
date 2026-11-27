@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
-use super::{WindowsHostedError, command_text, prepared_repository};
+use super::{GHCR_USERNAME, WindowsHostedError, command_text, prepared_repository};
 
 const REGISTRY: &str = "ghcr.io";
 const HTTP_OK: &str = "200";
@@ -38,7 +38,7 @@ struct RegistryError {
 ///
 /// # Errors
 ///
-/// Refuses when `gh` names no identity, GHCR cannot be reached, or the
+/// Refuses when `gh` holds no credential, GHCR cannot be reached, or the
 /// registry denies the read, naming GHCR's answer and the package authority
 /// to grant.
 pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
@@ -47,19 +47,18 @@ pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
     let package = reference
         .strip_prefix(&format!("{REGISTRY}/"))
         .expect("the prepared repository lives on GHCR");
-    let user = command_text("gh", &["api", "user", "--jq", ".login"])
-        .map_err(WindowsHostedError::ProviderResponse)?;
-    let user = user.trim();
     let token =
         command_text("gh", &["auth", "token"]).map_err(WindowsHostedError::ProviderResponse)?;
     let (status, body) = get(
         &format!("https://{REGISTRY}/token?scope=repository:{package}:pull&service={REGISTRY}"),
-        &format!("user = \"{}\"", quoted(&format!("{user}:{}", token.trim()))),
+        &format!(
+            "user = \"{}\"",
+            quoted(&format!("{GHCR_USERNAME}:{}", token.trim()))
+        ),
     )?;
-    read_verdict(&status, &body).map_err(|answer| denied(user, &reference, &answer))?;
+    read_verdict(&status, &body).map_err(|answer| denied(&reference, &answer))?;
     let pull: RegistryToken = serde_json::from_str(&body).map_err(|error| {
         denied(
-            user,
             &reference,
             &format!("token endpoint returned no pull token: {error}"),
         )
@@ -68,7 +67,7 @@ pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
         &format!("https://{REGISTRY}/v2/{package}/tags/list?n=1"),
         &format!("header = \"Authorization: Bearer {}\"", quoted(&pull.token)),
     )?;
-    read_verdict(&status, &body).map_err(|answer| denied(user, &reference, &answer))
+    read_verdict(&status, &body).map_err(|answer| denied(&reference, &answer))
 }
 
 /// GHCR's answer to one read: only success admits; any other status refuses
@@ -91,9 +90,9 @@ fn read_verdict(status: &str, body: &str) -> Result<(), String> {
     Err(format!("HTTP {status} {detail}"))
 }
 
-fn denied(user: &str, reference: &str, answer: &str) -> WindowsHostedError {
+fn denied(reference: &str, answer: &str) -> WindowsHostedError {
     WindowsHostedError::ProviderResponse(format!(
-        "gh identity {user} cannot read the prepared package {reference}, so no hosted stage was dispatched: GHCR answered {}. Grant package read before releasing: a classic token needs read:packages (gh auth refresh -h github.com -s read:packages); a fine-grained or app credential needs read access to that package.",
+        "the selected gh credential cannot read the prepared package {reference}, so no hosted stage was dispatched: GHCR answered {}. Grant package read before releasing: a classic token needs read:packages (gh auth refresh -h github.com -s read:packages); a fine-grained or app credential needs read access to that package.",
         answer.trim_end_matches('.')
     ))
 }

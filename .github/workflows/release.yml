@@ -8,6 +8,11 @@ on:
         description: Authored Markdown release notes, including Highlights
         required: true
         type: string
+      stage_only:
+        description: Stage and prove every target, then stop before any tag or release
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -24,7 +29,7 @@ jobs:
       actions: write
       attestations: read
       contents: write
-      packages: read
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -120,6 +125,66 @@ jobs:
           rustup toolchain install --no-self-update
           cargo build --locked --package xtask
 
+      - name: Install the pinned Linux xwin
+        shell: bash
+        run: |
+          set -euo pipefail
+          # dist/windows/xwin-hosted.toml pins this binary's bytes at this path; the
+          # archive digest is upstream's published checksum.
+          version=0.10.0
+          name="xwin-$version-x86_64-unknown-linux-musl"
+          archive="$RUNNER_TEMP/$name.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/Jake-Shadle/xwin/releases/download/$version/$name.tar.gz"
+          printf '%s  %s\n' d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88 "$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          sudo install -D -m 0755 "$RUNNER_TEMP/$name/xwin" "/opt/spice/xwin/$version/xwin"
+
+      - name: Record the Microsoft CRT and Windows SDK licence acceptance
+        shell: bash
+        env:
+          WINDOWS_MSVC_ACCEPTANCE: ${{ secrets.WINDOWS_MSVC_ACCEPTANCE }}
+        run: |
+          set -euo pipefail
+          test -n "$WINDOWS_MSVC_ACCEPTANCE"
+          jq -rn --arg statement "$WINDOWS_MSVC_ACCEPTANCE" \
+            '"statement = \($statement | tojson)"' > dist/windows/msvc.local.toml
+
+      - name: Load the admitted proof image
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          xtask="$RUNNER_TEMP/coordinator-target/debug/xtask"
+          root="$RUNNER_TEMP/prepared"
+          fetched="$root/proof-image"
+          mkdir -p "$root"
+          .github/scripts/proof-image-build-key.sh "$root/build-key.json"
+          key="$("$xtask" prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
+          [[ "$key" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          "$xtask" prepared-artifact resolve \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:$key" "sha256:$key" > "$root/resolve.out"
+          read -r label manifest payload identity < "$root/resolve.out"
+          test "$label" = resolved
+          [[ "$payload" =~ ^sha256:[0-9a-f]{64}$ ]]
+          "$xtask" prepared-artifact fetch \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared@$manifest" "sha256:$key" "$fetched"
+          oras logout ghcr.io
+          archive="$fetched/proof-image.tar"
+          printf '%s\n' "${payload#sha256:}" > "$archive.sha256"
+          printf '%s\n' "$identity" > "$archive.identity"
+          test "$(sha256sum "$archive" | cut -d' ' -f1)" = "${payload#sha256:}"
+          "$xtask" proof-image load "$archive" | tee "$root/load.out"
+          test "$(sed -n 's/^loaded proof image //p' "$root/load.out")" = "$identity"
+          rm -rf "$fetched"
+          common="$(git rev-parse --git-common-dir)"
+          mkdir -p "$common/.spice"
+          printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
+
       - name: Prepare authored release notes
         shell: bash
         env:
@@ -134,6 +199,7 @@ jobs:
         env:
           CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
+          STAGE_ONLY: ${{ inputs.stage_only }}
         run: |
           set -euo pipefail
           xtask="$CARGO_TARGET_DIR/debug/xtask"
@@ -142,6 +208,21 @@ jobs:
           complete="$publications/coordinator-complete.json"
           pending="$publications/pending.json"
           mkdir -p "$publications"
+          if test "$STAGE_ONLY" = true; then
+            # A staged request stays pinned for this run's reruns; it never
+            # reaches a tag, a release, or the completion marker.
+            test ! -e "$complete"
+            if test -f "$pending"; then
+              source_commit=$(jq -r .source_commit "$pending")
+              [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+              "$xtask" publish-hosted-release "$source_commit" --notes "$notes" --stage-only
+            else
+              "$xtask" publish-hosted-release --notes "$notes" --stage-only
+            fi
+            printf '### Staged release\n\n- source commit: `%s`\n' \
+              "$(jq -r .source_commit "$pending")" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           plans=()
           while IFS= read -r plan; do plans+=("$plan"); done \
             < <(find "$publications" -mindepth 2 -maxdepth 2 -name plan.json -type f -print)
@@ -231,7 +312,7 @@ jobs:
           retention-days: 7
 
       - name: Publish the final release result
-        if: ${{ success() }}
+        if: ${{ success() && !inputs.stage_only }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-result-${{ github.run_id }}
