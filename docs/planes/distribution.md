@@ -332,17 +332,21 @@ Platform preparation uses one other transport and authority contract.
 `prepared-artifact` describes an image or `tar.gz` bundle with one canonical
 JSON config: kind, target platform, every named build input and their combined
 build-key digest, payload media type, size and SHA-256, optional runtime image
-identity, and a sorted file inventory. Pinned ORAS 1.3.0 stores that config and
-exactly one payload beneath one OCI manifest in
-`ghcr.io/infimalabs/spice/prepared`. A deterministic build-key tag is discovery
-only: a consumer resolves it once, admits the config and OCI descriptor, and
-thereafter fetches only `repository@sha256:…`. Publication first computes the
-local OCI digest, with the manifest's `org.opencontainers.image.created`
-annotation pinned to the epoch so that digest depends only on config and
-payload. An absent tag is created, the same digest is an idempotent success,
-and a tag already naming different bytes is a conflict. Missing or
-mismatched GHCR content refuses without consulting a workflow artifact or
-another store.
+identity, and a sorted file inventory. Repository-pinned ORAS 1.3.0 stores
+that config and exactly one payload beneath one OCI manifest in
+`ghcr.io/infimalabs/spice/prepared`. Hosted jobs and coordinators resolve the
+same platform-specific upstream release asset. The coordinator downloads it
+through `gh`, verifies the archive and binary SHA-256 digests, and caches it
+beside its executable. A deterministic build-key tag is discovery only: a
+consumer resolves it once, admits the config
+and OCI descriptor, and thereafter fetches only `repository@sha256:…`.
+Publication first computes the local OCI digest, with the manifest's
+`org.opencontainers.image.created` annotation pinned to the epoch so that
+digest depends only on config and payload. An absent tag is created, the same
+digest is an idempotent success, and a tag already naming different bytes is a
+conflict. Missing or mismatched GHCR content refuses without consulting a
+workflow artifact or another store. Coordinator `gh` authentication must carry
+`read:packages`; publication additionally requires `write:packages`.
 
 `.github/workflows/proof-image.yml` prepares the Linux/amd64 proof image when
 one of its exact inputs changes. It builds and exercises the image, packages
@@ -644,8 +648,9 @@ the Windows machine. The release host cross-builds that bundle with
 `windows-cross` over the admitted release source and provider canvas, unless
 its output already holds a bundle whose build key names both, then publishes
 it to the repository's GHCR `prepared` package tagged by build key, so the
-host's `gh` credential also needs `write:packages` and the host needs ORAS
-1.3.0. The request pins the published OCI manifest digest, the build key, and
+host's `gh` credential also needs `write:packages`. The repository provisions
+and verifies its exact platform-specific ORAS 1.3.0 binary. The request pins
+the published OCI manifest digest, the build key, and
 the SHA-256 of the bundled `runner/windows-hosted.exe`. The workflow pulls
 exactly that manifest, checks the build key and payload digest, unpacks it as
 `bundle-CHALLENGE` in its temporary directory with its manifest beside it as

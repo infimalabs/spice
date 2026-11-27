@@ -3,10 +3,9 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::fs;
-use std::io;
+use std::fs::{self, File};
+use std::io::{self, Read as _};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
 
 use flate2::Compression;
 use flate2::GzBuilder;
@@ -16,8 +15,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tar::Archive;
 
+mod oras;
+
+pub use oras::exact_oras_command;
+use oras::{admit_oras_version, run_oras, run_oras_in, run_oras_stdout};
+
 const SCHEMA: u16 = 1;
-const ORAS_VERSION: &str = "1.3.0";
 const CONFIG_MEDIA_TYPE: &str = "application/vnd.infimalabs.spice.prepared.v1+json";
 const ARTIFACT_MEDIA_TYPE: &str = "application/vnd.infimalabs.spice.prepared.v1";
 const OCI_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
@@ -997,104 +1000,26 @@ fn copy_file(source: &Path, destination: &Path) -> Result<(), PreparedArtifactEr
         })
 }
 
-fn run_oras(arguments: &[OsString]) -> Result<(), PreparedArtifactError> {
-    let output = oras(arguments)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(classify_oras(arguments, output))
-    }
-}
-
-fn run_oras_in(directory: &Path, arguments: &[OsString]) -> Result<(), PreparedArtifactError> {
-    let output = oras_command(arguments)?
-        .current_dir(directory)
-        .output()
-        .map_err(PreparedArtifactError::Launch)?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(classify_oras(arguments, output))
-    }
-}
-
-fn run_oras_stdout(arguments: &[OsString]) -> Result<Vec<u8>, PreparedArtifactError> {
-    let output = oras(arguments)?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(classify_oras(arguments, output))
-    }
-}
-
-fn oras(arguments: &[OsString]) -> Result<Output, PreparedArtifactError> {
-    oras_command(arguments)?
-        .output()
-        .map_err(PreparedArtifactError::Launch)
-}
-
-fn oras_command(arguments: &[OsString]) -> Result<Command, PreparedArtifactError> {
-    let mut command = Command::new("oras");
-    command.args(arguments).env_remove("ORAS_CACHE");
-    Ok(command)
-}
-
-fn admit_oras_version() -> Result<(), PreparedArtifactError> {
-    let output = Command::new("oras")
-        .arg("version")
-        .output()
-        .map_err(PreparedArtifactError::Launch)?;
-    if !output.status.success() {
-        return Err(PreparedArtifactError::Oras {
-            command: "oras version".to_owned(),
-            status: output.status.code(),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let admitted = stdout.lines().any(|line| {
-        line.trim() == ORAS_VERSION
-            || line
-                .trim()
-                .strip_prefix("Version:")
-                .is_some_and(|version| version.trim() == ORAS_VERSION)
-    });
-    if !admitted {
-        return Err(PreparedArtifactError::Invalid(format!(
-            "oras must be exactly {ORAS_VERSION}, observed {}",
-            stdout.trim()
-        )));
-    }
-    Ok(())
-}
-
-fn classify_oras(arguments: &[OsString], output: Output) -> PreparedArtifactError {
-    let command = format!(
-        "oras {}",
-        arguments
-            .iter()
-            .map(|value| value.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if stderr.to_ascii_lowercase().contains("not found") {
-        PreparedArtifactError::OrasMissing(command)
-    } else {
-        PreparedArtifactError::Oras {
-            command,
-            status: output.status.code(),
-            stderr,
-        }
-    }
-}
-
 fn sha256_file(path: &Path) -> Result<String, PreparedArtifactError> {
-    let bytes = fs::read(path).map_err(|source| PreparedArtifactError::Io {
+    let mut file = File::open(path).map_err(|source| PreparedArtifactError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    Ok(sha256_bytes(&bytes))
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|source| PreparedArtifactError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("sha256:{:x}", digest.finalize()))
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -1225,6 +1150,8 @@ pub enum PreparedArtifactError {
     },
     /// ORAS was unavailable.
     Launch(io::Error),
+    /// The exact ORAS host asset could not be provisioned.
+    Provision(String),
     /// A local path could not be read or written.
     Io {
         /// Affected path.
@@ -1251,6 +1178,7 @@ impl fmt::Display for PreparedArtifactError {
             Self::OrasMissing(command) => write!(formatter, "prepared artifact is absent: `{command}`"),
             Self::Oras { command, status, stderr } => write!(formatter, "`{command}` failed with {status:?}: {stderr}"),
             Self::Launch(error) => write!(formatter, "could not launch pinned oras: {error}"),
+            Self::Provision(message) => formatter.write_str(message),
             Self::Io { path, source } => write!(formatter, "{}: {source}", path.display()),
             Self::Decode(error) => write!(formatter, "prepared JSON is invalid: {error}"),
             Self::Encode(error) => write!(formatter, "could not encode prepared JSON: {error}"),

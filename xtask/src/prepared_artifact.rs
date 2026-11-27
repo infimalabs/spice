@@ -2,6 +2,6 @@
 
 pub use prepared_artifact::{PreparedArtifactError, prepared_artifact};
 pub(crate) use prepared_artifact::{
-    WindowsReleaseBundle, fetch_bundle, publish_bundle, windows_bundle_files,
+    WindowsReleaseBundle, exact_oras_command, fetch_bundle, publish_bundle, windows_bundle_files,
     windows_release_bundle,
 };
