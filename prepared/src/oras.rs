@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use flate2::read::GzDecoder;
 use tar::Archive;
@@ -12,6 +13,9 @@ use tar::Archive;
 use super::{PreparedArtifactError, Scratch, sha256_file};
 
 const ORAS_VERSION: &str = "1.3.0";
+
+/// Distinguishes concurrent provisions within one process.
+static STAGING: AtomicU64 = AtomicU64::new(0);
 
 const ORAS_ASSETS: &[OrasAsset] = &[
     OrasAsset {
@@ -303,7 +307,11 @@ fn install_oras(
         path: parent.to_path_buf(),
         source,
     })?;
-    let staged = parent.join(format!(".oras-{}", std::process::id()));
+    let staged = parent.join(format!(
+        ".oras-{}-{}",
+        std::process::id(),
+        STAGING.fetch_add(1, Ordering::Relaxed)
+    ));
     fs::copy(source, &staged).map_err(|source| PreparedArtifactError::Io {
         path: staged.clone(),
         source,

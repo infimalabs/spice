@@ -335,9 +335,12 @@ build-key digest, payload media type, size and SHA-256, optional runtime image
 identity, and a sorted file inventory. Repository-pinned ORAS 1.3.0 stores
 that config and exactly one payload beneath one OCI manifest in
 `ghcr.io/infimalabs/spice/prepared`. Hosted jobs and coordinators resolve the
-same platform-specific upstream release asset. The coordinator downloads it
-through `gh`, verifies the archive and binary SHA-256 digests, and caches it
-beside its executable. A deterministic build-key tag is discovery only: a
+same platform-specific upstream release asset. Every `prepared-artifact`
+registry operation, on a coordinator or a hosted job, downloads it through `gh`
+on first use, verifies the archive and binary SHA-256 digests, and caches it
+beside the running executable; hosted steps that resolve, fetch, or publish
+hand `gh` the job token as `GH_TOKEN`. A deterministic build-key tag is
+discovery only: a
 consumer resolves it once, admits the config
 and OCI descriptor, and thereafter fetches only `repository@sha256:…`.
 Publication first computes the local OCI digest, with the manifest's

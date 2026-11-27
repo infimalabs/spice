@@ -156,6 +156,7 @@ jobs:
       - name: Fetch admitted proof image
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"

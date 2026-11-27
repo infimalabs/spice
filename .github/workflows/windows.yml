@@ -438,6 +438,7 @@ jobs:
         shell: pwsh
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           SPICE_HOSTED_REQUEST: ${{ inputs.request }}
         run: |
           $ErrorActionPreference = 'Stop'
