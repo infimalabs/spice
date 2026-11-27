@@ -576,23 +576,24 @@ so an interrupted publication leaves the prior file or none.
 
 `.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
 GitHub image, macOS build, Xcode SDK, Rust toolchain, downloaded tool digests,
-and proof-container identity admitted by `dist/darwin/hosted.toml`. The client
-uploads the canonical source archive unchanged as a challenge-bound immutable
-asset. The stage job verifies its raw digest, canonical archive identity,
-source commit, tree, and admitted workflow before the sealed native proof
-runner builds an unsigned `aarch64-apple-darwin` stage with networking denied.
-The workflow refuses image, source, archive, SDK, tool, or stage drift before
-credentials enter any job.
-The hosted bootstrap selects the exact Cargo executable and admits only its
-sibling Rustc; the proof build does not rediscover that toolchain through
-ambient `rustup`.
-It compiles xtask under the candidate build settings in
-`dist/release/candidate.toml`, the target and build directories, rustflags,
-debug-artifact profile override, and environment that `stage-target` gives
-its candidate build, so the candidate reuses every unit of that bootstrap and
-compiles only the `spice` binary unit.
-Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
-dynamic libraries; extracting the executable alone is not an executable tool.
+proof-container identity, and prepared-candidate identity admitted by
+`dist/darwin/hosted.toml`. The client uploads the canonical source archive
+unchanged as a challenge-bound immutable asset. The stage job verifies its raw
+digest, canonical archive identity, source commit, tree, and admitted workflow,
+then either admits the exact digest-addressed candidate prebuild for those
+inputs or runs the sealed native build. The workflow refuses image, source,
+archive, canvas, SDK, tool, prepared inventory, or stage drift before
+credentials enter any build or proof.
+
+On a prebuild miss, the hosted bootstrap selects the exact Cargo executable
+and admits only its sibling Rustc; the proof build does not rediscover that
+toolchain through ambient `rustup`. It compiles xtask under the candidate build
+settings in `dist/release/candidate.toml`, including the target and build
+directories, rustflags, debug-artifact profile override, and environment that
+`stage-target` gives its candidate build, so the candidate reuses every unit
+of that bootstrap and compiles only the `spice` binary unit. Binaryen's
+admitted tool closure retains `wasm-opt` with its pinned sibling dynamic
+libraries; extracting the executable alone is not an executable tool.
 
 `.github/workflows/macos-prebuild.yml` starts on every push to `main`, or on
 dispatch naming one exact landed commit, without waiting for release inputs,
@@ -614,6 +615,22 @@ seconds. Every packaged entry carries one fixed instant. An already-published
 key skips the build. Release staging links its selected canvas through the
 saved plan, and the existing linked-canvas check refuses any candidate that
 carries other canvas bytes.
+
+Release staging recomputes that key from its selected release input and the
+executing workflow commit, resolves only the deterministic discovery tag, and
+fetches the returned manifest digest through the common prepared-artifact
+client. The inventory and producer record must bind the key, source commit,
+source archive, tree, producer run, and build interval. A hit restores the
+deterministically packed target and sealed proof bundle, makes the
+byte-identical workspace and locked registry sources older, then stamps every
+restored output at one current second before running the unchanged
+unsigned-stage action. Cargo therefore keeps every compiled unit fresh while
+the saved link plan replaces the stand-in canvas with the selected input
+canvas. An absent tag selects the existing cold build; authentication,
+transport, malformed
+resolution, fetch, inventory, record, or output-shape failure refuses. Hosted
+summaries record the overlapped prebuild, digest admission and canvas rebind,
+signing and notarization, and signed native proof as separate durations.
 
 The repository variable `MACOS_DEVELOPER_IDENTITY` names the dedicated CI
 Developer ID Application identity. Actions secrets

@@ -164,7 +164,20 @@ jobs:
           path: ${{ runner.temp }}/release-cargo
           key: macos-registry-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
 
+      - name: Restore exact unsigned candidate prebuild
+        uses: ./.github/actions/macos-candidate-prebuild
+        id: candidate_prebuild
+        with:
+          source_commit: ${{ inputs.source_commit }}
+          source: ${{ inputs.source }}
+          tree: ${{ inputs.tree }}
+          archive_sha256: ${{ inputs.archive_sha256 }}
+          cargo_home: ${{ runner.temp }}/release-cargo
+          target_dir: ${{ runner.temp }}/release-target
+          token: ${{ github.token }}
+
       - name: Restore admitted native dependency layer
+        if: steps.candidate_prebuild.outputs.hit != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -175,10 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo="$RUST_BIN/cargo"
-          bootstrap="$RUNNER_TEMP/prepared-artifact-target"
-          "$cargo" build --locked --release --target aarch64-apple-darwin \
-            --target-dir "$bootstrap" --package prepared-artifact --bin prepared-artifact
-          prepared="$bootstrap/aarch64-apple-darwin/release/prepared-artifact"
+          prepared="$PREPARED_ARTIFACT_TOOL"
           test -x "$prepared"
 
           digest_text() {
@@ -318,8 +328,16 @@ jobs:
           set -euo pipefail
           build_seconds=$(($(date +%s) - NATIVE_BUILD_STARTED))
           printf 'DEPENDENCY_BUILD_SECONDS=%s\n' "$build_seconds" >> "$GITHUB_ENV"
+          if test "$CANDIDATE_PREBUILD_HIT" = 1; then
+            {
+              printf '### macOS candidate rebind\n\n'
+              printf -- '- Cargo freshness, canvas relink, and sealed stage: `%ss`\n' \
+                "$build_seconds"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Publish or record native dependency layer
+        if: steps.candidate_prebuild.outputs.hit != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -444,7 +462,9 @@ jobs:
       - name: Tear down build roots
         if: always()
         shell: bash
-        run: rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
+        run: |
+          rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage" \
+            "$RUNNER_TEMP/candidate-prebuild" "$RUNNER_TEMP/prepared-artifact-target"
 
   sign:
     name: Sign macOS
@@ -521,6 +541,7 @@ jobs:
           NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+          sign_started=$(date +%s)
           work="$RUNNER_TEMP/sign"
           native="$work/native"
           keychain="$RUNNER_TEMP/signing.keychain-db"
@@ -563,6 +584,11 @@ jobs:
           PY
           codesign --verify --deep --strict --verbose=2 "$native"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
+          sign_seconds=$(($(date +%s) - sign_started))
+          {
+            printf '### macOS signing and notarization\n\n'
+            printf -- '- signing, notarization, and assessment: `%ss`\n' "$sign_seconds"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload signed native bytes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -639,6 +665,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          proof_started=$(date +%s)
           work="$RUNNER_TEMP/finalize"
           finalizer="$work/finalizer"
           stage="$GITHUB_WORKSPACE/dist/stage"
@@ -708,6 +735,11 @@ jobs:
           cp -R "$stage/." "$result/stage/"
           (cd "$result" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
             | LC_ALL=C sort | jq -R . | jq -cs .) > "$result/subjects.json"
+          proof_seconds=$(($(date +%s) - proof_started))
+          {
+            printf '### macOS signed proof\n\n'
+            printf -- '- finalization, native proof, and assessment: `%ss`\n' "$proof_seconds"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install exact ORAS
         uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
