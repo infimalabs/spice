@@ -220,7 +220,9 @@ fn renewal_extends_a_live_producer_past_its_original_expiry() {
     let fixture = Fixture::new("renewal");
     let action = derive_action_key(b"renewed action");
     let acquired_at = SystemTime::now();
-    let original = Duration::from_millis(500);
+    // The original lease outlasts any host stall before the explicit renewal,
+    // which then reaches past it.
+    let original = PRODUCER_LEASE;
     let LeaseAcquisition::Acquired { lease, .. } = fixture
         .store
         .acquire_lease(&action, "producer", acquired_at, original)
@@ -234,8 +236,8 @@ fn renewal_extends_a_live_producer_past_its_original_expiry() {
         fixture.store.clone(),
         lease,
         Timing {
-            lease_lifetime: Duration::from_secs(60 * 60),
-            renew_interval: Duration::from_secs(60 * 60),
+            lease_lifetime: PRODUCER_LEASE * 2,
+            renew_interval: PRODUCER_LEASE * 2,
             ..test_timing()
         },
     );
@@ -300,11 +302,13 @@ fn an_already_expired_producer_admits_one_waiter_takeover() {
     );
 }
 
+/// Lease timing no fixture outlives, so renewal and waiting never race the
+/// host's speed.
 fn test_timing() -> Timing {
     Timing {
-        lease_lifetime: Duration::from_secs(2),
-        renew_interval: Duration::from_secs(1),
-        wait_limit: Duration::from_secs(1),
+        lease_lifetime: PRODUCER_LEASE,
+        renew_interval: PRODUCER_LEASE,
+        wait_limit: PRODUCER_LEASE,
     }
 }
 

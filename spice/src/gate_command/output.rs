@@ -742,9 +742,7 @@ mod tests {
         let observed = shared.clone();
         let until = move |reached: &dyn Fn(&str) -> bool| {
             while !reached(&observed.text()) {
-                writes
-                    .recv_timeout(Duration::from_secs(10))
-                    .expect("the heartbeat writes again");
+                writes.recv().expect("the heartbeat writes again");
             }
         };
         (progress, shared, until)

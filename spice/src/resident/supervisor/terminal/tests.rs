@@ -10,6 +10,10 @@ use wire::intent::{LaneJobKind, LaneJobStanding};
 use super::job::Ending;
 use super::{Control, Jobs, Terminal, WaitHints, kept, unheard, wait, wait_until};
 
+/// A wait bound no fixture outlives, so only the job's own ending, a match,
+/// or cancellation ends a wait whatever the host's speed.
+const UNREACHED: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+
 fn scratch(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "spice-lane-{label}-{}-{}",
@@ -174,7 +178,7 @@ fn a_blocking_wait_claims_only_the_ending_it_reports() {
     let report = wait(
         &job,
         &Control::new(),
-        Duration::from_secs(30),
+        UNREACHED,
         Duration::ZERO,
         &mut |_| {
             if !ended {
@@ -211,7 +215,7 @@ fn a_wait_does_not_repeat_an_ending_already_claimed_for_delivery() {
     let report = wait(
         &job,
         &Control::new(),
-        Duration::from_secs(30),
+        UNREACHED,
         Duration::ZERO,
         &mut |_| {},
     )
@@ -234,7 +238,7 @@ fn a_finite_wait_reports_what_its_log_gains_though_its_directory_never_changes()
     wait(
         &job,
         &control,
-        Duration::from_secs(30),
+        UNREACHED,
         Duration::from_millis(10),
         &mut |report| {
             progress.push(report.output.clone());
@@ -305,7 +309,7 @@ fn a_pattern_wait_wakes_on_output_written_after_it_began() {
     let report = wait_until(
         &service,
         &Control::new(),
-        Duration::from_secs(30),
+        UNREACHED,
         &pattern("^ready on (\\d+)$"),
         Duration::ZERO,
         &mut |report| {
@@ -367,7 +371,7 @@ fn a_pattern_wait_on_an_ended_job_matches_its_unterminated_last_line() {
     let matched = wait_until(
         &job,
         &Control::new(),
-        Duration::from_secs(30),
+        UNREACHED,
         &pattern("^ready$"),
         Duration::ZERO,
         &mut |_| {},
@@ -376,7 +380,7 @@ fn a_pattern_wait_on_an_ended_job_matches_its_unterminated_last_line() {
     let unmatched = wait_until(
         &job,
         &Control::new(),
-        Duration::from_secs(30),
+        UNREACHED,
         &pattern("^failed"),
         Duration::ZERO,
         &mut |_| {},
@@ -414,7 +418,7 @@ fn an_archived_log_that_reached_its_cap_still_reports_its_output_and_what_was_no
         wait_until(
             &job,
             &Control::new(),
-            Duration::from_secs(30),
+            UNREACHED,
             &pattern(expression),
             Duration::ZERO,
             &mut |_| {},

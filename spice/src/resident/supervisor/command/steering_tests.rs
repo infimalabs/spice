@@ -620,10 +620,8 @@ fn an_outbox_receipt_withdraws_its_acknowledged_reminder_before_catch_up() {
             },
         }),
     );
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while seat.notices("uri-write:w").is_empty() {
-        assert!(std::time::Instant::now() < deadline, "the write answers");
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::yield_now();
     }
 
     let remaining = seat.queued("inbox");

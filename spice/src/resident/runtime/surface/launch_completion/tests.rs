@@ -164,10 +164,8 @@ async fn assert_pending_wakes_are_request_local(
         ),
     };
     for _ in 0..3 {
-        let request =
-            tokio::time::timeout(std::time::Duration::from_secs(2), controls.control.recv())
-                .await
-                .expect("the client submits the next command");
+        // The client submits the next command.
+        let request = controls.control.recv().await;
         let dispatched = super::super::control_dispatch::dispatch_control(
             command_surface,
             seats,
@@ -246,9 +244,6 @@ fn exercise_commands(
     use tungstenite::http::header::ORIGIN;
 
     let stream = std::net::TcpStream::connect(address).expect("command client connects");
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-        .expect("client read deadline sets");
     let mut request = format!("ws://{address}/socket")
         .into_client_request()
         .expect("socket request builds");

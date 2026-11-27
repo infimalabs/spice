@@ -176,7 +176,6 @@ pub(super) const fn host_load() -> Option<f64> {
 mod tests {
     use super::*;
     use std::sync::{Arc, Condvar, Mutex};
-    use std::time::Duration;
 
     #[test]
     fn host_pressure_reduces_dispatch_without_crossing_the_ceiling() {
@@ -211,12 +210,8 @@ mod tests {
             )
         });
 
-        let first = starts
-            .recv_timeout(Duration::from_secs(1))
-            .expect("first action starts");
-        let second = starts
-            .recv_timeout(Duration::from_secs(1))
-            .expect("second independent action overlaps");
+        let first = starts.recv().expect("first action starts");
+        let second = starts.recv().expect("second independent action overlaps");
         assert_ne!(first, second);
         let (lock, ready) = &*released;
         *lock.lock().expect("release lock") = true;

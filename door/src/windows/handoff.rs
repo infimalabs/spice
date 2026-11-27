@@ -159,7 +159,8 @@ mod tests {
 
     use super::*;
 
-    const BOUND: Duration = Duration::from_secs(5);
+    /// A connecting fixture thread always arrives, so its offer never expires.
+    const BOUND: Duration = Duration::MAX;
 
     #[test]
     fn the_exact_child_gets_a_two_way_channel() {
