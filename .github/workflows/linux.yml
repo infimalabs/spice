@@ -195,6 +195,7 @@ jobs:
           PROOF_IMAGE: ${{ steps.image.outputs.identity }}
         run: |
           set -euo pipefail
+          [[ "${GITHUB_WORKFLOW_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
           root="$RUNNER_TEMP/linux-dependencies"
           target="$RUNNER_TEMP/sealed-target"
@@ -228,8 +229,7 @@ jobs:
           # both the dev xtask build and the release candidate.
           profile=$(python3 -c 'import json, tomllib; print(json.dumps(tomllib.load(open("Cargo.toml", "rb")).get("profile", {}), sort_keys=True))' \
             | digest_text)
-          contract=$(cat .github/workflows/linux.yml prepared/Cargo.toml prepared/src/lib.rs \
-            | digest_text)
+          contract=$(cat prepared/Cargo.toml prepared/src/lib.rs | digest_text)
           # The image fixes rustc, Cargo, the vendored sources, and the
           # absolute paths every sealed run compiles under.
           layout=$(printf '%s' 'workspace=/workspace;home=/cargo-home;target=/cargo-target' \
@@ -240,8 +240,9 @@ jobs:
             --arg lock "$(file_digest Cargo.lock)" \
             --arg cargo_config "$(file_digest .cargo/config.toml)" \
             --arg candidate "$(file_digest dist/release/candidate.toml)" \
-            --arg resolved "$resolved" --arg profile "$profile" --arg contract "$contract" \
-            '{target:$target,image:$image,layout:$layout,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,resolved:$resolved,profile:$profile,contract:$contract}' \
+            --arg resolved "$resolved" --arg profile "$profile" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg contract "$contract" \
+            '{target:$target,image:$image,layout:$layout,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,resolved:$resolved,profile:$profile,workflow_sha:$workflow_sha,contract:$contract}' \
             > "$root/build-key.json"
           key=$("$xtask" prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key //p')
           tag="${key#sha256:}"
