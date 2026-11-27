@@ -72,7 +72,7 @@ impl Io {
     }
 
     #[cfg(test)]
-    fn for_tests(
+    pub(super) fn for_tests(
         claim: impl Fn() -> io::Result<Option<ServiceClaim>> + Send + Sync + 'static,
     ) -> Self {
         Self {

@@ -15,7 +15,7 @@ impl<W: Write + Send + 'static> Driver<W> {
     /// Write one in-flight wait's progress and keep it for restatement.
     pub(super) fn report_wait(&self, id: &str, report: &Report) {
         let mut waits = self.waits.lock().unwrap_or_else(PoisonError::into_inner);
-        let _updated = self.write(&vendor::omp::host_tool_update(id, &report.output));
+        let _updated = self.reply(&vendor::omp::host_tool_update(id, &report.output));
         waits.insert(id.to_owned(), report.output.clone());
     }
 
@@ -40,7 +40,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             return;
         }
         for (id, output) in waits.iter() {
-            let _restated = self.write(&vendor::omp::host_tool_update(id, output));
+            let _restated = self.reply(&vendor::omp::host_tool_update(id, output));
         }
     }
 }

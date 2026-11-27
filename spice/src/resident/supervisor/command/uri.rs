@@ -106,7 +106,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             ("write", Some(content)) => Some(content.to_owned()),
             _ => {
                 let _refused =
-                    self.write(&vendor::omp::host_uri_refused(id, vendor::omp::URI_SERVED));
+                    self.reply(&vendor::omp::host_uri_refused(id, vendor::omp::URI_SERVED));
                 return;
             }
         };
@@ -134,7 +134,7 @@ impl<W: Write + Send + 'static> Driver<W> {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(id);
-            let _refused = self.write(&vendor::omp::host_uri_refused(
+            let _refused = self.reply(&vendor::omp::host_uri_refused(
                 id,
                 &format!("URI thread failed: {error}"),
             ));
@@ -170,17 +170,22 @@ impl<W: Write + Send + 'static> Driver<W> {
         let pending = pending.remove(id);
         if !write {
             if pending {
-                let _answered = self.write(&result_frame(id, &answer));
+                let _answered = self.reply(&result_frame(id, &answer));
             }
             return;
         }
         let purpose = format!("uri-write:{id}");
         let notice = write_notice(url, &answer);
-        let _answered = self.background_before(&purpose, &notice, |delivery| {
+        let noticed = self.background_before(&purpose, &notice, |delivery| {
             if pending {
                 append_result_frame(delivery, id, &answer);
             }
         });
+        // A parked driver cannot queue the notice, but the waiting call still
+        // gets its result.
+        if noticed.is_err() && pending {
+            let _answered = self.reply(&result_frame(id, &answer));
+        }
     }
 
     /// Silence the answer to a withdrawn request, if one is still pending.

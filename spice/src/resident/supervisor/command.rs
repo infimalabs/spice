@@ -618,7 +618,7 @@ impl<W: Write + Send + 'static> Driver<W> {
                 None
             }
             Some(dialog) => {
-                let _declined = self.write(&vendor::omp::dialog_declined(dialog.id()));
+                let _declined = self.reply(&vendor::omp::dialog_declined(dialog.id()));
                 None
             }
             None => None,
@@ -734,7 +734,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&request);
         if let Some(dialog) = dialog {
-            let _answered = self.write(&vendor::omp::dialog_confirmed(&dialog, confirmed));
+            let _answered = self.reply(&vendor::omp::dialog_confirmed(&dialog, confirmed));
         }
     }
 
@@ -896,6 +896,15 @@ impl<W: Write + Send + 'static> Driver<W> {
                 "the OMP command stream is idle",
             ));
         }
+        self.reply(bytes)
+    }
+
+    /// Answer a request OMP issued and is still waiting on: a host tool or
+    /// URI call, or a dialog. Retention admits only input that starts a turn.
+    /// The asking turn is already running even when a settlement observed
+    /// ahead of it parked this driver, so dropping its answer would strand
+    /// that turn. The answer needs only open input.
+    fn reply(&self, bytes: &[u8]) -> io::Result<()> {
         let mut stdin = self.stdin.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(stream) = stdin.as_mut() else {
             return Err(io::Error::new(
