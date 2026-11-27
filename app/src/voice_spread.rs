@@ -5,19 +5,17 @@
 //! publish the macOS tier metadata this pool reads. The assignment reads only
 //! the roster and the device's voice list, so every desktop page with the
 //! same roster and voices hears the same agent in the same voice. The pool
-//! prefers voices carrying macOS premium evidence in the chosen language;
-//! without one it takes the enhanced voices of that language, then any
-//! speaking voice the device serves in it (never a macOS novelty voice), and
-//! only when the language has no such voice does the device default speak.
-//! Every step down from premium carries
-//! a notice naming the gap, shown once per page. Teams and their members are
-//! visited in identity order, so reordering a team or the roster changes
-//! nothing. Teammates are what must sound different: within one team no voice
-//! repeats until the team outnumbers the pool. An agent keeps the voice its
-//! identity hashes to unless a teammate holds it, even when another team holds
-//! it too; only an agent a teammate displaced prefers, among the voices its
-//! team leaves free, one no other team holds.
+//! prefers voices carrying macOS premium evidence in the chosen language. If
+//! premium voices cannot cover the largest team, it fills the pool with
+//! enhanced, other local, then remote voices until teammates can differ. A
+//! macOS novelty voice never enters. Only when the language has no candidate
+//! does the device default speak. Every step down from premium carries a notice
+//! naming the gap, shown once per page. Teams and their members are visited in
+//! identity order, so reordering a team or the roster changes nothing.
+//! Teammates receive the best free pool slot before any lower-quality slot and
+//! repeat only when the team outnumbers the pool.
 
+use isolang::Language;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -25,7 +23,7 @@ use wire::CanonicalUuid;
 
 mod premium;
 
-pub use premium::{is_enhanced, is_premium, is_speaking};
+pub use premium::{is_enhanced, is_novelty, is_premium, is_speaking};
 
 /// How many premium languages a notice names before eliding the rest.
 const MAX_NAMED_LANGUAGES: usize = 8;
@@ -100,8 +98,10 @@ pub enum Tier {
     Premium,
     /// macOS enhanced voices of the chosen language.
     Enhanced,
-    /// Any voice the device serves in the chosen language.
+    /// Other voices the device serves in the chosen language.
     Local,
+    /// Voices served remotely in the chosen language.
+    Remote,
     /// The language has no published voice; the device default speaks.
     DeviceDefault,
 }
@@ -112,7 +112,8 @@ impl Tier {
         match self {
             Self::Premium => "premium voices",
             Self::Enhanced => "its enhanced voices",
-            Self::Local => "its other voices",
+            Self::Local => "its other local voices",
+            Self::Remote => "its remote voices",
             Self::DeviceDefault => "the device default voice",
         }
     }
@@ -191,19 +192,19 @@ pub struct Spread {
 /// The spread pool over `offered`.
 ///
 /// The language is that of the default premium voice, then `device_language`.
-/// When the device language names none of the published speaking voices, the
-/// default speaking voice supplies the browser's own compatible tag instead.
-/// Within the language, the pool is the premium voices, else the enhanced
-/// voices, else every speaking voice the device serves (a macOS novelty voice
-/// never speaks for an agent); a name published twice enters once. With no
-/// language known, or no voice in the language, the device default speaks. A
-/// pool below premium carries the gap only when `premium_expected`: a platform
-/// without a premium tier has nothing to download.
+/// ISO 639-1 and ISO 639-3 primary language codes compare canonically. Within
+/// that language, premium voices alone form the pool when they cover
+/// `largest_team`; otherwise the pool fills, best tier first, with enhanced,
+/// other local, then remote voices until it covers that team or runs out. A
+/// macOS novelty voice never enters, and a name published twice enters once.
+/// With no language known, or no voice in the language, the device default
+/// speaks. A pool below premium carries the gap only when `premium_expected`.
 #[must_use]
 pub fn pool(
     offered: &[OfferedVoice<'_>],
     device_language: Option<&str>,
     premium_expected: bool,
+    largest_team: usize,
 ) -> Spread {
     let premium: Vec<usize> = (0..offered.len())
         .filter(|&index| is_premium(&offered[index]))
@@ -216,7 +217,7 @@ pub fn pool(
     let device_matches = device_language.is_some_and(|language| {
         offered
             .iter()
-            .any(|voice| is_speaking(voice) && same_primary_language(voice.lang, language))
+            .any(|voice| is_candidate(voice) && same_primary_language(voice.lang, language))
     });
     let Some(language) = default_premium
         .or_else(|| device_language.filter(|_| device_matches))
@@ -224,7 +225,7 @@ pub fn pool(
             device_language.and_then(|_| {
                 offered
                     .iter()
-                    .find(|voice| voice.default && is_speaking(voice))
+                    .find(|voice| voice.default && is_candidate(voice))
                     .map(|voice| voice.lang)
             })
         })
@@ -240,17 +241,14 @@ pub fn pool(
             }),
         };
     };
-    let tiers = [
-        (Tier::Premium, in_language(offered, &language, is_premium)),
-        (Tier::Enhanced, in_language(offered, &language, is_enhanced)),
-        (Tier::Local, in_language(offered, &language, is_speaking)),
-    ];
-    let (tier, mut pool) = tiers
-        .into_iter()
-        .find(|(_, pool)| !pool.is_empty())
-        .unwrap_or((Tier::DeviceDefault, Vec::new()));
-    pool.sort_by(|&left, &right| offered[left].name.cmp(offered[right].name));
-    pool.dedup_by(|right, left| offered[*left].name == offered[*right].name);
+
+    let needed = largest_team.max(1);
+    let premium_pool = in_language(offered, &language, is_premium);
+    let (pool, tier) = if premium_pool.len() >= needed {
+        (premium_pool, Tier::Premium)
+    } else {
+        fill_pool(offered, &language, needed)
+    };
     let gap = (premium_expected && tier != Tier::Premium).then(|| PremiumGap::NoPremium {
         language,
         offered: offered.len(),
@@ -265,36 +263,94 @@ pub fn pool(
     Spread { pool, tier, gap }
 }
 
-/// Indices of the voices `admits` accepts that speak `language`.
+type TierPredicate = for<'voice> fn(&OfferedVoice<'voice>) -> bool;
+
+/// Fill one team-sized pool in descending quality order.
+fn fill_pool(offered: &[OfferedVoice<'_>], language: &str, needed: usize) -> (Vec<usize>, Tier) {
+    let tiers: [(Tier, TierPredicate); 4] = [
+        (Tier::Premium, is_premium),
+        (Tier::Enhanced, is_enhanced),
+        (Tier::Local, is_other_local),
+        (Tier::Remote, is_remote),
+    ];
+    let mut pool = Vec::with_capacity(needed);
+    let mut lowest = Tier::DeviceDefault;
+    for (tier, admits) in tiers {
+        let candidates = in_language(offered, language, admits);
+        for index in candidates {
+            if pool.len() == needed {
+                return (pool, lowest);
+            }
+            if !pool
+                .iter()
+                .any(|&selected| offered[selected].name == offered[index].name)
+            {
+                pool.push(index);
+                lowest = tier;
+            }
+        }
+    }
+    (pool, lowest)
+}
+
+fn is_candidate(voice: &OfferedVoice<'_>) -> bool {
+    !is_novelty(voice)
+}
+
+fn is_other_local(voice: &OfferedVoice<'_>) -> bool {
+    is_speaking(voice) && !is_premium(voice) && !is_enhanced(voice)
+}
+
+fn is_remote(voice: &OfferedVoice<'_>) -> bool {
+    !voice.local && is_candidate(voice)
+}
+
+/// Indices of the voices `admits` accepts that speak `language`, by name.
 fn in_language(
     offered: &[OfferedVoice<'_>],
     language: &str,
     admits: impl Fn(&OfferedVoice<'_>) -> bool,
 ) -> Vec<usize> {
-    (0..offered.len())
+    let mut indices: Vec<usize> = (0..offered.len())
         .filter(|&index| {
             admits(&offered[index]) && same_primary_language(offered[index].lang, language)
         })
-        .collect()
+        .collect();
+    indices.sort_by(|&left, &right| offered[left].name.cmp(offered[right].name));
+    indices.dedup_by(|right, left| offered[*left].name == offered[*right].name);
+    indices
 }
 
-/// Whether two tags name the same primary language.
+/// Whether two tags name the same canonical primary language.
 fn same_primary_language(left: &str, right: &str) -> bool {
-    primary_language_subtag(left).eq_ignore_ascii_case(primary_language_subtag(right))
+    match (iso_language(left), iso_language(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => primary_language_subtag(left).eq_ignore_ascii_case(primary_language_subtag(right)),
+    }
+}
+
+fn iso_language(tag: &str) -> Option<Language> {
+    let primary = primary_language_subtag(tag);
+    Language::from_639_1(primary).or_else(|| Language::from_639_3(primary))
 }
 
 fn primary_language_subtag(tag: &str) -> &str {
     tag.split(['-', '_']).next().unwrap_or_default()
 }
 
-/// The primary language subtag, so `en-GB`, `en_US`, and `EN` all read `en`.
+/// The canonical primary language, so `eng-US`, `en_GB`, and `EN` read `en`.
 fn primary_language(tag: &str) -> String {
-    primary_language_subtag(tag).to_ascii_lowercase()
+    iso_language(tag)
+        .and_then(|language| language.to_639_1())
+        .unwrap_or_else(|| primary_language_subtag(tag))
+        .to_ascii_lowercase()
 }
 
 /// The pool slot `member` speaks with among `teams`, given `size` voices.
 ///
-/// A member absent from the roster keeps the slot its identity hashes to.
+/// Pool slots are quality-ordered. Identity-ordered teammates take the best
+/// free slot before a lower-quality one and only repeat after exhausting the
+/// pool. A member absent from the roster keeps the slot its identity hashes to.
 #[must_use]
 pub fn voice_slot(
     teams: &[(CanonicalUuid, Vec<CanonicalUuid>)],
@@ -306,30 +362,18 @@ pub fn voice_slot(
     }
     let mut ordered: Vec<(CanonicalUuid, Vec<CanonicalUuid>)> = teams.to_vec();
     ordered.sort_by_key(|(team, _)| *team);
-    let mut elsewhere = BTreeSet::new();
     for (_, mut members) in ordered {
         members.sort_unstable();
         let mut held = BTreeSet::new();
         for candidate in members {
-            let preferred = preferred_slot(candidate, size);
-            let probe = |free: &dyn Fn(usize) -> bool| {
-                (0..size)
-                    .map(|step| (preferred + step) % size)
-                    .find(|&slot| free(slot))
-            };
-            let slot = if held.contains(&preferred) {
-                probe(&|slot| !held.contains(&slot) && !elsewhere.contains(&slot))
-                    .or_else(|| probe(&|slot| !held.contains(&slot)))
-                    .unwrap_or(preferred)
-            } else {
-                preferred
-            };
+            let slot = (0..size)
+                .find(|slot| !held.contains(slot))
+                .unwrap_or_else(|| preferred_slot(candidate, size));
             if candidate == member {
                 return Some(slot);
             }
             held.insert(slot);
         }
-        elsewhere.extend(held);
     }
     Some(preferred_slot(member, size))
 }
@@ -348,10 +392,7 @@ fn preferred_slot(member: CanonicalUuid, size: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        OfferedVoice, PremiumGap, Spread, Tier, VoicePolicy, policy, pool, preferred_slot,
-        voice_slot,
-    };
+    use super::{OfferedVoice, PremiumGap, Spread, Tier, VoicePolicy, policy, pool, voice_slot};
     use wire::CanonicalUuid;
 
     fn id(suffix: u16) -> CanonicalUuid {
@@ -461,43 +502,13 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_keeps_its_own_voice_unless_a_teammate_holds_it() {
-        let others: Vec<_> = (0..5).map(|n| id(200 + n)).collect();
-        for size in [2, 3, 5, 8] {
-            for n in 0..6 {
-                let alone = id(300 + n);
-                let without = voice_slot(&[(id(9), vec![alone])], alone, size);
-                let beside = voice_slot(
-                    &[(id(1), others.clone()), (id(9), vec![alone])],
-                    alone,
-                    size,
-                );
-                assert_eq!(without, Some(preferred_slot(alone, size)));
-                assert_eq!(beside, without, "another team moved a lone agent's voice");
-            }
-        }
-    }
-
-    #[test]
-    fn a_displaced_teammate_prefers_a_voice_no_other_team_holds() {
-        let size = 3;
-        let ids: Vec<_> = (0..64).map(|n| id(400 + n)).collect();
-        let (first, second) = ids
-            .iter()
-            .flat_map(|left| ids.iter().map(move |right| (*left, *right)))
-            .find(|(left, right)| {
-                left < right && preferred_slot(*left, size) == preferred_slot(*right, size)
-            })
-            .expect("some identities share a slot");
-        let shared = preferred_slot(first, size);
-        let neighbour = ids
-            .iter()
-            .copied()
-            .find(|other| preferred_slot(*other, size) == (shared + 1) % size)
-            .expect("some identity hashes to the next slot");
-        let teams = [(id(1), vec![neighbour]), (id(2), vec![second, first])];
-        assert_eq!(voice_slot(&teams, first, size), Some(shared));
-        assert_eq!(voice_slot(&teams, second, size), Some((shared + 2) % size));
+    fn teammates_take_quality_ordered_slots_before_repeating() {
+        let members: Vec<_> = (0..4).map(|n| id(300 + n)).collect();
+        let teams = [(id(1), members.clone())];
+        assert_eq!(slots(&teams, &members[..3], 3), [0, 1, 2]);
+        let heard = slots(&teams, &members, 3);
+        assert_eq!(&heard[..3], [0, 1, 2]);
+        assert!(heard[3] < 3, "the fourth teammate reuses the pool");
     }
 
     #[test]
@@ -551,7 +562,7 @@ mod tests {
     }
 
     fn names<'a>(offered: &[OfferedVoice<'a>], language: Option<&str>) -> Vec<&'a str> {
-        let spread = pool(offered, language, true);
+        let spread = pool(offered, language, true, 1);
         assert_eq!(spread.tier, Tier::Premium);
         assert_eq!(spread.gap, None, "a premium pool carries no gap");
         spread
@@ -605,7 +616,7 @@ mod tests {
         ];
         assert_eq!(names(&offered, Some("fr")), ["Thomas (Premium)"]);
         assert_eq!(
-            pool(&offered, None, true),
+            pool(&offered, None, true, 1),
             Spread {
                 pool: Vec::new(),
                 tier: Tier::DeviceDefault,
@@ -638,7 +649,7 @@ mod tests {
             substitute,
         };
         assert_eq!(
-            pool(&enhanced, Some("en-US"), true),
+            pool(&enhanced, Some("en-US"), true, 2),
             Spread {
                 pool: vec![2, 1],
                 tier: Tier::Enhanced,
@@ -651,7 +662,7 @@ mod tests {
             chromium("Thomas (Premium)", "fr-FR", false),
         ];
         assert_eq!(
-            pool(&elsewhere, Some("en-US"), true),
+            pool(&elsewhere, Some("en-US"), true, 2),
             Spread {
                 pool: Vec::new(),
                 tier: Tier::DeviceDefault,
@@ -736,7 +747,7 @@ mod tests {
         );
         assert_eq!(system.len(), speaking + 19);
         assert_eq!(
-            pool(&system, Some("en-US"), true),
+            pool(&system, Some("en-US"), true, 4),
             Spread {
                 pool: vec![3, 5, 4, 2],
                 tier: Tier::Local,
@@ -752,7 +763,7 @@ mod tests {
             chromium("Kyoko (Premium)", "ja-JP", false),
         ];
         assert_eq!(
-            pool(&only_novelty, Some("en-US"), true),
+            pool(&only_novelty, Some("en-US"), true, 4),
             Spread {
                 pool: Vec::new(),
                 tier: Tier::DeviceDefault,
@@ -762,49 +773,57 @@ mod tests {
     }
 
     #[test]
-    fn firefox_android_uses_its_published_default_language_for_the_local_pool() {
-        // Firefox Android publishes non-BCP-47 three-letter language tags.
-        // The browser's ordinary `en-US` navigator language cannot match them.
+    fn firefox_android_spreads_remote_three_letter_locales() {
         let android = [
-            safari(
-                "English United States",
-                "urn:moz-tts:android:eng-us-x-sfg",
-                "eng-US-f000",
-                true,
-            ),
-            safari(
-                "English United Kingdom",
-                "urn:moz-tts:android:eng-gb-x-gba",
-                "eng-GB-f001",
-                false,
-            ),
-            safari(
-                "Deutsch",
-                "urn:moz-tts:android:deu-de-x-nfh",
-                "deu-DE-f000",
-                false,
-            ),
             OfferedVoice {
-                name: "English (Cloud)",
-                uri: "urn:moz-tts:android:eng-us-cloud",
-                lang: "eng-US-cloud",
+                name: "English United States",
+                uri: "urn:moz-tts:android:eng-us-x-sfg",
+                lang: "eng-US-f000",
+                local: false,
+                default: false,
+            },
+            OfferedVoice {
+                name: "English United Kingdom",
+                uri: "urn:moz-tts:android:eng-gb-x-gba",
+                lang: "eng-GB-f001",
+                local: false,
+                default: false,
+            },
+            OfferedVoice {
+                name: "English Australia",
+                uri: "urn:moz-tts:android:eng-au-x-aub",
+                lang: "eng-AU-f002",
+                local: false,
+                default: false,
+            },
+            OfferedVoice {
+                name: "Deutsch",
+                uri: "urn:moz-tts:android:deu-de-x-nfh",
+                lang: "deu-DE-f000",
                 local: false,
                 default: false,
             },
         ];
-        let spread = Spread {
-            pool: vec![1, 0],
-            tier: Tier::Local,
-            gap: None,
-        };
-        assert_eq!(pool(&android, Some("en-US"), false), spread);
+        let spread = pool(&android, Some("en-US"), false, 3);
+        assert_eq!(spread.tier, Tier::Remote);
+        assert_eq!(spread.pool, [2, 1, 0]);
+
+        let members: Vec<_> = (0..3).map(|n| id(700 + n)).collect();
+        let teams = [(id(1), members.clone())];
+        let heard: Vec<_> = members
+            .iter()
+            .map(|member| {
+                let slot = voice_slot(&teams, *member, spread.pool.len()).expect("voice slot");
+                android[spread.pool[slot]].name
+            })
+            .collect();
         assert_eq!(
-            pool(&android, None, false),
-            Spread {
-                pool: Vec::new(),
-                tier: Tier::DeviceDefault,
-                gap: None,
-            }
+            heard,
+            [
+                "English Australia",
+                "English United Kingdom",
+                "English United States"
+            ]
         );
     }
 
@@ -820,7 +839,7 @@ mod tests {
         assert!(notice.contains("language \"en\""), "{notice}");
         assert!(notice.contains("68 voices"), "{notice}");
         assert!(
-            notice.contains("its other voices speak instead"),
+            notice.contains("its other local voices speak instead"),
             "{notice}"
         );
         assert!(notice.contains("say.voices"), "{notice}");
@@ -842,7 +861,7 @@ mod tests {
         let members: Vec<_> = (0..3).map(|n| id(700 + n)).collect();
         let teams = [(id(1), members.clone())];
         let heard = |offered: &[OfferedVoice<'_>]| -> Vec<String> {
-            let pool = pool(offered, Some("en-US"), true).pool;
+            let pool = pool(offered, Some("en-US"), true, members.len()).pool;
             members
                 .iter()
                 .map(|member| {
@@ -857,5 +876,32 @@ mod tests {
         distinct.sort_unstable();
         distinct.dedup();
         assert_eq!(distinct.len(), members.len(), "teammates shared a voice");
+    }
+
+    #[test]
+    fn a_short_premium_tier_fills_with_enhanced_voices_in_quality_order() {
+        let offered = [
+            chromium("Zoe (Premium)", "en-US", false),
+            chromium("Ava (Enhanced)", "en-US", false),
+            chromium("Allison (Enhanced)", "en-GB", false),
+            chromium("Samantha", "en-US", true),
+        ];
+        let spread = pool(&offered, Some("en-US"), true, 3);
+        assert_eq!(spread.pool, [0, 2, 1]);
+        assert_eq!(spread.tier, Tier::Enhanced);
+
+        let members: Vec<_> = (0..3).map(|n| id(800 + n)).collect();
+        let teams = [(id(1), members.clone())];
+        let heard: Vec<_> = members
+            .iter()
+            .map(|member| {
+                let slot = voice_slot(&teams, *member, spread.pool.len()).expect("voice slot");
+                offered[spread.pool[slot]].name
+            })
+            .collect();
+        assert_eq!(
+            heard,
+            ["Zoe (Premium)", "Allison (Enhanced)", "Ava (Enhanced)"]
+        );
     }
 }

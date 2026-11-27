@@ -421,7 +421,17 @@ fn spread_voice(
 ) -> (Option<Voice>, Option<String>) {
     let described: Vec<OfferedVoice<'_>> = offered.iter().map(Voice::offered).collect();
     let language = web_sys::window().and_then(|window| window.navigator().language());
-    let spread = voice_spread::pool(&described, language.as_deref(), premium_expected);
+    let largest_team = teams
+        .iter()
+        .map(|(_, members)| members.len())
+        .max()
+        .unwrap_or(1);
+    let spread = voice_spread::pool(
+        &described,
+        language.as_deref(),
+        premium_expected,
+        largest_team,
+    );
     let voice = voice_spread::voice_slot(teams, member, spread.pool.len())
         .map(|slot| offered[spread.pool[slot]].clone());
     (voice, spread.gap.map(|gap| gap.to_string()))

@@ -412,26 +412,27 @@ mobile browser uses the device default voice because its published voices do
 not carry macOS tier metadata. That is an iPhone, iPad, iPod, or iPadOS
 presenting its desktop-mode Macintosh user agent, recognized by a `Mobile/`
 token or by `navigator.maxTouchPoints` above one, which a Mac reports as zero.
-Other browsers spread roster agents across published macOS premium voices
-first: Safari's `com.apple.voice.premium.` identifier or Chromium's exact
-` (Premium)` name suffix, served locally. The pool keeps the default premium
-voice's language, otherwise the browser's language. If that language names
-none of the published speaking voices, the default speaking voice supplies the
-browser's own compatible tag instead. Within that language the pool is the
-premium voices, else the enhanced voices (`com.apple.voice.enhanced.` or
-` (Enhanced)`), else every speaking voice the browser serves locally, never a
-macOS novelty voice (`com.apple.speech.synthesis.voice.`: Bells, Bubbles,
-Zarvox, ...), and the browser default speaks only when the language has no such
-voice.
+Other browsers spread roster agents across one canonical primary language:
+ISO 639-1 and ISO 639-3 tags for that language compare equally, so `en-US`
+matches Firefox Android's `eng-US-f000`. The pool keeps the default premium
+voice's language, otherwise the browser's language. Safari's
+`com.apple.voice.premium.` identifier and Chromium's exact ` (Premium)` suffix
+identify premium voices. When premium voices can cover the largest team, only
+premium voices enter. Otherwise the pool fills only as far as that team needs,
+in order: premium, enhanced (`com.apple.voice.enhanced.` or ` (Enhanced)`),
+other local voices, then remote voices. A macOS novelty voice
+(`com.apple.speech.synthesis.voice.`: Bells, Bubbles, Zarvox, ...) never enters,
+and the browser default speaks only when the language has no published
+non-novelty voice.
 
-An agent keeps the voice its lane hashes to unless a teammate already holds
-it, so teammates sound different until a team outnumbers the voices, and
-agents on different teams may share. The first time a Macintosh page steps
-below premium, one toast names the language, how many voices the browser
-publishes, the languages its premium voices do speak, what speaks instead,
-and the remedy: download a premium voice or set `say.voices`. Other platforms
-have no premium tier to miss and run the same descent silently. A speaker
-outside the roster with no list uses the browser default. A browser that has
+Pool slots follow the same quality order. Identity-ordered teammates take the
+best free slot before any lower-quality slot and repeat only after their team
+outnumbers the pool; agents on different teams may share. The first time a
+Macintosh page needs a non-premium voice, one toast names the language, how many
+voices the browser publishes, the languages its premium voices do speak, what
+speaks instead, and the remedy: download a premium voice or set `say.voices`.
+Other platforms have no premium tier to miss and run the same descent silently.
+A speaker outside the roster with no list uses the browser default. A browser that has
 not yet published voices is waited for under a bound when configured or
 desktop spreading needs the list; a browser that never publishes any voice
 refuses, and a published list holding none of the configured names refuses,

@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+isolang = "2.4.0"
 serde = "1.0.229"
 thiserror = "2.0.19"
 wire = { path = "../wire" }
