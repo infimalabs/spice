@@ -1088,6 +1088,7 @@ mod tests {
             session: None,
             disposition: "seated".to_owned(),
             liveness: wire::intent::LaneLiveness::Vacant,
+            blocked_on: None,
             bound: false,
             wakeable: true,
             jobs: Vec::new(),

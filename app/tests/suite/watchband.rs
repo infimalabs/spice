@@ -171,6 +171,7 @@ fn member(id: &str, worktree: &str) -> LaneMember {
         session: Some("session-fixture".to_owned()),
         disposition: "seated".to_owned(),
         liveness: wire::intent::LaneLiveness::Working,
+        blocked_on: None,
         // A seat that has run: `bound` records that a resumable session was once
         // declared for it, and a bound seat is `wakeable`, which is true of every
         // lane this fixture builds because each one is occupied. No standing

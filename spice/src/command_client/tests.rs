@@ -919,6 +919,30 @@ fn a_transport_failure_names_the_elapsed_bound_before_it_names_a_direction() {
     }
 }
 
+#[test]
+fn a_delivered_write_timeout_names_its_command_and_waited_authority() {
+    let contract = crate::cli::contract(&["room", "contribute"])
+        .expect("the registry carries room contribute");
+    let outcome = delivered_unanswered(
+        environment_fault(
+            "serve::deadline-elapsed",
+            "resident did not answer within the 20s client bound",
+        ),
+        contract,
+    );
+
+    let Outcome::Fault(fault) = outcome else {
+        panic!("an unanswered delivered write must remain a typed fault");
+    };
+    assert_eq!(fault.reason, "serve::deadline-elapsed");
+    assert!(fault.detail.contains("spice room contribute"));
+    assert!(fault.detail.contains("resident authority"));
+    assert!(
+        fault.detail.contains("check its effect"),
+        "a delivered write retains its uncertain-effect warning"
+    );
+}
+
 /// Every command shares the temporary app answer bound.
 #[test]
 fn the_answer_bound_registry_declares_the_current_resident_answer_bound() {

@@ -87,6 +87,29 @@ impl Activity {
     }
 }
 
+/// One tool call the supervised occupant has started but not yet answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    occupant: CanonicalUuid,
+    call_id: String,
+    command: String,
+    started: Monotonic,
+}
+
+impl ToolCall {
+    /// Command the occupant is waiting on.
+    #[must_use]
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// Monotonic instant at which the call started.
+    #[must_use]
+    pub const fn started(&self) -> Monotonic {
+        self.started
+    }
+}
+
 impl Occupant {
     /// The lane this occupant sits in.
     #[must_use]
@@ -229,6 +252,7 @@ pub struct Seats {
     occupied: BTreeMap<CanonicalUuid, Occupant>,
     started: BTreeMap<CanonicalUuid, Activity>,
     activity: BTreeMap<CanonicalUuid, Activity>,
+    tool_calls: BTreeMap<CanonicalUuid, Vec<ToolCall>>,
     vacated: Vec<(CanonicalUuid, CanonicalUuid)>,
 }
 
@@ -240,6 +264,7 @@ impl Seats {
             occupied: BTreeMap::new(),
             started: BTreeMap::new(),
             activity: BTreeMap::new(),
+            tool_calls: BTreeMap::new(),
             vacated: Vec::new(),
         }
     }
@@ -286,6 +311,70 @@ impl Seats {
         }
         self.activity.insert(lane, Activity::new(occupant, at));
         true
+    }
+
+    /// Record one tool call started by the exact supervised occupant.
+    ///
+    /// Returns `false` for a stale report naming a vacant or succeeded seat.
+    pub fn start_tool_call(
+        &mut self,
+        lane: CanonicalUuid,
+        occupant: CanonicalUuid,
+        call_id: impl Into<String>,
+        command: impl Into<String>,
+        started: Monotonic,
+    ) -> bool {
+        if !self
+            .occupied
+            .get(&lane)
+            .is_some_and(|sitting| sitting.occupant == occupant)
+        {
+            return false;
+        }
+        let call_id = call_id.into();
+        let calls = self.tool_calls.entry(lane).or_default();
+        calls.retain(|call| call.call_id != call_id);
+        calls.push(ToolCall {
+            occupant,
+            call_id,
+            command: command.into(),
+            started,
+        });
+        true
+    }
+
+    /// Retire one answered tool call from the exact supervised occupant.
+    pub fn finish_tool_call(
+        &mut self,
+        lane: CanonicalUuid,
+        occupant: CanonicalUuid,
+        call_id: &str,
+    ) -> bool {
+        let Some(calls) = self.tool_calls.get_mut(&lane) else {
+            return false;
+        };
+        let before = calls.len();
+        calls.retain(|call| call.occupant != occupant || call.call_id != call_id);
+        let removed = calls.len() != before;
+        if calls.is_empty() {
+            self.tool_calls.remove(&lane);
+        }
+        removed
+    }
+
+    /// Oldest unanswered tool call for this lane, once it crosses `horizon`.
+    #[must_use]
+    pub fn blocked_tool_call(
+        &self,
+        lane: CanonicalUuid,
+        now: Monotonic,
+        horizon: Duration,
+    ) -> Option<&ToolCall> {
+        self.tool_calls
+            .get(&lane)?
+            .iter()
+            .filter(|call| now.duration_since(call.started) >= horizon)
+            .min_by_key(|call| call.started)
     }
 
     /// Every occupied lane, ordered by lane.
@@ -337,10 +426,10 @@ impl Seats {
         Ok(occupant)
     }
 
-    /// Releases a seat, handing back the group so it can be waited on.
     pub fn vacate(&mut self, lane: CanonicalUuid) -> Option<Occupant> {
         self.started.remove(&lane);
         self.activity.remove(&lane);
+        self.tool_calls.remove(&lane);
         let occupant = self.occupied.remove(&lane)?;
         self.vacated.push((lane, occupant.occupant()));
         Some(occupant)
@@ -372,6 +461,7 @@ impl Seats {
         self.occupied.clear();
         self.started.clear();
         self.activity.clear();
+        self.tool_calls.clear();
     }
 }
 
@@ -443,6 +533,51 @@ mod tests {
             vec![(uuid(2), uuid(4)), (uuid(1), uuid(3))]
         );
         assert!(seats.take_vacated().is_empty());
+    }
+
+    #[test]
+    fn a_tool_call_becomes_blocked_at_the_bound_and_clears_on_its_result() {
+        let mut seats = Seats::new();
+        seats
+            .seat_detached(uuid(1), uuid(3), Box::new(Detached(1)))
+            .expect("the seat takes a detached handle");
+        let started = seats.started(uuid(1)).expect("seating is timed").at();
+        assert!(seats.start_tool_call(
+            uuid(1),
+            uuid(3),
+            "call-1",
+            "spice room contribute DIRECTI-example",
+            started,
+        ));
+
+        assert!(
+            seats
+                .blocked_tool_call(
+                    uuid(1),
+                    started + Duration::from_secs(19),
+                    Duration::from_secs(20),
+                )
+                .is_none()
+        );
+        let blocked = seats
+            .blocked_tool_call(
+                uuid(1),
+                started + Duration::from_secs(20),
+                Duration::from_secs(20),
+            )
+            .expect("the unanswered call crosses the exact bound");
+        assert_eq!(blocked.command(), "spice room contribute DIRECTI-example");
+
+        assert!(seats.finish_tool_call(uuid(1), uuid(3), "call-1"));
+        assert!(
+            seats
+                .blocked_tool_call(
+                    uuid(1),
+                    started + Duration::from_secs(30),
+                    Duration::from_secs(20),
+                )
+                .is_none()
+        );
     }
 
     /// An empty seat takes one group, and the seat names what sits in it.

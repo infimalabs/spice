@@ -506,6 +506,7 @@ fn lane_response_with_renewals(
                 } else {
                     wire::intent::LaneLiveness::Vacant
                 },
+                blocked_on: None,
                 hold: None,
                 parked: None,
             },

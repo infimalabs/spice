@@ -926,9 +926,54 @@ pub(super) fn capture_record(
         }
         commit(bus, write)?;
     }
-    let admitted = seats.observe_activity(record.lane, record.occupant, Monotonic::now());
+    let now = Monotonic::now();
+    let admitted = seats.observe_activity(record.lane, record.occupant, now);
+    observe_tool_activity(seats, record, now);
     debug_assert!(admitted, "the current capture record remains supervised");
     Ok(true)
+}
+
+fn observe_tool_activity(seats: &mut Seats, record: &CaptureRecord, now: Monotonic) {
+    for tool in record
+        .decoded
+        .events()
+        .iter()
+        .filter_map(|event| match event {
+            listen::Event::Tool(tool) => Some(tool),
+            _ => None,
+        })
+    {
+        match &tool.moment {
+            listen::ToolMoment::Call {
+                name, arguments, ..
+            } => {
+                let observed = seats.start_tool_call(
+                    record.lane,
+                    record.occupant,
+                    tool.call_id.clone(),
+                    tool_call_command(name, arguments),
+                    now,
+                );
+                debug_assert!(observed, "the current tool call remains supervised");
+            }
+            listen::ToolMoment::Result(_) => {
+                seats.finish_tool_call(record.lane, record.occupant, &tool.call_id);
+            }
+            listen::ToolMoment::Update { .. } => {}
+        }
+    }
+}
+
+fn tool_call_command(name: &str, arguments: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|arguments| {
+            arguments
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| format!("{name} {arguments}"))
 }
 
 /// Vacate and durably degrade an occupant whose selected capture path failed.
@@ -1264,4 +1309,20 @@ pub(in crate::resident) fn admit_worktree(
         )));
     }
     Ok(repository)
+}
+
+#[cfg(test)]
+mod tool_activity_tests {
+    use super::tool_call_command;
+
+    #[test]
+    fn shell_tool_activity_names_the_exact_command() {
+        assert_eq!(
+            tool_call_command(
+                "shell",
+                r#"{"command":"spice room contribute DIRECTI-example","timeout":30}"#,
+            ),
+            "spice room contribute DIRECTI-example"
+        );
+    }
 }
