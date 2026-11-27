@@ -693,7 +693,12 @@ async fn app(
         Ok(policy) => policy,
         Err(message) => return (StatusCode::SERVICE_UNAVAILABLE, message).into_response(),
     };
-    let mut response = if if_none_match(&headers, &asset.etag) {
+    // Generation-qualified routes are content-addressed and cached forever.
+    // WebKit still revalidates them on an explicit reload and applies
+    // subresource integrity to an empty 304, so such a validator receives the
+    // complete verified body.
+    let immutable = crate::asset::generation_route(route).is_some();
+    let mut response = if !immutable && if_none_match(&headers, &asset.etag) {
         let mut response = Response::new(Body::empty());
         *response.status_mut() = StatusCode::NOT_MODIFIED;
         response
@@ -703,7 +708,14 @@ async fn app(
     let response_headers = response.headers_mut();
     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static(asset.content_type));
     response_headers.insert(ETAG, asset.etag);
-    response_headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response_headers.insert(
+        CACHE_CONTROL,
+        HeaderValue::from_static(if immutable {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        }),
+    );
     if asset.gzip {
         response_headers.insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
         response_headers.insert(VARY, HeaderValue::from_static("accept-encoding"));
