@@ -283,7 +283,7 @@ fn read(path: &Path) -> Result<Vec<u8>, PublishError> {
     })
 }
 
-fn publish(path: &Path, bytes: &[u8]) -> Result<(), PublishError> {
+pub(super) fn publish(path: &Path, bytes: &[u8]) -> Result<(), PublishError> {
     let mut staged = atomic::Destination::new(path)
         .map_err(|source| PublishError::Atomic {
             path: path.to_path_buf(),

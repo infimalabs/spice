@@ -461,7 +461,19 @@ immutable objects before package and plan capture; plan capture never depends
 on a mutable manifest left by an earlier local rehearsal. It persists the plan
 with its complete asset inventory under the session's `assets` directory,
 reports each asset's SHA-256, name, and length, and stops before the first tag
-or release mutation. The request stays pinned; a later ordinary resume
+or release mutation. Every invocation that reaches plan capture also writes
+`timeline.json` beside the plan and prints its summary. Each phase records:
+- its dependencies and the reason it waits on them;
+- its start and finish positions from the invocation start;
+- its idle gap after its latest dependency finished;
+- the provider run it admitted.
+
+The phases are notes admission, the input preflight, each native stage,
+receipt composition, and plan capture. The summary names the critical path, the
+chain of latest-finishing dependencies, and its duration, so an avoidable
+serialization or idle handoff is directly inspectable. Native stages wait only
+on the admitted inputs, never on a sibling; only receipt composition and plan
+capture join them. The request stays pinned; a later ordinary resume
 re-admits the receipts and re-captures the plan, refuses if any byte moved, and
 publishes exactly the staged assets.
 `publish-hosted-release --abandon COMMIT`
