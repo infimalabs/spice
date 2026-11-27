@@ -384,21 +384,22 @@ artifact, which only their coordinator downloads.
 
 **Invariant —** Darwin's compiled dependency reuse is a prepared OCI bundle,
 not provider-cache authority. Its build key covers the target, exact Rust and
-Cargo identities, lockfile, Cargo and candidate configuration, feature plan,
-the resolved third-party feature set, the root manifest's release profile,
-SDK/Xcode boundary, canonical vendor-set identity, and the preparation
-contract, so a manifest feature or profile change selects a new key rather
-than restoring units Cargo would discard. An exact-source `prepared-artifact`
-bootstrap resolves the deterministic discovery tag, admits its config and
-manifest, fetches by manifest digest, and safely unpacks the inventoried
-target directories inside the native build boundary. Dependency-cache
-archives preserve Cargo's output and fingerprint modification-time ordering;
-the restore copies those times intact so Cargo can keep admitted third-party
-units fresh.
-Before publication, Cargo removes every workspace package from a cold target
-copy; restored bytes can therefore satisfy only unchanged third-party units.
-Every workspace crate, repository-sensitive build
-script, and the final executable recompiles from the admitted source.
+Cargo identities, lockfile, Cargo and candidate configuration, candidate and
+proof feature plans, the resolved third-party feature set, the root manifest's
+release profile, SDK/Xcode boundary, canonical vendor-set identity, and both
+the preparation and proof-build contracts. A change to those inputs selects a
+new key rather than restoring units Cargo would discard. An exact-source
+`prepared-artifact` bootstrap resolves the deterministic discovery tag, admits
+its config and manifest, fetches by manifest digest, and safely unpacks the
+inventoried candidate and proof target directories plus the vendored closure
+inside the native build boundary. Dependency archives preserve Cargo's output
+and fingerprint modification-time ordering; the restore copies those times
+intact so Cargo can keep admitted third-party units fresh.
+Before publication, Cargo removes every workspace package from both cold target
+copies. The vendor tree and remaining compiled bytes can therefore satisfy
+only unchanged third-party units. Every workspace crate,
+repository-sensitive build script, generated proof pin, sealed proof runner,
+and final executable rebuilds from the admitted source.
 
 Only a canonically absent Darwin dependency tag or a resolved layer that
 fails fetch, inventory, or record admission selects the ordinary cold build.
@@ -595,11 +596,14 @@ of that bootstrap and compiles only the `spice` binary unit. Binaryen's
 admitted tool closure retains `wasm-opt` with its pinned sibling dynamic
 libraries; extracting the executable alone is not an executable tool.
 
+The optional exact-candidate retry cache in
 `.github/workflows/macos-prebuild.yml` runs only on dispatch naming one exact
-landed commit, never on push, so it never holds the macOS runners release
-staging waits for. It does not wait for release inputs, the proof image, or
-another platform. It runs `release-inputs` on the admitted
-macOS image, then rebuilds inside the same synthetic commit of the extracted
+landed commit, never on push. A normal release needs no preparatory run: on a
+miss, the dependency layer above supplies external build products and the
+selected product rebuilds. The optional workflow does not wait for release
+inputs, the proof image, or another platform. It runs `release-inputs` on the
+admitted macOS image, then rebuilds inside the same synthetic commit of the
+extracted
 archive that release staging builds in. It runs the same
 `.github/actions/macos-toolchain` and `.github/actions/macos-unsigned-stage`
 composite actions, with its own canvas and a zero proof identity standing in

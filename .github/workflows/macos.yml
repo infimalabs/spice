@@ -206,7 +206,7 @@ jobs:
           lock="sha256:$(shasum -a 256 Cargo.lock | cut -d' ' -f1)"
           cargo_config="sha256:$(shasum -a 256 .cargo/config.toml | cut -d' ' -f1)"
           candidate="sha256:$(shasum -a 256 dist/release/candidate.toml | cut -d' ' -f1)"
-          features=$(printf '%s' 'xtask:default;spice:canvas' | digest_text)
+          features=$(printf '%s' 'xtask:default;spice:canvas;proof:default' | digest_text)
           # Cargo.lock records no feature selection, and the root manifest
           # alone owns profiles: the resolved third-party feature plan and the
           # release profile key the layer so either change republishes it.
@@ -219,8 +219,9 @@ jobs:
           profile=$(python3 -c 'import json, tomllib; print(json.dumps(tomllib.load(open("Cargo.toml", "rb")).get("profile", {}).get("release", {}), sort_keys=True))' \
             | digest_text)
           sdk=$(printf '%s\n%s\n%s' "$EXPECTED_SDK" "$EXPECTED_XCODE_BUILD" "$DEVELOPER_DIR" | digest_text)
-          contract=$(cat prepared/Cargo.toml prepared/src/lib.rs .github/workflows/macos.yml \
-            | digest_text)
+          contract=$(cat prepared/Cargo.toml prepared/src/lib.rs \
+            dist/proof-runner/build.sh .github/actions/macos-unsigned-stage/action.yml \
+            .github/workflows/macos.yml | digest_text)
           jq -n --sort-keys \
             --arg target "$target" --arg rust "$rust" --arg cargo "$cargo_identity" \
             --arg lock "$lock" --arg cargo_config "$cargo_config" \
@@ -252,7 +253,9 @@ jobs:
               && baseline=$(jq -r .cold_build_seconds "$record") \
               && [[ "$baseline" =~ ^[0-9]+$ ]] \
               && test -d "$root/restored/target/release-appliance" \
-              && test -d "$root/restored/target/release-appliance-build"
+              && test -d "$root/restored/target/release-appliance-build" \
+              && test -d "$root/restored/target/proof-native-dependencies" \
+              && test -d "$root/restored/proof-native-darwin/vendor"
           }
           hit=0
           present=0
@@ -281,6 +284,9 @@ jobs:
                 # outputs, dependent outputs, and fingerprint markers. The
                 # cache archive preserves those mtimes; copy them intact.
                 cp -pR "$root/restored/target/." "$CARGO_TARGET_DIR/"
+                mkdir -p "$GITHUB_WORKSPACE/target/proof-native-darwin"
+                cp -pR "$root/restored/proof-native-darwin/vendor" \
+                  "$GITHUB_WORKSPACE/target/proof-native-darwin/"
                 hit=1
               else
                 echo "prepared layer $manifest refused; building cold" >&2
@@ -321,6 +327,7 @@ jobs:
           proof-container: ${{ inputs.proof_container }}
           canvas: ${{ runner.temp }}/input/canvas.zip
           app: ${{ inputs.app }}
+          proof-dependencies-restored: ${{ env.CANDIDATE_PREBUILD_HIT == '1' || env.DEPENDENCY_HIT == '1' }}
 
       - name: Record native build duration
         shell: bash
@@ -361,6 +368,7 @@ jobs:
               'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["target_dir"])')"
             build_dir="$CARGO_TARGET_DIR/$("$python" -c \
               'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["build_dir"])')"
+            proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
             debug_config=$("$python" -c \
               'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["debug_config"])')
             candidate_env=()
@@ -385,11 +393,15 @@ jobs:
             env "${candidate_env[@]}" "$cargo" clean --release \
               --target aarch64-apple-darwin --target-dir "$release_target" \
               --config "$debug_config" "${packages[@]}"
+            "$cargo" clean --release --target-dir "$proof_target" "${packages[@]}"
 
             root="$RUNNER_TEMP/native-dependencies/publish"
-            mkdir -p "$root/target"
+            mkdir -p "$root/target" "$root/proof-native-darwin"
             mv "$release_target" "$root/target/release-appliance"
             mv "$build_dir" "$root/target/release-appliance-build"
+            mv "$proof_target" "$root/target/proof-native-dependencies"
+            cp -pR "$GITHUB_WORKSPACE/target/proof-native-darwin/vendor" \
+              "$root/proof-native-darwin/"
             # Cold hosted run 45989936318 spent 23m30s in this native build.
             # Keep the reference fixed so the prepared payload is idempotent.
             jq -n --sort-keys --arg build_key "$DEPENDENCY_BUILD_KEY" \
