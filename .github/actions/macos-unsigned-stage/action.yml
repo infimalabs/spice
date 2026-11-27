@@ -25,6 +25,10 @@ inputs:
   app:
     description: App generation that canvas carries
     required: true
+  proof-dependencies-restored:
+    description: Whether the admitted proof Cargo products and vendor tree were restored
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -75,8 +79,15 @@ runs:
         env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
           --target-dir "$release_target" --config "$debug_config" \
           --package xtask --bin xtask
+        proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
+        proof_arguments=("$proof_target" --seal-only)
+        case '${{ inputs.proof-dependencies-restored }}' in
+          true) proof_arguments+=(--reuse-vendor) ;;
+          false) ;;
+          *) echo "proof-dependencies-restored must be true or false" >&2; exit 65 ;;
+        esac
         SPICE_PROOF_CARGO="$cargo" \
-          dist/proof-runner/build.sh "$CARGO_TARGET_DIR" --seal-only
+          dist/proof-runner/build.sh "${proof_arguments[@]}"
         runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
         SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
           SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \

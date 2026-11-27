@@ -11,9 +11,12 @@ dist/proof-runner/build.sh
 ```
 
 An optional first argument names the Cargo target directory both runner builds
-share; it defaults to the worktree's `target/`. The hosted macOS job passes its
-bootstrap target so the runner reuses the release dependency graph already
-built for `xtask` and `spice`.
+share; it defaults to the worktree's `target/`. The hosted macOS job uses the
+dedicated `release-target/proof-native-dependencies` root so an admitted layer
+can restore only source-independent Cargo products without overlapping the
+candidate target. `--reuse-vendor` explicitly preserves an already admitted
+`target/proof-native-darwin/vendor/` tree while deleting and rebuilding the
+runner binary, generated pins, and every other bundle entry.
 
 It requires native arm64 macOS, a tracked tree at `HEAD`, and no non-ignored
 untracked files outside release output. It writes the runner, its vendored

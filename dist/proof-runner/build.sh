@@ -48,27 +48,49 @@ dev_cargo() {
 bundle="$root/target/proof-native-darwin" # env-policy: allow
 # The unsealed and sealed runner builds share one release target directory, the
 # optional first argument or this worktree's `target/`, so the sealed build
-# recompiles only the runner after `SPICE_NATIVE_PINS` changes rather than its
-# whole dependency graph a second time. A caller that already built release
-# tools passes its own target directory to reuse that graph too.
+# recompiles only the selected-source runner after `SPICE_NATIVE_PINS` changes.
+# Hosted release staging gives proof its own admitted dependency root rather
+# than sharing either candidate Cargo root.
 target=${1:-$root/target} # env-policy: allow
 bind=true
 case "${2:-}" in # env-policy: allow
     '') ;;
     --seal-only) bind=false ;;
     *)
-        printf 'usage: %s [TARGET] [--seal-only]\n' "$0" >&2
+        printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
         exit 65
         ;;
 esac
-if [ "$#" -gt 2 ]; then
-    printf 'usage: %s [TARGET] [--seal-only]\n' "$0" >&2
+reuse_vendor=false
+case "${3:-}" in # env-policy: allow
+    '') ;;
+    --reuse-vendor) reuse_vendor=true ;;
+    *)
+        printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
+        exit 65
+        ;;
+esac
+if [ "$#" -gt 3 ]; then
+    printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
     exit 65
 fi
 vendor="$bundle/vendor" # env-policy: allow
-rm -rf "$bundle" # env-policy: allow
-mkdir -p "$bundle/bin" # env-policy: allow
-dev_cargo vendor --locked --respect-source-config "$vendor" # env-policy: allow
+if [ "$reuse_vendor" = true ]; then # env-policy: allow
+    if [ ! -d "$vendor" ] || [ -L "$vendor" ]; then # env-policy: allow
+        printf 'reused proof vendor is not one admitted directory: %s\n' "$vendor" >&2 # env-policy: allow
+        exit 65
+    fi
+    if ! find "$vendor" -mindepth 1 -print -quit | grep -q .; then # env-policy: allow
+        printf 'reused proof vendor is empty: %s\n' "$vendor" >&2 # env-policy: allow
+        exit 65
+    fi
+    find "$bundle" -mindepth 1 -maxdepth 1 ! -name vendor -exec rm -rf {} + # env-policy: allow
+    mkdir -p "$bundle/bin" # env-policy: allow
+else
+    rm -rf "$bundle" # env-policy: allow
+    mkdir -p "$bundle/bin" # env-policy: allow
+    dev_cargo vendor --locked --respect-source-config "$vendor" # env-policy: allow
+fi
 
 # The unsealed build of the runner is the one tool that computes the identities
 # the sealed build is pinned with, so the pins never come from a second
