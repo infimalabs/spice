@@ -147,7 +147,24 @@ impl ReplayRefusal {
 
 impl fmt::Display for ReplayRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("sealed proof replay did not establish clean standing")
+        formatter.write_str("sealed proof replay did not establish clean standing")?;
+        for check in self
+            .replay
+            .checks()
+            .iter()
+            .filter(|check| !check.standing().passes())
+        {
+            write!(
+                formatter,
+                "\n\n{} {}:",
+                check.kind().as_str(),
+                check.standing()
+            )?;
+            if let Some(diagnosis) = check.diagnosis() {
+                write!(formatter, "\n{}", diagnosis.trim_end())?;
+            }
+        }
+        Ok(())
     }
 }
 

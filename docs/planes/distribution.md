@@ -368,7 +368,10 @@ all three outcomes before failing, so one failed platform never hides or
 redispatches successful siblings. Either form accepts a trailing
 `--stage-only`: it runs the same pin, preflight, and native staging. Each
 platform executes the complete proof battery in its provider-specific sealed
-environment and returns its detached receipt with the staged bytes. The
+environment and returns its detached receipt with the staged bytes. When a
+battery refuses, its displayed error names every non-clean member, its
+standing, and a bounded tail of each captured output stream, so the provider
+log carries the member-level cause without embedding complete build logs. The
 publisher admits those receipts and composes the manifest pointer and
 immutable objects before package and plan capture; plan capture never depends
 on a mutable manifest left by an earlier local rehearsal. It persists the plan
