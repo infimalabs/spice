@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(super) const RESULT_PATH: &str = "result.json";
 pub(super) const STAGE_DIRECTORY: &str = "stage";
@@ -15,6 +15,10 @@ pub(super) struct StageLayout {
 impl StageLayout {
     pub(super) fn new(root: PathBuf) -> Self {
         Self { root }
+    }
+
+    pub(super) fn root(&self) -> &Path {
+        &self.root
     }
 
     pub(super) fn result(&self) -> PathBuf {
@@ -46,7 +50,7 @@ impl StageLayout {
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::{RESULT_PATH, RUNNER_PATH, SMOKE_LOG_PATH};
+    use super::{RESULT_PATH, RUNNER_PATH, SMOKE_LOG_PATH, STAGE_LOG_PATH};
 
     const SUBJECT_ROOT: &str = "${{ runner.temp }}/result/";
     const STAGE_PAYLOAD: &str = "stage/targets/native/payload.json";
@@ -58,42 +62,43 @@ mod tests {
 
     #[test]
     fn native_workflows_attest_the_admitted_stage_layout() {
-        let common = [RESULT_PATH, "stage/**"];
         let contracts = [
-            ("Linux", LINUX_WORKFLOW, &[SMOKE_LOG_PATH, "smoke/**"][..]),
-            ("macOS", MACOS_WORKFLOW, &[][..]),
-            ("Windows", WINDOWS_WORKFLOW, &[RUNNER_PATH][..]),
+            (
+                "Linux",
+                LINUX_WORKFLOW,
+                &[
+                    RESULT_PATH,
+                    STAGE_PAYLOAD,
+                    STAGE_RECEIPT,
+                    STAGE_LOG_PATH,
+                    SMOKE_LOG_PATH,
+                    SMOKE_PAYLOAD,
+                ][..],
+            ),
+            (
+                "macOS",
+                MACOS_WORKFLOW,
+                &[RESULT_PATH, STAGE_PAYLOAD, STAGE_RECEIPT][..],
+            ),
+            (
+                "Windows",
+                WINDOWS_WORKFLOW,
+                &[RESULT_PATH, STAGE_PAYLOAD, STAGE_RECEIPT, RUNNER_PATH][..],
+            ),
         ];
 
-        for (platform, workflow, extras) in contracts {
+        for (platform, workflow, admitted_paths) in contracts {
             let observed = relative_subjects(workflow);
-            let expected = common
-                .iter()
-                .copied()
-                .chain(extras.iter().copied())
-                .map(str::to_owned)
-                .collect::<BTreeSet<_>>();
             assert_eq!(
-                observed, expected,
-                "{platform} attestation subjects drifted"
+                observed,
+                BTreeSet::from(["**".to_owned()]),
+                "{platform} must attest its complete artifact root exactly once"
             );
-
-            for admitted in [RESULT_PATH, STAGE_PAYLOAD, STAGE_RECEIPT] {
+            for admitted in admitted_paths {
                 assert!(
                     observed.iter().any(|subject| matches(subject, admitted)),
                     "{platform} does not attest admitted path {admitted}"
                 );
-            }
-            if platform == "Linux" {
-                for admitted in [SMOKE_LOG_PATH, SMOKE_PAYLOAD] {
-                    assert!(
-                        observed.iter().any(|subject| matches(subject, admitted)),
-                        "Linux does not attest admitted path {admitted}"
-                    );
-                }
-            }
-            if platform == "Windows" {
-                assert!(observed.iter().any(|subject| matches(subject, RUNNER_PATH)));
             }
         }
     }
@@ -143,7 +148,8 @@ mod tests {
     }
 
     fn matches(subject: &str, path: &str) -> bool {
-        subject == path
+        subject == "**"
+            || subject == path
             || subject.strip_suffix("/**").is_some_and(|prefix| {
                 path.strip_prefix(prefix)
                     .is_some_and(|suffix| suffix.starts_with('/'))

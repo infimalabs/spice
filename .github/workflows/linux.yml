@@ -294,11 +294,7 @@ jobs:
           name: linux-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
 
-      - name: Attest result, smoke, and staged files
+      - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
-          subject-path: |
-            ${{ runner.temp }}/result/result.json
-            ${{ runner.temp }}/result/smoke.log
-            ${{ runner.temp }}/result/smoke/**
-            ${{ runner.temp }}/result/stage/**
+          subject-path: ${{ runner.temp }}/result/**
