@@ -141,9 +141,15 @@ fn an_unindented_line_after_a_list_item_starts_a_paragraph_and_a_new_list() {
         rendered.html
     );
 
-    let indented = render_received("- item\n  continued\n- next\n\n> - quoted\nlazy");
+    let indented =
+        render_received("- item\n  continued\n- next\n\n1. one\n  two\n\n> - quoted\nlazy");
     assert!(
         indented.html.contains("<li>item\ncontinued</li>"),
+        "{}",
+        indented.html
+    );
+    assert!(
+        indented.html.contains("<li>one\ntwo</li>"),
         "{}",
         indented.html
     );

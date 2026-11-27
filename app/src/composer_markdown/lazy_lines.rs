@@ -3,9 +3,10 @@
 //! CommonMark lets an unindented line continue the paragraph of the list item
 //! above it. Hard-wrapped documents rely on that, but agents and operators
 //! writing messages almost never do: they mean a new paragraph, and the list
-//! that follows it a new list. A blank line written before each such line
-//! makes the canonical parser read it that way, while a line indented under
-//! its item still continues it. Block quotes keep their own lazy reading.
+//! that follows it a new list. A blank line written before each line indented
+//! no further than its item's marker makes the canonical parser read it that
+//! way, while any line indented past the marker still continues its item.
+//! Block quotes keep their own lazy reading.
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use wire::{MessageDirective, MessageSend};
@@ -14,8 +15,8 @@ use super::math::Normalized;
 
 /// A block the parser has opened and not yet closed.
 enum Block {
-    /// A list item, with the column its content starts at once seen.
-    Item(Option<usize>),
+    /// A list item, with the column its marker starts at.
+    Item(usize),
     Quote,
     Other,
 }
@@ -63,36 +64,34 @@ pub(super) fn separate(normalized: Normalized<'_>, options: Options) -> Normaliz
     }
 }
 
-/// The byte offset of each line that lazily continues a list item's
-/// paragraph outside any block quote, in source order.
+/// The byte offset of each line indented no further than the marker of the
+/// list item whose paragraph it lazily continues, outside any block quote, in
+/// source order.
 fn lazy_lines(markdown: &str, options: Options) -> Vec<usize> {
     let mut blocks = Vec::new();
     let mut after_break = None;
     let mut breaks = Vec::new();
     for (event, source) in Parser::new_ext(markdown, options).into_offset_iter() {
         let line = line_start(markdown, source.start);
-        if let Some(Block::Item(content @ None)) = blocks.last_mut() {
-            *content = Some(source.start - line);
-        }
-        if let Some(column) = after_break.take()
-            && source.start - line < column
+        if let Some(marker) = after_break.take()
+            && source.start - line <= marker
             && markdown[line..source.start].trim().is_empty()
         {
             breaks.push(line);
         }
         match event {
             Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph) => {}
-            Event::Start(Tag::Item) => blocks.push(Block::Item(None)),
+            Event::Start(Tag::Item) => blocks.push(Block::Item(source.start - line)),
             Event::Start(Tag::BlockQuote(_)) => blocks.push(Block::Quote),
             Event::Start(_) => blocks.push(Block::Other),
             Event::End(_) => {
                 blocks.pop();
             }
             Event::SoftBreak | Event::HardBreak => {
-                if let Some(Block::Item(Some(column))) = blocks.last()
+                if let Some(Block::Item(marker)) = blocks.last()
                     && !blocks.iter().any(|block| matches!(block, Block::Quote))
                 {
-                    after_break = Some(*column);
+                    after_break = Some(*marker);
                 }
             }
             _ => {}
