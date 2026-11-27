@@ -289,12 +289,10 @@ pub(in crate::toolchain) fn formatter_edition(root: &Path) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt as _;
-    use std::process::ExitStatus;
-
     use super::*;
     use crate::toolchain::TOOLCHAIN_ARMS;
     use crate::toolchain::captured::Stream;
+    use crate::toolchain::exit_status;
 
     fn reply(completion: &Completion, stdout: Option<Stream<'_>>) -> Analysis {
         formatter_reply(
@@ -319,7 +317,7 @@ mod tests {
     }
 
     fn exited(code: i32) -> Completion {
-        Completion::Exited(ExitStatus::from_raw(code << 8))
+        Completion::Exited(exit_status::exited(code))
     }
 
     /// A differing file is the finding whatever the exit status says, a path
@@ -362,22 +360,27 @@ mod tests {
             truncated: true,
             complete: true,
         };
-        let killed = ExitStatus::from_raw(9);
+        let killed = exit_status::terminated();
+        // Only Unix reports an exit without a code, which is termination by
+        // signal.
+        let signaled = cfg!(unix).then_some((
+            Completion::Exited(killed),
+            whole(b""),
+            ArmOutcome::ParseFailure,
+        ));
         for (completion, stdout, outcome) in [
             (exited(0), Some(truncated), ArmOutcome::ParseFailure),
             (exited(0), None, ArmOutcome::ParseFailure),
-            (
-                Completion::Exited(killed),
-                whole(b""),
-                ArmOutcome::ParseFailure,
-            ),
             (Completion::TimedOut(killed), None, ArmOutcome::Timeout),
             (
                 Completion::Cancelled(killed),
                 None,
                 ArmOutcome::ParseFailure,
             ),
-        ] {
+        ]
+        .into_iter()
+        .chain(signaled)
+        {
             assert_eq!(reply(&completion, stdout).outcome, outcome);
         }
     }

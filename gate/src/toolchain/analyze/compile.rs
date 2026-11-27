@@ -276,12 +276,10 @@ fn configure_output(spec: &mut sill::Spec, capture: CompileCapture, bounds: &Bou
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt as _;
-    use std::process::ExitStatus;
-
     use super::*;
     use crate::toolchain::ArmFinding;
     use crate::toolchain::captured::Stream;
+    use crate::toolchain::exit_status;
 
     const ROOT: &str = "/fixture/tree";
 
@@ -320,7 +318,7 @@ mod tests {
     }
 
     fn exited(code: i32) -> Completion {
-        Completion::Exited(ExitStatus::from_raw(code << 8))
+        Completion::Exited(exit_status::exited(code))
     }
 
     /// A refusal the compiler did not type keeps its exit code and what it
@@ -421,12 +419,17 @@ mod tests {
 
     #[test]
     fn bounds_and_cancellation_end_without_reading_output() {
-        let killed = ExitStatus::from_raw(9);
+        let killed = exit_status::terminated();
+        // Only Unix reports an exit without a code, which is termination by
+        // signal.
+        let signaled = cfg!(unix).then_some((Completion::Exited(killed), ArmOutcome::ParseFailure));
         for (completion, outcome) in [
             (Completion::TimedOut(killed), ArmOutcome::Timeout),
             (Completion::Cancelled(killed), ArmOutcome::Cancelled),
-            (Completion::Exited(killed), ArmOutcome::ParseFailure),
-        ] {
+        ]
+        .into_iter()
+        .chain(signaled)
+        {
             let Err(analysis) = reply(
                 CompileCapture::Prefix,
                 &completion,
