@@ -229,6 +229,135 @@ fn held_claim(
     Ok((available, parked))
 }
 
+/// Park held-claim continuation and repeat-only peer presentation while one
+/// armed same-round peer line remains open. Fresh peer and operator input stays
+/// pending and therefore keeps its ordinary higher-priority wake.
+pub(super) fn await_armed_lines(
+    bus: &Bus,
+    snapshot: &bus::TaskSnapshot,
+    targets: &mut [Target<'_>],
+) -> CommandResult<Vec<(CanonicalUuid, Seq)>> {
+    let invalid = targets
+        .iter()
+        .filter_map(|target| {
+            let (position, armed) = snapshot.facts().latest_line_arm(target.lane)?;
+            armed.is_none().then_some((target.lane, position))
+        })
+        .collect::<Vec<_>>();
+    let candidates = targets
+        .iter()
+        .filter_map(|target| {
+            let (_, armed) = snapshot.facts().latest_line_arm(target.lane)?;
+            let armed = armed.filter(|armed| arm_matches_claim(snapshot, target.lane, armed))?;
+            (!armed.roots.is_empty()).then_some((target.lane, armed.clone()))
+        })
+        .collect::<Vec<_>>();
+    let open = bus
+        .read(move |read| {
+            candidates
+                .iter()
+                .map(|(lane, armed)| {
+                    let mut partners = Vec::new();
+                    for root in &armed.roots {
+                        if let Some(partner) = armed_root_counterpart(read, *lane, *root)? {
+                            partners.push(partner);
+                        }
+                    }
+                    Ok((*lane, (armed.task.clone(), partners)))
+                })
+                .collect::<Result<BTreeMap<_, _>, journal::GuardError>>()
+        })
+        .map_err(|error| store_fault("lifecycle::line-park-unreadable", &error.to_string()))?;
+    let standing = open
+        .into_iter()
+        .map(|(lane, (task, partners))| {
+            let stands = partners
+                .into_iter()
+                .any(|partner| counterpart_holds_round(snapshot, &task, partner));
+            (lane, stands)
+        })
+        .collect::<BTreeMap<_, _>>();
+    for target in targets {
+        if !standing.get(&target.lane).copied().unwrap_or(false) {
+            continue;
+        }
+        let hold_reminder = target.pending_inbox && target.inbox_reminder_only;
+        if target.held_claim == Available::None && !hold_reminder {
+            continue;
+        }
+        if hold_reminder {
+            target.pending_inbox = false;
+        }
+        target.held_claim = Available::None;
+        target.drain_queue = Available::None;
+        target.park = Some(wire::body::LanePark::Line);
+    }
+    Ok(invalid)
+}
+
+/// Whether `armed` binds `lane`'s one current active claim exactly.
+fn arm_matches_claim(
+    snapshot: &bus::TaskSnapshot,
+    lane: CanonicalUuid,
+    armed: &wire::body::LineArmed,
+) -> bool {
+    let mut claims = snapshot.tasks().iter().filter(|heads| {
+        heads.claims().iter().any(|held| {
+            let claim = held.claim().body();
+            claim.lane == lane && claim.disposition == ClaimDisposition::Active
+        })
+    });
+    let Some(heads) = claims.next() else {
+        return false;
+    };
+    claims.next().is_none()
+        && heads.statement().body().born == armed.task
+        && heads.workflow().body().phase == armed.phase
+        && heads.completion().body().round == armed.round
+}
+
+/// Whether `lane` still holds an active claim in `task`'s current round.
+fn counterpart_holds_round(
+    snapshot: &bus::TaskSnapshot,
+    task: &TaskStamp,
+    lane: CanonicalUuid,
+) -> bool {
+    snapshot.task_heads(task).is_some_and(|heads| {
+        heads.claims().iter().any(|held| {
+            let claim = held.claim().body();
+            claim.lane == lane && claim.disposition == ClaimDisposition::Active
+        })
+    })
+}
+
+/// The other lane on one armed root while that line remains open. A missing,
+/// terminal or malformed derived line head holds no park.
+fn armed_root_counterpart(
+    read: &journal::JournalRead<'_>,
+    lane: CanonicalUuid,
+    root: CanonicalUuid,
+) -> Result<Option<CanonicalUuid>, journal::GuardError> {
+    let Some(head) = read.peer_line_head(root)? else {
+        return Ok(None);
+    };
+    if head.terminal().is_some()
+        || head.participants().len() != 2
+        || !head.participants().contains(&Actor::Lane(lane))
+    {
+        return Ok(None);
+    }
+    Ok(
+        match head
+            .participants()
+            .iter()
+            .find(|participant| **participant != Actor::Lane(lane))
+        {
+            Some(Actor::Lane(partner)) => Some(*partner),
+            Some(Actor::Principal(_) | Actor::Spice) | None => None,
+        },
+    )
+}
+
 /// Leave a lane whose deadline-bounded jobs are unfinished to the job keeper:
 /// its wake on completion, or the admitted expiry (`delivered`) when no keeper
 /// speaks, causes the next turn. A held claim and repeat peer presentation wait

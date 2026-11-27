@@ -846,6 +846,9 @@ pub enum LanePark {
         /// Admitted expiry of the job the continuation waits behind.
         until: Instant,
     },
+    /// The held claim and reminder-only peer presentation wait while at least
+    /// one armed same-round peer line remains open.
+    Line,
     /// The held claim waits on a trust grant or a Design decision no lane holds.
     Authority,
     /// The resident refused to start this lane's wake and waits for the
@@ -862,6 +865,7 @@ impl LanePark {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Job { .. } => "job",
+            Self::Line => "line",
             Self::Authority => "authority",
             Self::Refused => "refused",
             Self::Hold => "hold",

@@ -215,6 +215,7 @@ impl LaneMember {
         let park = match self.parked {
             None => return status.label().to_owned(),
             Some(wire::body::LanePark::Job { .. }) => "parked behind its running job",
+            Some(wire::body::LanePark::Line) => "parked on its armed peer lines",
             Some(wire::body::LanePark::Authority) => {
                 "parked awaiting a trust grant or Design decision"
             }
