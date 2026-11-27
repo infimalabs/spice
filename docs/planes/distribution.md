@@ -398,9 +398,10 @@ copy; restored bytes can therefore satisfy only unchanged third-party units.
 Every workspace crate, repository-sensitive build
 script, and the final executable recompiles from the admitted source.
 
-An absent or unadmittable Darwin dependency layer, or a refused GHCR login,
-selects the ordinary cold build; the stage then succeeds or fails on that
-build alone. After successful staging, a build whose tag was absent removes
+Only a canonically absent Darwin dependency tag or a resolved layer that
+fails fetch, inventory, or record admission selects the ordinary cold build.
+Authentication, transport, tool, and malformed resolution failures refuse
+before the build. After successful staging, a build whose tag was absent removes
 workspace artifacts, packages the remaining dependency target beneath the
 common prepared-artifact manifest, and publishes it with conflict-refusing
 idempotence; a tag naming a refused layer is never overwritten, and a refused

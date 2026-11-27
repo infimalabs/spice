@@ -319,17 +319,14 @@ jobs:
           repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           repository="ghcr.io/$repository/prepared"
           # The credential lives only for this lookup; the sealed stage below
-          # builds and runs third-party and repository code without it. A
-          # refused login builds cold like any other unavailable layer.
-          logged_in=0
-          if printf '%s' "$GHCR_TOKEN" \
-            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin; then
-            logged_in=1
-            trap 'oras logout ghcr.io' EXIT
-          fi
+          # builds and runs third-party and repository code without it.
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'oras logout ghcr.io' EXIT
 
-          # A layer that is absent or fails any admission selects the ordinary
-          # cold build; only a layer whose tag is absent is published later.
+          # A canonically absent layer builds cold. Resolver failures refuse;
+          # a resolved layer that fails byte or record admission builds cold
+          # without overwriting its occupied discovery tag.
           admit_restored() {
             local record="$root/restored/record.json"
             test "$(jq -r .schema "$record")" = 1 \
@@ -344,26 +341,39 @@ jobs:
           manifest=-
           baseline=0
           : > "$root/resolve.err"
-          if test "$logged_in" = 1 \
-            && resolved_layer=$("$prepared" resolve "$repository:$tag" "$key" 2>"$root/resolve.err"); then
-            present=1
-            read -r label manifest _ <<< "$resolved_layer"
-            if test "$label" = resolved \
-              && "$prepared" fetch-extract "$repository@$manifest" "$key" "$root/restored" \
-              && admit_restored; then
-              mkdir -p "$CARGO_TARGET_DIR"
-              # Cargo freshness is an ordering relation between dependency
-              # outputs, dependent outputs, and fingerprint markers. The
-              # cache archive preserves those mtimes; copy them intact.
-              cp -pR "$root/restored/target/." "$CARGO_TARGET_DIR/"
-              hit=1
-            else
-              echo "prepared layer $manifest refused; building cold" >&2
-              baseline=0
-            fi
+          if resolved_layer=$("$prepared" resolve-if-present \
+            "$repository:$tag" "$key" 2>"$root/resolve.err"); then
+            :
           else
+            status=$?
             cat "$root/resolve.err" >&2
+            exit "$status"
           fi
+          case "$resolved_layer" in
+            absent)
+              ;;
+            resolved\ *)
+              present=1
+              read -r label manifest _ <<< "$resolved_layer"
+              test "$label" = resolved
+              if "$prepared" fetch-extract "$repository@$manifest" "$key" "$root/restored" \
+                && admit_restored; then
+                mkdir -p "$CARGO_TARGET_DIR"
+                # Cargo freshness is an ordering relation between dependency
+                # outputs, dependent outputs, and fingerprint markers. The
+                # cache archive preserves those mtimes; copy them intact.
+                cp -pR "$root/restored/target/." "$CARGO_TARGET_DIR/"
+                hit=1
+              else
+                echo "prepared layer $manifest refused; building cold" >&2
+                baseline=0
+              fi
+              ;;
+            *)
+              echo "prepared resolver returned malformed output: $resolved_layer" >&2
+              exit 65
+              ;;
+          esac
           if test "$hit" = 0; then
             rm -rf "$CARGO_TARGET_DIR" "$root/restored"
             mkdir -p "$CARGO_TARGET_DIR"
