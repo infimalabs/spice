@@ -216,8 +216,23 @@ fn addressed_participant_label(
     Some(format!("{name} {address}"))
 }
 
+/// One ended current-round claim: the free or lapse fact that ended it, the
+/// win that named it, and the occupant holding it when it ended.
+struct RoundDeparture {
+    event: Seq,
+    claimed: Seq,
+    won: wire::body::ClaimWon,
+    occupant: CanonicalUuid,
+}
+
 /// Claim endings in every task's current active round, with their winning
 /// claim authority restored even after a later join replaced the ended head.
+///
+/// Replay follows journal claim replay: a win names the claim, carrying and
+/// rebinding move it to a new occupant, a free ends the holder's claim, and a
+/// lapse ends the claim its current occupant holds. A lane holds at most one
+/// active claim per task, so a later win for the same task and lane replaces
+/// any earlier entry, including one a completion ended without a free fact.
 ///
 /// Re-reading the bounded current-round suffix is intentional: an ending must
 /// remain projectable until the participant address and receiving claim
@@ -225,33 +240,53 @@ fn addressed_participant_label(
 fn round_departures(
     snapshot: &bus::TaskSnapshot,
     earliest_active_round: Seq,
-) -> Vec<(Seq, Seq, wire::body::ClaimWon)> {
-    let facts = snapshot.facts();
-    facts
-        .after(Some(earliest_active_round))
-        .filter_map(|envelope| {
-            let (claimed, won) = match envelope.fact.kind() {
-                wire::FactKind::ClaimFreed => {
-                    let claimed = envelope.cause?;
-                    let won = facts.at(claimed)?.fact.read::<wire::body::ClaimWon>()?;
-                    (claimed, won)
-                }
-                wire::FactKind::ClaimLapsed => {
-                    let lapsed = envelope.fact.read::<wire::body::ClaimLapsed>()?;
-                    facts.iter().rev().find_map(|candidate| {
-                        if candidate.seq >= envelope.seq {
-                            return None;
-                        }
-                        let won = candidate.fact.read::<wire::body::ClaimWon>()?;
-                        (won.task == lapsed.task && won.occupant == lapsed.occupant)
-                            .then_some((candidate.seq, won))
-                    })?
-                }
-                _ => return None,
-            };
-            Some((envelope.seq, claimed, won))
-        })
-        .collect()
+) -> Vec<RoundDeparture> {
+    let mut held: Vec<(Seq, wire::body::ClaimWon, CanonicalUuid)> = Vec::new();
+    let mut departures = Vec::new();
+    for envelope in snapshot.facts().after(Some(earliest_active_round)) {
+        let fact = &envelope.fact;
+        let ended = if let Some(won) = fact.read::<wire::body::ClaimWon>() {
+            held.retain(|(_, prior, _)| prior.task != won.task || prior.lane != won.lane);
+            let occupant = won.occupant;
+            held.push((envelope.seq, won, occupant));
+            None
+        } else if let Some(carried) = fact.read::<wire::body::ClaimCarried>() {
+            if let Some((_, _, occupant)) = held
+                .iter_mut()
+                .find(|(_, won, _)| won.task == carried.task && won.lane == carried.lane)
+            {
+                *occupant = carried.occupant;
+            }
+            None
+        } else if let Some(rebound) = fact.read::<wire::body::ClaimRebound>() {
+            if let Some((_, _, occupant)) = held
+                .iter_mut()
+                .find(|(_, won, _)| won.task == rebound.task && won.lane == rebound.lane)
+            {
+                *occupant = rebound.occupant;
+            }
+            None
+        } else if let Some(freed) = fact.read::<wire::body::ClaimFreed>() {
+            held.iter()
+                .position(|(_, won, _)| won.task == freed.task && won.actor == freed.actor)
+        } else if let Some(lapsed) = fact.read::<wire::body::ClaimLapsed>() {
+            held.iter().position(|(_, won, occupant)| {
+                won.task == lapsed.task && *occupant == lapsed.occupant
+            })
+        } else {
+            None
+        };
+        if let Some(index) = ended {
+            let (claimed, won, occupant) = held.swap_remove(index);
+            departures.push(RoundDeparture {
+                event: envelope.seq,
+                claimed,
+                won,
+                occupant,
+            });
+        }
+    }
+    departures
 }
 
 fn earliest_active_round(snapshot: &bus::TaskSnapshot) -> Option<Seq> {
@@ -353,25 +388,27 @@ fn round_update_notices(
                 ));
             }
         }
-        for (event, claimed, left) in &departures {
+        for departure in &departures {
+            let left = &departure.won;
             if left.task != statement.born
                 || left.cell.phase != *phase
-                || *claimed < completion.round
+                || departure.claimed < completion.round
                 || completion
                     .arrivals
                     .iter()
-                    .any(|arrival| arrival.claimed == *claimed)
+                    .any(|arrival| arrival.claimed == departure.claimed)
             {
                 continue;
             }
-            let Some(participant) = addressed_participant_label(snapshot, left.lane, left.occupant)
+            let Some(participant) =
+                addressed_participant_label(snapshot, left.lane, departure.occupant)
             else {
                 continue;
             };
             for holder in active
                 .iter()
                 .copied()
-                .filter(|holder| holder.lane != left.lane && holder.claimed < *event)
+                .filter(|holder| holder.lane != left.lane && holder.claimed < departure.event)
             {
                 notices.push((
                     holder.lane,
@@ -379,7 +416,7 @@ fn round_update_notices(
                         occupant: holder.occupant,
                         task: task.clone(),
                         holder_claim: holder.claimed.get(),
-                        event: event.get(),
+                        event: departure.event.get(),
                         phase: phase.to_string(),
                         participant: participant.clone(),
                         action: TaskRoundUpdateKind::Left,
