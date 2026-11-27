@@ -155,6 +155,18 @@ fn an_unindented_line_after_a_list_item_starts_a_paragraph_and_a_new_list() {
 }
 
 #[test]
+fn a_term_line_with_colon_led_definitions_renders_as_a_definition_list() {
+    let rendered = render_received("Bound\n: the most a field holds\n: never a cut width");
+    assert!(
+        rendered.html.contains(
+            "<dl>\n<dt>Bound</dt>\n<dd>the most a field holds</dd>\n<dd>never a cut width</dd>\n</dl>"
+        ),
+        "{}",
+        rendered.html
+    );
+}
+
+#[test]
 fn composed_markdown_emits_canonical_target_links_in_visible_shard_order() {
     assert_eq!(compose::<Media>("  body only  ", &[], &[]), "body only");
     let tape = tape_target("agent source text");

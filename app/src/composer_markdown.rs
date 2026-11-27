@@ -77,7 +77,8 @@ const OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_TASKLISTS)
     .union(Options::ENABLE_SMART_PUNCTUATION)
     .union(Options::ENABLE_MATH)
-    .union(Options::ENABLE_GFM);
+    .union(Options::ENABLE_GFM)
+    .union(Options::ENABLE_DEFINITION_LIST);
 
 pub(crate) struct RenderedMarkdown {
     pub(crate) html: String,
