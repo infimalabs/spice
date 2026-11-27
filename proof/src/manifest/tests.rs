@@ -591,6 +591,7 @@ fn prepared(target: ReleaseTarget, source: Digest, clean: bool) -> Prepared {
                     include: r"C:\include".to_owned(),
                     lib: r"C:\lib".to_owned(),
                 },
+                executables: Vec::new(),
             })
         }
     };

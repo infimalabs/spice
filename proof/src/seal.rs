@@ -15,7 +15,7 @@ use crate::container::Limits;
 use crate::evidence::{EvidencePublishError, admit_receipt, publish};
 use crate::layout::Layout;
 use crate::proving::{ProofError, Proved, Staged};
-use crate::replay::ReceiptError;
+use crate::replay::{HostedBattery, ReceiptError};
 
 /// Prove the one payload selected by `layout` and atomically publish evidence.
 ///
@@ -40,18 +40,20 @@ pub fn seal(
 }
 
 /// Publish detached evidence from a provider-authenticated Windows batch whose
-/// current proof battery starts at `offset`.
+/// prebuilt `battery` starts at `offset`; the receipt's environment binds
+/// every executable digest the run verified.
 ///
 /// # Errors
 ///
-/// Refuses any moved command or output, non-clean replay, or receipt
-/// publication failure.
+/// Refuses any moved command or output, executable bytes other than
+/// `battery`'s, non-clean replay, or receipt publication failure.
 pub fn seal_hosted_windows(
     layout: &Layout,
     execution: &HostedExecution,
     offset: usize,
+    battery: &HostedBattery,
 ) -> Result<ProofEvidence, SealError> {
-    let proved = Staged::admit(layout)?.replay_hosted_windows(execution, offset)?;
+    let proved = Staged::admit(layout)?.replay_hosted_windows(execution, offset, battery)?;
     publish_receipt(&proved, publish)
 }
 

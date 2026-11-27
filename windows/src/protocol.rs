@@ -21,12 +21,49 @@ pub struct Limits {
     pub output_bytes: u32,
 }
 
+/// Program token prefix naming one executable in the cross-built bundle by its
+/// bundle-relative path.
+pub const BUNDLE_PROGRAM: &str = "@bundle/";
+
 /// One argv transferred as data, never interpolated into a shell program.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Command {
     pub program: String,
     pub arguments: Vec<String>,
+    /// Present exactly when `program` names a bundle executable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleProgram>,
+}
+
+/// What a bundle executable must be and where it runs.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleProgram {
+    /// Lowercase hex SHA-256 of the executable's exact bytes; any other bytes
+    /// refuse the command before it runs.
+    pub sha256: String,
+    /// Source-relative working directory, as Cargo runs a test from its
+    /// package root, so fixtures resolve against the delivered source.
+    pub directory: String,
+}
+
+impl Command {
+    /// One argv for an admitted tool token or source-relative program.
+    #[must_use]
+    pub fn new(program: impl Into<String>, arguments: Vec<String>) -> Self {
+        Self {
+            program: program.into(),
+            arguments,
+            bundle: None,
+        }
+    }
+
+    /// The bundle-relative path this command runs, when it names one.
+    #[must_use]
+    pub fn bundle_path(&self) -> Option<&str> {
+        self.program.strip_prefix(BUNDLE_PROGRAM)
+    }
 }
 
 /// Why the command stopped.

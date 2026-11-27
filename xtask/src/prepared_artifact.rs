@@ -393,6 +393,41 @@ pub(crate) fn fetch_bundle(
     admit_tree(&manifest, destination)
 }
 
+/// The hosted Windows proof battery the cross-built bundle `manifest` names,
+/// admitted only when that bundle was built from the release source archive
+/// whose identity is `source`.
+///
+/// # Errors
+///
+/// Refuses an unreadable or invalid manifest, a non-Windows bundle, a bundle
+/// built from other source, or proof files that are not the current battery.
+pub(crate) fn windows_proof_battery(
+    manifest: &Path,
+    source: &wire::Digest,
+) -> Result<proof::HostedBattery, PreparedArtifactError> {
+    let manifest = read_manifest(manifest)?;
+    if manifest.kind != ArtifactKind::Bundle || manifest.platform != Platform::WindowsAmd64 {
+        return Err(PreparedArtifactError::Invalid(
+            "prepared manifest is not a Windows bundle".to_owned(),
+        ));
+    }
+    let expected = format!("{DIGEST_PREFIX}{source}");
+    if manifest.build_key.inputs.get("source") != Some(&expected) {
+        return Err(PreparedArtifactError::Invalid(format!(
+            "Windows bundle was not built from release source {source}"
+        )));
+    }
+    proof::HostedBattery::from_bundle(manifest.files.iter().map(|file| {
+        (
+            file.path.as_str(),
+            file.digest
+                .strip_prefix(DIGEST_PREFIX)
+                .unwrap_or(&file.digest),
+        )
+    }))
+    .map_err(|error| PreparedArtifactError::Invalid(error.to_string()))
+}
+
 impl PreparedManifest {
     fn admit(&self) -> Result<(), PreparedArtifactError> {
         if self.schema != SCHEMA {

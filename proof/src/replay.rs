@@ -4,8 +4,11 @@ use std::cell::Cell;
 use std::error::Error;
 use std::fmt;
 
+use windows_execution::hosted::bundle;
 use windows_execution::hosted::client::HostedExecution;
-use windows_execution::protocol::{Command as HostedCommand, Completion as HostedCompletion};
+use windows_execution::protocol::{
+    BUNDLE_PROGRAM, BundleProgram, Command as HostedCommand, Completion as HostedCompletion,
+};
 use wire::manifest::{
     PROOF_RECEIPT_VERSION, ProofEnvironment, ProofReceipt, ProofStanding, ReleaseTarget,
     TargetPayload,
@@ -41,6 +44,18 @@ impl CheckKind {
             Self::DialectRefusals => "dialect-refusals",
             Self::WaitAndProcess => "wait-and-process",
             Self::SupplyRebuild => "supply-rebuild",
+        }
+    }
+
+    /// Source-relative package directory a member's tests run from, as Cargo
+    /// runs them.
+    #[must_use]
+    pub const fn package(self) -> &'static str {
+        match self {
+            Self::Gate => "gate",
+            Self::DialectRefusals => "listen",
+            Self::WaitAndProcess => "sill",
+            Self::SupplyRebuild => "dist",
         }
     }
 }
@@ -124,12 +139,127 @@ impl Battery {
         &self.digest
     }
 
-    /// Commands the hosted Windows runner must execute after staging.
+    /// Cargo commands that prove the battery from source in a hosted Windows
+    /// run that carries no cross-built bundle.
     #[must_use]
     pub fn hosted_commands(&self) -> Vec<HostedCommand> {
         self.checks.iter().map(hosted_command).collect()
     }
 }
+
+/// The current battery as the prebuilt test executables of one cross-built
+/// Windows bundle: every member runs each executable under
+/// `proof/<member>/`, named by bundle path and SHA-256, from its package
+/// directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostedBattery {
+    battery: Battery,
+    commands: Vec<HostedCommand>,
+    /// How many consecutive commands each check runs, in check order.
+    members: Vec<usize>,
+}
+
+impl HostedBattery {
+    /// Select the proof executables from every `(path, sha256)` bundle file.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a proof file outside a current member directory, a member with
+    /// no executable, or a digest that is not lowercase SHA-256 hex.
+    pub fn from_bundle<'a>(
+        files: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Self, HostedBatteryError> {
+        let battery = Battery::current();
+        let mut selected = files
+            .into_iter()
+            .filter(|(path, _)| path.starts_with("proof/"))
+            .map(|(path, sha256)| {
+                let kind = CheckKind::ALL
+                    .into_iter()
+                    .find(|kind| {
+                        path.strip_prefix("proof/")
+                            .and_then(|rest| rest.strip_prefix(kind.as_str()))
+                            .and_then(|rest| rest.strip_prefix('/'))
+                            .is_some_and(|name| !name.is_empty() && !name.contains('/'))
+                    })
+                    .ok_or_else(|| HostedBatteryError::Member(path.to_owned()))?;
+                if sha256.len() != SHA256_HEX_LENGTH
+                    || !sha256
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    return Err(HostedBatteryError::Digest(path.to_owned()));
+                }
+                Ok((kind, path, sha256))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        selected.sort_unstable();
+        let mut commands = Vec::with_capacity(selected.len());
+        let mut members = Vec::with_capacity(battery.checks.len());
+        for check in &battery.checks {
+            let before = commands.len();
+            commands.extend(
+                selected
+                    .iter()
+                    .filter(|(kind, _, _)| *kind == check.kind)
+                    .map(|(kind, path, sha256)| HostedCommand {
+                        program: format!("{BUNDLE_PROGRAM}{path}"),
+                        arguments: Vec::new(),
+                        bundle: Some(BundleProgram {
+                            sha256: (*sha256).to_owned(),
+                            directory: kind.package().to_owned(),
+                        }),
+                    }),
+            );
+            match commands.len() - before {
+                0 => return Err(HostedBatteryError::Empty(check.kind)),
+                count => members.push(count),
+            }
+        }
+        Ok(Self {
+            battery,
+            commands,
+            members,
+        })
+    }
+
+    /// Commands the hosted Windows runner executes after staging, in check
+    /// order.
+    #[must_use]
+    pub fn commands(&self) -> &[HostedCommand] {
+        &self.commands
+    }
+}
+
+/// Why a cross-built bundle does not carry the current battery.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HostedBatteryError {
+    Member(String),
+    Digest(String),
+    Empty(CheckKind),
+}
+
+impl fmt::Display for HostedBatteryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Member(path) => write!(
+                formatter,
+                "bundle proof file {path} is not an executable of a current battery member"
+            ),
+            Self::Digest(path) => write!(
+                formatter,
+                "bundle proof file {path} has no lowercase SHA-256 digest"
+            ),
+            Self::Empty(kind) => write!(
+                formatter,
+                "bundle carries no test executable for proof member {}",
+                kind.as_str()
+            ),
+        }
+    }
+}
+
+impl Error for HostedBatteryError {}
 
 /// One member's typed result and complete bounded output evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -185,6 +315,9 @@ impl CheckVerdict {
         Some(diagnosis)
     }
 }
+
+/// Lowercase hex digits in one SHA-256 digest.
+const SHA256_HEX_LENGTH: usize = 64;
 
 /// Most trailing bytes of one stream a failing member's diagnosis carries.
 const DIAGNOSIS_STREAM_BYTES: usize = 2048;
@@ -410,18 +543,20 @@ pub fn replay(environment: &SealedEnvironment) -> Result<ReplayVerdict, ReplayEr
 }
 
 /// Admit and classify the battery outputs following `offset` in one
-/// provider-authenticated hosted Windows execution.
+/// provider-authenticated hosted Windows execution of `battery`'s prebuilt
+/// executables.
 ///
 /// # Errors
 ///
 /// Refuses any command, output count, completion, or capture that is not the
-/// exact current battery.
+/// exact battery, and a run whose request or verified identity names
+/// executable bytes other than `battery`'s.
 pub fn replay_hosted_windows(
     execution: &HostedExecution,
     offset: usize,
+    battery: &HostedBattery,
 ) -> Result<ReplayVerdict, ReplayError> {
-    let battery = Battery::current();
-    let commands = battery.hosted_commands();
+    let commands = battery.commands();
     let expected = offset.checked_add(commands.len()).ok_or_else(|| {
         ReplayError::execution(CheckKind::Gate, "hosted output offset overflow".to_owned())
     })?;
@@ -439,33 +574,41 @@ pub fn replay_hosted_windows(
             ),
         ));
     }
-    if execution.result.request.commands[offset..] != commands {
+    if execution.result.request.commands[offset..] != *commands {
         return Err(ReplayError::execution(
             CheckKind::Gate,
-            "hosted Windows proof command inventory moved".to_owned(),
+            "hosted Windows proof request names executables other than the bundle's".to_owned(),
+        ));
+    }
+    if execution.result.identity.executables != bundle::executables(commands) {
+        return Err(ReplayError::execution(
+            CheckKind::Gate,
+            "hosted Windows identity verified executables other than the bundle's".to_owned(),
         ));
     }
     let executor = CompletedWindows {
         execution,
-        offset,
-        next: Cell::new(0),
+        members: &battery.members,
+        check: Cell::new(0),
+        next: Cell::new(offset),
     };
-    run_with(&executor, &battery)
+    run_with(&executor, &battery.battery)
 }
 
 fn hosted_command(check: &Check) -> HostedCommand {
-    HostedCommand {
-        program: match check.program() {
-            "cargo" => "@cargo".to_owned(),
-            program => program.to_owned(),
+    HostedCommand::new(
+        match check.program() {
+            "cargo" => "@cargo",
+            program => program,
         },
-        arguments: check.arguments().to_vec(),
-    }
+        check.arguments().to_vec(),
+    )
 }
 
 struct CompletedWindows<'a> {
     execution: &'a HostedExecution,
-    offset: usize,
+    members: &'a [usize],
+    check: Cell<usize>,
     next: Cell<usize>,
 }
 
@@ -478,37 +621,56 @@ impl Executor for CompletedWindows<'_> {
         ProofEnvironment::hosted_windows(self.execution.result.identity.clone())
     }
 
+    /// One member's executables as one execution: the first unclean
+    /// completion stands, and the captures concatenate in run order.
     fn execute(&self, check: &Check) -> Result<Execution, String> {
-        let member = self.next.get();
-        self.next.set(member + 1);
-        let index = self.offset + member;
-        if self.execution.result.request.commands[index] != hosted_command(check) {
-            return Err(format!(
-                "hosted Windows proof member {} moved",
+        let position = self.check.get();
+        self.check.set(position + 1);
+        let count = *self.members.get(position).ok_or_else(|| {
+            format!(
+                "hosted Windows proof member {} has no executables",
                 check.kind().as_str()
-            ));
-        }
-        let observed = &self.execution.outputs[index];
-        let protocol = &self.execution.result.outputs[index];
-        Ok(Execution {
-            completion: match observed.completion {
-                HostedCompletion::Exited { code } => ExecutionCompletion::Exited {
-                    success: code == 0,
-                    code: Some(code),
-                },
-                HostedCompletion::TimedOut => ExecutionCompletion::TimedOut { code: Some(124) },
+            )
+        })?;
+        let start = self.next.get();
+        self.next.set(start + count);
+        let mut member = Execution {
+            completion: ExecutionCompletion::Exited {
+                success: true,
+                code: Some(0),
             },
             stdout: crate::container::Captured {
-                bytes: observed.stdout.clone(),
-                truncated: protocol.stdout.truncated,
+                bytes: Vec::new(),
+                truncated: false,
                 complete: true,
             },
             stderr: crate::container::Captured {
-                bytes: observed.stderr.clone(),
-                truncated: protocol.stderr.truncated,
+                bytes: Vec::new(),
+                truncated: false,
                 complete: true,
             },
-        })
+        };
+        for index in start..start + count {
+            let observed = &self.execution.outputs[index];
+            let protocol = &self.execution.result.outputs[index];
+            if matches!(
+                member.completion,
+                ExecutionCompletion::Exited { success: true, .. }
+            ) {
+                member.completion = match observed.completion {
+                    HostedCompletion::Exited { code } => ExecutionCompletion::Exited {
+                        success: code == 0,
+                        code: Some(code),
+                    },
+                    HostedCompletion::TimedOut => ExecutionCompletion::TimedOut { code: Some(124) },
+                };
+            }
+            member.stdout.bytes.extend_from_slice(&observed.stdout);
+            member.stdout.truncated |= protocol.stdout.truncated;
+            member.stderr.bytes.extend_from_slice(&observed.stderr);
+            member.stderr.truncated |= protocol.stderr.truncated;
+        }
+        Ok(member)
     }
 }
 
@@ -857,6 +1019,9 @@ impl fmt::Display for ReceiptError {
 }
 
 impl Error for ReceiptError {}
+
+#[cfg(test)]
+mod hosted_tests;
 
 #[cfg(test)]
 mod tests {

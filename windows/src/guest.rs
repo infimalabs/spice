@@ -43,7 +43,11 @@ impl Request {
         if self.limits.output_bytes == 0 || self.limits.output_bytes > MAX_OUTPUT_BYTES {
             return Err(RequestError::Output(self.limits.output_bytes));
         }
-        if self.command.program.is_empty() || self.command.program.contains('\0') {
+        // Only the hosted runner receives a cross-built bundle.
+        if self.command.program.is_empty()
+            || self.command.program.contains('\0')
+            || self.command.bundle.is_some()
+        {
             return Err(RequestError::Program);
         }
         if self.command.arguments.len() > MAX_ARGUMENTS
@@ -106,10 +110,7 @@ mod tests {
                 runtime_seconds,
                 output_bytes,
             },
-            command: Command {
-                program: r"bin\spice.exe".to_owned(),
-                arguments,
-            },
+            command: Command::new(r"bin\spice.exe", arguments),
         }
     }
 

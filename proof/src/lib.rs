@@ -135,8 +135,8 @@ pub use payload::{AdmittedPayload, PayloadError, admit};
 pub use proving::{ProofError, ReplayRefusal};
 pub use rederive::{RederiveError, rederive};
 pub use replay::{
-    Battery, Check, CheckKind, CheckStanding, CheckVerdict, ReceiptError, ReplayError,
-    ReplayFailure, ReplayVerdict, replay,
+    Battery, Check, CheckKind, CheckStanding, CheckVerdict, HostedBattery, HostedBatteryError,
+    ReceiptError, ReplayError, ReplayFailure, ReplayVerdict, replay,
 };
 pub use seal::{SealError, seal, seal_hosted_windows};
 pub use vendor_set::{PROOF_IMAGE_REPOSITORY, VENDOR_SET_LABEL, VendorSet, VendorSetError};

@@ -25,8 +25,8 @@ mod windows {
     use std::thread;
     use std::time::Duration;
     use windows_execution::hosted::{
-        Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument, ToolchainPins,
-        WORKFLOW, X86_64_ARCHITECTURE,
+        self as hosted, Artifact, GITHUB_PROVIDER, Identity, Isolation, Request, ResultDocument,
+        ToolchainPins, WORKFLOW, X86_64_ARCHITECTURE,
     };
     use windows_execution::protocol::{
         Capture, Command as HostedCommand, CommandResult, Completion,
@@ -246,6 +246,16 @@ mod windows {
                 account.sid(),
             )?;
         }
+        if uses_bundle(&request) {
+            let bundle = hosted::bundle::root(&temp, &request.challenge);
+            grant_ancestor_traversal(&bundle, account.sid())?;
+            make_read_only(
+                "cross-built bundle",
+                &bundle,
+                &request.challenge,
+                account.sid(),
+            )?;
+        }
         eprintln!("[windows-hosted] granting isolated tool access");
         grant_file_access(Path::new(request_path), account.sid(), 0o400)?;
         grant_file_access(&executable, account.sid(), 0o500)?;
@@ -350,6 +360,10 @@ mod windows {
         if let Some(canvas) = &canvas {
             verify_read_only("provider canvas", canvas, &request.challenge)?;
         }
+        let bundle = hosted::bundle::root(&temp, &request.challenge);
+        if uses_bundle(&request) {
+            verify_read_only("cross-built bundle", &bundle, &request.challenge)?;
+        }
         verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
         verify_writable("fresh target", &target, &request.challenge)?;
         verify_writable("staged output", &stage, &request.challenge)?;
@@ -362,11 +376,12 @@ mod windows {
             .commands
             .iter()
             .map(|command| {
-                let program = resolve_program(&request, command, &workspace, &executable)?;
+                let (program, directory) =
+                    resolve_program(&request, command, &workspace, &bundle, &executable)?;
                 execute(
                     &program,
                     &command.arguments,
-                    &workspace,
+                    &directory,
                     &cargo_home,
                     &target,
                     &system_root,
@@ -400,6 +415,7 @@ mod windows {
                 runner,
                 source: request.source.clone(),
                 toolchain: observed_toolchain,
+                executables: hosted::bundle::executables(&request.commands),
             },
             outputs,
             artifacts,
@@ -421,6 +437,13 @@ mod windows {
             format!("cannot read request {}: {error}", Path::new(path).display())
         })?;
         serde_json::from_slice(&bytes).map_err(|error| format!("request does not decode: {error}"))
+    }
+
+    fn uses_bundle(request: &Request) -> bool {
+        request
+            .commands
+            .iter()
+            .any(|command| command.bundle_path().is_some())
     }
 
     fn write_result(path: &std::ffi::OsStr, encoded: &[u8]) -> Result<(), String> {
@@ -915,12 +938,19 @@ mod windows {
         Ok(())
     }
 
+    /// The exact executable one command runs and its working directory: the
+    /// selected source for tools and source programs, or the package directory
+    /// a verified bundle executable names.
     fn resolve_program(
         request: &Request,
         command: &HostedCommand,
         workspace: &Path,
+        bundle: &Path,
         runner: &Path,
-    ) -> Result<PathBuf, String> {
+    ) -> Result<(PathBuf, PathBuf), String> {
+        if command.bundle_path().is_some() {
+            return hosted::bundle::resolve(bundle, workspace, command);
+        }
         let selected = match command.program.as_str() {
             "@runner" => runner.to_path_buf(),
             "@cargo" => PathBuf::from(&request.toolchain.cargo_path),
@@ -958,13 +988,13 @@ mod windows {
                 selected.display()
             ));
         }
-        Ok(selected)
+        Ok((selected, workspace.to_path_buf()))
     }
 
     fn execute(
         program: &Path,
         arguments: &[String],
-        workspace: &Path,
+        directory: &Path,
         cargo_home: &Path,
         target: &Path,
         system_root: &Path,
@@ -978,7 +1008,7 @@ mod windows {
         let mut command = ProcessCommand::new(program);
         command
             .args(arguments)
-            .current_dir(workspace)
+            .current_dir(directory)
             .env_clear()
             .env("SystemRoot", system_root)
             // Admitted tools are executables; `which`-style lookups such as
