@@ -4,7 +4,7 @@ use listen::{Decoded, TurnMoment};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError};
+use std::sync::{Arc, PoisonError, mpsc};
 
 use vendor::omp::{JobCall, JobOp, ShellCall};
 
@@ -88,13 +88,30 @@ impl StepState {
 pub(super) struct ActiveCall {
     pub(super) handle: Handle,
     pub(super) blocking_wait: bool,
+    /// Dropping the registered call releases its bound watcher.
+    _bound: mpsc::Sender<()>,
 }
 
 impl ActiveCall {
-    fn new(handle: Handle, work: &Work) -> Self {
+    pub(super) fn new(handle: Handle, work: &Work) -> (Self, mpsc::Receiver<()>) {
+        let (bound, released) = mpsc::channel();
+        (
+            Self {
+                handle,
+                blocking_wait: matches!(work, Work::Job(call) if call.op == JobOp::Wait),
+                _bound: bound,
+            },
+            released,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn fixture(handle: Handle, blocking_wait: bool) -> Self {
+        let (bound, _) = mpsc::channel();
         Self {
             handle,
-            blocking_wait: matches!(work, Work::Job(call) if call.op == JobOp::Wait),
+            blocking_wait,
+            _bound: bound,
         }
     }
 }
@@ -163,10 +180,21 @@ impl<W: Write + Send + 'static> Driver<W> {
             }
         };
         let control = Control::new();
+        let (active, released) = ActiveCall::new(control.handle(), &work);
         self.calls
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_owned(), ActiveCall::new(control.handle(), &work));
+            .insert(id.to_owned(), active);
+        if let Err(error) =
+            self.watch_tool_bound(id.to_owned(), released, crate::cli::APP_ANSWER_BOUND)
+        {
+            self.cancel(id);
+            let _refused = self.write(&vendor::omp::host_tool_refused(
+                id,
+                &format!("tool-bound watcher failed: {error}"),
+            ));
+            return;
+        }
         // Interject scans registered calls while holding the same step lock it
         // uses to publish fresh steering. Register first, then recheck: either
         // that scan sees this call, or this check sees its stale generation.
@@ -187,6 +215,30 @@ impl<W: Write + Send + 'static> Driver<W> {
                 &format!("shell thread failed: {error}"),
             ));
         }
+    }
+
+    pub(super) fn watch_tool_bound(
+        self: &Arc<Self>,
+        id: String,
+        released: mpsc::Receiver<()>,
+        horizon: std::time::Duration,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        let driver = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("spice-tool-bound".to_owned())
+            .spawn(move || {
+                if matches!(
+                    released.recv_timeout(horizon),
+                    Err(mpsc::RecvTimeoutError::Timeout)
+                ) && driver
+                    .calls
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains_key(&id)
+                {
+                    driver.deliver_inbox();
+                }
+            })
     }
 
     pub(super) fn preempt_stale(&self, work: &Work, control: &Control) -> bool {

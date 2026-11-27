@@ -127,10 +127,7 @@ impl Seat {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(
                 id.to_owned(),
-                ActiveCall {
-                    handle: control.handle(),
-                    blocking_wait,
-                },
+                ActiveCall::fixture(control.handle(), blocking_wait),
             );
         control
     }
@@ -409,6 +406,50 @@ fn fresh_direction_interrupts_the_host_call_and_enters_steering_once_in_order() 
         steered,
         "one rendering enters steering once"
     );
+}
+
+#[test]
+fn tool_bound_rechecks_pending_human_direction_without_status_polling() {
+    let seat = Seat::new();
+    let control = Control::new();
+    let work = Work::Shell(ShellCall {
+        command: "spice room contribute DIRECTI-example".to_owned(),
+        lifetime: Lifetime::Deadline(Duration::from_secs(30)),
+        notices: Vec::new(),
+        until: None,
+    });
+    let (call, released) = ActiveCall::new(control.handle(), &work);
+    seat.driver
+        .calls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert("blocked-call".to_owned(), call);
+    seat.journal.list(&[(ASKED, "published")]);
+
+    seat.driver
+        .watch_tool_bound("blocked-call".to_owned(), released, Duration::ZERO)
+        .expect("bound watcher starts")
+        .join()
+        .expect("bound watcher finishes");
+
+    assert!(
+        control.was_interrupted(),
+        "the bound releases the unanswered host call"
+    );
+    let steered = seat.steered();
+    assert_eq!(steered.len(), 1, "{steered:?}");
+    assert!(steered[0].contains(ASKED), "{steered:?}");
+    assert!(
+        seat.driver
+            .calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains_key("blocked-call"),
+        "delivery retains the exact call until its result"
+    );
+
+    seat.driver.deliver_inbox();
+    assert_eq!(seat.steered(), steered, "an unchanged inbox delivers once");
 }
 
 #[test]
