@@ -175,6 +175,9 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/stage.log"
           status="${PIPESTATUS[0]}"
           if [[ "$status" == 0 ]]; then
+            # The sealed container writes the payload into the root-owned stage;
+            # the runner-user proof publishes its detached receipt beside it.
+            sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0755 dist/stage/proofs
             "$xtask" prove-staged-target x86_64-unknown-linux-musl \
               2>&1 | tee -a "$RUNNER_TEMP/stage.log"
             status="${PIPESTATUS[0]}"
