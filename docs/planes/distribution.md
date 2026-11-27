@@ -398,7 +398,12 @@ sole publication command. The notes file must carry authored Highlights;
 untouched drafts, placeholders, empty overview scaffolds, and history that
 cannot derive at the pinned commit refuse before provider dispatch. A new
 request reads `main` exactly once and pins that commit; the local checkout
-never selects the release. It creates or resumes that commit's `input.yml`
+never selects the release. Before that preflight, and before any aggregate or
+single macOS or Windows hosted stage, the coordinator spends its `gh`
+identity's GHCR pull token on one read of the repository `prepared` package;
+a registry denial refuses with GHCR's answer and the package authority to
+grant, before any provider run exists. The registry decides, not the token's
+advertised scopes. It creates or resumes that commit's `input.yml`
 preflight, then creates or resumes Linux, macOS, and Windows concurrently
 against the pinned input run. Its Git-common records bind the pinned request,
 the source and input identities, all four workflow blobs read from the

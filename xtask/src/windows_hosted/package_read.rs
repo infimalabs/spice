@@ -1,0 +1,172 @@
+//! Proof, before any hosted dispatch, that this coordinator's `gh` identity
+//! can read the repository's prepared GHCR package.
+//!
+//! GHCR, not the credential's advertised scopes, decides. Its token endpoint
+//! issues a pull token to any authenticated GitHub user, so the check spends
+//! that token on one registry read of the prepared package, the same
+//! authorization a prepared-bundle fetch needs. Classic, fine-grained, and app
+//! credentials pass or refuse alike on that answer.
+
+use std::io::Write as _;
+use std::process::{Command, Stdio};
+
+use serde::Deserialize;
+
+use super::{WindowsHostedError, command_text, prepared_repository};
+
+const REGISTRY: &str = "ghcr.io";
+const HTTP_OK: &str = "200";
+
+#[derive(Deserialize)]
+struct RegistryToken {
+    token: String,
+}
+
+#[derive(Deserialize)]
+struct RegistryErrors {
+    errors: Vec<RegistryError>,
+}
+
+#[derive(Deserialize)]
+struct RegistryError {
+    code: String,
+    message: String,
+}
+
+/// Refuse unless the selected `gh` credential reads the repository's prepared
+/// package on GHCR.
+///
+/// # Errors
+///
+/// Refuses when `gh` names no identity, GHCR cannot be reached, or the
+/// registry denies the read, naming GHCR's answer and the package authority
+/// to grant.
+pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
+    let repository = windows_execution::hosted::client::require_public_attestation_repository()?;
+    let reference = prepared_repository(&repository);
+    let package = reference
+        .strip_prefix(&format!("{REGISTRY}/"))
+        .expect("the prepared repository lives on GHCR");
+    let user = command_text("gh", &["api", "user", "--jq", ".login"])
+        .map_err(WindowsHostedError::ProviderResponse)?;
+    let user = user.trim();
+    let token =
+        command_text("gh", &["auth", "token"]).map_err(WindowsHostedError::ProviderResponse)?;
+    let (status, body) = get(
+        &format!("https://{REGISTRY}/token?scope=repository:{package}:pull&service={REGISTRY}"),
+        &format!("user = \"{}\"", quoted(&format!("{user}:{}", token.trim()))),
+    )?;
+    read_verdict(&status, &body).map_err(|answer| denied(user, &reference, &answer))?;
+    let pull: RegistryToken = serde_json::from_str(&body).map_err(|error| {
+        denied(
+            user,
+            &reference,
+            &format!("token endpoint returned no pull token: {error}"),
+        )
+    })?;
+    let (status, body) = get(
+        &format!("https://{REGISTRY}/v2/{package}/tags/list?n=1"),
+        &format!("header = \"Authorization: Bearer {}\"", quoted(&pull.token)),
+    )?;
+    read_verdict(&status, &body).map_err(|answer| denied(user, &reference, &answer))
+}
+
+/// GHCR's answer to one read: only success admits; any other status refuses
+/// with the registry's own error codes.
+fn read_verdict(status: &str, body: &str) -> Result<(), String> {
+    if status == HTTP_OK {
+        return Ok(());
+    }
+    let detail = serde_json::from_str::<RegistryErrors>(body).map_or_else(
+        |_| body.trim().to_owned(),
+        |answer| {
+            answer
+                .errors
+                .iter()
+                .map(|error| format!("{} {}", error.code, error.message))
+                .collect::<Vec<_>>()
+                .join("; ")
+        },
+    );
+    Err(format!("HTTP {status} {detail}"))
+}
+
+fn denied(user: &str, reference: &str, answer: &str) -> WindowsHostedError {
+    WindowsHostedError::ProviderResponse(format!(
+        "gh identity {user} cannot read the prepared package {reference}, so no hosted stage was dispatched: GHCR answered {}. Grant package read before releasing: a classic token needs read:packages (gh auth refresh -h github.com -s read:packages); a fine-grained or app credential needs read access to that package.",
+        answer.trim_end_matches('.')
+    ))
+}
+
+/// One curl config string value, escaped for its double quotes.
+fn quoted(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// GET `url` with curl, passing `config` (which carries the credential) on
+/// standard input rather than the command line. Returns the HTTP status and
+/// body.
+fn get(url: &str, config: &str) -> Result<(String, String), WindowsHostedError> {
+    let mut child = Command::new("curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--config",
+            "-",
+            "--write-out",
+            "\n%{http_code}",
+            url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| WindowsHostedError::Launch {
+            program: "curl".to_owned(),
+            source,
+        })?;
+    let written = child
+        .stdin
+        .take()
+        .expect("piped curl config")
+        .write_all(config.as_bytes());
+    let output = child
+        .wait_with_output()
+        .map_err(|source| WindowsHostedError::Launch {
+            program: "curl".to_owned(),
+            source,
+        })?;
+    if let Err(source) = written {
+        return Err(WindowsHostedError::Launch {
+            program: "curl".to_owned(),
+            source,
+        });
+    }
+    if !output.status.success() {
+        return Err(WindowsHostedError::ProviderResponse(format!(
+            "could not reach {REGISTRY} to check prepared package read: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = text.rsplit_once('\n').unwrap_or(("", &text));
+    Ok((status.trim().to_owned(), body.to_owned()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_verdict;
+
+    #[test]
+    fn only_a_successful_registry_read_admits() {
+        assert!(read_verdict("200", "{\"tags\":[]}").is_ok());
+        let denied = read_verdict(
+            "403",
+            r#"{"errors":[{"code":"DENIED","message":"permission_denied: The token provided does not match expected scopes."}]}"#,
+        )
+        .unwrap_err();
+        assert!(denied.contains("403") && denied.contains("DENIED"));
+        assert!(read_verdict("401", "").is_err());
+        assert!(read_verdict("404", "not json").is_err());
+    }
+}
