@@ -694,11 +694,14 @@ async fn app(
         Err(message) => return (StatusCode::SERVICE_UNAVAILABLE, message).into_response(),
     };
     // Generation-qualified routes are content-addressed and cached forever.
-    // WebKit still revalidates them on an explicit reload and applies
-    // subresource integrity to an empty 304, so such a validator receives the
-    // complete verified body.
+    // Do not advertise an entity validator for them: WebKit revalidates on an
+    // explicit reload and applies subresource integrity to an empty 304
+    // instead of its retained asset. A specific stale validator therefore
+    // receives the complete verified body, while `*` still observes that the
+    // selected representation exists.
     let immutable = crate::asset::generation_route(route).is_some();
-    let mut response = if !immutable && if_none_match(&headers, &asset.etag) {
+    let not_modified = if_none_match(&headers, (!immutable).then_some(&asset.etag));
+    let mut response = if not_modified {
         let mut response = Response::new(Body::empty());
         *response.status_mut() = StatusCode::NOT_MODIFIED;
         response
@@ -707,7 +710,9 @@ async fn app(
     };
     let response_headers = response.headers_mut();
     response_headers.insert(CONTENT_TYPE, HeaderValue::from_static(asset.content_type));
-    response_headers.insert(ETAG, asset.etag);
+    if !immutable {
+        response_headers.insert(ETAG, asset.etag);
+    }
     response_headers.insert(
         CACHE_CONTROL,
         HeaderValue::from_static(if immutable {
@@ -780,7 +785,7 @@ fn admits_gzip(headers: &HeaderMap) -> bool {
     decides("gzip").or_else(|| decides("*")).unwrap_or(false)
 }
 
-fn if_none_match(headers: &HeaderMap, etag: &HeaderValue) -> bool {
+fn if_none_match(headers: &HeaderMap, etag: Option<&HeaderValue>) -> bool {
     headers
         .get_all(IF_NONE_MATCH)
         .iter()
@@ -789,7 +794,9 @@ fn if_none_match(headers: &HeaderMap, etag: &HeaderValue) -> bool {
         .map(str::trim)
         .any(|candidate| {
             candidate == "*"
-                || candidate.strip_prefix("W/").unwrap_or(candidate).as_bytes() == etag.as_bytes()
+                || etag.is_some_and(|etag| {
+                    candidate.strip_prefix("W/").unwrap_or(candidate).as_bytes() == etag.as_bytes()
+                })
         })
 }
 

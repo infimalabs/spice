@@ -58,7 +58,7 @@ async fn etags_revalidate_without_retransmitting_the_asset() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn generation_qualified_assets_are_immutable_and_retransmit_when_revalidated() {
+async fn generation_qualified_assets_are_immutable_without_entity_validators() {
     let app = TestApp::new();
     let (server, _control) = Server::bind(generation(&app, Capabilities::default()))
         .await
@@ -71,6 +71,10 @@ async fn generation_qualified_assets_are_immutable_and_retransmit_when_revalidat
             "{}/{FIXTURE_GENERATION}/{file}",
             crate::APP_GENERATION_ROUTE
         );
+        let stale_etag = match app.source().answer(&route).expect("asset answers") {
+            CanvasAnswer::Asset(asset) => asset.etag,
+            answer => panic!("generation-qualified fixture was not an asset: {answer:?}"),
+        };
         let initial = request_with_headers(address, &address.to_string(), &route, &[]).await;
         assert!(initial.starts_with(b"HTTP/1.1 200 OK\r\n"));
         assert_eq!(
@@ -81,25 +85,33 @@ async fn generation_qualified_assets_are_immutable_and_retransmit_when_revalidat
             response_header(&initial, "content-type"),
             crate::content_type(file)
         );
-        let etag = response_header(&initial, "etag")
-            .expect("the generation-qualified asset carries an ETag")
-            .to_owned();
+        assert_eq!(response_header(&initial, "etag"), None);
         let body = response_body(&initial);
 
-        let revalidated = request_with_headers(
+        let stale_revalidation = request_with_headers(
             address,
             &address.to_string(),
             &route,
-            &[("If-None-Match", &etag)],
+            &[(
+                "If-None-Match",
+                stale_etag.to_str().expect("fixture ETag is visible ASCII"),
+            )],
         )
         .await;
-        assert!(revalidated.starts_with(b"HTTP/1.1 200 OK\r\n"));
-        assert_eq!(response_body(&revalidated), body);
-        assert_eq!(response_header(&revalidated, "etag"), Some(etag.as_str()));
-        assert_eq!(
-            response_header(&revalidated, "cache-control"),
-            Some("public, max-age=31536000, immutable")
-        );
+        assert!(stale_revalidation.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert_eq!(response_body(&stale_revalidation), body);
+        assert_eq!(response_header(&stale_revalidation, "etag"), None);
+
+        let existence_check = request_with_headers(
+            address,
+            &address.to_string(),
+            &route,
+            &[("If-None-Match", "*")],
+        )
+        .await;
+        assert!(existence_check.starts_with(b"HTTP/1.1 304 Not Modified\r\n"));
+        assert!(response_body(&existence_check).is_empty());
+        assert_eq!(response_header(&existence_check, "etag"), None);
     }
 
     task.abort();
@@ -342,10 +354,8 @@ async fn embedded_archive_serves_its_stored_gzip_slices_and_refuses_what_it_cann
         );
         assert_eq!(response_header(&response, "content-encoding"), Some("gzip"));
         assert_eq!(response_header(&response, "vary"), Some("accept-encoding"));
-        assert_eq!(
-            response_header(&response, "etag"),
-            Some(format!("\"{held}/{index}\"").as_str())
-        );
+        let expected_etag = (route == "/").then(|| format!("\"{held}/{index}\""));
+        assert_eq!(response_header(&response, "etag"), expected_etag.as_deref());
     }
     let shell = request(address, &host, "/").await;
     assert!(response_header(&shell, "content-security-policy").is_some());

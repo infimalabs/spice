@@ -395,23 +395,16 @@ for final-image admission and the Authenticode policy,
 [`spice/src/install/canvas.rs`](../spice/src/install/canvas.rs) for install
 admission.
 
-The resident serves app routes through one boundary, `CanvasAssets`, with
-exactly two sources. Only a staged `spice up` serves `DevelopmentDirectory`:
-the staged generation directories, hot-swapped as generations publish, behind
-a two-entry generation cache. Every installed resident serves
-`EmbeddedArchive`: the archive linked into its executable, admitted once at
-startup into an index from logical path to the stored gzip slice, the table's
-content type, and a strong ETag naming generation and member; it reads no app
-file from disk and inflates only HTML members, once, for their content
-security policies. Every embedded body is the stored slice, sent with
-`Content-Encoding: gzip`, its exact `Content-Length`, and
-`Vary: Accept-Encoding`; a request whose `Accept-Encoding` refuses gzip gets
-406. An installed resident holds one generation for its lifetime; a route
-qualified with another generation answers 410 Gone, with
-`x-spice-app-generation` naming the served one. `/build.json` answers the
-linked rack's build record the same way, its ETag naming the record's own
-bytes, so a rebuilt record under an unchanged app never revalidates as
-unmodified. Owners:
+`CanvasAssets` owns every app route. A staged `spice up` serves
+`DevelopmentDirectory` through a hot-swapped two-entry cache; installed
+residents serve the linked `EmbeddedArchive`, admitted once at startup without
+app-file reads. Embedded bodies use their gzip slices with
+`Content-Encoding: gzip`, exact `Content-Length`, and
+`Vary: Accept-Encoding`; refusing gzip gets 406. A qualified route outside
+the installed generation answers 410 Gone and names the served generation in
+`x-spice-app-generation`. `/build.json` similarly serves the linked rack's
+build record with an ETag over the record itself, so changing that record under
+an unchanged app cannot revalidate as unmodified. Owners:
 [`serve/src/canvas/assets.rs`](../serve/src/canvas/assets.rs) and
 [`serve/src/axum.rs`](../serve/src/axum.rs).
 
@@ -419,12 +412,13 @@ A resident restart keeps the app's last good surface on screen until the new
 session's scope is fully hydrated. Unversioned app routes answer `no-cache`
 with a content ETag and may answer a matching validator with 304, so an
 ordinary reload finds the generation the resident serves. Generation-qualified
-routes are content-addressed and answer
-`public, max-age=31536000, immutable`; if a client nevertheless revalidates
-one, the resident retransmits the complete verified body rather than answering
-304 because WebKit applies subresource integrity to that empty payload instead
-of its retained asset. A page whose generation the resident no longer serves
-reloads once into the served
+routes are content-addressed, answer
+`public, max-age=31536000, immutable`, and advertise no entity validator.
+WebKit revalidates them on an explicit reload and applies subresource integrity
+to an empty 304 instead of its retained asset, so a specific stale validator
+receives the complete verified body. `If-None-Match: *` still answers 304
+because the selected representation exists. A page whose generation the
+resident no longer serves reloads once into the served
 generation, whether or not the app protocol changed: when its next
 connection's bootstrap names another generation, before any session opens, or
 when a qualified fetch answers 410 for the shell's module or wasm (caught by
