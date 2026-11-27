@@ -24,7 +24,6 @@ pub(super) fn document_route(generation: &str) -> String {
 pub(super) struct Frame {
     parent: web_sys::Window,
     element: web_sys::HtmlIFrameElement,
-    child: web_sys::Window,
     listener: Closure<dyn FnMut(web_sys::MessageEvent)>,
     pub(super) ready: bool,
 }
@@ -66,13 +65,10 @@ impl Frame {
             .body()
             .ok_or_else(|| JsValue::from_str("No browser body"));
         let appended = body.and_then(|body| body.append_child(&element).map(|_| ()));
-        let child =
-            appended.and_then(|()| element.content_window().ok_or("No renderer window".into()));
-        match child {
-            Ok(child) => Ok(Self {
+        match appended {
+            Ok(()) => Ok(Self {
                 parent,
                 element,
-                child,
                 listener,
                 ready: false,
             }),
@@ -85,6 +81,13 @@ impl Frame {
                 Err(error)
             }
         }
+    }
+
+    fn child(&self) -> Result<JsValue, JsValue> {
+        let child = Reflect::get(self.element.as_ref(), &JsValue::from_str("contentWindow"))?;
+        (!child.is_null() && !child.is_undefined())
+            .then_some(child)
+            .ok_or_else(|| JsValue::from_str("No renderer window"))
     }
 
     pub(super) fn send(&self, job: &Job, channel: &str) -> Result<(), JsValue> {
@@ -110,16 +113,18 @@ impl Frame {
             node_ids.push(&JsValue::from_str(id));
         }
         Reflect::set(&message, &JsValue::from_str("nodeIds"), &node_ids.into())?;
-        // An opaque recipient requires '*'. Admission in both directions pins
-        // the WindowProxy, generation and complete request envelope instead.
-        self.child.post_message(&message, "*")
+        // An opaque recipient requires '*'. Wait until its ready message
+        // before taking the WindowProxy, after Chromium has replaced the
+        // iframe's initial same-origin realm with its sandboxed one.
+        web_sys::Window::unchecked_from_js(self.child()?).post_message(&message, "*")
     }
 
     fn owns(&self, event: &web_sys::MessageEvent) -> bool {
         event.origin() == "null"
-            && event
-                .source()
-                .is_some_and(|source| JsValue::from(source) == JsValue::from(self.child.clone()))
+            && event.source().is_some_and(|source| {
+                self.child()
+                    .is_ok_and(|child| Object::is(source.as_ref(), &child))
+            })
     }
 }
 
