@@ -3,6 +3,7 @@
 # the installed Spice `dev xtask -- stage-target`; they are not task-source work.
 /dist/stage/objects/
 /dist/stage/targets/
+/dist/stage/proofs/
 # The one source archive a release stages every target from, written by
 # `dev xtask -- source-archive`; its bytes are the release's source identity.
 /dist/stage/source.tar
