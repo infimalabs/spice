@@ -21,6 +21,10 @@ const ORAS_VERSION: &str = "1.3.0";
 const CONFIG_MEDIA_TYPE: &str = "application/vnd.infimalabs.spice.prepared.v1+json";
 const ARTIFACT_MEDIA_TYPE: &str = "application/vnd.infimalabs.spice.prepared.v1";
 const OCI_MANIFEST_MEDIA_TYPE: &str = "application/vnd.oci.image.manifest.v1+json";
+/// ORAS stamps manifests with the wall clock unless this annotation is given;
+/// a fixed value keeps the manifest digest a function of config and payload,
+/// so republishing known content matches its existing tag.
+const CREATED_ANNOTATION: &str = "org.opencontainers.image.created=1970-01-01T00:00:00Z";
 const DIGEST_PREFIX: &str = "sha256:";
 const DIGEST_HEX_LENGTH: usize = 64;
 const BUILD_KEY_NAME_MAX: usize = 64;
@@ -617,6 +621,8 @@ fn publish(
             ARTIFACT_MEDIA_TYPE.into(),
             "--config".into(),
             format!("prepared.json:{CONFIG_MEDIA_TYPE}").into(),
+            "--annotation".into(),
+            CREATED_ANNOTATION.into(),
             local.clone().into(),
             payload_argument.into(),
         ],

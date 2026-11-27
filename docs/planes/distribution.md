@@ -337,8 +337,10 @@ exactly one payload beneath one OCI manifest in
 `ghcr.io/infimalabs/spice/prepared`. A deterministic build-key tag is discovery
 only: a consumer resolves it once, admits the config and OCI descriptor, and
 thereafter fetches only `repository@sha256:…`. Publication first computes the
-local OCI digest. An absent tag is created, the same digest is an idempotent
-success, and a tag already naming different bytes is a conflict. Missing or
+local OCI digest, with the manifest's `org.opencontainers.image.created`
+annotation pinned to the epoch so that digest depends only on config and
+payload. An absent tag is created, the same digest is an idempotent success,
+and a tag already naming different bytes is a conflict. Missing or
 mismatched GHCR content refuses without consulting a workflow artifact or
 another store.
 
