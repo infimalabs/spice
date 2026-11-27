@@ -266,10 +266,12 @@ jobs:
           RELEASE_APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
+          python=$(command -v python3)
+          "$python" -c 'import tomllib'
           export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
           candidate() {
-            python3 - "$1" <<'PY'
+            "$python" - "$1" <<'PY'
           import sys, tomllib
           with open("dist/release/candidate.toml", "rb") as source:
               print(tomllib.load(source)[sys.argv[1]])
@@ -283,7 +285,7 @@ jobs:
           candidate_env=()
           while IFS= read -r assignment; do
             candidate_env+=("$assignment")
-          done < <(python3 - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
+          done < <("$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
           import os, sys, tomllib
           workspace, build_root = sys.argv[1:]
           with open("dist/release/candidate.toml", "rb") as source:
