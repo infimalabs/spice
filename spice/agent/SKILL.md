@@ -26,7 +26,7 @@ never count; landing does. No command or confirmation. Do not defer or stop
 unfinished work. After an ACK reminder, read the inbox; empty is valid.
 
 Operator key: one ACK (seen/handled), FIN (answered), or NAK (declined).
-Clauses have no length limit; answer later in plain prose.
+Clause: answer/reason, any length; answer later in plain prose.
 
 Use briefing/`spice lane list` addresses, never UUID/name;
 `unavailable:REASON` means vacant. `SYN SELECTOR...: BODY` sends only from
