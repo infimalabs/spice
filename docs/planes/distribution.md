@@ -617,18 +617,32 @@ spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned --app-only
 
 `PROGRAM` is either a path beneath the selected worktree or one admitted tool
 token: `@runner`, `@cargo`, `@rustc`, `@git`, `@cl`, or `@rc`. A release
-stage's proof battery instead names each prebuilt test executable of the
-cross-built bundle as `@bundle/PATH` with the SHA-256 its bytes must have and
-the package directory it runs from. The client reads the bundle manifest that
-`spice dev xtask -- windows-cross` writes to
-`target/windows-cross/out/prepared.json` and refuses a bundle whose build key
-names a source archive other than the release inputs'. The runner takes the
-bundle unpacked as `bundle-CHALLENGE` in its temporary directory, seals it
-read-only, and refuses a command whose executable bytes differ before running
-it. The signed identity lists every executable digest the run verified, and
-the replay and its receipt bind that list, so a run whose request names other
-bytes than the bundle refuses. The complete battery runs as one bounded batch,
-so one signed provider run identity covers it. The client materializes an ad
+stage instead runs only the cross-built bundle and invokes no Cargo command on
+the Windows machine. The release host cross-builds that bundle with
+`windows-cross` over the admitted release source and provider canvas, unless
+its output already holds a bundle whose build key names both, then publishes
+it to the repository's GHCR `prepared` package tagged by build key, so the
+host's `gh` credential also needs `write:packages` and the host needs ORAS
+1.3.0. The request pins the published OCI manifest digest, the build key, and
+the SHA-256 of the bundled `runner/windows-hosted.exe`. The workflow pulls
+exactly that manifest, checks the build key and payload digest, unpacks it as
+`bundle-CHALLENGE` in its temporary directory with its manifest beside it as
+`bundle-CHALLENGE.json`, and refuses any file missing from, added to, or
+differing from the manifest inventory before running the bundled runner. The
+stage command is the bundled `runner/xtask.exe` running the prebuilt stage
+below from the source root, with `@bundle-manifest` and `@bundle` delivered as
+those two paths; the proof battery names each prebuilt test executable as
+`@bundle/PATH` with the SHA-256 its bytes must have and the package directory
+it runs from. Such a run installs and observes no Rust toolchain, so its
+signed identity records none. The runner seals the bundle read-only and
+refuses a command whose executable bytes differ before running it. The signed
+identity lists every executable digest the run verified, and the replay and
+its receipt bind that list, so a run whose request names other bytes than the
+bundle refuses; the client also refuses an attested runner other than the
+pinned one. The complete battery runs as one bounded batch, so one signed
+provider run identity covers it. Ad hoc `windows-hosted` batches, including
+the generic hosted Windows `spice proof` route, still build the runner from
+the delivered source. The client materializes an ad
 hoc worktree or accepts the canonical release archive, derives one exact
 `source.tar`, and uploads those unchanged bytes as the sole asset of a
 challenge-bound draft GitHub Release. The request binds the asset ID, raw

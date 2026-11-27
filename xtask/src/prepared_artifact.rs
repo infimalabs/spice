@@ -393,24 +393,63 @@ pub(crate) fn fetch_bundle(
     admit_tree(&manifest, destination)
 }
 
-/// The hosted Windows proof battery the cross-built bundle `manifest` names,
-/// admitted as [`windows_bundle_files`] admits it.
+/// The cross-built Windows bundle one hosted release stage pins: its build-key
+/// digest and every inventoried file by relative path with its bare lowercase
+/// SHA-256 digest.
+pub(crate) struct WindowsReleaseBundle {
+    pub(crate) build_key: String,
+    pub(crate) files: BTreeMap<String, String>,
+}
+
+/// Admit the cross-built Windows bundle `manifest` and its `payload` for a
+/// release stage: built from the release source archive whose identity is
+/// `source`, linking the canvas whose exact bytes have the bare SHA-256
+/// `canvas`, and packed as the manifest records.
 ///
 /// # Errors
 ///
-/// Refuses what [`windows_bundle_files`] refuses and proof files that are not
-/// the current battery.
-pub(crate) fn windows_proof_battery(
+/// Refuses what [`windows_bundle_files`] refuses, a bundle linking another
+/// canvas, and a payload that differs from the manifest.
+pub(crate) fn windows_release_bundle(
     manifest: &Path,
+    payload: &Path,
     source: &wire::Digest,
-) -> Result<proof::HostedBattery, PreparedArtifactError> {
-    let files = windows_bundle_files(manifest, source)?;
-    proof::HostedBattery::from_bundle(
-        files
-            .iter()
-            .map(|(path, digest)| (path.as_str(), digest.as_str())),
-    )
-    .map_err(|error| PreparedArtifactError::Invalid(error.to_string()))
+    canvas: &str,
+) -> Result<WindowsReleaseBundle, PreparedArtifactError> {
+    let manifest = windows_bundle(manifest, source)?;
+    if manifest.build_key.inputs.get("canvas") != Some(&format!("{DIGEST_PREFIX}{canvas}")) {
+        return Err(PreparedArtifactError::Invalid(format!(
+            "Windows bundle does not link release canvas {canvas}"
+        )));
+    }
+    admit_payload(&manifest, payload)?;
+    Ok(WindowsReleaseBundle {
+        build_key: manifest.build_key.digest.clone(),
+        files: bundle_files(manifest),
+    })
+}
+
+/// Publish the prepared bundle `manifest` with its `payload` to `repository`,
+/// tagged by its build key, and answer the OCI manifest digest an exact pull
+/// names. Publishing a bundle already present under its tag answers the same
+/// digest without pushing.
+///
+/// # Errors
+///
+/// Refuses what the `publish` command refuses, including a tag that already
+/// names other content.
+pub(crate) fn publish_bundle(
+    repository: &str,
+    manifest: &Path,
+    payload: &Path,
+) -> Result<String, PreparedArtifactError> {
+    let prepared = read_manifest(manifest)?;
+    let tag = prepared
+        .build_key
+        .digest
+        .strip_prefix(DIGEST_PREFIX)
+        .ok_or_else(|| PreparedArtifactError::Invalid("build key is not SHA-256".to_owned()))?;
+    publish(OsStr::new(repository), OsStr::new(tag), manifest, payload)
 }
 
 /// Every file the cross-built Windows bundle `manifest` inventories, by
@@ -426,6 +465,13 @@ pub(crate) fn windows_bundle_files(
     manifest: &Path,
     source: &wire::Digest,
 ) -> Result<BTreeMap<String, String>, PreparedArtifactError> {
+    windows_bundle(manifest, source).map(bundle_files)
+}
+
+fn windows_bundle(
+    manifest: &Path,
+    source: &wire::Digest,
+) -> Result<PreparedManifest, PreparedArtifactError> {
     let manifest = read_manifest(manifest)?;
     if manifest.kind != ArtifactKind::Bundle || manifest.platform != Platform::WindowsAmd64 {
         return Err(PreparedArtifactError::Invalid(
@@ -438,7 +484,11 @@ pub(crate) fn windows_bundle_files(
             "Windows bundle was not built from release source {source}"
         )));
     }
-    Ok(manifest
+    Ok(manifest)
+}
+
+fn bundle_files(manifest: PreparedManifest) -> BTreeMap<String, String> {
+    manifest
         .files
         .into_iter()
         .map(|file| {
@@ -449,7 +499,7 @@ pub(crate) fn windows_bundle_files(
                 .to_owned();
             (file.path, digest)
         })
-        .collect())
+        .collect()
 }
 
 impl PreparedManifest {
@@ -1354,5 +1404,37 @@ mod tests {
             .unpack(&unpacked)
             .unwrap();
         assert_eq!(inventory(&unpacked).unwrap(), inventory(&root).unwrap());
+    }
+
+    #[test]
+    fn a_release_bundle_admits_only_its_source_canvas_and_payload() {
+        let scratch = Scratch::new().unwrap();
+        let payload = scratch.path.join("windows-cross.tar.gz");
+        fs::write(&payload, b"packed bundle").unwrap();
+        let source: wire::Digest = "2".repeat(64).parse().unwrap();
+        let canvas = "6".repeat(64);
+        let mut prepared = manifest();
+        prepared.platform = Platform::WindowsAmd64;
+        prepared
+            .build_key
+            .inputs
+            .insert("canvas".to_owned(), format!("sha256:{canvas}"));
+        prepared.build_key.digest =
+            sha256_bytes(&serde_json::to_vec(&prepared.build_key.inputs).unwrap());
+        prepared.payload.path = "windows-cross.tar.gz".to_owned();
+        prepared.payload.bytes = 13;
+        prepared.payload.digest = sha256_file(&payload).unwrap();
+        let path = scratch.path.join("prepared.json");
+        fs::write(&path, serde_json::to_vec(&prepared).unwrap()).unwrap();
+
+        let admitted = windows_release_bundle(&path, &payload, &source, &canvas).unwrap();
+        assert_eq!(admitted.build_key, prepared.build_key.digest);
+        assert_eq!(admitted.files["bin/spice"], "4".repeat(64));
+
+        let other: wire::Digest = "7".repeat(64).parse().unwrap();
+        assert!(windows_release_bundle(&path, &payload, &other, &canvas).is_err());
+        assert!(windows_release_bundle(&path, &payload, &source, &"8".repeat(64)).is_err());
+        fs::write(&payload, b"packed bundlf").unwrap();
+        assert!(windows_release_bundle(&path, &payload, &source, &canvas).is_err());
     }
 }

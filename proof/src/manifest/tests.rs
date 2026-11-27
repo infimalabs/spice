@@ -573,7 +573,7 @@ fn prepared(target: ReleaseTarget, source: Digest, clean: bool) -> Prepared {
                 },
                 runner: digest(Domain::ProofNativeRunner, b"hosted runner"),
                 source: "1".repeat(64),
-                toolchain: HostedWindowsToolchain {
+                toolchain: Some(HostedWindowsToolchain {
                     rust: "rustc 1.97.1".to_owned(),
                     cargo: "cargo 1.97.1".to_owned(),
                     git: "git version 2.51.0.windows.2".to_owned(),
@@ -590,7 +590,7 @@ fn prepared(target: ReleaseTarget, source: Digest, clean: bool) -> Prepared {
                     path: r"C:\tools".to_owned(),
                     include: r"C:\include".to_owned(),
                     lib: r"C:\lib".to_owned(),
-                },
+                }),
                 executables: Vec::new(),
             })
         }

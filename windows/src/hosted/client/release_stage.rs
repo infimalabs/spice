@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::hosted::{PreparedBundlePin, ReleaseInputsPin, Request};
+use crate::hosted::{CrossBundlePin, PreparedBundlePin, ReleaseInputsPin, Request};
 use crate::protocol::{Command as HostedCommand, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS};
 
 use super::{
@@ -11,25 +11,12 @@ use super::{
     complete_dispatched_run, drive, source, workspace_root,
 };
 
-/// Dispatch a Windows native stage against one provider-produced release-input set.
-pub fn windows_release_commands_into(
-    commands: Vec<HostedCommand>,
-    destination: &Path,
-    release_inputs: &ReleaseInputs,
-    attach: Option<Attach>,
-) -> Result<HostedExecution, WindowsHostedError> {
-    windows_release_commands_into_controlled(
-        commands,
-        destination,
-        release_inputs,
-        attach,
-        super::HostedRunControl::default(),
-    )
-}
-
-/// Dispatch Windows while recording the exact provider run for aggregate resume.
+/// Dispatch a Windows native stage that runs `commands` from the cross-built
+/// bundle `cross_bundle` pins against one provider-produced release-input
+/// set, recording the exact provider run for aggregate resume.
 pub fn windows_release_commands_into_controlled(
     commands: Vec<HostedCommand>,
+    cross_bundle: CrossBundlePin,
     destination: &Path,
     release_inputs: &ReleaseInputs,
     attach: Option<Attach>,
@@ -104,6 +91,7 @@ pub fn windows_release_commands_into_controlled(
             &source.tree,
             &workflow_blob,
         ),
+        cross_bundle: Some(cross_bundle),
     };
     let run = HostedRun {
         root: &root,

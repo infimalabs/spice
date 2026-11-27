@@ -1,11 +1,14 @@
 //! Prebuilt bundle executables a hosted Windows run verifies before running.
 //!
-//! The release workflow unpacks the cross-built bundle into
-//! [`root`] before the runner starts. A command names one of its executables
-//! as `@bundle/PATH` with the exact SHA-256 its bytes must have; the runner
-//! seals the bundle read-only, and refuses the command when those bytes
-//! differ, before anything executes.
+//! The release workflow unpacks the cross-built bundle into [`root`] and
+//! writes its prepared manifest to [`manifest`] before the runner starts. A
+//! command names one of its executables as `@bundle/PATH` with the exact
+//! SHA-256 its bytes must have; the runner seals the bundle read-only, and
+//! refuses the command when those bytes differ, before anything executes. A
+//! bundle command's argument spelled [`ROOT_ARGUMENT`] or
+//! [`MANIFEST_ARGUMENT`] receives that root's or manifest's absolute path.
 
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read as _;
 use std::path::{Component, Path, PathBuf};
@@ -17,11 +20,43 @@ use wire::manifest::HostedWindowsExecutable;
 
 use super::{AdmissionError, DIGEST_HEX_LENGTH, require_hex};
 
+/// The argument a bundle command spells to receive the unpacked bundle root.
+pub const ROOT_ARGUMENT: &str = "@bundle";
+/// The argument a bundle command spells to receive the bundle's prepared
+/// manifest.
+pub const MANIFEST_ARGUMENT: &str = "@bundle-manifest";
+/// The working directory a bundle command spells to run from the source root
+/// itself rather than one package directory.
+pub const SOURCE_ROOT_DIRECTORY: &str = ".";
+
 /// Where the workflow places the unpacked bundle for the request `challenge`
 /// names.
 #[must_use]
 pub fn root(temp: &Path, challenge: &str) -> PathBuf {
     temp.join(format!("bundle-{challenge}"))
+}
+
+/// Where the workflow places the bundle's prepared manifest, beside
+/// [`root`].
+#[must_use]
+pub fn manifest(temp: &Path, challenge: &str) -> PathBuf {
+    temp.join(format!("bundle-{challenge}.json"))
+}
+
+/// The argv one bundle command runs with: every [`ROOT_ARGUMENT`] or
+/// [`MANIFEST_ARGUMENT`] becomes `root` or `manifest`, and every other
+/// argument passes unchanged.
+#[must_use]
+pub fn arguments(root: &Path, manifest: &Path, command: &Command) -> Vec<OsString> {
+    command
+        .arguments
+        .iter()
+        .map(|argument| match argument.as_str() {
+            ROOT_ARGUMENT => root.as_os_str().to_owned(),
+            MANIFEST_ARGUMENT => manifest.as_os_str().to_owned(),
+            other => OsString::from(other),
+        })
+        .collect()
 }
 
 /// Refuse a command whose bundle token, digest, or directory is not one
@@ -31,7 +66,9 @@ pub(super) fn admit(command: &Command) -> Result<(), AdmissionError> {
         (None, None) => Ok(()),
         (Some(path), Some(bundle)) => {
             require_hex("bundle sha256", &bundle.sha256, DIGEST_HEX_LENGTH)?;
-            if relative(path) && relative(&bundle.directory) {
+            let directory =
+                bundle.directory == SOURCE_ROOT_DIRECTORY || relative(&bundle.directory);
+            if relative(path) && directory {
                 Ok(())
             } else {
                 Err(AdmissionError::Program)
@@ -175,12 +212,15 @@ mod tests {
     fn bundle_tokens_admit_only_relative_paths_with_a_digest() {
         let digest = "0".repeat(DIGEST_HEX_LENGTH);
         assert!(admit(&command("proof/gate/test-suite.exe", &digest, "gate")).is_ok());
+        assert!(admit(&command("runner/xtask.exe", &digest, SOURCE_ROOT_DIRECTORY)).is_ok());
         for (path, directory) in [
             ("../escape.exe", "gate"),
             ("proof/../../escape.exe", "gate"),
             ("C:/escape.exe", "gate"),
             ("proof\\gate.exe", "gate"),
             ("proof/gate/test-suite.exe", "../gate"),
+            ("proof/gate/test-suite.exe", "./gate"),
+            ("proof/gate/test-suite.exe", ".."),
             ("proof/gate/test-suite.exe", ""),
         ] {
             assert!(
@@ -196,5 +236,31 @@ mod tests {
         assert!(admit(&tool).is_ok());
         tool.bundle = command("x.exe", &digest, "gate").bundle;
         assert!(admit(&tool).is_err());
+    }
+
+    #[test]
+    fn only_exact_bundle_tokens_become_delivered_paths() {
+        let mut stage = command("runner/xtask.exe", &"0".repeat(64), SOURCE_ROOT_DIRECTORY);
+        stage.arguments = [
+            "--prebuilt",
+            MANIFEST_ARGUMENT,
+            ROOT_ARGUMENT,
+            "@bundle/runner",
+            "@bundle-manifest.json",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let root = Path::new("T/bundle-c");
+        let manifest = Path::new("T/bundle-c.json");
+        assert_eq!(
+            arguments(root, manifest, &stage),
+            [
+                OsString::from("--prebuilt"),
+                manifest.as_os_str().to_owned(),
+                root.as_os_str().to_owned(),
+                OsString::from("@bundle/runner"),
+                OsString::from("@bundle-manifest.json"),
+            ]
+        );
     }
 }

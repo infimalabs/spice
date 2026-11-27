@@ -86,7 +86,7 @@ pub use windows_cross::{WindowsCrossError, windows_cross};
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{
-    Attach, HostedExecution, HostedReleaseError, ReleaseInputs, WindowsHostedError,
+    Attach, CrossHost, HostedExecution, HostedReleaseError, ReleaseInputs, WindowsHostedError,
     hosted_release_inputs, hosted_release_stage, hosted_release_stage_with_inputs,
     linux_hosted_stage, macos_hosted_stage, windows_hosted, windows_hosted_stage,
 };

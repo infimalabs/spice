@@ -115,12 +115,15 @@ fn main() -> ExitCode {
             run_release_inputs(arguments.collect(), &ambient, &mut output)
         }
         #[cfg(not(target_arch = "wasm32"))]
-        Some(value) if value == OsStr::new("stage-hosted-release") => {
-            run_hosted_release(arguments.collect(), &mut output, &mut io::stderr().lock())
-        }
+        Some(value) if value == OsStr::new("stage-hosted-release") => run_hosted_release(
+            arguments.collect(),
+            &ambient,
+            &mut output,
+            &mut io::stderr().lock(),
+        ),
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("publish-hosted-release") => {
-            run_publish_hosted_release(arguments.collect(), &mut output)
+            run_publish_hosted_release(arguments.collect(), &ambient, &mut output)
         }
         Some(value) if value == OsStr::new("prove-staged-target") => {
             run_prove_staged_target(arguments.collect(), &mut output)
@@ -501,6 +504,7 @@ fn run_prove_staged_target(arguments: Vec<OsString>, output: &mut impl io::Write
 
 fn run_hosted_release(
     arguments: Vec<OsString>,
+    ambient: &Ambient,
     output: &mut impl io::Write,
     error_output: &mut impl io::Write,
 ) -> CommandResult {
@@ -510,11 +514,22 @@ fn run_hosted_release(
     };
     let attach =
         xtask::Attach::run(run_id.to_str().ok_or_else(usage_error)?).ok_or_else(usage_error)?;
-    xtask::hosted_release_stage(attach, output, error_output).map_err(Into::into)
+    xtask::hosted_release_stage(attach, &cross_host(ambient)?, output, error_output)
+        .map_err(Into::into)
+}
+
+/// The environments a hosted Windows release stage cross-builds its bundle
+/// under.
+fn cross_host(ambient: &Ambient) -> Result<xtask::CrossHost, Box<dyn std::error::Error>> {
+    Ok(xtask::CrossHost {
+        release: release_environment(ambient),
+        ambient: ambient.environment()?,
+    })
 }
 
 fn run_publish_hosted_release(
     arguments: Vec<OsString>,
+    ambient: &Ambient,
     output: &mut impl io::Write,
 ) -> CommandResult {
     let arguments = arguments
@@ -544,8 +559,14 @@ fn run_publish_hosted_release(
             return Err(usage_error().into());
         }
     };
-    xtask::publish_hosted_release(&request, effect, output, &mut io::stderr().lock())
-        .map_err(Into::into)
+    xtask::publish_hosted_release(
+        &request,
+        effect,
+        &cross_host(ambient)?,
+        output,
+        &mut io::stderr().lock(),
+    )
+    .map_err(Into::into)
 }
 
 fn run_stage_target(
@@ -597,16 +618,22 @@ fn run_stage_target(
             return Err(usage_error().into());
         }
         let inputs = xtask::hosted_release_inputs(release_inputs.ok_or_else(usage_error)?)?;
-        return xtask::windows_hosted_stage(&inputs, attach, output, error_output)
-            .and_then(|execution| {
-                (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
-                    xtask::WindowsHostedError::ProviderResponse(format!(
-                        "hosted Windows staging exited {}",
-                        execution.exit_code()
-                    ))
-                })
+        return xtask::windows_hosted_stage(
+            &inputs,
+            &cross_host(ambient)?,
+            attach,
+            output,
+            error_output,
+        )
+        .and_then(|execution| {
+            (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                xtask::WindowsHostedError::ProviderResponse(format!(
+                    "hosted Windows staging exited {}",
+                    execution.exit_code()
+                ))
             })
-            .map_err(Into::into);
+        })
+        .map_err(Into::into);
     }
     if scope == StageScope::AppOnly {
         let proof_container = resolve_proof_container(proof_container)?;

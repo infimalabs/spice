@@ -202,7 +202,9 @@ mod windows {
                 request.tree, tree
             ));
         }
-        admit_toolchain(&request)?;
+        if request.cross_bundle.is_none() {
+            admit_toolchain(&request)?;
+        }
 
         let scratch = scratch_root(&temp, &request.challenge);
         let cargo_home = scratch.join("cargo-home");
@@ -246,7 +248,7 @@ mod windows {
                 account.sid(),
             )?;
         }
-        if uses_bundle(&request) {
+        if request.cross_bundle.is_some() {
             let bundle = hosted::bundle::root(&temp, &request.challenge);
             grant_ancestor_traversal(&bundle, account.sid())?;
             make_read_only(
@@ -255,22 +257,29 @@ mod windows {
                 &request.challenge,
                 account.sid(),
             )?;
+            grant_file_access(
+                &hosted::bundle::manifest(&temp, &request.challenge),
+                account.sid(),
+                0o400,
+            )?;
         }
         eprintln!("[windows-hosted] granting isolated tool access");
         grant_file_access(Path::new(request_path), account.sid(), 0o400)?;
         grant_file_access(&executable, account.sid(), 0o500)?;
-        let toolchain_root = Path::new(&request.toolchain.cargo_path)
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| "pinned Cargo path has no toolchain root".to_owned())?;
-        grant_ancestor_traversal(toolchain_root, account.sid())?;
-        grant_tree_access(toolchain_root, account.sid(), 0o500, 0o500)?;
-        let trunk_root = Path::new(&request.toolchain.trunk_path)
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(|| "pinned Trunk path has no installation root".to_owned())?;
-        grant_ancestor_traversal(trunk_root, account.sid())?;
-        grant_tree_access(trunk_root, account.sid(), 0o500, 0o500)?;
+        if request.cross_bundle.is_none() {
+            let toolchain_root = Path::new(&request.toolchain.cargo_path)
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| "pinned Cargo path has no toolchain root".to_owned())?;
+            grant_ancestor_traversal(toolchain_root, account.sid())?;
+            grant_tree_access(toolchain_root, account.sid(), 0o500, 0o500)?;
+            let trunk_root = Path::new(&request.toolchain.trunk_path)
+                .parent()
+                .and_then(Path::parent)
+                .ok_or_else(|| "pinned Trunk path has no installation root".to_owned())?;
+            grant_ancestor_traversal(trunk_root, account.sid())?;
+            grant_tree_access(trunk_root, account.sid(), 0o500, 0o500)?;
+        }
 
         eprintln!("[windows-hosted] establishing principal firewall");
         verify_non_loopback_available()?;
@@ -344,7 +353,12 @@ mod windows {
                 request.tree, tree
             ));
         }
-        let observed_toolchain = admit_toolchain(&request)?;
+        // A bundle-only request runs no native toolchain, so the run neither
+        // admits nor reports one.
+        let observed_toolchain = match request.cross_bundle {
+            None => Some(admit_toolchain(&request)?),
+            Some(_) => None,
+        };
         verify_non_loopback_denied()?;
         eprintln!("[windows-hosted] guest network isolation admitted");
 
@@ -361,7 +375,8 @@ mod windows {
             verify_read_only("provider canvas", canvas, &request.challenge)?;
         }
         let bundle = hosted::bundle::root(&temp, &request.challenge);
-        if uses_bundle(&request) {
+        let bundle_manifest = hosted::bundle::manifest(&temp, &request.challenge);
+        if request.cross_bundle.is_some() {
             verify_read_only("cross-built bundle", &bundle, &request.challenge)?;
         }
         verify_writable("fresh Cargo home", &cargo_home, &request.challenge)?;
@@ -378,9 +393,14 @@ mod windows {
             .map(|command| {
                 let (program, directory) =
                     resolve_program(&request, command, &workspace, &bundle, &executable)?;
+                let arguments = if command.bundle_path().is_some() {
+                    hosted::bundle::arguments(&bundle, &bundle_manifest, command)
+                } else {
+                    command.arguments.iter().map(Into::into).collect()
+                };
                 execute(
                     &program,
-                    &command.arguments,
+                    &arguments,
                     &directory,
                     &cargo_home,
                     &target,
@@ -437,13 +457,6 @@ mod windows {
             format!("cannot read request {}: {error}", Path::new(path).display())
         })?;
         serde_json::from_slice(&bytes).map_err(|error| format!("request does not decode: {error}"))
-    }
-
-    fn uses_bundle(request: &Request) -> bool {
-        request
-            .commands
-            .iter()
-            .any(|command| command.bundle_path().is_some())
     }
 
     fn write_result(path: &std::ffi::OsStr, encoded: &[u8]) -> Result<(), String> {
@@ -993,7 +1006,7 @@ mod windows {
 
     fn execute(
         program: &Path,
-        arguments: &[String],
+        arguments: &[std::ffi::OsString],
         directory: &Path,
         cargo_home: &Path,
         target: &Path,

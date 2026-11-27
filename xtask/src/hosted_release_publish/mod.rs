@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use windows_execution::hosted::client::Attach;
 
 use crate::windows_hosted::{
-    hosted_release_inputs, hosted_release_inputs_dispatch, hosted_release_stage_with_inputs_into,
-    landed_commit,
+    CrossHost, hosted_release_inputs, hosted_release_inputs_dispatch,
+    hosted_release_stage_with_inputs_into, landed_commit,
 };
 
 mod package;
@@ -63,6 +63,7 @@ pub enum PublishEffect {
 pub fn publish_hosted_release(
     request: &PublishRequest,
     effect: PublishEffect,
+    host: &CrossHost,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), PublishError> {
@@ -111,6 +112,7 @@ pub fn publish_hosted_release(
     hosted_release_stage_with_inputs_into(
         inputs.manifest().run_id,
         &inputs,
+        host,
         &stage_root,
         output,
         error_output,

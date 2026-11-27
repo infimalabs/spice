@@ -30,6 +30,12 @@ const IMAGE_REPOSITORY: &str = "spice-windows-cross";
 const IMAGE_PLATFORM: &str = "linux/amd64";
 /// Marks a build context whose admitted sysroot copy finished.
 const CONTEXT_COMPLETE: &str = ".complete";
+/// The cross build's directory below the build root, and its output below that.
+const CROSS_ROOT: &str = "windows-cross";
+const CROSS_OUTPUT: &str = "out";
+/// The packed artifact root and its prepared manifest in the output directory.
+pub(crate) const BUNDLE_PAYLOAD: &str = "windows-cross.tar.gz";
+pub(crate) const BUNDLE_MANIFEST: &str = "prepared.json";
 
 /// Why the Windows cross build did not complete.
 #[derive(Debug)]
@@ -149,8 +155,113 @@ pub fn windows_cross(
 ) -> Result<(), WindowsCrossError> {
     let repository = spice::repository::Repository::discover(Path::new("."))
         .map_err(|error| WindowsCrossError::Repository(Box::new(error)))?;
+    let delivered = match &environment.source_archive {
+        Some(identity) => Some(identity.to_str().ok_or(WindowsCrossError::SourceArchive)?),
+        None => None,
+    };
+    let canvas = provider_canvas(environment, delivered.is_some())?;
+    let source = CrossSource {
+        workspace: repository.worktree_root(),
+        git_common: repository.common_dir(),
+        delivered,
+        canvas,
+    };
+    cross_build(
+        environment,
+        ambient,
+        &repository,
+        source,
+        output,
+        error_output,
+    )
+}
+
+/// Cross-build the Windows MSVC release set over `release`: the admitted
+/// release archive extracted as its own Git repository, linking its provider
+/// canvas as its app generation, into [`release_output`].
+///
+/// This worktree still supplies the container runtime, the admitted MSVC
+/// generation, and the build root; the release source supplies everything
+/// built, including the cross-image definition and the vendor set.
+///
+/// # Errors
+///
+/// Refuses what [`windows_cross`] refuses.
+pub(crate) fn windows_cross_release(
+    environment: &ReleaseEnvironment,
+    ambient: &sill::Environment,
+    release: ReleaseSource<'_>,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsCrossError> {
+    let repository = spice::repository::Repository::discover(Path::new("."))
+        .map_err(|error| WindowsCrossError::Repository(Box::new(error)))?;
+    let git_common = release.tree.join(".git");
+    let source = CrossSource {
+        workspace: release.tree,
+        git_common: &git_common,
+        delivered: Some(release.identity),
+        canvas: Some(proof::ProviderCanvas {
+            path: release.canvas,
+            app: release.app,
+        }),
+    };
+    cross_build(
+        environment,
+        ambient,
+        &repository,
+        source,
+        output,
+        error_output,
+    )
+}
+
+/// The output directory where this worktree's cross build leaves its bundle.
+///
+/// # Errors
+///
+/// Refuses a working directory outside a repository.
+pub(crate) fn release_output(
+    environment: &ReleaseEnvironment,
+) -> Result<PathBuf, WindowsCrossError> {
+    let repository = spice::repository::Repository::discover(Path::new("."))
+        .map_err(|error| WindowsCrossError::Repository(Box::new(error)))?;
+    Ok(environment
+        .build_root(repository.worktree_root())
+        .join(CROSS_ROOT)
+        .join(CROSS_OUTPUT))
+}
+
+/// One admitted release source a release host cross-builds: its extracted
+/// tree, archive identity, provider canvas, and that canvas's app generation.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ReleaseSource<'a> {
+    pub(crate) tree: &'a Path,
+    pub(crate) identity: &'a str,
+    pub(crate) canvas: &'a Path,
+    pub(crate) app: &'a str,
+}
+
+/// The source one cross build compiles: the workspace the image mounts, its
+/// Git common directory, the delivered archive identity when the workspace is
+/// a release archive's tree, and the provider canvas it links.
+struct CrossSource<'a> {
+    workspace: &'a Path,
+    git_common: &'a Path,
+    delivered: Option<&'a str>,
+    canvas: Option<proof::ProviderCanvas<'a>>,
+}
+
+fn cross_build(
+    environment: &ReleaseEnvironment,
+    ambient: &sill::Environment,
+    repository: &spice::repository::Repository,
+    source: CrossSource<'_>,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsCrossError> {
     let worktree = repository.worktree_root();
-    let config = spice::config::load_repository(&repository, &[])
+    let config = spice::config::load_repository(repository, &[])
         .map_err(|error| WindowsCrossError::Repository(Box::new(error)))?;
     let runtime = config
         .root()
@@ -169,15 +280,15 @@ pub fn windows_cross(
             error,
         }
     })?;
-    let container =
-        proof::Container::new(admitted, worktree, limits).map_err(WindowsCrossError::Image)?;
-    let proof_tag = proof::VendorSet::read(worktree.join("Cargo.lock"))
+    let container = proof::Container::new(admitted, source.workspace, limits)
+        .map_err(WindowsCrossError::Image)?;
+    let proof_tag = proof::VendorSet::read(source.workspace.join("Cargo.lock"))
         .map_err(WindowsCrossError::VendorSet)?
         .image_tag();
     let msvc = crate::windows_msvc(ambient, &mut Vec::new()).map_err(WindowsCrossError::Msvc)?;
 
-    let build_root = environment.build_root(worktree).join("windows-cross");
-    let context = cross_context(worktree, &build_root, &msvc)?;
+    let build_root = environment.build_root(worktree).join(CROSS_ROOT);
+    let context = cross_context(source.workspace, &build_root, &msvc)?;
     let cross_image = build_image(
         &runtime,
         &context,
@@ -188,23 +299,18 @@ pub fn windows_cross(
     )?;
     writeln!(output, "[windows-cross] image={cross_image}").map_err(WindowsCrossError::Output)?;
 
-    let delivered = match &environment.source_archive {
-        Some(identity) => Some(identity.to_str().ok_or(WindowsCrossError::SourceArchive)?),
-        None => {
-            crate::app(environment, output).map_err(WindowsCrossError::App)?;
-            None
-        }
-    };
-    let canvas = provider_canvas(environment, delivered.is_some())?;
-    let out = build_root.join("out");
+    if source.delivered.is_none() {
+        crate::app(environment, output).map_err(WindowsCrossError::App)?;
+    }
+    let out = build_root.join(CROSS_OUTPUT);
     let run = container
         .cross_build_windows(proof::WindowsCross {
             cross_image: &cross_image,
             msvc_generation: &msvc.generation,
-            git_common: repository.common_dir(),
+            git_common: source.git_common,
             out: &out,
-            delivered,
-            canvas,
+            delivered: source.delivered,
+            canvas: source.canvas,
         })
         .map_err(WindowsCrossError::Run)?;
     output
@@ -284,9 +390,9 @@ fn build_image(
 /// output's path, size, and SHA-256 under the build key.
 fn record_bundle(out: &Path, output: &mut impl Write) -> Result<(), WindowsCrossError> {
     let root = out.join("root");
-    let archive = out.join("windows-cross.tar.gz");
+    let archive = out.join(BUNDLE_PAYLOAD);
     let key = out.join("build-key.json");
-    let manifest = out.join("prepared.json");
+    let manifest = out.join(BUNDLE_MANIFEST);
     crate::prepared_artifact(
         vec!["pack".into(), root.clone().into(), archive.clone().into()],
         output,

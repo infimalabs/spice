@@ -61,13 +61,17 @@ pub fn cross_build_windows(
     let version = spice::version::source_version(&root, dist::Build::Staged)
         .map_err(TargetBuildError::SourceVersion)?;
     let canvas = release_canvas(app, &root, &workspace, &stage_root, &environment, &archive)?;
+    let linked_canvas = canvas.as_ref().map(|canvas| sha256(canvas.bytes()));
     let programs = Programs::discover(&root, &environment, TARGET)?;
     let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
     let result = (|| {
         let toolchain = observe_toolchain(&executor, &programs, TARGET)?;
         let outputs = build_set(&root, &build_root, &version, canvas, &programs, &executor)?;
         archive.verify()?;
-        let inputs = build_key(&root, &archive, image, &programs, &executor)?;
+        let mut inputs = build_key(&root, &archive, image, &programs, &executor)?;
+        if let Some(linked_canvas) = linked_canvas {
+            inputs.insert("canvas".to_owned(), linked_canvas);
+        }
         publish(out, &outputs, &inputs, &toolchain)
     })();
     render_command_records(output, &executor.records())?;
@@ -256,7 +260,8 @@ fn missing(subject: &str) -> TargetBuildError {
 /// The named inputs the release set is a function of, each as a SHA-256
 /// digest: source archive, `Cargo.lock`, the exact compiler, the target, every
 /// Cargo argument vector and candidate setting, the MSVC generation, and the
-/// cross image.
+/// cross image. A candidate linking a canvas also names that canvas's exact
+/// bytes, so bundles linking different canvases never share a key.
 fn build_key<E: Executor>(
     root: &Path,
     archive: &SourceArchive,
