@@ -1,0 +1,264 @@
+name: macOS candidate prebuild
+run-name: macOS candidate prebuild ${{ inputs.source_commit || github.sha }}
+
+# Builds the unsigned macOS candidate as soon as an exact main commit lands,
+# without waiting for release inputs or another platform, and publishes its
+# complete target directory under an exact-tree prepared-artifact build key.
+# Release staging restores that layer, runs the unchanged stage, and links
+# its selected input canvas through the saved final-link plan; the canvas
+# built here only stands in for the link.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact landed main commit to prebuild
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: macos-prebuild-${{ inputs.source_commit || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  prebuild:
+    name: Prebuild macOS candidate
+    runs-on: macos-15
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
+      STAND_IN_PROOF_CONTAINER: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    steps:
+      - name: Check out exact landed source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Admit landed commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'PREBUILD_STARTED=%s\n' "$(date +%s)" >> "$GITHUB_ENV"
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" refs/remotes/origin/main
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Admit runner image and install exact tools
+        uses: ./.github/actions/macos-toolchain
+
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Restore derivable registry sources
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ${{ runner.temp }}/release-cargo
+          key: macos-registry-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+
+      - name: Build canonical source archive and stand-in canvas
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/release-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
+          RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
+        run: |
+          set -euo pipefail
+          "$RUST_BIN/cargo" build --locked --package xtask
+          "$CARGO_TARGET_DIR/debug/xtask" release-inputs "$RUNNER_TEMP/input"
+
+      # Release staging builds inside a synthetic commit of the extracted
+      # archive, and the sealed proof runner pins that commit. Recreate it
+      # exactly so every build below matches the stage's own.
+      - name: Admit canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer="$RUNNER_TEMP/input/producer.json"
+          archive="$RUNNER_TEMP/input/source.tar"
+          test "$(jq -r .source_commit "$producer")" = "$SOURCE_COMMIT"
+          archive_sha256=$(shasum -a 256 "$archive" | cut -d' ' -f1)
+          test "$(jq -r .archive_sha256 "$producer")" = "$archive_sha256"
+          find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          tar -xmf "$archive" --strip-components=1 -C "$GITHUB_WORKSPACE"
+          test "$(python3 -c 'import json; print(json.load(open("dist/build.json"))["source"]["commit"])')" = "$SOURCE_COMMIT"
+          git init -q
+          git config core.autocrlf false
+          git config user.name spice-hosted
+          git config user.email hosted@invalid
+          git add -A -f -- .
+          GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
+            git commit -q -m "canonical source $SOURCE_COMMIT"
+          tree=$(git ls-tree -r -z --full-tree HEAD | shasum -a 256 | cut -d' ' -f1)
+          {
+            printf 'SOURCE=%s\n' "$(jq -r .source "$producer")"
+            printf 'ARCHIVE_SHA256=%s\n' "$archive_sha256"
+            printf 'TREE=%s\n' "$tree"
+            printf 'STAND_IN_APP=%s\n' "$(jq -r .app "$producer")"
+            printf 'STAND_IN_CANVAS=%s\n' "$(jq -r .canvas "$producer")"
+          } >> "$GITHUB_ENV"
+
+      - name: Derive the exact-tree inputs
+        uses: ./.github/actions/macos-prebuild-key
+        with:
+          tree: ${{ env.TREE }}
+          archive-sha256: ${{ env.ARCHIVE_SHA256 }}
+          cargo-home: ${{ runner.temp }}/release-cargo
+          target-dir: ${{ runner.temp }}/release-target
+          output: ${{ runner.temp }}/candidate-prebuild-key.json
+
+      - name: Derive the build key
+        shell: bash
+        run: |
+          set -euo pipefail
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          key_file="$RUNNER_TEMP/candidate-prebuild-key.json"
+          key=$("$xtask" prepared-artifact build-key "$key_file" | sed -n 's/^build key //p')
+          [[ "$key" =~ ^sha256:[0-9a-f]{64}$ ]]
+          repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')/prepared"
+          {
+            printf 'PREPARED_ARTIFACT_TOOL=%s\n' "$xtask"
+            printf 'PREPARED_REPOSITORY=%s\n' "$repository"
+            printf 'PREBUILD_KEY_FILE=%s\n' "$key_file"
+            printf 'PREBUILD_KEY=%s\n' "$key"
+          } >> "$GITHUB_ENV"
+
+      # The credential lives only for this lookup; no build sees it.
+      - name: Resolve an existing prebuild
+        id: resolve
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'oras logout ghcr.io' EXIT
+          existing=$("$PREPARED_ARTIFACT_TOOL" resolve-if-present \
+            "$PREPARED_REPOSITORY:${PREBUILD_KEY#sha256:}" "$PREBUILD_KEY")
+          case "$existing" in
+            absent)
+              present=0
+              prebuild=-
+              ;;
+            resolved\ *)
+              present=1
+              read -r _ prebuild _ <<< "$existing"
+              ;;
+            *)
+              echo "prepared resolver returned malformed output: $existing" >&2
+              exit 65
+              ;;
+          esac
+          printf 'PREBUILD_MANIFEST=%s\n' "$prebuild" >> "$GITHUB_ENV"
+          printf 'present=%s\n' "$present" >> "$GITHUB_OUTPUT"
+
+      - name: Mark native build start
+        if: steps.resolve.outputs.present == '0'
+        shell: bash
+        run: printf 'NATIVE_BUILD_STARTED=%s\n' "$(date +%s)" >> "$GITHUB_ENV"
+
+      # The proof image identity is recorded only by this disposable stage;
+      # release staging reruns the stage with its admitted proof image, so the
+      # prebuild never waits for Linux proof-image preparation.
+      - name: Build and execute the stand-in unsigned stage
+        if: steps.resolve.outputs.present == '0'
+        uses: ./.github/actions/macos-unsigned-stage
+        with:
+          cargo-home: ${{ runner.temp }}/release-cargo
+          target-dir: ${{ runner.temp }}/release-target
+          archive: ${{ env.SOURCE }}
+          proof-container: ${{ env.STAND_IN_PROOF_CONTAINER }}
+          canvas: ${{ runner.temp }}/input/canvas.zip
+          app: ${{ env.STAND_IN_APP }}
+
+      # Every packaged entry carries one fixed instant, later than the instant
+      # the consumer stamps on the keyed sources. Cargo's staleness test is
+      # strictly newer, so the restored outputs stay fresh over those sources.
+      - name: Pack exact candidate prebuild layer
+        if: steps.resolve.outputs.present == '0'
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/candidate-prebuild/layer"
+          mkdir -p "$root"
+          mv "$CARGO_TARGET_DIR" "$root/target"
+          mv "$GITHUB_WORKSPACE/target/proof-native-darwin" "$root/proof-native-darwin"
+          finished=$(date +%s)
+          build_seconds=$((finished - NATIVE_BUILD_STARTED))
+          {
+            printf 'PREBUILD_FINISHED=%s\n' "$finished"
+            printf 'BUILD_SECONDS=%s\n' "$build_seconds"
+          } >> "$GITHUB_ENV"
+          jq -n --sort-keys \
+            --arg build_key "$PREBUILD_KEY" --arg source_commit "$SOURCE_COMMIT" \
+            --arg source "$SOURCE" --arg archive_sha256 "$ARCHIVE_SHA256" --arg tree "$TREE" \
+            --arg stand_in_proof_container "$STAND_IN_PROOF_CONTAINER" \
+            --arg stand_in_app "$STAND_IN_APP" --arg stand_in_canvas "$STAND_IN_CANVAS" \
+            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
+            --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --argjson started "$PREBUILD_STARTED" --argjson finished "$finished" \
+            --argjson build_seconds "$build_seconds" \
+            '{schema:1,build_key:$build_key,source_commit:$source_commit,source:$source,
+              archive_sha256:$archive_sha256,tree:$tree,
+              stand_in_proof_container:$stand_in_proof_container,
+              stand_in_app:$stand_in_app,stand_in_canvas:$stand_in_canvas,
+              workflow_sha:$workflow_sha,run:$run,attempt:$attempt,
+              started:$started,finished:$finished,build_seconds:$build_seconds}' \
+            > "$root/record.json"
+          find "$root" -exec touch -h -t 200001020000 {} +
+          archive="$RUNNER_TEMP/candidate-prebuild/macos-candidate.tar.gz"
+          config="$RUNNER_TEMP/candidate-prebuild/prepared.json"
+          "$PREPARED_ARTIFACT_TOOL" pack-preserve-times "$root" "$archive"
+          "$PREPARED_ARTIFACT_TOOL" manifest \
+            bundle macos-arm64 "$PREBUILD_KEY_FILE" application/gzip \
+            "$archive" "$root" - "$config"
+          printf 'PREBUILD_ARCHIVE=%s\nPREBUILD_CONFIG=%s\n' "$archive" "$config" >> "$GITHUB_ENV"
+
+      - name: Publish exact candidate prebuild layer
+        if: steps.resolve.outputs.present == '0'
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'oras logout ghcr.io' EXIT
+          read -r label published < <("$PREPARED_ARTIFACT_TOOL" publish \
+            "$PREPARED_REPOSITORY" "${PREBUILD_KEY#sha256:}" "$PREBUILD_CONFIG" "$PREBUILD_ARCHIVE")
+          test "$label" = published
+          [[ "$published" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'PREBUILD_MANIFEST=%s\n' "$published" >> "$GITHUB_ENV"
+
+      - name: Record prebuild summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf '### macOS candidate prebuild\n\n'
+            printf -- '- source commit: `%s`\n' "$SOURCE_COMMIT"
+            printf -- '- tree: `%s`\n' "${TREE:--}"
+            printf -- '- build key: `%s`\n' "${PREBUILD_KEY:--}"
+            printf -- '- manifest: `%s`\n' "${PREBUILD_MANIFEST:--}"
+            printf -- '- already published: `%s`\n' "${{ steps.resolve.outputs.present || '-' }}"
+            printf -- '- native build: `%ss`\n' "${BUILD_SECONDS:--}"
+            printf -- '- started: `%s`\n' "${PREBUILD_STARTED:--}"
+            printf -- '- finished: `%s`\n' "${PREBUILD_FINISHED:--}"
+          } >> "$GITHUB_STEP_SUMMARY"
