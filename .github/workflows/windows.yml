@@ -24,6 +24,14 @@ jobs:
     name: Stage Windows
     runs-on: windows-2025
     timeout-minutes: 75
+    # Pulling the pinned cross-built bundle needs package read; package write
+    # stays with the publish job below.
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+      packages: read
     outputs:
       challenge: ${{ steps.request.outputs.challenge }}
       release_inputs_run: ${{ steps.request.outputs.release_inputs_run }}
@@ -45,8 +53,10 @@ jobs:
           }
           "challenge=$($request.challenge)" >> $env:GITHUB_OUTPUT
           if ($null -ne $request.release_inputs) {
+            if ($null -eq $request.cross_bundle) { throw 'release request pins no cross-built bundle' }
             "release_inputs_run=$($request.release_inputs.run_id)" >> $env:GITHUB_OUTPUT
             "release_inputs_challenge=$($request.release_inputs.challenge)" >> $env:GITHUB_OUTPUT
+            "cross_bundle=$($request.cross_bundle.manifest)" >> $env:GITHUB_OUTPUT
           } elseif ($null -ne $request.canvas) {
             "canvas=$($request.canvas.digest)" >> $env:GITHUB_OUTPUT
             "linux_run=$($request.canvas.run_id)" >> $env:GITHUB_OUTPUT
@@ -155,7 +165,81 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}\linux-stage-${{ steps.request.outputs.challenge }}
 
+      # A release request runs only the cross-built bundle it pins: no Rust
+      # toolchain is installed and no Cargo command runs. The bundle is pulled
+      # by OCI manifest digest and its complete inventory is admitted before
+      # any of its executables runs.
+      - name: Install exact ORAS
+        if: steps.request.outputs.cross_bundle != ''
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Admit pinned cross-built bundle
+        id: bundle
+        if: steps.request.outputs.cross_bundle != ''
+        shell: pwsh
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $request = Get-Content -Raw -LiteralPath (Join-Path $env:RUNNER_TEMP 'request.json') | ConvertFrom-Json
+          $pin = $request.cross_bundle
+          if ($request.challenge -cnotmatch '^[0-9a-f]{64}$') { throw 'challenge is malformed' }
+          foreach ($digest in @($pin.manifest, $pin.build_key, $pin.runner)) {
+            if ($digest -cnotmatch '^sha256:[0-9a-f]{64}$') { throw 'cross bundle pin is malformed' }
+          }
+          $version = & oras version | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($version -cnotmatch '(?m)^Version:\s+1\.3\.0\s*$') { throw "oras drifted: $version" }
+          $env:GHCR_TOKEN | oras login ghcr.io --username $env:GITHUB_ACTOR --password-stdin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pulled = Join-Path $env:RUNNER_TEMP 'cross-bundle'
+          New-Item -ItemType Directory -Path $pulled | Out-Null
+          $configPath = Join-Path $pulled 'prepared.json'
+          & oras pull --output $pulled --config $configPath `
+            "ghcr.io/$($env:GITHUB_REPOSITORY.ToLowerInvariant())/prepared@$($pin.manifest)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          oras logout ghcr.io
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+          if ($config.kind -cne 'bundle' -or $config.platform -cne 'windows-amd64' -or
+              $config.build_key.digest -cne $pin.build_key) {
+            throw 'pulled bundle is not the pinned Windows bundle'
+          }
+          if ($config.payload.path -cnotmatch '^[A-Za-z0-9._-]+$') { throw 'bundle payload path is malformed' }
+          $payload = Join-Path $pulled $config.payload.path
+          $observed = 'sha256:' + (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($observed -cne $config.payload.digest) { throw "bundle payload drifted: $observed" }
+          $root = Join-Path $env:RUNNER_TEMP "bundle-$($request.challenge)"
+          New-Item -ItemType Directory -Path $root | Out-Null
+          & "$env:SystemRoot\System32\tar.exe" -xzf $payload -C $root
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Get-ChildItem -LiteralPath $root -Recurse -Force |
+              Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) {
+            throw 'bundle carries a link'
+          }
+          $expected = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+          foreach ($file in $config.files) { $expected.Add($file.path, $file.digest) }
+          $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Force)
+          if ($files.Count -ne $expected.Count) { throw 'bundle inventory differs from its manifest' }
+          foreach ($file in $files) {
+            $relative = [IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/')
+            $digest = 'sha256:' + (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (-not $expected.ContainsKey($relative) -or $expected[$relative] -cne $digest) {
+              throw "bundle file $relative differs from its manifest"
+            }
+          }
+          if ($expected['runner/windows-hosted.exe'] -cne $pin.runner) { throw 'bundle runner is not the pinned runner' }
+          Copy-Item -LiteralPath $configPath -Destination (Join-Path $env:RUNNER_TEMP "bundle-$($request.challenge).json")
+          Remove-Item -Recurse -Force -LiteralPath $pulled
+          # A bundle-only run builds nothing, so its vendored closure is empty.
+          New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'vendor') | Out-Null
+          "runner=$(Join-Path $root 'runner\windows-hosted.exe')" >> $env:GITHUB_OUTPUT
+          "publisher=$(Join-Path $root 'runner\xtask.exe')" >> $env:GITHUB_OUTPUT
+
       - name: Install exact Rust and release tools
+        if: steps.request.outputs.cross_bundle == ''
         shell: pwsh
         run: |
           $rustup = "$env:USERPROFILE\.cargo\bin\rustup.exe"
@@ -220,6 +304,7 @@ jobs:
           }
 
       - name: Restore derivable bootstrap environment
+        if: steps.request.outputs.cross_bundle == ''
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: |
@@ -228,6 +313,7 @@ jobs:
           key: windows-bootstrap-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/windows/hosted.toml') }}
 
       - name: Build repository-owned runner
+        if: steps.request.outputs.cross_bundle == ''
         shell: pwsh
         env:
           CARGO_HOME: ${{ runner.temp }}\bootstrap-cargo
@@ -241,25 +327,13 @@ jobs:
           & $cargo vendor --locked --versioned-dirs "$env:RUNNER_TEMP\vendor" | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build release bundle publisher
-        if: steps.request.outputs.release_inputs_run != ''
-        shell: pwsh
-        env:
-          CARGO_HOME: ${{ runner.temp }}\bootstrap-cargo
-          RUSTC: C:\Users\runneradmin\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin\rustc.exe
-          RUSTUP_TOOLCHAIN: 1.97.1-x86_64-pc-windows-msvc
-          CARGO_TARGET_DIR: ${{ runner.temp }}\bootstrap-target
-        run: |
-          $cargo = "$env:USERPROFILE\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin\cargo.exe"
-          & $cargo build --locked --release --package xtask --bin xtask
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
       - name: Execute sealed request
         shell: pwsh
         env:
           SPICE_HOSTED_VENDOR: ${{ runner.temp }}\vendor
         run: |
-          $runner = Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe'
+          $runner = '${{ steps.bundle.outputs.runner }}'
+          if ($runner -eq '') { $runner = Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe' }
           $request = Join-Path $env:RUNNER_TEMP 'request.json'
           $result = Join-Path $env:RUNNER_TEMP 'result.json'
           $archive = Join-Path $env:RUNNER_TEMP 'source.tar'
@@ -275,7 +349,9 @@ jobs:
           New-Item -ItemType Directory -Force $root | Out-Null
           New-Item -ItemType Directory -Force (Join-Path $root 'runner') | Out-Null
           Copy-Item -Force (Join-Path $env:RUNNER_TEMP 'result.json') (Join-Path $root 'result.json')
-          Copy-Item -Force (Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe') (Join-Path $root 'runner\windows-hosted.exe')
+          $runner = '${{ steps.bundle.outputs.runner }}'
+          if ($runner -eq '') { $runner = Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe' }
+          Copy-Item -Force $runner (Join-Path $root 'runner\windows-hosted.exe')
           if (Test-Path -LiteralPath $stage) {
             Copy-Item -Recurse -Force -LiteralPath $stage -Destination (Join-Path $root 'stage')
           }
@@ -306,7 +382,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-publisher-${{ steps.request.outputs.challenge }}
-          path: ${{ runner.temp }}/bootstrap-target/release/xtask.exe
+          path: ${{ steps.bundle.outputs.publisher }}
           if-no-files-found: error
           retention-days: 1
 
@@ -323,6 +399,9 @@ jobs:
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\source.tar"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\cross-bundle"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bundle-${{ inputs.challenge }}"
+          Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\bundle-${{ inputs.challenge }}.json"
 
   # Package-write authority lives only here: release requests execute the
   # admitted canonical source, while ad hoc batches run worktree commands in

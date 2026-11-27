@@ -96,6 +96,7 @@ fn execution(requested: &[Command], verified: &[Command], codes: &[i32]) -> Host
             build_key: format!("sha256:{}", "5".repeat(64)),
             inputs: BTreeMap::new(),
         },
+        cross_bundle: None,
     };
     let outputs = std::iter::once(0)
         .chain(codes.iter().copied())
@@ -117,7 +118,7 @@ fn execution(requested: &[Command], verified: &[Command], codes: &[i32]) -> Host
             image,
             runner: Digest::compute(Domain::ProofNativeRunner, b"runner"),
             source: request.source.clone(),
-            toolchain: pins(),
+            toolchain: Some(pins()),
             executables: bundle::executables(verified),
         },
         outputs: outputs

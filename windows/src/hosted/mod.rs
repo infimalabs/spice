@@ -88,13 +88,46 @@ impl PreparedBundlePin {
     }
 }
 
+/// The cross-built Windows bundle a release request runs instead of
+/// compiling: the digest of its prepared-artifact OCI manifest in the
+/// repository's GHCR `prepared` package, the build key that manifest's config
+/// must carry, and the SHA-256 of the bundle's `runner/windows-hosted.exe`.
+/// The workflow pulls exactly that manifest and admits the unpacked inventory
+/// before any executable runs; the client admits only a result whose attested
+/// runner is that bundled runner.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrossBundlePin {
+    pub manifest: String,
+    pub build_key: String,
+    pub runner: String,
+}
+
+impl CrossBundlePin {
+    fn admit(&self) -> Result<(), AdmissionError> {
+        for (field, value) in [
+            ("cross bundle manifest", &self.manifest),
+            ("cross bundle build key", &self.build_key),
+            ("cross bundle runner", &self.runner),
+        ] {
+            let digest = value
+                .strip_prefix("sha256:")
+                .ok_or(AdmissionError::Digest(field))?;
+            require_hex(field, digest, DIGEST_HEX_LENGTH)?;
+        }
+        Ok(())
+    }
+}
+
 /// Complete client request signed into one provider run.
 ///
 /// `source` is the canonical archive identity; `archive_sha256` is the raw
 /// transported `source.tar` digest; `source_commit` is the canonical commit
 /// recorded inside that archive; and `tree` is its exact file listing. A
 /// release stage's `canvas` names the staged Linux canvas the guest links
-/// instead of compiling the app.
+/// instead of compiling the app. A release request carrying `cross_bundle`
+/// runs only that bundle's prebuilt executables and admits no native
+/// toolchain.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
@@ -118,6 +151,8 @@ pub struct Request {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas: Option<CanvasPin>,
     pub prepared_bundle: PreparedBundlePin,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cross_bundle: Option<CrossBundlePin>,
 }
 
 /// The staged Linux canvas one release stage adopts: the provider run whose
@@ -182,7 +217,25 @@ impl Request {
         self.admit_limits()?;
         self.admit_commands()?;
         self.admit_toolchain()?;
+        self.admit_cross_bundle()?;
         self.prepared_bundle.admit()
+    }
+
+    /// Bundle executables run exactly in a release request that pins the
+    /// cross-built bundle, and such a request runs nothing else.
+    fn admit_cross_bundle(&self) -> Result<(), AdmissionError> {
+        let bundled = self
+            .commands
+            .iter()
+            .filter(|command| command.bundle_path().is_some())
+            .count();
+        match &self.cross_bundle {
+            None if bundled == 0 => Ok(()),
+            Some(pin) if self.release_inputs.is_some() && bundled == self.commands.len() => {
+                pin.admit()
+            }
+            _ => Err(AdmissionError::CrossBundle),
+        }
     }
 
     fn admit_identity(&self) -> Result<(), AdmissionError> {
@@ -361,7 +414,12 @@ pub fn admit_result(
     if identity.source != request.source {
         return Err(AdmissionError::Source);
     }
-    if !toolchain_admits(&request.toolchain, &mut identity.toolchain) {
+    let observed_toolchain = match (&request.cross_bundle, identity.toolchain.as_mut()) {
+        (None, Some(observed)) => toolchain_admits(&request.toolchain, observed),
+        (Some(_), None) => true,
+        _ => false,
+    };
+    if !observed_toolchain {
         return Err(AdmissionError::Toolchain("observed"));
     }
     if &identity.runner != runner {
@@ -518,6 +576,7 @@ pub enum AdmissionError {
     Commands,
     Program,
     Arguments,
+    CrossBundle,
     Toolchain(&'static str),
     Challenge,
     Request,
@@ -567,6 +626,9 @@ impl fmt::Display for AdmissionError {
             Self::Arguments => {
                 formatter.write_str("hosted argv exceeds its count bound or contains NUL")
             }
+            Self::CrossBundle => formatter.write_str(
+                "hosted bundle executables require a release request pinning the cross-built bundle, which runs nothing else",
+            ),
             Self::Toolchain(tool) => write!(
                 formatter,
                 "hosted toolchain pin {tool} is empty, drifted, or contains NUL"
@@ -654,6 +716,7 @@ mod tests {
                 &"3".repeat(64),
                 &"4".repeat(40),
             ),
+            cross_bundle: None,
         }
     }
 
@@ -671,7 +734,7 @@ mod tests {
                 image: request.image.clone(),
                 runner: Digest::compute(Domain::ProofNativeRunner, b"runner"),
                 source: request.source.clone(),
-                toolchain: request.toolchain.clone(),
+                toolchain: Some(request.toolchain.clone()),
                 executables: Vec::new(),
             },
             outputs: vec![CommandResult {
@@ -703,9 +766,25 @@ mod tests {
         );
     }
 
-    #[test]
-    fn results_admit_only_the_bundle_executables_the_request_named() {
+    /// The bundle-only release request the cross-built route sends.
+    fn bundle_request() -> Request {
         let mut request = request();
+        request.transport_asset = None;
+        request.release_inputs = Some(ReleaseInputsPin {
+            run_id: 9,
+            challenge: "5".repeat(64),
+            app: Digest::compute(Domain::ProofNativeRunner, b"app"),
+            canvas: Digest::compute(Domain::ProofNativeRunner, b"canvas"),
+            proof_build_key: format!("sha256:{}", "6".repeat(64)),
+            proof_manifest: format!("sha256:{}", "7".repeat(64)),
+            proof_identity: format!("sha256:{}", "8".repeat(64)),
+            workflow_sha: "9".repeat(40),
+        });
+        request.cross_bundle = Some(CrossBundlePin {
+            manifest: format!("sha256:{}", "a".repeat(64)),
+            build_key: format!("sha256:{}", "b".repeat(64)),
+            runner: format!("sha256:{}", "c".repeat(64)),
+        });
         request.commands = vec![Command {
             program: format!(
                 "{}proof/gate/test-suite.exe",
@@ -717,8 +796,21 @@ mod tests {
                 directory: "gate".to_owned(),
             }),
         }];
-        let mut result = result(&request);
+        request
+    }
+
+    /// What the runner signs for a bundle-only request: no native toolchain.
+    fn bundle_result(request: &Request) -> ResultDocument {
+        let mut result = result(request);
+        result.identity.toolchain = None;
         result.identity.executables = bundle::executables(&request.commands);
+        result
+    }
+
+    #[test]
+    fn results_admit_only_the_bundle_executables_the_request_named() {
+        let request = bundle_request();
+        let mut result = bundle_result(&request);
         admit_result(&request, &result, &result.identity.runner).expect("attested bytes admit");
 
         result.identity.executables[0].sha256 = "8".repeat(64);
@@ -734,18 +826,78 @@ mod tests {
     }
 
     #[test]
+    fn bundle_executables_run_only_in_a_release_request_pinning_the_bundle() {
+        bundle_request()
+            .admit()
+            .expect("a pinned bundle-only release admits");
+
+        let mut unpinned = bundle_request();
+        unpinned.cross_bundle = None;
+        assert_eq!(unpinned.admit(), Err(AdmissionError::CrossBundle));
+
+        let mut mixed = bundle_request();
+        mixed.commands.push(Command::new("@cargo", Vec::new()));
+        assert_eq!(mixed.admit(), Err(AdmissionError::CrossBundle));
+
+        let mut ad_hoc = bundle_request();
+        ad_hoc.release_inputs = None;
+        ad_hoc.transport_asset = Some(42);
+        assert_eq!(ad_hoc.admit(), Err(AdmissionError::CrossBundle));
+
+        let mut pinned_tools = bundle_request();
+        pinned_tools.commands = vec![Command::new("@cargo", Vec::new())];
+        assert_eq!(pinned_tools.admit(), Err(AdmissionError::CrossBundle));
+
+        let mut unprefixed = bundle_request();
+        if let Some(pin) = &mut unprefixed.cross_bundle {
+            pin.manifest = "a".repeat(64);
+        }
+        assert_eq!(
+            unprefixed.admit(),
+            Err(AdmissionError::Digest("cross bundle manifest"))
+        );
+    }
+
+    #[test]
+    fn only_a_bundle_only_run_omits_the_observed_toolchain() {
+        let request = bundle_request();
+        let mut claimed = bundle_result(&request);
+        claimed.identity.toolchain = Some(request.toolchain.clone());
+        assert_eq!(
+            admit_result(&request, &claimed, &claimed.identity.runner),
+            Err(AdmissionError::Toolchain("observed"))
+        );
+
+        let native = self::request();
+        let mut unobserved = result(&native);
+        unobserved.identity.toolchain = None;
+        assert_eq!(
+            admit_result(&native, &unobserved, &unobserved.identity.runner),
+            Err(AdmissionError::Toolchain("observed"))
+        );
+    }
+
+    #[test]
     fn provider_and_update_revisions_are_evidence_not_gates() {
         let request = request();
         let mut result = result(&request);
         result.identity.image.version = "20261115.999.1".to_owned();
         result.identity.image.os_version = "10.0.26100.99999".to_owned();
-        result.identity.toolchain.git = "git version 2.56.0.windows.99".to_owned();
+        let observed = result
+            .identity
+            .toolchain
+            .as_mut()
+            .expect("native toolchain");
+        observed.git = "git version 2.56.0.windows.99".to_owned();
 
         let identity = admit_result(&request, &result, &result.identity.runner)
             .expect("provider-only revisions admit");
         assert_eq!(identity.image.version, "20261115.999.1");
         assert_eq!(identity.image.os_version, "10.0.26100.99999");
-        assert_eq!(identity.toolchain.git, "git version 2.56.0.windows.99");
+        assert_eq!(
+            identity.toolchain.map(|toolchain| toolchain.git).as_deref(),
+            Some("git version 2.56.0.windows.99")
+        );
 
         for changed_release in [
             "11.0.26100.99999",
@@ -762,7 +914,9 @@ mod tests {
         }
 
         let mut changed_compiler = result;
-        changed_compiler.identity.toolchain.msvc = "19.45.99999".to_owned();
+        if let Some(observed) = changed_compiler.identity.toolchain.as_mut() {
+            observed.msvc = "19.45.99999".to_owned();
+        }
         assert_eq!(
             admit_result(
                 &request,

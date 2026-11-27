@@ -57,7 +57,7 @@ pub use linux::{LinuxHostedStage, linux_hosted_stage, linux_hosted_stage_control
 pub use macos::{MacosHostedStage, macos_hosted_stage, macos_hosted_stage_controlled};
 use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
 use ownership::RunAuthority;
-pub use release_stage::{windows_release_commands_into, windows_release_commands_into_controlled};
+pub use release_stage::windows_release_commands_into_controlled;
 use source::PreparedSource;
 use subjects::DeclaredSubjects;
 
@@ -132,12 +132,13 @@ pub enum HostedSource<'a> {
 }
 
 /// Require the configured repository to be public before a release proof can
-/// dispatch work whose authority is a public GitHub Sigstore attestation.
+/// dispatch work whose authority is a public GitHub Sigstore attestation, and
+/// answer that `OWNER/NAME` repository.
 ///
 /// Ordinary private hosted development remains available through
 /// [`windows_hosted_commands`]. Release proof calls this boundary first so a
 /// private repository cannot be mistaken for an attestation-capable one.
-pub fn require_public_attestation_repository() -> Result<(), WindowsHostedError> {
+pub fn require_public_attestation_repository() -> Result<String, WindowsHostedError> {
     let policy: Policy = toml::from_str(POLICY).map_err(WindowsHostedError::Policy)?;
     policy.admit()?;
     let root = workspace_root()?;
@@ -154,7 +155,8 @@ pub fn require_public_attestation_repository() -> Result<(), WindowsHostedError>
             ],
         )?,
     )?;
-    admit_public_attestation_visibility(&policy.repository, visibility.trim())
+    admit_public_attestation_visibility(&policy.repository, visibility.trim())?;
+    Ok(policy.repository)
 }
 
 fn admit_public_attestation_visibility(
@@ -246,6 +248,7 @@ pub fn windows_hosted_commands_into(
             &bound.source.tree,
             &bound.source.workflow_blob,
         ),
+        cross_bundle: None,
     };
 
     let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
@@ -397,6 +400,14 @@ fn complete_dispatched_run(
     let (layout, declared, runner_path, result_path) =
         prepared::admitted_artifact(run, request, run_id, prepared_bundles)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
+    if let Some(pin) = &request.cross_bundle
+        && pin.runner.strip_prefix("sha256:") != Some(source::file_sha256(&runner_path)?.as_str())
+    {
+        return Err(WindowsHostedError::ProviderResponse(
+            "the attested runner is not the cross-built bundle runner the request pinned"
+                .to_owned(),
+        ));
+    }
     let result_bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
         path: result_path.clone(),
         source,

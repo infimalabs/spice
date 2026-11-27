@@ -17,9 +17,9 @@ use windows_execution::hosted::client::{
     HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight, PreparedBundleTransport,
 };
 
-/// The manifest `windows-cross` writes for the cross-built bundle whose proof
-/// executables the hosted Windows battery runs.
-const WINDOWS_BUNDLE_MANIFEST: &str = "target/windows-cross/out/prepared.json";
+mod cross_bundle;
+
+pub use cross_bundle::CrossHost;
 
 struct PreparedBundles;
 
@@ -33,42 +33,54 @@ impl PreparedBundleTransport for PreparedBundles {
         build_key: &str,
         destination: &Path,
     ) -> Result<(), String> {
-        let repository = format!("ghcr.io/{}/prepared", repository.to_ascii_lowercase());
-        let user = command_text("gh", &["api", "user", "--jq", ".login"])?;
-        let token = command_text("gh", &["auth", "token"])?;
-        let mut login = Command::new("oras")
-            .args([
-                "login",
-                "ghcr.io",
-                "--username",
-                user.trim(),
-                "--password-stdin",
-            ])
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("could not launch oras login: {error}"))?;
-        login
-            .stdin
-            .take()
-            .expect("piped login input")
-            .write_all(token.trim().as_bytes())
-            .map_err(|error| format!("could not supply GHCR credential: {error}"))?;
-        let status = login
-            .wait()
-            .map_err(|error| format!("could not wait for oras login: {error}"))?;
-        if !status.success() {
-            return Err(format!("oras login refused with {status}"));
-        }
-        let result =
+        let repository = prepared_repository(repository);
+        with_ghcr_login(|| {
             crate::prepared_artifact::fetch_bundle(&repository, tag, build_key, destination)
-                .map_err(|error| error.to_string());
-        let logout = Command::new("oras").args(["logout", "ghcr.io"]).status();
-        match (result, logout) {
-            (Ok(()), Ok(status)) if status.success() => Ok(()),
-            (Ok(()), Ok(status)) => Err(format!("oras logout refused with {status}")),
-            (Ok(()), Err(error)) => Err(format!("could not launch oras logout: {error}")),
-            (Err(error), _) => Err(error),
-        }
+                .map_err(|error| error.to_string())
+        })
+    }
+}
+
+/// The GHCR package holding `repository`'s prepared artifacts.
+fn prepared_repository(repository: &str) -> String {
+    format!("ghcr.io/{}/prepared", repository.to_ascii_lowercase())
+}
+
+/// Run `operation` while ORAS holds this machine's `gh` credential for GHCR,
+/// then log out again.
+fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let user = command_text("gh", &["api", "user", "--jq", ".login"])?;
+    let token = command_text("gh", &["auth", "token"])?;
+    let mut login = Command::new("oras")
+        .args([
+            "login",
+            "ghcr.io",
+            "--username",
+            user.trim(),
+            "--password-stdin",
+        ])
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not launch oras login: {error}"))?;
+    login
+        .stdin
+        .take()
+        .expect("piped login input")
+        .write_all(token.trim().as_bytes())
+        .map_err(|error| format!("could not supply GHCR credential: {error}"))?;
+    let status = login
+        .wait()
+        .map_err(|error| format!("could not wait for oras login: {error}"))?;
+    if !status.success() {
+        return Err(format!("oras login refused with {status}"));
+    }
+    let result = operation();
+    let logout = Command::new("oras").args(["logout", "ghcr.io"]).status();
+    match (result, logout) {
+        (Ok(value), Ok(status)) if status.success() => Ok(value),
+        (Ok(_), Ok(status)) => Err(format!("oras logout refused with {status}")),
+        (Ok(_), Err(error)) => Err(format!("could not launch oras logout: {error}")),
+        (Err(error), _) => Err(error),
     }
 }
 
@@ -106,6 +118,7 @@ pub fn hosted_release_inputs_dispatch(
 /// its watcher starts.
 pub fn hosted_release_stage(
     inputs_run: Attach,
+    host: &CrossHost,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), HostedReleaseError> {
@@ -115,19 +128,21 @@ pub fn hosted_release_stage(
         ));
     };
     let inputs = hosted_release_inputs(Attach::Run(inputs_run))?;
-    hosted_release_stage_with_inputs(inputs_run, &inputs, output, error_output)
+    hosted_release_stage_with_inputs(inputs_run, &inputs, host, output, error_output)
 }
 
 /// Create or resume all native stages from already admitted release inputs.
 pub fn hosted_release_stage_with_inputs(
     inputs_run: u64,
     inputs: &ReleaseInputs,
+    host: &CrossHost,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), HostedReleaseError> {
     hosted_release_stage_with_inputs_into(
         inputs_run,
         inputs,
+        host,
         Path::new("dist/stage"),
         output,
         error_output,
@@ -138,6 +153,7 @@ pub fn hosted_release_stage_with_inputs(
 pub(crate) fn hosted_release_stage_with_inputs_into(
     inputs_run: u64,
     inputs: &ReleaseInputs,
+    host: &CrossHost,
     stage_root: &Path,
     output: &mut impl Write,
     error_output: &mut impl Write,
@@ -186,6 +202,7 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
             let control = resumable_control(&windows_recorder, &windows_workflow);
             let result = windows_hosted_stage_controlled(
                 inputs,
+                host,
                 windows_attach,
                 stage_root,
                 control,
@@ -362,15 +379,18 @@ fn linux_hosted_stage_controlled(
 }
 
 /// Stage the Windows release target on one fresh provider-hosted machine from
-/// the provider inputs, or re-enter the provider run `attach` names.
+/// the provider inputs and this host's cross-built bundle, or re-enter the
+/// provider run `attach` names.
 pub fn windows_hosted_stage(
     inputs: &ReleaseInputs,
+    host: &CrossHost,
     attach: Option<Attach>,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
     windows_hosted_stage_controlled(
         inputs,
+        host,
         attach,
         Path::new("dist/stage"),
         HostedRunControl::default().with_prepared_bundles(&PREPARED_BUNDLES),
@@ -381,39 +401,19 @@ pub fn windows_hosted_stage(
 
 fn windows_hosted_stage_controlled(
     inputs: &ReleaseInputs,
+    host: &CrossHost,
     attach: Option<Attach>,
     stage_root: &Path,
     control: HostedRunControl<'_>,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    windows_execution::hosted::client::require_public_attestation_repository()?;
-    let arguments = vec![
-        "run".to_owned(),
-        "--locked".to_owned(),
-        "-p".to_owned(),
-        "xtask".to_owned(),
-        "--".to_owned(),
-        "stage-target".to_owned(),
-        "x86_64-pc-windows-msvc".to_owned(),
-        "--unsigned".to_owned(),
-        "--proof-container".to_owned(),
-        inputs.manifest().proof_identity.to_owned(),
-    ];
-    let command = windows_execution::protocol::Command::new("@cargo", arguments);
-    let manifest = Path::new(WINDOWS_BUNDLE_MANIFEST);
-    let battery =
-        crate::prepared_artifact::windows_proof_battery(manifest, &inputs.manifest().source)
-            .map_err(|error| {
-                WindowsHostedError::ProviderResponse(format!(
-                    "cross-built Windows bundle {} refused: {error}",
-                    manifest.display()
-                ))
-            })?;
-    let mut commands = vec![command];
-    commands.extend_from_slice(battery.commands());
+    let repository = windows_execution::hosted::client::require_public_attestation_repository()?;
+    let bundle = cross_bundle::release_bundle(host, inputs, &repository, output, error_output)?;
+    let mut commands = vec![bundle.stage];
+    commands.extend_from_slice(bundle.battery.commands());
     let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
-        commands, stage_root, inputs, attach, control,
+        commands, bundle.pin, stage_root, inputs, attach, control,
     )?;
     let first = &execution.outputs[0];
     output
@@ -428,7 +428,7 @@ fn windows_hosted_stage_controlled(
             stage_root.join("proofs"),
             wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc,
         );
-        proof::seal_hosted_windows(&layout, &execution, 1, &battery).map_err(|error| {
+        proof::seal_hosted_windows(&layout, &execution, 1, &bundle.battery).map_err(|error| {
             WindowsHostedError::ProviderResponse(format!(
                 "hosted Windows proof receipt refused: {error}"
             ))

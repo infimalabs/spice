@@ -311,7 +311,11 @@ pub struct HostedWindowsIdentity {
     pub image: HostedWindowsImage,
     pub runner: Digest,
     pub source: String,
-    pub toolchain: HostedWindowsToolchain,
+    /// The native toolchain the run observed. A run that executed only the
+    /// cross-built bundle's prebuilt executables admits no native toolchain
+    /// and carries none; every other run encodes exactly as it did before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toolchain: Option<HostedWindowsToolchain>,
     /// Every bundle executable the run verified, in request order. Runs that
     /// executed only admitted tools carry none, and encode exactly as they did
     /// before bundle executables existed.
