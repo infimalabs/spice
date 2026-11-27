@@ -52,6 +52,19 @@ bundle="$root/target/proof-native-darwin" # env-policy: allow
 # whole dependency graph a second time. A caller that already built release
 # tools passes its own target directory to reuse that graph too.
 target=${1:-$root/target} # env-policy: allow
+bind=true
+case "${2:-}" in # env-policy: allow
+    '') ;;
+    --seal-only) bind=false ;;
+    *)
+        printf 'usage: %s [TARGET] [--seal-only]\n' "$0" >&2
+        exit 65
+        ;;
+esac
+if [ "$#" -gt 2 ]; then
+    printf 'usage: %s [TARGET] [--seal-only]\n' "$0" >&2
+    exit 65
+fi
 vendor="$bundle/vendor" # env-policy: allow
 rm -rf "$bundle" # env-policy: allow
 mkdir -p "$bundle/bin" # env-policy: allow
@@ -117,6 +130,11 @@ challenge=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n') # env-policy: allow
     cargo --version # env-policy: allow
 
 printf '%s\n' "$pins" > "$bundle/pins.toml" # env-policy: allow
+
+if [ "$bind" = false ]; then # env-policy: allow
+    printf 'runner %s\nidentity %s\nsealed without proof.runner binding\n' "$runner" "$identity" # env-policy: allow
+    exit 0
+fi
 
 # The runner is sealed for this worktree's HEAD and vendor tree, so it is bound
 # here and nowhere else: `proof.runner` admits only the worktree layer, and the

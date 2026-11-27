@@ -23,7 +23,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -337,7 +337,7 @@ fn run_seal_darwin(
     let root = env::current_dir()?;
     xtask::seal_runner(&root, output)?;
     xtask::source_archive(None, ambient.environment()?)?;
-    preflight_native_release(TARGET)?;
+    preflight_native_release(TARGET, None)?;
     let build = xtask::stage_target(
         TARGET,
         release_environment(ambient),
@@ -506,6 +506,7 @@ fn run_stage_target(
         target,
         unsigned,
         proof_container,
+        proof_runner,
         scope,
         route,
         attach,
@@ -575,7 +576,7 @@ fn run_stage_target(
     } else {
         xtask::AppOrigin::Linux
     };
-    preflight_native_release(target).and_then(|()| {
+    preflight_native_release(target, proof_runner).and_then(|()| {
         xtask::stage_target(
             target,
             environment,
@@ -600,6 +601,7 @@ struct StageRequest<'a> {
     target: &'a str,
     unsigned: bool,
     proof_container: Option<&'a str>,
+    proof_runner: Option<&'a str>,
     scope: StageScope,
     route: StageRoute,
     /// The provider run a hosted stage re-enters instead of dispatching.
@@ -638,6 +640,12 @@ fn parse_stage_route(arguments: &[OsString]) -> (StageRoute, &[OsString]) {
 fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     let (attach, release_inputs, arguments) = parse_provider_controls(arguments)?;
     let (route, arguments) = parse_stage_route(arguments);
+    let (proof_runner, arguments) = match arguments {
+        [rest @ .., flag, runner] if flag == OsStr::new("--proof-runner") => {
+            (Some(runner.to_str()?), rest)
+        }
+        _ => (None, arguments),
+    };
     let (target, unsigned, proof_container, scope) = match arguments {
         [target] => (target, false, None, StageScope::Target),
         [target, flag] if flag == OsStr::new("--unsigned") => {
@@ -674,7 +682,14 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         _ => return None,
     };
     let target = target.to_str()?;
-    if !stage_route_admitted(target, unsigned, proof_container, scope, route) {
+    if !stage_route_admitted(
+        target,
+        unsigned,
+        proof_container,
+        proof_runner,
+        scope,
+        route,
+    ) {
         return None;
     }
     // Only a provider-hosted stage has a run to re-enter: an explicit hosted
@@ -689,6 +704,7 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         target,
         unsigned,
         proof_container,
+        proof_runner,
         scope,
         route,
         attach,
@@ -700,9 +716,15 @@ fn stage_route_admitted(
     target: &str,
     unsigned: bool,
     proof_container: Option<&str>,
+    proof_runner: Option<&str>,
     scope: StageScope,
     route: StageRoute,
 ) -> bool {
+    if proof_runner.is_some()
+        && (target != DARWIN_TARGET || route != StageRoute::Default || scope != StageScope::Target)
+    {
+        return false;
+    }
     if scope != StageScope::Target {
         return route == StageRoute::Default;
     }
@@ -1039,42 +1061,52 @@ fn run_release_inputs(
     .map_err(Into::into)
 }
 
-fn preflight_native_release(target: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn preflight_native_release(
+    target: &str,
+    proof_runner: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if target != "aarch64-apple-darwin" {
         return Ok(());
     }
     let repository = spice::repository::Repository::discover(Path::new("."))?;
-    let config = spice::config::load_repository(&repository, &[])?;
-    let runner = config.root().proof().runner().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            concat!(
-                "proof.runner is required before Darwin release staging; ",
-                "seal and bind this worktree's runner with dist/proof-runner/build.sh ",
-                "or run seal-darwin"
-            ),
-        )
-    })?;
+    let runner = match proof_runner {
+        Some(runner) => PathBuf::from(runner),
+        None => spice::config::load_repository(&repository, &[])?
+            .root()
+            .proof()
+            .runner()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    concat!(
+                        "proof.runner is required before Darwin release staging; ",
+                        "seal and bind this worktree's runner with ",
+                        "dist/proof-runner/build.sh or run seal-darwin"
+                    ),
+                )
+            })?
+            .as_path()
+            .to_path_buf(),
+    };
     let deadlines = Deadlines::new(
         Duration::from_secs(60),
         Duration::from_secs(10),
         Duration::from_secs(10),
     )?;
     let limits = proof::Limits::new(deadlines, Duration::from_secs(5), 1024 * 1024)?;
-    let admitted =
-        proof::NativeRunner::attest(runner.as_path(), repository.worktree_root(), limits)
-            .map_err(|error| runner_refused(runner.as_path(), &error))?;
+    let admitted = proof::NativeRunner::attest(&runner, repository.worktree_root(), limits)
+        .map_err(|error| runner_refused(&runner, &error))?;
     admitted
         .preflight()
-        .map_err(|error| runner_refused(runner.as_path(), &error))?;
+        .map_err(|error| runner_refused(&runner, &error))?;
     Ok(())
 }
 
-/// Name the bound runner in its refusal: the runner's own stderr already
+/// Name the selected runner in its refusal: the runner's own stderr already
 /// names its sealed commit, the observed HEAD, and the reseal command.
 fn runner_refused(runner: &Path, error: &proof::NativeError) -> io::Error {
     io::Error::other(format!(
-        "proof.runner {} (this worktree's binding) refused: {error}",
+        "proof.runner {} selected for this worktree refused: {error}",
         runner.display()
     ))
 }
@@ -1151,13 +1183,30 @@ mod tests {
     #[test]
     fn hosted_targets_admit_only_their_supported_proof_image_inputs() {
         let image = "sha256:0123456789abcdef";
+        let runner = "/tmp/sealed-runner";
         let darwin = [DARWIN_TARGET, "--proof-container", image, "--hosted"].map(OsString::from);
         let darwin = parse_stage_target(&darwin).expect("hosted Darwin proof image");
         assert_eq!(darwin.target, DARWIN_TARGET);
         assert_eq!(darwin.proof_container, Some(image));
+        assert_eq!(darwin.proof_runner, None);
         assert_eq!(darwin.route, StageRoute::Hosted);
         assert!(!darwin.unsigned);
 
+        let native_darwin = [
+            DARWIN_TARGET,
+            "--unsigned",
+            "--proof-container",
+            image,
+            "--proof-runner",
+            runner,
+        ]
+        .map(OsString::from);
+        let native_darwin =
+            parse_stage_target(&native_darwin).expect("native Darwin sealed runner");
+        assert_eq!(native_darwin.proof_runner, Some(runner));
+        let non_darwin_runner =
+            [LINUX_TARGET, "--unsigned", "--proof-runner", runner].map(OsString::from);
+        assert!(parse_stage_target(&non_darwin_runner).is_none());
         let windows = [
             WINDOWS_TARGET,
             "--unsigned",
