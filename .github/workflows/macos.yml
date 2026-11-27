@@ -274,6 +274,7 @@ jobs:
           PY
           "$RUNNER_TEMP/bootstrap-target/release/xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
           tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
+          cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
           finalizer="$RUNNER_TEMP/finalizer"
           mkdir -p "$finalizer"
           cp "$RUNNER_TEMP/bootstrap-target/release/xtask" "$finalizer/"
