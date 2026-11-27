@@ -87,12 +87,9 @@ pub(crate) fn git_commit(repository: &Tree, message: &str) {
     repository.commit(message);
 }
 
-/// One tracked workspace document, read from the real workspace.
-pub(crate) fn workspace_document(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(name);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {} for the fixture: {error}", path.display()))
-}
+/// The workspace's tracked `spice.toml`, embedded at build time so a test
+/// executable built elsewhere never reads the build host's checkout.
+pub(crate) const WORKSPACE_POLICY: &str = ::std::include_str!("../../../../spice.toml");
 
 /// One tracked policy document a fixture repository can be gated against.
 ///
@@ -105,7 +102,7 @@ pub(crate) fn policy_document(body: &str) -> String {
 /// One committed fixture repository carrying the tracked policy.
 pub(crate) fn contract_repository(label: &str) -> Tree {
     let repository = git_repository(label);
-    repository.write("spice.toml", &workspace_document("spice.toml"));
+    repository.write("spice.toml", WORKSPACE_POLICY);
     repository.write("src/app.rs", "fn main() {}\n");
     git_commit(&repository, "fixture contract");
     repository

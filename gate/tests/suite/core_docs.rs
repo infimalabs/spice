@@ -10,8 +10,8 @@ use gate::{
 };
 
 use super::support::{
-    Tree, acquired, acquired_arm, acquired_inputs, contract_repository, git_commit,
-    workspace_document,
+    Tree, WORKSPACE_POLICY, acquired, acquired_arm, acquired_inputs, contract_repository,
+    git_commit,
 };
 
 /// The packaged base cap for Markdown past the bounded depths.
@@ -265,10 +265,7 @@ fn document_repository(label: &str, declaration: Option<&str>) -> Tree {
     if let Some(docs) = declaration {
         repository.write(
             "spice.toml",
-            &format!(
-                "{}\n[policy.repo_truth]\n{docs}\n",
-                workspace_document("spice.toml")
-            ),
+            &format!("{WORKSPACE_POLICY}\n[policy.repo_truth]\n{docs}\n",),
         );
     }
     git_commit(&repository, "repository document declaration fixture");
