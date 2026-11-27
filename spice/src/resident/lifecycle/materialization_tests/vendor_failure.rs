@@ -32,6 +32,8 @@ const FINISHED_PROSE: &[u8] = br#"{"type":"message_end","message":{"role":"assis
 "#;
 const FINISHED_RESULT: &[u8] = br#"{"type":"prompt_result","id":"prompt-7","agentInvoked":true,"status":"completed","sessionSettled":true}
 "#;
+const COMPLETED_ASIDE: &[u8] = br#"{"type":"prompt_result","id":"spice-aside-1","agentInvoked":false,"status":"completed","sessionSettled":false}
+"#;
 /// The occupant's answer headed with the key `operator_direction_write` addresses to the lane.
 const ACKED_PROSE: &[u8] = br#"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ACK 1kKRRsDSx: Finished the claim."}],"stopReason":"stop","usage":{"input":7,"cacheRead":5,"cacheWrite":3,"output":2}}}
 "#;
@@ -325,32 +327,46 @@ fn cancelling_the_refused_operator_direction_releases_the_vendor_hold() {
 }
 
 #[test]
-fn an_exit_that_ended_on_prose_is_a_mature_death_however_young_the_occupant() {
-    let fixture = VendorExitFixture::new(
-        "finished",
-        &[PROMPT, FINISHED_PROSE, FINISHED_RESULT, TRAILING_WIDGET],
-    );
+fn a_settled_exit_followed_by_an_aside_is_mature_however_young_the_occupant() {
     let config = one_death_holds();
     let mut lifecycle = lifecycle::Runtime::new(&config);
-    let before = fact_kinds(&fixture.bus);
-    let mut diagnostic = Vec::new();
 
-    fixture
-        .exit(&mut lifecycle, &mut diagnostic)
-        .expect("the finished exit is accounted");
+    for tag in ["finished-first", "finished-second"] {
+        let fixture = VendorExitFixture::new(
+            tag,
+            &[
+                PROMPT,
+                FINISHED_PROSE,
+                FINISHED_RESULT,
+                COMPLETED_ASIDE,
+                TRAILING_WIDGET,
+            ],
+        );
+        let before = fact_kinds(&fixture.bus);
+        let mut diagnostic = Vec::new();
 
-    assert_eq!(
-        fact_kinds(&fixture.bus)[before.len()..],
-        [wire::FactKind::LaneExited],
-        "an exit on the occupant's own prose journals no hold even where one young death would"
-    );
-    assert_eq!(lifecycle.held_until(lane()), None);
-    assert!(
-        diagnostic.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&diagnostic)
-    );
-    fixture.finish();
+        fixture
+            .exit(&mut lifecycle, &mut diagnostic)
+            .expect("the finished exit is accounted");
+
+        assert_eq!(
+            fact_kinds(&fixture.bus)[before.len()..],
+            [wire::FactKind::LaneExited],
+            "a settled exit journals no hold even where one young death would"
+        );
+        assert_eq!(lifecycle.held_until(lane()), None);
+        let snapshot = fixture.bus.task_snapshot().expect("vacant snapshot reads");
+        assert!(
+            replay_holds(snapshot.facts().iter()).seats(lane()),
+            "the settled exit leaves the vacant lane eligible"
+        );
+        assert!(
+            diagnostic.is_empty(),
+            "{}",
+            String::from_utf8_lossy(&diagnostic)
+        );
+        fixture.finish();
+    }
 }
 
 #[test]

@@ -116,29 +116,32 @@ pub(super) fn closing_word(
                 continue;
             };
             settled |= context.session_settled;
-            if let Some(outcome) = &context.prompt_outcome {
-                return Ok(match outcome.status {
-                    listen::PromptStatus::Completed if outcome.session_settled || settled => {
-                        LastWord::Answered
-                    }
-                    listen::PromptStatus::Error => decoded
-                        .events()
-                        .iter()
-                        .find_map(|event| match event {
-                            listen::Event::Failure(failure) => {
-                                Some(LastWord::Failure(failure.message.clone()))
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or(LastWord::Silent),
-                    listen::PromptStatus::Completed | listen::PromptStatus::Aborted => {
-                        LastWord::Silent
-                    }
-                });
-            }
-            if context.turn == Some(listen::TurnMoment::Started) {
-                return Ok(LastWord::Silent);
-            }
+            let Some(outcome) = context
+                .prompt_outcome
+                .as_ref()
+                .filter(|outcome| outcome.agent_invoked)
+            else {
+                if context.turn == Some(listen::TurnMoment::Started) {
+                    return Ok(LastWord::Silent);
+                }
+                continue;
+            };
+            return Ok(match outcome.status {
+                listen::PromptStatus::Completed if outcome.session_settled || settled => {
+                    LastWord::Answered
+                }
+                listen::PromptStatus::Error => decoded
+                    .events()
+                    .iter()
+                    .find_map(|event| match event {
+                        listen::Event::Failure(failure) => {
+                            Some(LastWord::Failure(failure.message.clone()))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(LastWord::Silent),
+                listen::PromptStatus::Completed | listen::PromptStatus::Aborted => LastWord::Silent,
+            });
         }
     }
     Ok(LastWord::Silent)
@@ -272,6 +275,28 @@ mod tests {
                 .expect("the retained tape reads"),
             LastWord::Answered,
             "the later typed settlement completes the prompt"
+        );
+    }
+
+    #[test]
+    fn non_agent_asides_do_not_hide_the_settled_prompt() {
+        let scratch = Scratch::new();
+        let tape = tape::Tape::open(&scratch.0).expect("fixture tape opens");
+        let declared = write(
+            &tape,
+            &omp_declaration("018f82d4-6f59-7d06-92e3-bce9131163c2"),
+        );
+        write(&tape, &omp_prompt_result("completed", true, None));
+        write(
+            &tape,
+            r#"{"type":"prompt_result","id":"spice-aside-1","agentInvoked":false,"status":"completed","sessionSettled":false}"#,
+        );
+
+        assert_eq!(
+            closing_word(&scratch.0, &spice::extension::OMP, &declared)
+                .expect("the retained tape reads"),
+            LastWord::Answered,
+            "an aside does not replace the authoritative agent result"
         );
     }
 
