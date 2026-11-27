@@ -49,8 +49,20 @@ pub(super) fn admitted_artifact(
     Ok((layout, declared, runner, result))
 }
 
-/// The attempt of run `run_id` whose `job` last succeeded. Each attempt signs
-/// or records its own bytes and publishes them beneath its own discovery tag.
+/// Greatest positive attempt in provider output. Every token must be valid:
+/// malformed provider output is an admission refusal, not a partial answer.
+fn latest_successful_attempt(attempts: &str) -> Option<u32> {
+    let mut latest = None;
+    for attempt in attempts.split_whitespace() {
+        let attempt = attempt.parse::<u32>().ok().filter(|attempt| *attempt > 0)?;
+        latest = Some(latest.map_or(attempt, |current: u32| current.max(attempt)));
+    }
+    latest
+}
+
+/// The greatest attempt of run `run_id` whose `job` succeeded. Each attempt
+/// signs or records its own bytes and publishes them beneath its own discovery
+/// tag. Failed later attempts do not hide a prior successful publication.
 pub(super) fn published_attempt(
     run: &HostedRun<'_>,
     run_id: u64,
@@ -63,8 +75,9 @@ pub(super) fn published_attempt(
             "gh",
             [
                 OsString::from("api"),
+                OsString::from("--paginate"),
                 OsString::from(format!(
-                    "repos/{}/actions/runs/{run_id}/jobs?filter=latest",
+                    "repos/{}/actions/runs/{run_id}/jobs?filter=all&per_page=100",
                     run.repository
                 )),
                 OsString::from("--jq"),
@@ -74,13 +87,9 @@ pub(super) fn published_attempt(
             ],
         )?,
     )?;
-    match attempts.split_whitespace().collect::<Vec<_>>().as_slice() {
-        [attempt] => attempt.parse().ok().filter(|attempt| *attempt > 0),
-        _ => None,
-    }
-    .ok_or_else(|| {
+    latest_successful_attempt(&attempts).ok_or_else(|| {
         WindowsHostedError::ProviderResponse(format!(
-            "run {run_id} names no single successful {job} attempt: {attempts:?}"
+            "run {run_id} names no successful {job} attempt: {attempts:?}"
         ))
     })
 }
@@ -137,6 +146,14 @@ mod tests {
                 .strip_prefix(key)
                 .map(str::trim)
         })
+    }
+
+    #[test]
+    fn latest_successful_publication_survives_later_failed_attempts() {
+        assert_eq!(super::latest_successful_attempt("1\n3\n2\n"), Some(3));
+        assert_eq!(super::latest_successful_attempt("1\n"), Some(1));
+        assert_eq!(super::latest_successful_attempt(""), None);
+        assert_eq!(super::latest_successful_attempt("1\ninvalid\n2\n"), None);
     }
 
     #[test]
