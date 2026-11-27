@@ -18,8 +18,10 @@ use windows_execution::hosted::client::{
 };
 
 mod cross_bundle;
+mod package_read;
 
 pub use cross_bundle::CrossHost;
+use package_read::require_prepared_read;
 
 struct PreparedBundles;
 
@@ -106,10 +108,13 @@ pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHos
     windows_execution::hosted::client::release_inputs(Preflight::Attach(attach))
 }
 
-/// Dispatch one fresh provider preflight of `source_commit`.
+/// Dispatch one fresh provider preflight of `source_commit`, once this
+/// coordinator has proven it can read the prepared bundles the release will
+/// fetch.
 pub fn hosted_release_inputs_dispatch(
     source_commit: String,
 ) -> Result<ReleaseInputs, WindowsHostedError> {
+    require_prepared_read()?;
     windows_execution::hosted::client::release_inputs(Preflight::Dispatch(source_commit))
 }
 
@@ -158,6 +163,7 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), HostedReleaseError> {
+    require_prepared_read()?;
     let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
     write_session_path(output, &session)?;
 
@@ -301,6 +307,7 @@ pub fn macos_hosted_stage(
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
+    require_prepared_read()?;
     macos_hosted_stage_controlled(
         inputs,
         attach,
@@ -388,6 +395,7 @@ pub fn windows_hosted_stage(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
+    require_prepared_read()?;
     windows_hosted_stage_controlled(
         inputs,
         host,
