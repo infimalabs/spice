@@ -571,7 +571,7 @@ fn content_fields(
                 </select>
             </label>
             <label class="draft-field-title"><span>{"Title"}</span><input name="title" type="text" required=true value={value(DraftField::Title)} oninput={typed(DraftField::Title)} /></label>
-            <label class="draft-field-pitch"><span>{"Pitch"}</span><input name="pitch" type="text" required=true maxlength="160" placeholder="One plain sentence saying why this work matters" value={value(DraftField::Pitch)} oninput={typed(DraftField::Pitch)} /></label>
+            <label class="draft-field-pitch"><span>{"Pitch"}</span><input name="pitch" type="text" required=true maxlength="240" placeholder="One plain sentence saying why this work matters" value={value(DraftField::Pitch)} oninput={typed(DraftField::Pitch)} /></label>
             {context}
         </>
     }

@@ -11,7 +11,7 @@ use crate::rooms::one_line;
 
 /// Most Unicode scalar values an authored pitch may hold: an authoring bound,
 /// never a truncation width.
-pub const PITCH_CHARS: usize = 160;
+pub const PITCH_CHARS: usize = 240;
 
 /// A mechanical rule an authored pitch broke; each is one typed refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

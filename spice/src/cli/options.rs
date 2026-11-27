@@ -131,7 +131,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     (
         "task add",
         "pitch",
-        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 160 characters",
+        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 240 characters",
     ),
     (
         "task add",
@@ -174,7 +174,7 @@ const OPTIONS: &[(&str, &str, &str)] = &[
     (
         "task modify",
         "pitch",
-        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 160 characters",
+        "One plain sentence saying who can do what once this task lands and why that matters, not the current defect; at most 240 characters",
     ),
     (
         "task modify",

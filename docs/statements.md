@@ -301,7 +301,7 @@ unless it is about to finish or pass it cleanly.
 - Every task statement stores a pitch: one plain, unlabeled sentence stating
   who can do what once the work lands and why that matters, never the current
   defect, required on `task add` and refused when missing, blank, multi-line,
-  or over 160 characters. Board rows, graph nodes, and notices often show only
+  or over 240 characters. Board rows, graph nodes, and notices often show only
   title and pitch, so a title names the result and a pitch reads without its
   terms. A Design's title stays its question and its pitch states the end
   state it pursues, never a one-word heading. Each unresolved Design question
