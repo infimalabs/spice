@@ -1,8 +1,5 @@
-use std::os::unix::process::ExitStatusExt as _;
-use std::process::ExitStatus;
-
 use super::*;
-use crate::toolchain::{ArmMeasurement, measure_toolchain_arm};
+use crate::toolchain::{ArmMeasurement, exit_status, measure_toolchain_arm};
 
 mod environment;
 mod scanners;
@@ -40,8 +37,25 @@ impl Fixture {
         }
     }
 
-    /// One rim program with exact bytes and the requested mode.
-    fn program(&self, name: &str, bytes: &[u8], mode: u32) -> PathBuf {
+    /// One launchable rim program with exact bytes, executable by the host's
+    /// own rule: the mode's execute bits on Unix, the extension on Windows.
+    fn program(&self, name: &str, bytes: &[u8]) -> PathBuf {
+        #[cfg(unix)]
+        let path = self.program_with_mode(name, bytes, 0o755);
+        #[cfg(windows)]
+        let path = {
+            let path = self.root.join("rim/bin").join(name).with_extension("exe");
+            fs::write(&path, bytes).expect("write fixture program");
+            path
+        };
+        path
+    }
+
+    /// One rim program with exact bytes and the requested Unix mode.
+    #[cfg(unix)]
+    fn program_with_mode(&self, name: &str, bytes: &[u8], mode: u32) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt as _;
+
         let path = self.root.join("rim/bin").join(name);
         fs::write(&path, bytes).expect("write fixture program");
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))
@@ -126,10 +140,10 @@ fn whole(bytes: &[u8]) -> Option<Stream<'_>> {
 #[test]
 fn executable_authority_moves_with_exact_bytes_without_launching() {
     let fixture = Fixture::new("gate-tool-byte-authority");
-    fixture.program("rustfmt", b"first executable authority", 0o755);
+    fixture.program("rustfmt", b"first executable authority");
     let source = fixture.source(&[]);
     let before = toolchain_executable_authority(&source).unwrap();
-    fixture.program("rustfmt", b"second and longer executable authority", 0o755);
+    fixture.program("rustfmt", b"second and longer executable authority");
     let after = toolchain_executable_authority(&source).unwrap();
 
     assert_ne!(before, after);
@@ -142,7 +156,7 @@ fn an_identified_program_carries_its_resolved_bytes_and_exact_printed_version() 
     let fixture = Fixture::new("gate-tool-identity");
     let requirement = cargo_requirement();
     let bytes = b"fixture cargo executable";
-    let resolved = fixture.program(requirement.program, bytes, 0o755);
+    let resolved = fixture.program(requirement.program, bytes);
     let printed = format!("{} \n", requirement.exact_version);
     let asked = std::cell::RefCell::new(Vec::new());
 
@@ -187,30 +201,39 @@ fn an_unresolved_program_is_missing_and_an_unusable_one_keeps_its_resolution() {
         }
     );
 
-    let resolved = fixture.program(requirement.program, b"not executable", 0o644);
-    let unprobed = |failure| ToolEvidence::Unprobed {
-        name: requirement.name.to_owned(),
-        requested_program: requirement.program.to_owned(),
-        resolved_program: resolved.to_string_lossy().into_owned(),
-        failure,
-    };
-    assert_eq!(
-        probe_with(requirement, &fixture.source(&[]), read_program, never),
-        unprobed(ProbeFailure::NotStarted)
-    );
+    // A program the host would not launch is resolved but never probed. Only
+    // Unix keeps that apart from launchability by name, through the mode.
+    #[cfg(unix)]
+    {
+        let resolved = fixture.program_with_mode(requirement.program, b"not executable", 0o644);
+        assert_eq!(
+            probe_with(requirement, &fixture.source(&[]), read_program, never),
+            ToolEvidence::Unprobed {
+                name: requirement.name.to_owned(),
+                requested_program: requirement.program.to_owned(),
+                resolved_program: resolved.to_string_lossy().into_owned(),
+                failure: ProbeFailure::NotStarted,
+            }
+        );
+    }
 
-    fixture.program(requirement.program, b"refusing", 0o755);
+    let resolved = fixture.program(requirement.program, b"refusing");
     assert_eq!(
         probe_with(requirement, &fixture.source(&[]), read_program, &|_, _| {
             Err(ProbeFailure::Refused { code: 41 })
         }),
-        unprobed(ProbeFailure::Refused { code: 41 })
+        ToolEvidence::Unprobed {
+            name: requirement.name.to_owned(),
+            requested_program: requirement.program.to_owned(),
+            resolved_program: resolved.to_string_lossy().into_owned(),
+            failure: ProbeFailure::Refused { code: 41 },
+        }
     );
 }
 
 #[test]
 fn a_version_probe_identifies_only_a_clean_whole_decodable_version() {
-    let exited = |code: i32| Completion::Exited(ExitStatus::from_raw(code << 8));
+    let exited = |code: i32| Completion::Exited(exit_status::exited(code));
     let printed = "cargo 1.0.0 (fixture)\n";
 
     assert_eq!(
@@ -221,19 +244,21 @@ fn a_version_probe_identifies_only_a_clean_whole_decodable_version() {
         printed_version(&exited(41), whole(printed.as_bytes())),
         Err(ProbeFailure::Refused { code: 41 })
     );
+    // Only Unix reports an exit without a code, which is termination by signal.
+    #[cfg(unix)]
     assert_eq!(
         printed_version(
-            &Completion::Exited(ExitStatus::from_raw(9)),
+            &Completion::Exited(exit_status::terminated()),
             whole(printed.as_bytes())
         ),
         Err(ProbeFailure::Signaled)
     );
     assert_eq!(
-        printed_version(&Completion::TimedOut(ExitStatus::from_raw(9)), None),
+        printed_version(&Completion::TimedOut(exit_status::terminated()), None),
         Err(ProbeFailure::TimedOut)
     );
     assert_eq!(
-        printed_version(&Completion::Cancelled(ExitStatus::from_raw(9)), None),
+        printed_version(&Completion::Cancelled(exit_status::terminated()), None),
         Err(ProbeFailure::Signaled)
     );
     assert_eq!(

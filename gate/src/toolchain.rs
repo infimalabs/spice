@@ -1311,6 +1311,8 @@ fn contracted_version(version: &str) -> &str {
 }
 
 #[cfg(test)]
+pub(crate) mod exit_status;
+#[cfg(test)]
 pub(crate) mod scratch;
 #[cfg(test)]
 use scratch::*;

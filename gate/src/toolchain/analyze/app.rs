@@ -277,8 +277,6 @@ pub(in crate::toolchain) fn app_output_roots(repository: &Path) -> (PathBuf, Pat
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt as _;
-    use std::process::ExitStatus;
     use std::time::Duration;
 
     use sill::Completion;
@@ -286,6 +284,7 @@ mod tests {
     use super::super::compile::{CompileReply, compile_reply};
     use super::*;
     use crate::toolchain::captured::Stream;
+    use crate::toolchain::exit_status;
 
     /// The app checks run in declared order and stop at the first refusal, so
     /// trunk never builds an app whose compiler already rejected it.
@@ -341,7 +340,7 @@ mod tests {
                             detail: |code, message| FindingDetail::AppWebOutput { code, message },
                         },
                         &Captured {
-                            completion: &Completion::Exited(ExitStatus::from_raw(code << 8)),
+                            completion: &Completion::Exited(exit_status::exited(code)),
                             observation_failure: None,
                             stdout: whole(b"compiling fixture\n"),
                             stderr: whole(b""),
