@@ -215,6 +215,11 @@ impl PublicationSession {
         &self.root
     }
 
+    /// Durable generated stage authority for this exact pinned publication.
+    pub(super) fn stage_root(&self) -> PathBuf {
+        self.root.join("stage")
+    }
+
     pub(super) fn source_commit(&self) -> &str {
         &self.source_commit
     }
@@ -476,6 +481,59 @@ mod tests {
                 .admit(&resume(pinned.clone()))
                 .expect("a crossed plan still resumes"),
             Some(pinned)
+        );
+    }
+
+    #[test]
+    fn generated_stage_authority_resumes_outside_the_operator_worktree() {
+        let scratch = Scratch::new();
+        let worktree = scratch.0.join("worktree");
+        fs::create_dir(&worktree).expect("operator worktree");
+        let operator_file = worktree.join("notes.md");
+        fs::write(&operator_file, b"operator bytes").expect("operator file");
+        let pinned = "a".repeat(COMMIT_HEX_LENGTH);
+        let stage_root;
+
+        {
+            let publications = scratch.publications().expect("first invocation");
+            let session = publications.begin(&pinned).expect("pin");
+            stage_root = session.stage_root();
+            let receipt = stage_root.join("proofs/source/target/receipt.json");
+            let manifest = stage_root.join("release/manifest.json");
+            fs::create_dir_all(receipt.parent().expect("receipt parent")).expect("proof tree");
+            fs::create_dir_all(manifest.parent().expect("manifest parent")).expect("release tree");
+            fs::write(&receipt, b"receipt bytes").expect("receipt");
+            fs::write(&manifest, b"manifest bytes").expect("manifest");
+        }
+
+        {
+            let publications = scratch.publications().expect("resumed invocation");
+            assert_eq!(
+                publications
+                    .admit(&resume(pinned.clone()))
+                    .expect("exact pin resumes"),
+                Some(pinned.clone())
+            );
+            let session = publications.begin(&pinned).expect("resume pin");
+            assert_eq!(session.stage_root(), stage_root);
+            assert_eq!(
+                fs::read(stage_root.join("proofs/source/target/receipt.json"))
+                    .expect("receipt resumes"),
+                b"receipt bytes"
+            );
+            assert_eq!(
+                fs::read(stage_root.join("release/manifest.json")).expect("manifest resumes"),
+                b"manifest bytes"
+            );
+        }
+
+        assert_eq!(
+            fs::read(operator_file).expect("operator file survives"),
+            b"operator bytes"
+        );
+        assert!(
+            !worktree.join("dist/stage").exists(),
+            "generated authority never enters the worktree"
         );
     }
 

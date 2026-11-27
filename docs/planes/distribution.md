@@ -16,8 +16,10 @@ boundaries.
 **Invariant —** `spice dev xtask -- publish-hosted-release` is the only command
 with externally visible release effects. It derives one immutable publication
 plan from the current landed source and the three admitted native stages before
-the first tag or provider mutation. The plan is retained under the Git-common
-release-operation directory.
+the first tag or provider mutation. The plan and its resumable generated stage
+— provider payloads, proof receipts, and release manifest — remain together
+under the pinned Git-common release-operation directory; the publisher never
+materializes them in the operator worktree.
 
 **Invariant —** Plan identity covers the source commit, product version,
 annotated tag, release title and notes, and every asset name, byte length, and

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use windows_execution::hosted::client::Attach;
 
 use crate::windows_hosted::{
-    hosted_release_inputs, hosted_release_inputs_dispatch, hosted_release_stage_with_inputs,
+    hosted_release_inputs, hosted_release_inputs_dispatch, hosted_release_stage_with_inputs_into,
     landed_commit,
 };
 
@@ -107,9 +107,16 @@ pub fn publish_hosted_release(
         )));
     }
     session.record_inputs(inputs.manifest())?;
-    hosted_release_stage_with_inputs(inputs.manifest().run_id, &inputs, output, error_output)?;
-    proof_stage::materialize(&worktree, &inputs, output)?;
-    let plan = PublicationPlan::capture(&worktree, session.root(), &inputs, &notes)?;
+    let stage_root = session.stage_root();
+    hosted_release_stage_with_inputs_into(
+        inputs.manifest().run_id,
+        &inputs,
+        &stage_root,
+        output,
+        error_output,
+    )?;
+    proof_stage::materialize(&stage_root, &inputs, output)?;
+    let plan = PublicationPlan::capture(&stage_root, session.root(), &inputs, &notes)?;
     plan.persist(session.root())?;
     conclude(effect, &session, unpublished, || {
         provider::publish_and_verify(&worktree, session.root(), &plan)
