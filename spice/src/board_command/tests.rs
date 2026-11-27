@@ -1365,6 +1365,8 @@ use edit::*;
 // The pitch every statement leads with: its mechanical refusals, the hold its
 // prose findings raise, and the revision an authored change advances.
 mod pitch;
+// The title bound every authored creation and correction admits verbatim.
+mod title;
 // Whole-text replacement of a description or the terms through the modify
 // intent, admitted only over the digest of the text its writer read.
 mod task_text;

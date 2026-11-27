@@ -108,7 +108,7 @@ fn ownerless_work_precedes_workflow_waits_in_native_board_counts() {
 fn a_large_board_keeps_the_claim_pages_every_task_once_and_clips_long_titles() {
     let (root, bus, epoch, seats) = fixture("board-view", 1);
     let lane = Actor::Lane(seats[0].lane);
-    let long = "é".repeat(400);
+    let long = "é".repeat(wire::title::TITLE_CHARS);
     let handles = (0..TASKS)
         .map(|index| {
             let title = if index == TASKS / 2 {

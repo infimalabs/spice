@@ -6,8 +6,15 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The release-one repository law for commit-message prose.
+/// The release-one repository law for commit-message body prose: the width
+/// long body lines fold to.
 pub const WRAP_LIMIT: usize = 100;
+
+/// Most characters a hand-written commit subject may hold. It matches the
+/// task title bound and never folds. An automatic landing subject frames the
+/// full admitted title with its scope, handle, and phase, and is written
+/// without this hook.
+pub const SUBJECT_LIMIT: usize = wire::title::TITLE_CHARS;
 
 const PLACEHOLDER_SUBJECTS: &[&str] = &[
     "changes",
@@ -333,13 +340,13 @@ fn validate_hygiene(
         ));
     }
     let subject_width = subject.chars().count();
-    if subject_width > WRAP_LIMIT {
+    if subject_width > SUBJECT_LIMIT {
         failures.push(format!(
             concat!(
                 "line {} is {} chars; ",
                 "keep the subject at {} or less: {}"
             ),
-            subject_line, subject_width, WRAP_LIMIT, subject
+            subject_line, subject_width, SUBJECT_LIMIT, subject
         ));
     }
 
@@ -425,7 +432,7 @@ mod tests {
 
     #[test]
     fn placeholder_literal_newline_and_long_subjects_are_refused_together() {
-        let subject = format!("WIP{}", "!".repeat(98));
+        let subject = format!("WIP{}", "!".repeat(SUBJECT_LIMIT - 2));
         let message = format!("{subject}\n\nliteral \\n evidence\n");
         let error = validate_hygiene(&message, &gate::CommitMessagePolicy::default())
             .expect_err("hygiene refuses");
@@ -433,7 +440,22 @@ mod tests {
 
         assert!(detail.contains("literal '\\n'"));
         assert!(detail.contains("placeholder"));
-        assert!(detail.contains("101 chars"));
+        assert!(detail.contains(&format!("{} chars", SUBJECT_LIMIT + 1)));
+    }
+
+    #[test]
+    fn a_subject_wider_than_the_body_fold_admits_up_to_its_own_bound() {
+        let policy = gate::CommitMessagePolicy::default();
+        let widest = format!("Preserve {}", "é".repeat(SUBJECT_LIMIT - "Preserve ".len()));
+        assert!(widest.chars().count() > WRAP_LIMIT);
+        validate_hygiene(&format!("{widest}\n"), &policy).expect("a bound-width subject admits");
+        let folded = fold(&format!("{widest}\n"));
+        assert_eq!(
+            folded.lines().next(),
+            Some(widest.as_str()),
+            "subjects never fold"
+        );
+        validate_hygiene(&format!("{widest}é\n"), &policy).expect_err("one more refuses");
     }
 
     #[test]

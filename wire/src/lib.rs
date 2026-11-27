@@ -86,6 +86,7 @@ pub use sequence_code::{SequenceCode, SequenceCodeError};
 mod speech;
 mod state_root;
 mod task_invite;
+pub mod title;
 pub use task_invite::{
     InvitationState, TaskInvitation, TaskInviteBinding, TaskInviteControl, TaskInviteControlError,
     TaskInviteStanding,

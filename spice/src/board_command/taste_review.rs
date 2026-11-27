@@ -64,16 +64,30 @@ pub(super) fn validate_term(term: &[String]) -> Result<(), Outcome<CommandAnswer
     Ok(())
 }
 
+/// Characters of refused statement text a refusal echoes back.
+const REFUSED_EXCERPT_CHARS: usize = 80;
+
 /// Admit an authored pitch against the three mechanical rules.
 pub(super) fn validate_pitch(pitch: &str) -> Result<(), Outcome<CommandAnswer>> {
     wire::pitch::admit(pitch).map_err(|refused| {
         let observed = match refused {
             wire::pitch::PitchRefusal::Empty => None,
             wire::pitch::PitchRefusal::Multiline | wire::pitch::PitchRefusal::TooLong { .. } => {
-                Some(wire::rooms::one_line(pitch, 80))
+                Some(wire::rooms::one_line(pitch, REFUSED_EXCERPT_CHARS))
             }
         };
         refusal(refused.reason(), observed, refused.remedy())
+    })
+}
+
+/// Admit an authored title against its length bound.
+pub(super) fn validate_title(title: &str) -> Result<(), Outcome<CommandAnswer>> {
+    wire::title::admit(title).map_err(|refused| {
+        refusal(
+            wire::title::TitleTooLong::REASON,
+            Some(wire::rooms::one_line(title, REFUSED_EXCERPT_CHARS)),
+            refused.remedy(),
+        )
     })
 }
 

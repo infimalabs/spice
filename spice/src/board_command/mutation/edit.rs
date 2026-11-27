@@ -172,6 +172,9 @@ fn prepare_correction(
     if let Some(pitch) = &edit.pitch {
         validate_pitch(pitch)?;
     }
+    if let Some(title) = &edit.title {
+        validate_title(title)?;
+    }
     let (mut statement, flow) = corrected_statement(entry, edit)?;
     // A Draft asserts nothing yet; taste policy binds when it is filed.
     if !entry.is_draft() {
