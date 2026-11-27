@@ -593,7 +593,5 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
           subject-path: |
-            ${{ runner.temp }}/stage/result.json
-            ${{ runner.temp }}/stage/targets/aarch64-apple-darwin/payload.json
-            ${{ runner.temp }}/stage/objects/*
+            ${{ runner.temp }}/stage/**
 
