@@ -185,9 +185,9 @@ jobs:
           canvas: ${{ runner.temp }}/input/canvas.zip
           app: ${{ env.STAND_IN_APP }}
 
-      # Every packaged entry carries one fixed instant, later than the instant
-      # the consumer stamps on the keyed sources. Cargo's staleness test is
-      # strictly newer, so the restored outputs stay fresh over those sources.
+      # Fixed entry times make repeated publication byte-identical. A consumer
+      # restamps the admitted outputs together after preparing its sources,
+      # which preserves Cargo freshness without changing these payload bytes.
       - name: Pack exact candidate prebuild layer
         if: steps.resolve.outputs.present == '0'
         shell: bash

@@ -166,6 +166,7 @@ jobs:
 
       - name: Restore exact unsigned candidate prebuild
         uses: ./.github/actions/macos-candidate-prebuild
+        id: candidate_prebuild
         with:
           source_commit: ${{ inputs.source_commit }}
           source: ${{ inputs.source }}
@@ -176,7 +177,7 @@ jobs:
           token: ${{ github.token }}
 
       - name: Restore admitted native dependency layer
-        if: env.CANDIDATE_PREBUILD_HIT != '1'
+        if: steps.candidate_prebuild.outputs.hit != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -336,7 +337,7 @@ jobs:
           fi
 
       - name: Publish or record native dependency layer
-        if: env.CANDIDATE_PREBUILD_HIT != '1'
+        if: steps.candidate_prebuild.outputs.hit != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo

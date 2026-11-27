@@ -621,11 +621,13 @@ executing workflow commit, resolves only the deterministic discovery tag, and
 fetches the returned manifest digest through the common prepared-artifact
 client. The inventory and producer record must bind the key, source commit,
 source archive, tree, producer run, and build interval. A hit restores the
-fixed-time target and sealed proof bundle, makes the byte-identical workspace
-and locked registry sources older, and runs the unchanged unsigned-stage
-action. Cargo therefore keeps every compiled unit fresh while the saved link
-plan replaces the stand-in canvas with the selected input canvas. An absent
-tag selects the existing cold build; authentication, transport, malformed
+deterministically packed target and sealed proof bundle, makes the
+byte-identical workspace and locked registry sources older, then stamps every
+restored output at one current second before running the unchanged
+unsigned-stage action. Cargo therefore keeps every compiled unit fresh while
+the saved link plan replaces the stand-in canvas with the selected input
+canvas. An absent tag selects the existing cold build; authentication,
+transport, malformed
 resolution, fetch, inventory, record, or output-shape failure refuses. Hosted
 summaries record the overlapped prebuild, digest admission and canvas rebind,
 signing and notarization, and signed native proof as separate durations.

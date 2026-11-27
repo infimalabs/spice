@@ -64,6 +64,8 @@ runs:
         host=$(printf 'workspace %s\ncargo_home %s\ntarget_dir %s\nsdk_path %s\ndeveloper_dir %s\n%s\n' \
           "$workspace" "$KEY_CARGO_HOME" "$KEY_TARGET_DIR" "$sdk_path" "$developer_dir" "$tools" \
           | digest_text)
+        test -d "$(dirname "$OUTPUT")"
+        test ! -L "$OUTPUT"
         jq -n --sort-keys \
           --arg layer "$layer" --arg tree "sha256:$TREE" --arg archive "sha256:$ARCHIVE_SHA256" \
           --arg target "$target" --arg rust "$rust" --arg cargo "$cargo" --arg sdk "$sdk" \

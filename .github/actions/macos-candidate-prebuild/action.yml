@@ -24,6 +24,20 @@ inputs:
     description: GHCR package credential
     required: true
 
+outputs:
+  key:
+    description: Complete candidate prebuild key
+    value: ${{ steps.restore.outputs.key }}
+  manifest:
+    description: Admitted manifest digest, or a dash on a miss
+    value: ${{ steps.restore.outputs.manifest }}
+  hit:
+    description: One when an exact prebuild was admitted, otherwise zero
+    value: ${{ steps.restore.outputs.hit }}
+  producer_run:
+    description: Provider run that published the admitted layer, or a dash
+    value: ${{ steps.restore.outputs.producer_run }}
+
 runs:
   using: composite
   steps:
@@ -63,6 +77,7 @@ runs:
         printf 'prepared=%s\nkey=%s\n' "$prepared" "$key" >> "$GITHUB_OUTPUT"
 
     - name: Resolve and admit exact candidate prebuild
+      id: restore
       shell: bash
       env:
         ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
@@ -154,6 +169,11 @@ runs:
                 find "$sources" -type f -exec touch -t 200001010000 {} +
               fi
             done
+            # One current second keeps every restored output at least as new
+            # as its admitted inputs without disturbing Cargo's unit ordering.
+            stamp=$(date +%Y%m%d%H%M.%S)
+            find "$CARGO_TARGET_DIR" "$GITHUB_WORKSPACE/target/proof-native-darwin" \
+              -exec touch -h -t "$stamp" {} +
             hit=1
             ;;
           *)
@@ -175,6 +195,12 @@ runs:
           printf 'CANDIDATE_PREBUILD_RUN=%s\n' "$prebuild_run"
           printf 'CANDIDATE_PREBUILD_SECONDS=%s\n' "$prebuild_seconds"
         } >> "$GITHUB_ENV"
+        {
+          printf 'key=%s\n' "$PREBUILD_KEY"
+          printf 'manifest=%s\n' "$manifest"
+          printf 'hit=%s\n' "$hit"
+          printf 'producer_run=%s\n' "$prebuild_run"
+        } >> "$GITHUB_OUTPUT"
         {
           printf '### macOS unsigned candidate prebuild\n\n'
           printf -- '- build key: `%s`\n' "$PREBUILD_KEY"
