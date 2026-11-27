@@ -21,6 +21,8 @@ use sill::{
 use wire::manifest::{BuildPins, ProductVersion, ReleaseTarget};
 use wire::{Digest, Domain};
 
+mod candidate;
+use candidate::candidate;
 mod builder;
 mod native;
 #[cfg(all(test, unix))]
@@ -641,7 +643,7 @@ fn stage_with_roots<E: Executor>(
     }
 
     let pipeline = Pipeline::new(required.clone(), version.clone());
-    let target_dir = build_root.join("release-appliance");
+    let target_dir = candidate().target_dir(build_root);
     let app_root = release_app_root(build_root);
     let mut builder = CommandBuilder {
         root,
@@ -1115,18 +1117,20 @@ impl SystemExecutor {
             ),
             (
                 OsString::from("CARGO_BUILD_BUILD_DIR"),
-                build_root.join("release-appliance-build").into_os_string(),
+                candidate().build_dir(&build_root).into_os_string(),
             ),
-            (OsString::from("CARGO_INCREMENTAL"), OsString::from("0")),
             (OsString::from("CARGO_NET_OFFLINE"), OsString::from("true")),
             (OsString::from("NO_COLOR"), OsString::from("true")),
             (
                 OsString::from("CARGO_ENCODED_RUSTFLAGS"),
                 remapped_rustflags(root)?.into(),
             ),
-            (OsString::from("RUSTC_WRAPPER"), OsString::new()),
-            (OsString::from("RUSTC_WORKSPACE_WRAPPER"), OsString::new()),
         ]);
+        entries.extend(
+            candidate()
+                .environment()
+                .map(|(name, value)| (name.into(), value.into())),
+        );
         Ok(Self {
             root: root.to_path_buf(),
             environment: Environment::new(entries)?,
@@ -1268,7 +1272,7 @@ fn remapped_rustflags(root: &Path) -> Result<String, TargetBuildError> {
     let root = root
         .to_str()
         .ok_or_else(|| TargetBuildError::Artifact(root.to_path_buf()))?;
-    Ok(format!("--remap-path-prefix={root}=/workspace"))
+    Ok(candidate().rustflags(root))
 }
 
 fn workspace_root() -> Result<PathBuf, TargetBuildError> {

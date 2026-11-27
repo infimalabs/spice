@@ -1,0 +1,26 @@
+# The Cargo build every release candidate compiles under.
+#
+# `xtask stage-target` applies these settings to its candidate build. A hosted
+# job that compiles xtask before staging applies the same settings to that
+# bootstrap build, so the candidate reuses every unit both graphs share
+# instead of compiling the workspace twice.
+
+# Directories below the release build root: `CARGO_TARGET_DIR`, else the
+# workspace `target` directory.
+target_dir = "release-appliance"
+build_dir = "release-appliance-build"
+
+# `CARGO_ENCODED_RUSTFLAGS`; `{workspace}` names the workspace root.
+rustflags = "--remap-path-prefix={workspace}=/workspace"
+
+# The Cargo `--config` override for a target whose release declares a debug
+# artifact (the macOS dSYM, the Windows PDB).
+debug_config = 'profile.release.debug="line-tables-only"'
+
+# Variables every candidate build sets. Cargo hashes workspace units
+# differently when a wrapper variable is set to the empty string than when it
+# is absent, so a bootstrap must set these exactly to share those units.
+[environment]
+CARGO_INCREMENTAL = "0"
+RUSTC_WRAPPER = ""
+RUSTC_WORKSPACE_WRAPPER = ""
