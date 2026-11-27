@@ -364,17 +364,26 @@ holds package-write authority; ad hoc hosted Windows batches execute worktree
 commands without it and return their attested result as a one-day run
 artifact, which only their coordinator downloads.
 
-**Invariant —** Hosted caches hold only derivable bootstrap state, never
-release outputs, prepared OCI payloads, or result evidence. Each workflow keeps
-its own `actions/cache` entry for the bootstrap `CARGO_HOME` and target, keyed
-by provider OS and architecture, plus `rust-toolchain.toml`, `Cargo.lock`,
-`.cargo/config.toml`, and that platform's tool pins (the preflight's trunk
-version, `dist/darwin/hosted.toml` with `dist/release/candidate.toml`, or
-`dist/windows/hosted.toml`). Native jobs
-extract `source.tar` with fresh modification times, so Cargo rebuilds every
-workspace crate on a restored target and reuses only registry dependencies.
-Prepared bytes survive independently in GHCR by digest; a cache eviction can
-cost compilation time but cannot select release authority.
+**Invariant —** Darwin's compiled dependency reuse is a prepared OCI bundle,
+not provider-cache authority. Its build key covers the target, exact Rust and
+Cargo identities, lockfile, Cargo and candidate configuration, feature plan,
+SDK/Xcode boundary, canonical vendor-set identity, and the preparation
+contract. An exact-source `prepared-artifact` bootstrap resolves the
+deterministic discovery tag, admits its config and manifest, fetches by
+manifest digest, and safely unpacks the inventoried target directories inside
+the native build boundary. Before publication, Cargo removes every workspace
+package from a cold target copy; restored bytes can therefore satisfy only
+unchanged third-party units. Every workspace crate, repository-sensitive build
+script, and the final executable recompiles from the admitted source.
+
+An absent or unadmittable Darwin dependency layer selects the ordinary cold
+build. After successful staging, that build removes workspace artifacts,
+packages the remaining dependency target beneath the common prepared-artifact
+manifest, and publishes it with conflict-refusing idempotence. The hosted
+summary records the manifest digest, cold baseline, observed build time, and
+savings. The mutable provider cache carries only Cargo registry sources; its
+eviction affects download time but cannot select compiled release authority.
+Prepared bytes survive independently in GHCR by digest.
 
 **Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
 sole publication command. The notes file must carry authored Highlights;

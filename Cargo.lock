@@ -3865,6 +3865,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
+name = "prepared-artifact"
+version = "0.0.0"
+dependencies = [
+ "flate2",
+ "getrandom 0.3.4",
+ "proof",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "vendor-set",
+ "wire",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3969,6 +3984,7 @@ dependencies = [
  "sha2",
  "sill",
  "toml 1.1.4+spec-1.1.0",
+ "vendor-set",
  "windows-execution",
  "wire",
 ]
@@ -5505,6 +5521,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vendor-set"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "sha2",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
 name = "version-compare"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6085,6 +6110,7 @@ dependencies = [
  "getrandom 0.3.4",
  "jiff",
  "libc",
+ "prepared-artifact",
  "proof",
  "rack",
  "serde",

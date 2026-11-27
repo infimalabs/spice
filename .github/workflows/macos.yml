@@ -69,6 +69,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       actions: read
+      packages: write
     steps:
       - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -241,18 +242,112 @@ jobs:
           printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
           printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
 
-      # Derivable release state only: registry sources and the one release
-      # target shared by xtask and the candidate. The bootstrap below compiles
-      # under the candidate settings in dist/release/candidate.toml, so the
-      # candidate build reuses its units. The sealed proof runner keeps its own
-      # target below this root because its profile is intentionally different.
-      - name: Restore derivable release environment
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      # The provider cache carries registry sources only. Compiled dependency
+      # authority comes from the admitted OCI layer below, never this mutable
+      # optimization surface.
+      - name: Restore derivable registry sources
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
-          path: |
-            ${{ runner.temp }}/release-cargo
-            ${{ runner.temp }}/release-target
-          key: macos-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml', 'dist/release/candidate.toml') }}
+          path: ${{ runner.temp }}/release-cargo
+          key: macos-registry-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+
+      - name: Restore admitted native dependency layer
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/release-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
+          GHCR_TOKEN: ${{ github.token }}
+          RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
+        run: |
+          set -euo pipefail
+          cargo="$RUST_BIN/cargo"
+          bootstrap="$RUNNER_TEMP/prepared-artifact-target"
+          "$cargo" build --locked --release --target aarch64-apple-darwin \
+            --target-dir "$bootstrap" --package prepared-artifact --bin prepared-artifact
+          prepared="$bootstrap/aarch64-apple-darwin/release/prepared-artifact"
+          test -x "$prepared"
+
+          digest_text() {
+            shasum -a 256 | cut -d' ' -f1 | sed 's/^/sha256:/'
+          }
+          root="$RUNNER_TEMP/native-dependencies"
+          mkdir -p "$root"
+          vendor=$("$prepared" vendor-set Cargo.lock | sed -n 's/^vendor set //p')
+          vendor_hex=${vendor#sha256:}
+          case "$vendor_hex" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#vendor_hex}" -eq 64
+          target=$(printf '%s' 'aarch64-apple-darwin' | digest_text)
+          rust=$("$RUST_BIN/rustc" -vV | digest_text)
+          cargo_identity=$("$cargo" -Vv | digest_text)
+          lock="sha256:$(shasum -a 256 Cargo.lock | cut -d' ' -f1)"
+          cargo_config="sha256:$(shasum -a 256 .cargo/config.toml | cut -d' ' -f1)"
+          candidate="sha256:$(shasum -a 256 dist/release/candidate.toml | cut -d' ' -f1)"
+          features=$(printf '%s' 'xtask:default;spice:canvas' | digest_text)
+          sdk=$(printf '%s\n%s\n%s' "$EXPECTED_SDK" "$EXPECTED_XCODE_BUILD" "$DEVELOPER_DIR" | digest_text)
+          contract=$(cat prepared/Cargo.toml prepared/src/lib.rs .github/workflows/macos.yml \
+            | digest_text)
+          jq -n --sort-keys \
+            --arg target "$target" --arg rust "$rust" --arg cargo "$cargo_identity" \
+            --arg lock "$lock" --arg cargo_config "$cargo_config" \
+            --arg candidate "$candidate" --arg features "$features" --arg sdk "$sdk" \
+            --arg vendor "$vendor" --arg contract "$contract" \
+            '{target:$target,rust:$rust,cargo:$cargo,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,features:$features,sdk:$sdk,vendor:$vendor,contract:$contract}' \
+            > "$root/build-key.json"
+          key=$("$prepared" build-key "$root/build-key.json" | sed -n 's/^build key //p')
+          test -n "$key"
+          tag="${key#sha256:}"
+          case "$tag" in *[!0-9a-f]*|'') exit 65 ;; esac
+          test "${#tag}" -eq 64
+          repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          repository="ghcr.io/$repository/prepared"
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+          hit=0
+          manifest=-
+          baseline=0
+          if resolved=$("$prepared" resolve "$repository:$tag" "$key" 2>"$root/resolve.err"); then
+            read -r label manifest _ <<< "$resolved"
+            test "$label" = resolved
+            if "$prepared" fetch-extract \
+              "$repository@$manifest" "$key" "$root/restored"; then
+              test "$(jq -r .schema "$root/restored/record.json")" = 1
+              test "$(jq -r .build_key "$root/restored/record.json")" = "$key"
+              baseline=$(jq -r .cold_build_seconds "$root/restored/record.json")
+              case "$baseline" in *[!0-9]*|'') exit 65 ;; esac
+              test -d "$root/restored/target/release-appliance"
+              test -d "$root/restored/target/release-appliance-build"
+              mkdir -p "$CARGO_TARGET_DIR"
+              cp -R "$root/restored/target/." "$CARGO_TARGET_DIR/"
+              # Prepared archives normalize mtimes. The admitted dependency
+              # graph is immutable under this key, so make its outputs newer
+              # than the already-restored registry sources. Workspace outputs
+              # were removed before publication and cannot be made fresh here.
+              find "$CARGO_TARGET_DIR" -type f -exec touch {} +
+              hit=1
+            fi
+          else
+            cat "$root/resolve.err" >&2
+          fi
+          if test "$hit" = 0; then
+            rm -rf "$CARGO_TARGET_DIR" "$root/restored"
+            mkdir -p "$CARGO_TARGET_DIR"
+          fi
+          {
+            printf 'PREPARED_ARTIFACT_TOOL=%s\n' "$prepared"
+            printf 'DEPENDENCY_BUILD_KEY_FILE=%s\n' "$root/build-key.json"
+            printf 'DEPENDENCY_BUILD_KEY=%s\n' "$key"
+            printf 'DEPENDENCY_REPOSITORY=%s\n' "$repository"
+            printf 'DEPENDENCY_TAG=%s\n' "$tag"
+            printf 'DEPENDENCY_MANIFEST=%s\n' "$manifest"
+            printf 'DEPENDENCY_HIT=%s\n' "$hit"
+            printf 'DEPENDENCY_BASELINE_SECONDS=%s\n' "$baseline"
+          } >> "$GITHUB_ENV"
 
       - name: Build and execute the sealed unsigned stage
         shell: bash
@@ -266,6 +361,7 @@ jobs:
           RELEASE_APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
+          build_started=$(date +%s)
           python=$(command -v python3)
           "$python" -c 'import tomllib'
           cargo="$RUST_BIN/cargo"
@@ -336,6 +432,86 @@ jobs:
           cp "$xtask" "$finalizer/"
           cp -R target/proof-native-darwin "$finalizer/"
           tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .
+          build_seconds=$(($(date +%s) - build_started))
+          printf 'DEPENDENCY_BUILD_SECONDS=%s\n' "$build_seconds" >> "$GITHUB_ENV"
+
+      - name: Publish or record native dependency layer
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/release-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
+          RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
+        run: |
+          set -euo pipefail
+          manifest="$DEPENDENCY_MANIFEST"
+          if test "$DEPENDENCY_HIT" = 0; then
+            python=$(command -v python3)
+            cargo="$RUST_BIN/cargo"
+            release_target="$CARGO_TARGET_DIR/$("$python" -c \
+              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["target_dir"])')"
+            build_dir="$CARGO_TARGET_DIR/$("$python" -c \
+              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["build_dir"])')"
+            debug_config=$("$python" -c \
+              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["debug_config"])')
+            candidate_env=()
+            while IFS= read -r assignment; do
+              candidate_env+=("$assignment")
+            done < <("$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
+          import os, sys, tomllib
+          workspace, build_root = sys.argv[1:]
+          with open("dist/release/candidate.toml", "rb") as source:
+              candidate = tomllib.load(source)
+          for name, value in candidate["environment"].items():
+              print(f"{name}={value}")
+          print("CARGO_BUILD_BUILD_DIR=" + os.path.join(build_root, candidate["build_dir"]))
+          print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
+          PY
+            )
+            packages=()
+            while IFS= read -r package; do
+              packages+=(--package "$package")
+            done < <("$cargo" metadata --locked --no-deps --format-version 1 \
+              | jq -r '.workspace_members[] as $id | .packages[] | select(.id == $id) | .name')
+            env "${candidate_env[@]}" "$cargo" clean --release \
+              --target aarch64-apple-darwin --target-dir "$release_target" \
+              --config "$debug_config" "${packages[@]}"
+
+            root="$RUNNER_TEMP/native-dependencies/publish"
+            mkdir -p "$root/target"
+            mv "$release_target" "$root/target/release-appliance"
+            mv "$build_dir" "$root/target/release-appliance-build"
+            # Cold hosted run 45989936318 spent 23m30s in this native build.
+            # Keep the reference fixed so the prepared payload is idempotent.
+            jq -n --sort-keys --arg build_key "$DEPENDENCY_BUILD_KEY" \
+              --argjson seconds 1410 --argjson run 45989936318 \
+              '{schema:1,build_key:$build_key,cold_build_seconds:$seconds,cold_build_run:$run}' \
+              > "$root/record.json"
+            archive="$RUNNER_TEMP/native-dependencies/macos-dependencies.tar.gz"
+            config="$RUNNER_TEMP/native-dependencies/prepared.json"
+            "$PREPARED_ARTIFACT_TOOL" pack "$root" "$archive"
+            "$PREPARED_ARTIFACT_TOOL" manifest \
+              bundle macos-arm64 "$DEPENDENCY_BUILD_KEY_FILE" application/gzip \
+              "$archive" "$root" - "$config"
+            output=$("$PREPARED_ARTIFACT_TOOL" publish \
+              "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive")
+            read -r label manifest <<< "$output"
+            test "$label" = published
+          fi
+          savings=$((DEPENDENCY_BASELINE_SECONDS - DEPENDENCY_BUILD_SECONDS))
+          if test "$DEPENDENCY_HIT" = 0; then
+            savings=0
+          fi
+          {
+            printf '### macOS native dependency layer\n\n'
+            printf -- '- build key: `%s`\n' "$DEPENDENCY_BUILD_KEY"
+            printf -- '- manifest: `%s`\n' "$manifest"
+            printf -- '- cache hit: `%s`\n' "$DEPENDENCY_HIT"
+            printf -- '- native build: `%ss`\n' "$DEPENDENCY_BUILD_SECONDS"
+            printf -- '- cold baseline: `%ss`\n' \
+              "$([[ "$DEPENDENCY_HIT" = 1 ]] && printf '%s' "$DEPENDENCY_BASELINE_SECONDS" || printf '%s' "$DEPENDENCY_BUILD_SECONDS")"
+            printf -- '- compile-time savings: `%ss`\n' "$savings"
+          } >> "$GITHUB_STEP_SUMMARY"
+          oras logout ghcr.io
 
       - name: Upload unsigned stage transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
