@@ -4,14 +4,15 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::hosted::PreparedBundlePin;
 use crate::hosted::stage_layout::{RESULT_PATH, STAGE_DIRECTORY, StageLayout};
 use serde::Deserialize;
 use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use super::{
-    Attach, Cancellation, DeclaredSubjects, HostedRun, HostedSource, ReleaseInputs, Scratch,
-    WindowsHostedError, download_artifact, drive, publish_artifacts,
+    Attach, Cancellation, DeclaredSubjects, HostedRun, HostedSource, PreparedBundleTransport,
+    ReleaseInputs, RunAuthority, Scratch, WindowsHostedError, drive, publish_artifacts,
     require_public_attestation_repository, source, verify_attestation, watch_run, workspace_root,
 };
 
@@ -52,6 +53,19 @@ struct ExpectedResult<'a> {
     inputs: &'a crate::hosted::release_inputs::ResultManifest,
     run_id: u64,
     image: &'a Image,
+}
+
+struct MacosCompletion<'a> {
+    run: &'a HostedRun<'a>,
+    prepared_bundles: &'a dyn PreparedBundleTransport,
+    prepared_bundle: &'a PreparedBundlePin,
+    policy: &'a Policy,
+    scratch: &'a Path,
+    manifest: &'a crate::hosted::release_inputs::ResultManifest,
+    challenge: &'a str,
+    source: &'a super::source::PreparedSource,
+    source_archive: &'a str,
+    destination: &'a Path,
 }
 
 #[derive(Deserialize)]
@@ -125,6 +139,11 @@ pub fn macos_hosted_stage_controlled(
     let destination = root.join(destination);
     let scratch = Scratch::new()?;
     let cancellation = Cancellation::install()?;
+    let prepared_bundles = control.prepared_bundles.ok_or_else(|| {
+        WindowsHostedError::ProviderResponse(
+            "hosted macOS staging has no prepared-bundle transport".to_owned(),
+        )
+    })?;
     let source = source::prepare(
         &root,
         scratch.path(),
@@ -150,6 +169,12 @@ pub fn macos_hosted_stage_controlled(
     )?;
     let manifest = release_inputs.manifest();
     let source_archive = source.archive.to_string();
+    let prepared_bundle = PreparedBundlePin::new(
+        &challenge,
+        &source.archive.to_string(),
+        &source.tree,
+        &workflow_blob,
+    );
     let run = HostedRun {
         root: &root,
         scratch: scratch.path(),
@@ -165,7 +190,20 @@ pub fn macos_hosted_stage_controlled(
         &source,
         &source_archive,
         manifest,
+        &prepared_bundle,
     ));
+    let completion = MacosCompletion {
+        run: &run,
+        prepared_bundles,
+        prepared_bundle: &prepared_bundle,
+        policy: &policy,
+        scratch: scratch.path(),
+        manifest,
+        challenge: &challenge,
+        source: &source,
+        source_archive: &source_archive,
+        destination: &destination,
+    };
     drive(
         &run,
         attached,
@@ -173,59 +211,72 @@ pub fn macos_hosted_stage_controlled(
         WORKFLOW_PATH,
         inputs,
         control,
-        |authority| {
-            watch_run(run.root, run.repository, authority, &cancellation)?;
-            let run_id = authority.run_id();
-            let layout = StageLayout::new(download_artifact(
-                &run,
-                run_id,
-                &format!("macos-{challenge}"),
-            )?);
-            let declared = DeclaredSubjects::load(&run, WORKFLOW_PATH, run_id, &layout)?;
-            declared.require(&[
-                PathBuf::from(RESULT_PATH),
-                PathBuf::from(STAGE_DIRECTORY).join(PAYLOAD_PATH),
-            ])?;
-            let result_path = layout.result();
-            verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
-            let result: MacosResult =
-                serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
-                    .map_err(WindowsHostedError::ResultSchema)?;
-            let expected = ExpectedResult {
-                challenge: &challenge,
-                source: &source,
-                inputs: manifest,
-                run_id,
-                image: &policy.image,
-            };
-            admit_result(&result, &expected)?;
-            let stage = layout.stage();
-            let artifacts = admit_stage(&stage, &declared, &expected, &policy.toolchain)?;
-            let mut files = vec![PathBuf::from(RESULT_PATH)];
-            files.extend(
-                artifacts
-                    .iter()
-                    .map(|artifact| PathBuf::from(STAGE_DIRECTORY).join(&artifact.path)),
-            );
-            declared.admit_exact(&files)?;
-            verify_stage_attestations(&run, run_id, &stage, &artifacts)?;
-            publish_artifacts(
-                &stage,
-                &artifacts,
-                &destination,
-                &source_archive,
-                None,
-                Some(manifest),
-            )?;
-            Ok(MacosHostedStage {
-                run_id,
-                runner_image: format!(
-                    "{} {} {}",
-                    result.image_os, result.image_version, result.architecture
-                ),
-            })
-        },
+        |authority| completion.finish(authority, &cancellation),
     )
+}
+
+impl MacosCompletion<'_> {
+    fn finish(
+        &self,
+        authority: &RunAuthority,
+        cancellation: &Cancellation,
+    ) -> Result<MacosHostedStage, WindowsHostedError> {
+        watch_run(self.run.root, self.run.repository, authority, cancellation)?;
+        let run_id = authority.run_id();
+        let artifact = self.scratch.join("artifact");
+        self.prepared_bundles
+            .fetch(
+                &self.policy.repository,
+                self.prepared_bundle.tag(),
+                &self.prepared_bundle.build_key,
+                &artifact,
+            )
+            .map_err(WindowsHostedError::ProviderResponse)?;
+        let layout = StageLayout::new(artifact);
+        let declared = DeclaredSubjects::load(self.run, WORKFLOW_PATH, run_id, &layout)?;
+        declared.require(&[
+            PathBuf::from(RESULT_PATH),
+            PathBuf::from(STAGE_DIRECTORY).join(PAYLOAD_PATH),
+        ])?;
+        let result_path = layout.result();
+        verify_attestation(self.run, WORKFLOW_PATH, run_id, &result_path)?;
+        let result: MacosResult =
+            serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
+                .map_err(WindowsHostedError::ResultSchema)?;
+        let expected = ExpectedResult {
+            challenge: self.challenge,
+            source: self.source,
+            inputs: self.manifest,
+            run_id,
+            image: &self.policy.image,
+        };
+        admit_result(&result, &expected)?;
+        let stage = layout.stage();
+        let artifacts = admit_stage(&stage, &declared, &expected, &self.policy.toolchain)?;
+        let mut files = vec![PathBuf::from(RESULT_PATH)];
+        files.extend(
+            artifacts
+                .iter()
+                .map(|artifact| PathBuf::from(STAGE_DIRECTORY).join(&artifact.path)),
+        );
+        declared.admit_exact(&files)?;
+        verify_stage_attestations(self.run, run_id, &stage, &artifacts)?;
+        publish_artifacts(
+            &stage,
+            &artifacts,
+            self.destination,
+            self.source_archive,
+            None,
+            Some(self.manifest),
+        )?;
+        Ok(MacosHostedStage {
+            run_id,
+            runner_image: format!(
+                "{} {} {}",
+                result.image_os, result.image_version, result.architecture
+            ),
+        })
+    }
 }
 
 fn dispatch_inputs(
@@ -233,6 +284,7 @@ fn dispatch_inputs(
     source: &super::source::PreparedSource,
     source_archive: &str,
     manifest: &crate::hosted::release_inputs::ResultManifest,
+    prepared_bundle: &PreparedBundlePin,
 ) -> serde_json::Value {
     serde_json::json!({
         "challenge": challenge,
@@ -247,6 +299,9 @@ fn dispatch_inputs(
         "proof_container": manifest.proof_identity,
         "app": manifest.app,
         "canvas": manifest.canvas,
+        "prepared_build_key": prepared_bundle.build_key,
+        "prepared_inputs": serde_json::to_string(&prepared_bundle.inputs)
+            .expect("prepared build-key inputs serialize"),
     })
 }
 fn verify_stage_attestations(

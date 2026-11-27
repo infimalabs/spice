@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::hosted::{ReleaseInputsPin, Request};
+use crate::hosted::{PreparedBundlePin, ReleaseInputsPin, Request};
 use crate::protocol::{Command as HostedCommand, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS};
 
 use super::{
@@ -98,6 +98,12 @@ pub fn windows_release_commands_into_controlled(
         },
         commands,
         canvas: None,
+        prepared_bundle: PreparedBundlePin::new(
+            &challenge,
+            &source.archive.to_string(),
+            &source.tree,
+            &workflow_blob,
+        ),
     };
     let run = HostedRun {
         root: &root,
@@ -131,6 +137,7 @@ pub fn windows_release_commands_into_controlled(
                 &request,
                 authority,
                 Some((&destination, None, Some(inputs))),
+                control.prepared_bundles,
                 &cancellation,
             )
         },
