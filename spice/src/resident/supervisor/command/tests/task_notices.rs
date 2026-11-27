@@ -157,6 +157,18 @@ fn round_updates_require_disclosure_and_deliver_each_event_once() {
         3,
         "the distinct arrival lands once; another occupant's copy and a future claim's event do not"
     );
+
+    update.event = 48;
+    update.action = TaskRoundUpdateKind::Left;
+    driver.deliver_task_notice(occupant, round_kick(&update));
+    let frames = sink.answered(4);
+    assert_eq!(frames.len(), 4, "the distinct departure lands once");
+    assert!(
+        frames[3]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("participant left task")),
+        "the departure is distinguishable from a completion arrival"
+    );
 }
 
 #[test]

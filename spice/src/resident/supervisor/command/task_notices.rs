@@ -136,6 +136,7 @@ impl TaskDisclosureState {
 pub(in crate::resident) enum TaskRoundUpdateKind {
     Joined,
     Arrived,
+    Left,
 }
 
 /// One participant join or arrival, scoped to the receiving claim.
@@ -156,6 +157,7 @@ impl TaskRoundUpdateNotice {
         let action = match self.action {
             TaskRoundUpdateKind::Joined => "joined",
             TaskRoundUpdateKind::Arrived => "arrived",
+            TaskRoundUpdateKind::Left => "left",
         };
         format!(
             "<system-notice>\nA participant {action} task {} in phase {}: {}. Coordinate in \
