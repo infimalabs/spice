@@ -112,6 +112,49 @@ fn math_aliases_preserve_code_escaped_literals_and_authenticated_ranges() {
 }
 
 #[test]
+fn an_unindented_line_after_a_list_item_starts_a_paragraph_and_a_new_list() {
+    let rendered = render_received(
+        "Evidence:\n\
+         - first finding\n\
+         - second finding\n\
+         Proposal I am boarding now:\n\
+         - first step\n\
+         1. ordered\n\
+         next line",
+    );
+    assert_eq!(
+        rendered.html.matches("<ul>").count(),
+        2,
+        "{}",
+        rendered.html
+    );
+    assert!(
+        rendered
+            .html
+            .contains("second finding</li>\n</ul>\n<p>Proposal I am boarding now:</p>"),
+        "{}",
+        rendered.html
+    );
+    assert!(
+        rendered.html.contains("ordered</li>\n</ol>\n<p>next line"),
+        "{}",
+        rendered.html
+    );
+
+    let indented = render_received("- item\n  continued\n- next\n\n> - quoted\nlazy");
+    assert!(
+        indented.html.contains("<li>item\ncontinued</li>"),
+        "{}",
+        indented.html
+    );
+    assert!(
+        indented.html.contains("<li>quoted\nlazy</li>"),
+        "{}",
+        indented.html
+    );
+}
+
+#[test]
 fn composed_markdown_emits_canonical_target_links_in_visible_shard_order() {
     assert_eq!(compose::<Media>("  body only  ", &[], &[]), "body only");
     let tape = tape_target("agent source text");
