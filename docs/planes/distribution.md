@@ -382,6 +382,15 @@ holds package-write authority; ad hoc hosted Windows batches execute worktree
 commands without it and return their attested result as a one-day run
 artifact, which only their coordinator downloads.
 
+`NativeStageContract` owns the required record schema, not provider-created
+root wiring. Local checks exercise that schema only against independently
+supplied inventories. After dispatch, each producer enumerates its actual
+packaged root into `subjects.json`; the coordinator verifies that declaration's
+attestation, exact transported file set, required records, and individual
+stage attestations. Upload-root or attestation-root drift therefore refuses at
+the first provider boundary that can observe it rather than being inferred by
+a pre-dispatch check.
+
 **Invariant —** Darwin's compiled dependency reuse is a prepared OCI bundle,
 not provider-cache authority. Its build key covers the target, exact Rust and
 Cargo identities, lockfile, Cargo and candidate configuration, candidate and
