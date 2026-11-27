@@ -52,8 +52,9 @@ impl Phase {
                 "provider preflight admits the pinned source, canvas, and proof image",
             ),
             Self::Linux | Self::Macos | Self::Windows => (
-                &[Self::Inputs],
-                "consumes only the admitted source archive, canvas, and proof image",
+                &[Self::Inputs, Self::Notes],
+                "consumes the admitted source archive, canvas, and proof image; refused notes \
+                 dispatch no native runner",
             ),
             Self::Proofs => (
                 &[Self::Linux, Self::Macos, Self::Windows],
