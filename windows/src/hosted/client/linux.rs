@@ -7,7 +7,7 @@
 //! only staged files the result inventories.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::hosted::stage_layout::StageLayout;
 use serde::Deserialize;
@@ -209,6 +209,7 @@ fn complete_run(
         serde_json::from_slice(&bytes).map_err(WindowsHostedError::ResultSchema)?;
     admit_result(&result, challenge, source, manifest, run_id)?;
     let log_path = layout.stage_log();
+    verify_attestation(run, WORKFLOW_PATH, run_id, &log_path)?;
     let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
         path: log_path.clone(),
         source,
@@ -235,6 +236,22 @@ fn complete_run(
     for artifact in &smoke_artifacts {
         verify_attestation(run, WORKFLOW_PATH, run_id, &smoke.join(&artifact.path))?;
     }
+    let mut files = vec![
+        PathBuf::from("result.json"),
+        PathBuf::from("stage.log"),
+        PathBuf::from("smoke.log"),
+    ];
+    files.extend(
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    files.extend(
+        smoke_artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("smoke").join(&artifact.path)),
+    );
+    super::admit_file_set(layout.root(), files)?;
     admit_smoke_result(result.exit_code, result.smoke_exit_code, &smoke_artifacts)?;
     if result.exit_code == 0 {
         publish_artifacts(

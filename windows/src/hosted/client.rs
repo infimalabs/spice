@@ -17,7 +17,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     AdmissionError, GITHUB_PROVIDER, ImagePin, Request, ResultDocument, ToolchainPins, WORKFLOW,
-    admit_result, stage_layout::StageLayout,
+    admit_result,
+    stage_layout::{RUNNER_PATH, StageLayout},
 };
 use crate::protocol::{
     Command as HostedCommand, Completion, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS,
@@ -400,6 +401,14 @@ fn complete_dispatched_run(
     for artifact in &result.artifacts {
         verify_attestation(run, WORKFLOW, run_id, &stage.join(&artifact.path))?;
     }
+    let mut files = vec![PathBuf::from("result.json"), PathBuf::from(RUNNER_PATH)];
+    files.extend(
+        result
+            .artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    admit_file_set(layout.root(), files)?;
     let outputs = result
         .outputs
         .iter()
@@ -544,6 +553,7 @@ fn publish_artifacts(
     canvas: Option<&canvas::LinuxCanvas>,
     release_inputs: Option<&super::release_inputs::ResultManifest>,
 ) -> Result<(), WindowsHostedError> {
+    admit_artifact_file_set(source, artifacts)?;
     for artifact in artifacts {
         let path = source.join(&artifact.path);
         let metadata = fs::metadata(&path).map_err(|source| WindowsHostedError::Io {
@@ -582,6 +592,69 @@ fn publish_artifacts(
             path: path.clone(),
             source,
         })?;
+    }
+    Ok(())
+}
+
+fn admit_artifact_file_set(
+    source: &Path,
+    artifacts: &[super::Artifact],
+) -> Result<(), WindowsHostedError> {
+    admit_file_set(
+        source,
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from(&artifact.path))
+            .collect(),
+    )
+}
+
+fn admit_file_set(root: &Path, mut expected: Vec<PathBuf>) -> Result<(), WindowsHostedError> {
+    expected.sort();
+    let mut observed = Vec::new();
+    collect_artifact_files(root, root, &mut observed)?;
+    observed.sort();
+    if observed != expected {
+        return Err(WindowsHostedError::ProviderResponse(
+            "hosted artifact differs from its signed inventory".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_artifact_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), WindowsHostedError> {
+    let entries = fs::read_dir(directory).map_err(|source| WindowsHostedError::Io {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| WindowsHostedError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| WindowsHostedError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_dir() {
+            collect_artifact_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(
+                path.strip_prefix(root)
+                    .expect("collected artifact stays below its root")
+                    .to_path_buf(),
+            );
+        } else {
+            return Err(WindowsHostedError::ProviderResponse(format!(
+                "hosted stage contains non-regular path {}",
+                path.display()
+            )));
+        }
     }
     Ok(())
 }

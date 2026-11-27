@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::hosted::stage_layout::StageLayout;
+use crate::hosted::stage_layout::{RESULT_PATH, StageLayout};
 use serde::Deserialize;
 use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
@@ -212,9 +212,8 @@ pub fn macos_hosted_stage_controlled(
                 &manifest.app,
                 &policy.toolchain,
             )?;
-            for artifact in &artifacts {
-                verify_attestation(&run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
-            }
+            verify_stage_attestations(&run, run_id, &stage, &artifacts)?;
+            admit_hosted_file_set(layout.root(), &artifacts)?;
             publish_artifacts(
                 &stage,
                 &artifacts,
@@ -233,6 +232,31 @@ pub fn macos_hosted_stage_controlled(
         },
     )
 }
+fn verify_stage_attestations(
+    run: &HostedRun<'_>,
+    run_id: u64,
+    stage: &Path,
+    artifacts: &[crate::hosted::Artifact],
+) -> Result<(), WindowsHostedError> {
+    for artifact in artifacts {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
+    }
+    Ok(())
+}
+
+fn admit_hosted_file_set(
+    root: &Path,
+    artifacts: &[crate::hosted::Artifact],
+) -> Result<(), WindowsHostedError> {
+    let mut files = vec![PathBuf::from(RESULT_PATH)];
+    files.extend(
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    super::admit_file_set(root, files)
+}
+
 fn admit_result(
     result: &MacosResult,
     expected: &ExpectedResult<'_>,

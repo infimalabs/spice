@@ -504,6 +504,8 @@ jobs:
 
       - name: Rebind, prove, and verify exact signed stage
         shell: bash
+        env:
+          CHALLENGE: ${{ inputs.challenge }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/finalize"
@@ -574,7 +576,8 @@ jobs:
           mv "$stage/result.json" "$result/result.json"
           cp -R "$stage/." "$result/stage/"
 
-      - name: Upload exact signed stage
+
+      - name: Upload complete hosted artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-${{ inputs.challenge }}
@@ -598,9 +601,7 @@ jobs:
           name: macos-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
 
-      - name: Attest result and staged files
+      - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          subject-path: |
-            ${{ runner.temp }}/result/result.json
-            ${{ runner.temp }}/result/stage/**
+          subject-path: ${{ runner.temp }}/result/**
