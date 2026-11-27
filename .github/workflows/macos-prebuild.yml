@@ -1,16 +1,15 @@
 name: macOS candidate prebuild
 run-name: macOS candidate prebuild ${{ inputs.source_commit || github.sha }}
 
-# Builds the unsigned macOS candidate as soon as an exact main commit lands,
-# without waiting for release inputs or another platform, and publishes its
-# complete target directory under an exact-tree prepared-artifact build key.
-# Release staging restores that layer, runs the unchanged stage, and links
-# its selected input canvas through the saved final-link plan; the canvas
-# built here only stands in for the link.
+# Builds the unsigned macOS candidate for one exact landed main commit, only
+# when dispatched, without waiting for release inputs or another platform,
+# and publishes its complete target directory under an exact-tree
+# prepared-artifact build key. Release staging restores that layer, runs the
+# unchanged stage, and links its selected input canvas through the saved
+# final-link plan; the canvas built here only stands in for the link. It never
+# runs on push so it cannot hold the macOS runners release staging waits for.
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       source_commit:
