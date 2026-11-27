@@ -268,7 +268,6 @@ jobs:
           set -euo pipefail
           python=$(command -v python3)
           "$python" -c 'import tomllib'
-          export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
           candidate() {
             "$python" - "$1" <<'PY'
@@ -278,6 +277,7 @@ jobs:
           PY
           }
           release_target="$CARGO_TARGET_DIR/$(candidate target_dir)"
+          debug_config=$(candidate debug_config)
           target_output="$release_target/aarch64-apple-darwin"
           xtask="$target_output/release/xtask"
           # The candidate build's unit-affecting environment, one NAME=VALUE
@@ -296,8 +296,9 @@ jobs:
           print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
           PY
           )
+          export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
-            --target-dir "$release_target" --config "$(candidate debug_config)" \
+            --target-dir "$release_target" --config "$debug_config" \
             --package xtask --bin xtask
           SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh "$CARGO_TARGET_DIR"
           SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
