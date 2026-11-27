@@ -77,7 +77,7 @@ runs:
         )
         export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
         driver_started=$(date +%s)
-        canvas_object="$release_target/canvas/release.macos-aarch64.o"
+        canvas_object="$RUNNER_TEMP/release-canvas/release.macos-aarch64.o"
         "$PREPARED_ARTIFACT_TOOL" canvas-object macos-arm64 "$RELEASE_CANVAS" "$canvas_object"
         env "${candidate_env[@]}" "$cargo" rustc --locked --release --target aarch64-apple-darwin \
           --target-dir "$release_target" --config "$debug_config" \
