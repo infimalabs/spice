@@ -50,7 +50,7 @@ pub(super) fn reconcile(
             },
         );
     }
-    for (lane, notice) in round_update_notices(snapshot, findings.cursor) {
+    for (lane, notice) in round_update_notices(snapshot) {
         super::super::supervisor::command::task_round_update(paths, lane, notice);
     }
     for (lane, notice) in taste_holds(bus, snapshot, findings.cursor)? {
@@ -216,18 +216,19 @@ fn addressed_participant_label(
     Some(format!("{name} {address}"))
 }
 
-/// Claim endings since the previous lifecycle observation, with their winning
+/// Claim endings in every task's current active round, with their winning
 /// claim authority restored even after a later join replaced the ended head.
+///
+/// Re-reading the bounded current-round suffix is intentional: an ending must
+/// remain projectable until the participant address and receiving claim
+/// disclosure exist, including after resident restart.
 fn round_departures(
     snapshot: &bus::TaskSnapshot,
-    cursor: Option<Seq>,
+    earliest_active_round: Seq,
 ) -> Vec<(Seq, Seq, wire::body::ClaimWon)> {
-    let Some(cursor) = cursor else {
-        return Vec::new();
-    };
     let facts = snapshot.facts();
     facts
-        .after(Some(cursor))
+        .after(Some(earliest_active_round))
         .filter_map(|envelope| {
             let (claimed, won) = match envelope.fact.kind() {
                 wire::FactKind::ClaimFreed => {
@@ -253,17 +254,34 @@ fn round_departures(
         .collect()
 }
 
+fn earliest_active_round(snapshot: &bus::TaskSnapshot) -> Option<Seq> {
+    snapshot
+        .tasks()
+        .iter()
+        .filter(|heads| {
+            heads
+                .claims()
+                .iter()
+                .any(|held| held.claim().body().disposition == ClaimDisposition::Active)
+        })
+        .map(|heads| heads.completion().body().round)
+        .min()
+}
+
 /// Every current-round join, arrival, and departure projected to each active
 /// partner once its participant has a proved address.
 ///
 /// Joins and arrivals remain in the current heads and reproject until the
-/// occupant driver deduplicates them. Departures consume immutable ending facts
-/// after the lifecycle cursor because a later join replaces an ended claim head.
+/// occupant driver deduplicates them. Departures are rehydrated from the
+/// durable suffix beginning at the oldest active round so delayed address or
+/// receiving-claim disclosure cannot lose them.
 fn round_update_notices(
     snapshot: &bus::TaskSnapshot,
-    cursor: Option<Seq>,
 ) -> Vec<(CanonicalUuid, TaskRoundUpdateNotice)> {
-    let departures = round_departures(snapshot, cursor);
+    let Some(earliest_active_round) = earliest_active_round(snapshot) else {
+        return Vec::new();
+    };
+    let departures = round_departures(snapshot, earliest_active_round);
     let mut notices = Vec::new();
     for heads in snapshot.tasks() {
         let completion = heads.completion().body();
