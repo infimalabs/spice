@@ -7,8 +7,8 @@ use listen::{Dialect, Locus};
 use vendor::omp::{JobCall, JobOp};
 
 use super::super::terminal::job::Ending;
-use super::super::terminal::{Control, Job, Jobs, Terminal};
-use super::{Driver, FirstTurn, Work};
+use super::super::terminal::{Control, Job, Jobs, ServiceClaim, Terminal};
+use super::{Driver, FirstTurn, Readers, Work, retention};
 
 /// The occupant's input, as the driver writes it.
 #[derive(Clone, Default)]
@@ -361,4 +361,51 @@ fn stale_wait_reports_then_replays_inbox_and_delivers_its_ending_once() {
     assert_eq!(sink.notices().len(), 1);
     seated.hear(&terminal, &job, &Control::new());
     assert_eq!(sink.notices().len(), 1, "the ending is delivered once");
+}
+
+/// A settlement observed ahead of a turn OMP already started parks the
+/// driver. The tool call that running turn issues must still be answered,
+/// because OMP waits on it and queues all later steering behind it.
+#[test]
+fn a_parked_driver_still_answers_the_tool_call_its_running_turn_issued() {
+    let scratch = Scratch::new("parked-answer");
+    let (jobs, terminal) = terminal(&scratch);
+    let job = jobs.record_for_tests("spice room contribute", None, Some(60_000));
+    job.end_for_tests(Ending::Exited { code: 0 });
+    let sink = Sink::default();
+    let owner = ServiceClaim::for_tests(
+        wire::TaskStamp::for_micros(1).expect("fixture stamp is representable"),
+        crate::resident::new_uuid(),
+        crate::resident::new_uuid(),
+    );
+    let seated = Driver::with_runtime(
+        sink.clone(),
+        Readers::default(),
+        Box::new(|_: &str, _: crate::resource::Access<'_>| Err("no URI reads".to_owned()))
+            as crate::resource::Server,
+        steer::Key::for_identity(crate::resident::new_uuid()),
+        Some(terminal.clone()),
+        retention::Io::for_tests(move || Ok(Some(owner.clone()))),
+    );
+
+    seated.settle();
+    assert!(
+        seated
+            .background("held-claim-continuation", "Resume the held claim.")
+            .is_err(),
+        "a parked driver starts no turn"
+    );
+    let call = Work::Job(JobCall {
+        op: JobOp::Wait,
+        id: Some(job.id().to_owned()),
+        timeout: Duration::from_secs(30),
+        until: None,
+    });
+    seated.resolve(&terminal, "wait-1", &call, &Control::new(), false);
+
+    let frames = sink.frames();
+    let last = frames.last().expect("the call is answered");
+    assert_eq!(last["type"], "host_tool_result", "{frames:?}");
+    assert_eq!(last["id"], "wait-1");
+    assert!(sink.notices().is_empty(), "{frames:?}");
 }

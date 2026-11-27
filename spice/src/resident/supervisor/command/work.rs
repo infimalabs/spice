@@ -175,7 +175,7 @@ impl<W: Write + Send + 'static> Driver<W> {
                 let reason = work
                     .err()
                     .unwrap_or_else(|| "this lane has no terminal".to_owned());
-                let _refused = self.write(&vendor::omp::host_tool_refused(id, &reason));
+                let _refused = self.reply(&vendor::omp::host_tool_refused(id, &reason));
                 return;
             }
         };
@@ -189,7 +189,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             self.watch_tool_bound(id.to_owned(), released, crate::cli::APP_ANSWER_BOUND)
         {
             self.cancel(id);
-            let _refused = self.write(&vendor::omp::host_tool_refused(
+            let _refused = self.reply(&vendor::omp::host_tool_refused(
                 id,
                 &format!("tool-bound watcher failed: {error}"),
             ));
@@ -210,7 +210,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             });
         if let Err(error) = started {
             self.cancel(id);
-            let _refused = self.write(&vendor::omp::host_tool_refused(
+            let _refused = self.reply(&vendor::omp::host_tool_refused(
                 id,
                 &format!("shell thread failed: {error}"),
             ));
@@ -287,7 +287,7 @@ impl<W: Write + Send + 'static> Driver<W> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(id);
-        let answered = self.write(&vendor::omp::host_tool_result(
+        let answered = self.reply(&vendor::omp::host_tool_result(
             id,
             &report.output,
             report.exit_code,
