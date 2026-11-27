@@ -57,6 +57,36 @@ struct ReapBounds {
     reap: Duration,
     output_drain: Duration,
 }
+trait CleanupClock {
+    type Deadline;
+
+    fn elapsed(&self) -> Duration;
+    fn deadline(&self, boundary: Duration) -> Self::Deadline;
+}
+
+struct MonotonicCleanupClock {
+    started: Instant,
+}
+
+impl MonotonicCleanupClock {
+    fn start() -> Self {
+        Self {
+            started: Instant::now(),
+        }
+    }
+}
+
+impl CleanupClock for MonotonicCleanupClock {
+    type Deadline = Instant;
+
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    fn deadline(&self, boundary: Duration) -> Self::Deadline {
+        deadline_after(self.started, boundary)
+    }
+}
 
 /// What one observation found still running in the owned groups.
 #[derive(Debug, Default, Eq, PartialEq)]
@@ -115,6 +145,7 @@ impl DescendantGroups {
         let mut wait = |members: &[u32], deadline: Instant| {
             await_exits(members, &mut root_exit, root_terminal, deadline)
         };
+        let clock = MonotonicCleanupClock::start();
         let reaped = self.reap_while_root_terminates_with(
             ReapBounds {
                 grace,
@@ -122,6 +153,7 @@ impl DescendantGroups {
                 output_drain,
             },
             root_terminal,
+            &clock,
             &mut snapshot,
             &mut signal_group,
             &mut wait,
@@ -134,27 +166,28 @@ impl DescendantGroups {
     /// and tree are terminal across two consecutive observations. `wait`
     /// blocks until every listed member and, while it runs, the root have
     /// exited, or until the deadline it is given.
-    fn reap_while_root_terminates_with<Snapshot, Signal, Wait>(
+    fn reap_while_root_terminates_with<Clock, Snapshot, Signal, Wait>(
         &mut self,
         bounds: ReapBounds,
         root_terminal: &AtomicBool,
+        clock: &Clock,
         snapshot: &mut Snapshot,
         signal_group: &mut Signal,
         wait: &mut Wait,
     ) -> io::Result<()>
     where
+        Clock: CleanupClock,
         Snapshot: FnMut() -> io::Result<Vec<Process>>,
         Signal: FnMut(u32, libc::c_int) -> io::Result<()>,
-        Wait: FnMut(&[u32], Instant) -> io::Result<()>,
+        Wait: FnMut(&[u32], Clock::Deadline) -> io::Result<()>,
     {
-        let started = Instant::now();
         let grace = bounds.grace;
         let reap_deadline = grace.saturating_add(bounds.reap);
         let absolute_deadline = reap_deadline.saturating_add(bounds.output_drain);
         let mut signal = libc::SIGTERM;
         let mut observed_terminal = false;
         loop {
-            let elapsed = started.elapsed();
+            let elapsed = clock.elapsed();
             if signal == libc::SIGTERM && elapsed >= grace {
                 signal = libc::SIGKILL;
                 self.observe_and_signal(signal, true, snapshot, signal_group)?;
@@ -169,7 +202,7 @@ impl DescendantGroups {
             } else {
                 observed_terminal = false;
             }
-            let elapsed = started.elapsed();
+            let elapsed = clock.elapsed();
             if elapsed >= absolute_deadline || (elapsed >= reap_deadline && !live.groups.is_empty())
             {
                 let detail = if !live.groups.is_empty() {
@@ -197,7 +230,7 @@ impl DescendantGroups {
             } else {
                 reap_deadline
             };
-            wait(&live.members, deadline_after(started, boundary))?;
+            wait(&live.members, clock.deadline(boundary))?;
         }
     }
 
@@ -454,6 +487,23 @@ fn display_groups(groups: &BTreeSet<u32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    struct LogicalCleanupClock<'a> {
+        elapsed: &'a Cell<Duration>,
+    }
+
+    impl CleanupClock for LogicalCleanupClock<'_> {
+        type Deadline = Duration;
+
+        fn elapsed(&self) -> Duration {
+            self.elapsed.get()
+        }
+
+        fn deadline(&self, boundary: Duration) -> Self::Deadline {
+            boundary
+        }
+    }
 
     #[test]
     fn captured_tree_follows_parentage_across_process_group_boundaries() {
@@ -602,16 +652,14 @@ mod tests {
             }
             Ok(())
         };
-        // The late member ignores the request to leave, so no exit arrives
-        // before the deadline each wait is given. Only the grace boundary is
-        // traversed; once KILL leaves the tree terminal the loop re-observes
-        // without waiting, so the test's reap and drain bounds are effectively
-        // unbounded.
-        let (_exits, exited) = std::sync::mpsc::channel::<()>();
+        // The late member ignores TERM. Advancing the fixture clock to the
+        // requested boundary enters KILL immediately, without a host deadline.
+        let elapsed = Cell::new(Duration::ZERO);
+        let clock = LogicalCleanupClock { elapsed: &elapsed };
         let mut waited = Vec::new();
-        let mut wait = |members: &[u32], deadline: Instant| {
+        let mut wait = |members: &[u32], deadline: Duration| {
             waited.push(members.to_vec());
-            let _ = exited.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+            elapsed.set(deadline);
             Ok(())
         };
 
@@ -623,6 +671,7 @@ mod tests {
                     output_drain: Duration::MAX,
                 },
                 &root_terminal,
+                &clock,
                 &mut snapshot,
                 &mut signal_group,
                 &mut wait,
