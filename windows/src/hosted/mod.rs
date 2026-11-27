@@ -86,6 +86,17 @@ impl PreparedBundlePin {
             .strip_prefix("sha256:")
             .expect("admitted build key has its algorithm")
     }
+
+    /// Discovery tag of the bundle one finalize attempt signed and published:
+    /// an exact rerun signs the same source again into different bytes, so
+    /// every attempt owns its own tag beneath the shared build key.
+    #[must_use]
+    pub fn attempt_tag(&self, attempt: u32) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{}:{attempt}", self.tag()).as_bytes())
+        )
+    }
 }
 
 /// The cross-built Windows bundle a release request runs instead of

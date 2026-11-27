@@ -731,6 +731,8 @@ jobs:
   finalize:
     name: Finalize macOS
     needs: sign
+    outputs:
+      manifest: ${{ steps.publish.outputs.manifest }}
     runs-on: macos-15
     timeout-minutes: 45
     permissions:
@@ -862,6 +864,7 @@ jobs:
           version: 1.3.0
 
       - name: Publish finalized macOS bundle
+        id: publish
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -878,14 +881,22 @@ jobs:
           "$xtask" prepared-artifact manifest \
             bundle macos-arm64 "$prepared/build-key.json" application/gzip \
             "$prepared/macos-stage.tar.gz" "$RUNNER_TEMP/result" - "$prepared/prepared.json"
-          tag="${PREPARED_BUILD_KEY#sha256:}"
-          test "${#tag}" -eq 64
+          key="${PREPARED_BUILD_KEY#sha256:}"
+          test "${#key}" -eq 64
+          # An exact rerun signs again into different bytes, so each attempt
+          # publishes beneath its own discovery tag.
+          tag=$(printf '%s:%s' "$key" "$GITHUB_RUN_ATTEMPT" | shasum -a 256 | cut -d' ' -f1)
           repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           repository="ghcr.io/$repository/prepared"
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact publish \
-            "$repository" "$tag" \
-            "$prepared/prepared.json" "$prepared/macos-stage.tar.gz"
+          read -r label manifest < <(
+            "$xtask" prepared-artifact publish \
+              "$repository" "$tag" \
+              "$prepared/prepared.json" "$prepared/macos-stage.tar.gz"
+          )
+          test "$label" = published
+          [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
           oras logout ghcr.io
 
   attest:
@@ -917,6 +928,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PREPARED_BUILD_KEY: ${{ inputs.prepared_build_key }}
           PREPARED_INPUTS: ${{ inputs.prepared_inputs }}
+          PREPARED_MANIFEST: ${{ needs.finalize.outputs.manifest }}
         run: |
           set -euo pipefail
           tools="$RUNNER_TEMP/tools"
@@ -925,16 +937,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$tools"
           xtask="$tools/xtask"
           printf '%s' "$PREPARED_INPUTS" > "$prepared/build-key.json"
-          tag="${PREPARED_BUILD_KEY#sha256:}"
+          [[ "$PREPARED_MANIFEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           repository="ghcr.io/$repository/prepared"
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          read -r label manifest _ < <(
-            "$xtask" prepared-artifact resolve "$repository:$tag" "$PREPARED_BUILD_KEY"
-          )
-          test "$label" = resolved
           "$xtask" prepared-artifact fetch \
-            "$repository@$manifest" "$PREPARED_BUILD_KEY" "$prepared/pulled"
+            "$repository@$PREPARED_MANIFEST" "$PREPARED_BUILD_KEY" "$prepared/pulled"
           mkdir "$RUNNER_TEMP/result"
           tar -xzf "$prepared/pulled/macos-stage.tar.gz" -C "$RUNNER_TEMP/result"
           "$xtask" prepared-artifact admit-tree \
