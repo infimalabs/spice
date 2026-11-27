@@ -78,6 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           "$RUST_BIN/cargo" build --locked --package xtask
+          "$RUST_BIN/cargo" build --locked --package prepared-artifact --bin prepared-artifact
           "$CARGO_TARGET_DIR/debug/xtask" release-inputs "$RUNNER_TEMP/input"
 
       # Release staging builds inside a synthetic commit of the extracted
@@ -124,13 +125,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          prepared="$RUNNER_TEMP/bootstrap-target/debug/prepared-artifact"
           key_file="$RUNNER_TEMP/candidate-prebuild-key.json"
-          key=$("$xtask" prepared-artifact build-key "$key_file" | sed -n 's/^build key //p')
+          key=$("$prepared" build-key "$key_file" | sed -n 's/^build key //p')
           [[ "$key" =~ ^sha256:[0-9a-f]{64}$ ]]
           repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')/prepared"
           {
-            printf 'PREPARED_ARTIFACT_TOOL=%s\n' "$xtask"
+            printf 'PREPARED_ARTIFACT_TOOL=%s\n' "$prepared"
             printf 'PREPARED_REPOSITORY=%s\n' "$repository"
             printf 'PREBUILD_KEY_FILE=%s\n' "$key_file"
             printf 'PREBUILD_KEY=%s\n' "$key"
