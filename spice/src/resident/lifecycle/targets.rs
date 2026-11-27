@@ -281,12 +281,13 @@ pub(super) fn await_armed_lines(
         if !standing.get(&target.lane).copied().unwrap_or(false) {
             continue;
         }
-        let hold_reminder = target.pending_inbox && target.inbox_reminder_only;
-        if target.held_claim == Available::None && !hold_reminder {
-            continue;
-        }
-        if hold_reminder {
+        if target.pending_inbox && target.inbox_reminder_only {
             target.pending_inbox = false;
+        }
+        // A held claim already unavailable keeps its own park, as a job park
+        // leaves it; only the repeat reminder waits on the line.
+        if target.held_claim == Available::None {
+            continue;
         }
         target.held_claim = Available::None;
         target.drain_queue = Available::None;
