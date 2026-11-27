@@ -8,6 +8,7 @@ use gate::{
 };
 use serde_json::Value;
 use std::fs;
+use std::path::Path;
 use wire::{Digest, Domain};
 
 use super::support::{
@@ -427,8 +428,7 @@ fn a_disappeared_selected_tree_refuses_capture_with_a_typed_core_input_error() {
         .expect("materialize the captured index");
     let contract = selected_contract(tree.root());
 
-    let displaced = tree.root().with_file_name("displaced-root");
-    fs::rename(tree.root(), &displaced).expect("displace the selected tree root");
+    remove_selected_tree(tree.root());
     let rim = rim(&repository);
     let refused = CoreSource::capture(
         &tree,
@@ -442,6 +442,26 @@ fn a_disappeared_selected_tree_refuses_capture_with_a_typed_core_input_error() {
     refused.expect_err("a disappeared selected tree cannot yield one identity");
 
     repository.remove();
+}
+
+#[expect(
+    clippy::permissions_set_readonly_false,
+    reason = "the selected test tree is sealed read-only and must be made removable before simulating its disappearance"
+)]
+fn remove_selected_tree(path: &Path) {
+    let metadata = fs::symlink_metadata(path).expect("inspect selected tree path");
+    let mut permissions = metadata.permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions).expect("make selected tree path removable");
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).expect("read selected tree directory") {
+            let entry = entry.expect("read selected tree entry");
+            remove_selected_tree(&entry.path());
+        }
+        fs::remove_dir(path).expect("remove selected tree directory");
+    } else {
+        fs::remove_file(path).expect("remove selected tree file");
+    }
 }
 
 #[test]
