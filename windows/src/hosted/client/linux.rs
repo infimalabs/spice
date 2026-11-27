@@ -9,6 +9,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::hosted::stage_layout::StageLayout;
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use wire::Domain;
@@ -193,8 +194,12 @@ fn complete_run(
     } = completion;
     watch_run(run.root, run.repository, authority, cancellation)?;
     let run_id = authority.run_id();
-    let artifact = download_artifact(run, run_id, &format!("linux-{challenge}"))?;
-    let result_path = artifact.join("result.json");
+    let layout = StageLayout::new(download_artifact(
+        run,
+        run_id,
+        &format!("linux-{challenge}"),
+    )?);
+    let result_path = layout.result();
     verify_attestation(run, WORKFLOW_PATH, run_id, &result_path)?;
     let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
         path: result_path.clone(),
@@ -203,7 +208,7 @@ fn complete_run(
     let result: LinuxResult =
         serde_json::from_slice(&bytes).map_err(WindowsHostedError::ResultSchema)?;
     admit_result(&result, challenge, source, manifest, run_id)?;
-    let log_path = artifact.join("stage.log");
+    let log_path = layout.stage_log();
     let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
         path: log_path.clone(),
         source,
@@ -211,9 +216,12 @@ fn complete_run(
     if sha256(&log) != result.log_sha256 {
         return Err(differs("stage.log"));
     }
-    let stage = artifact.join("stage");
+    let stage = layout.stage();
     let artifacts = admit_inventory(&stage, &result.artifacts)?;
-    let smoke_log_path = artifact.join("smoke.log");
+    for artifact in &artifacts {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
+    }
+    let smoke_log_path = layout.smoke_log();
     verify_attestation(run, WORKFLOW_PATH, run_id, &smoke_log_path)?;
     let smoke_log = fs::read(&smoke_log_path).map_err(|source| WindowsHostedError::Io {
         path: smoke_log_path.clone(),
@@ -222,8 +230,11 @@ fn complete_run(
     if sha256(&smoke_log) != result.smoke_log_sha256 {
         return Err(differs("smoke.log"));
     }
-    let smoke = artifact.join("smoke");
+    let smoke = layout.smoke();
     let smoke_artifacts = admit_inventory(&smoke, &result.smoke_artifacts)?;
+    for artifact in &smoke_artifacts {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &smoke.join(&artifact.path))?;
+    }
     admit_smoke_result(result.exit_code, result.smoke_exit_code, &smoke_artifacts)?;
     if result.exit_code == 0 {
         publish_artifacts(

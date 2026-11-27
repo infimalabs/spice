@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
     AdmissionError, GITHUB_PROVIDER, ImagePin, Request, ResultDocument, ToolchainPins, WORKFLOW,
-    admit_result,
+    admit_result, stage_layout::StageLayout,
 };
 use crate::protocol::{
     Command as HostedCommand, Completion, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS,
@@ -379,7 +379,7 @@ fn complete_dispatched_run(
 ) -> Result<HostedExecution, WindowsHostedError> {
     watch_run(run.root, run.repository, authority, cancellation)?;
     let run_id = authority.run_id();
-    let (artifact_dir, runner_path, result_path) =
+    let (layout, runner_path, result_path) =
         download_attested_artifact(run, &request.challenge, run_id)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
     let result_bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
@@ -395,6 +395,10 @@ fn complete_dispatched_run(
             dispatched: run_id,
             signed: identity.run_id,
         });
+    }
+    let stage = layout.stage();
+    for artifact in &result.artifacts {
+        verify_attestation(run, WORKFLOW, run_id, &stage.join(&artifact.path))?;
     }
     let outputs = result
         .outputs
@@ -419,7 +423,7 @@ fn complete_dispatched_run(
             .all(|output| matches!(output.completion, Completion::Exited { code: 0 }))
         {
             publish_artifacts(
-                &artifact_dir.join(format!("windows-stage-{}", request.challenge)),
+                &stage,
                 &result.artifacts,
                 destination,
                 &request.source,
@@ -454,14 +458,18 @@ fn download_attested_artifact(
     run: &HostedRun<'_>,
     challenge: &str,
     run_id: u64,
-) -> Result<(PathBuf, PathBuf, PathBuf), WindowsHostedError> {
-    let artifact_dir = download_artifact(run, run_id, &format!("windows-{challenge}"))?;
-    let result_path = artifact_dir.join("result.json");
-    let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
+) -> Result<(StageLayout, PathBuf, PathBuf), WindowsHostedError> {
+    let layout = StageLayout::new(download_artifact(
+        run,
+        run_id,
+        &format!("windows-{challenge}"),
+    )?);
+    let result_path = layout.result();
+    let runner_path = layout.runner();
     for path in [&runner_path, &result_path] {
         verify_attestation(run, WORKFLOW, run_id, path)?;
     }
-    Ok((artifact_dir, runner_path, result_path))
+    Ok((layout, runner_path, result_path))
 }
 
 /// Download the run's one artifact `name` into a fresh scratch directory.

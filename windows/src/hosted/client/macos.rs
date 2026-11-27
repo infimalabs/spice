@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::hosted::stage_layout::StageLayout;
 use serde::Deserialize;
 use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
@@ -19,7 +20,6 @@ pub(super) const WORKFLOW_PATH: &str = ".github/workflows/macos.yml";
 const RUN_TITLE_PREFIX: &str = "macOS staging ";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
-const RESULT_PATH: &str = "result.json";
 const PAYLOAD_LIMIT: u64 = 1024 * 1024;
 
 /// The provider-authenticated outcome of one hosted macOS stage.
@@ -182,8 +182,12 @@ pub fn macos_hosted_stage_controlled(
         |authority| {
             watch_run(run.root, run.repository, authority, &cancellation)?;
             let run_id = authority.run_id();
-            let stage = download_artifact(&run, run_id, &format!("macos-{challenge}"))?;
-            let result_path = stage.join(RESULT_PATH);
+            let layout = StageLayout::new(download_artifact(
+                &run,
+                run_id,
+                &format!("macos-{challenge}"),
+            )?);
+            let result_path = layout.result();
             verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             let result: MacosResult =
                 serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
@@ -198,6 +202,7 @@ pub fn macos_hosted_stage_controlled(
                     image: &policy.image,
                 },
             )?;
+            let stage = layout.stage();
             let artifacts = admit_stage(
                 &stage,
                 &source.canonical_commit,
@@ -320,7 +325,6 @@ fn admit_stage(
 
     let expected = BTreeSet::from([
         PathBuf::from(PAYLOAD_PATH),
-        PathBuf::from(RESULT_PATH),
         relative(stage, &native_path)?,
         relative(stage, &symbol_path)?,
         receipt_relative.clone(),
