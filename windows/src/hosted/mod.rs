@@ -4,6 +4,7 @@ pub mod client;
 pub mod release_inputs;
 mod stage_layout;
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
@@ -11,6 +12,7 @@ use crate::protocol::{
     Command, CommandResult, Limits, MAX_ARGUMENTS, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use wire::Digest;
 pub use wire::manifest::{
     HostedWindowsIdentity as Identity, HostedWindowsImage as ImagePin,
@@ -18,7 +20,7 @@ pub use wire::manifest::{
 };
 
 /// The sole current hosted Windows execution protocol.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 /// Provider spelling admitted by the current protocol.
 pub const GITHUB_PROVIDER: &str = "github-actions";
 /// Architecture spelling emitted by GitHub's Windows runner.
@@ -33,6 +35,57 @@ const DIGEST_HEX_LENGTH: usize = 64;
 const MAX_COMMANDS: usize = 8;
 const MAX_ARTIFACTS: usize = 256;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Deterministic discovery identity for one finalized prepared bundle.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedBundlePin {
+    pub build_key: String,
+    pub inputs: BTreeMap<String, String>,
+}
+
+impl PreparedBundlePin {
+    pub(crate) fn new(challenge: &str, source: &str, tree: &str, workflow_blob: &str) -> Self {
+        let inputs = BTreeMap::from([
+            ("challenge".to_owned(), format!("sha256:{challenge}")),
+            ("source".to_owned(), format!("sha256:{source}")),
+            ("tree".to_owned(), format!("sha256:{tree}")),
+            (
+                "workflow".to_owned(),
+                format!("sha256:{:x}", Sha256::digest(workflow_blob.as_bytes())),
+            ),
+        ]);
+        let encoded = serde_json::to_vec(&inputs).expect("string map serializes");
+        Self {
+            build_key: format!("sha256:{:x}", Sha256::digest(&encoded)),
+            inputs,
+        }
+    }
+
+    fn admit(&self) -> Result<(), AdmissionError> {
+        for digest in self.inputs.values() {
+            let digest = digest
+                .strip_prefix("sha256:")
+                .ok_or(AdmissionError::Digest("prepared build-key input"))?;
+            require_hex("prepared build-key input", digest, DIGEST_HEX_LENGTH)?;
+        }
+        let encoded = serde_json::to_vec(&self.inputs)
+            .map_err(|_| AdmissionError::Digest("prepared build key"))?;
+        let expected = format!("sha256:{:x}", Sha256::digest(&encoded));
+        if self.inputs.is_empty() || self.build_key != expected {
+            return Err(AdmissionError::Digest("prepared build key"));
+        }
+        Ok(())
+    }
+
+    /// Lowercase build-key digest used only as the deterministic discovery tag.
+    #[must_use]
+    pub fn tag(&self) -> &str {
+        self.build_key
+            .strip_prefix("sha256:")
+            .expect("admitted build key has its algorithm")
+    }
+}
 
 /// Complete client request signed into one provider run.
 ///
@@ -63,6 +116,7 @@ pub struct Request {
     pub commands: Vec<Command>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas: Option<CanvasPin>,
+    pub prepared_bundle: PreparedBundlePin,
 }
 
 /// The staged Linux canvas one release stage adopts: the provider run whose
@@ -126,7 +180,8 @@ impl Request {
         self.admit_image()?;
         self.admit_limits()?;
         self.admit_commands()?;
-        self.admit_toolchain()
+        self.admit_toolchain()?;
+        self.prepared_bundle.admit()
     }
 
     fn admit_identity(&self) -> Result<(), AdmissionError> {
@@ -583,6 +638,12 @@ mod tests {
                 arguments: vec!["space value".to_owned(), "雪".to_owned()],
             }],
             canvas: None,
+            prepared_bundle: PreparedBundlePin::new(
+                &"1".repeat(64),
+                &"2".repeat(64),
+                &"3".repeat(64),
+                &"4".repeat(40),
+            ),
         }
     }
 
@@ -688,6 +749,19 @@ mod tests {
         assert_eq!(
             admit_result(&request, &over, &over.identity.runner),
             Err(AdmissionError::Capture)
+        );
+    }
+
+    #[test]
+    fn prepared_bundle_key_covers_every_named_input() {
+        let mut request = request();
+        request
+            .prepared_bundle
+            .inputs
+            .insert("workflow".to_owned(), format!("sha256:{}", "f".repeat(64)));
+        assert_eq!(
+            request.admit(),
+            Err(AdmissionError::Digest("prepared build key"))
         );
     }
 

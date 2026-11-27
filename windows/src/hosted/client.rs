@@ -16,8 +16,8 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{
-    AdmissionError, GITHUB_PROVIDER, ImagePin, Request, ResultDocument, ToolchainPins, WORKFLOW,
-    admit_result,
+    AdmissionError, GITHUB_PROVIDER, ImagePin, PreparedBundlePin, Request, ResultDocument,
+    ToolchainPins, WORKFLOW, admit_result,
     stage_layout::{RESULT_PATH, RUNNER_PATH, StageLayout},
 };
 use crate::protocol::{
@@ -37,6 +37,7 @@ mod linux;
 mod macos;
 mod observation;
 mod ownership;
+mod prepared;
 mod quota;
 mod release_stage;
 mod source;
@@ -45,7 +46,8 @@ mod transport;
 pub use attach::Attach;
 use attestation::verify_attestation;
 pub use control::{
-    HostedRunBinding, HostedRunControl, HostedRunObserver, HostedWorkflow, ReleaseWorkflowBlobs,
+    HostedRunBinding, HostedRunControl, HostedRunObserver, HostedWorkflow, PreparedBundleTransport,
+    ReleaseWorkflowBlobs,
 };
 pub use inputs::{Preflight, ReleaseInputs, landed_commit, release_inputs};
 #[cfg(test)]
@@ -238,6 +240,12 @@ pub fn windows_hosted_commands_into(
         },
         commands,
         canvas: canvas.as_ref().map(|canvas| canvas.pin.clone()),
+        prepared_bundle: PreparedBundlePin::new(
+            &bound.challenge,
+            &bound.source.archive.to_string(),
+            &bound.source.tree,
+            &bound.source.workflow_blob,
+        ),
     };
 
     let run = bound.run(&root, scratch.path(), &policy.repository, &policy.branch);
@@ -265,6 +273,7 @@ pub fn windows_hosted_commands_into(
                 destination
                     .as_deref()
                     .map(|stage| (stage, canvas.as_ref(), None)),
+                None,
                 &cancellation,
             )
         },
@@ -380,12 +389,13 @@ fn complete_dispatched_run(
         Option<&canvas::LinuxCanvas>,
         Option<&super::release_inputs::ResultManifest>,
     )>,
+    prepared_bundles: Option<&dyn PreparedBundleTransport>,
     cancellation: &Cancellation,
 ) -> Result<HostedExecution, WindowsHostedError> {
     watch_run(run.root, run.repository, authority, cancellation)?;
     let run_id = authority.run_id();
     let (layout, declared, runner_path, result_path) =
-        download_attested_artifact(run, &request.challenge, run_id)?;
+        prepared::admitted_artifact(run, request, run_id, prepared_bundles)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
     let result_bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
         path: result_path.clone(),

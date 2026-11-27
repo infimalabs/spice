@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use crate::hosted_release_session::{
     NativeTarget, ReleaseSession, SessionError, TargetWorkflow, schema_provider_failure,
@@ -13,8 +14,76 @@ pub use windows_execution::hosted::client::{
     Attach, HostedExecution, ReleaseInputs, WindowsHostedError, landed_commit, windows_hosted,
 };
 use windows_execution::hosted::client::{
-    HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight,
+    HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight, PreparedBundleTransport,
 };
+
+struct PreparedBundles;
+
+static PREPARED_BUNDLES: PreparedBundles = PreparedBundles;
+
+impl PreparedBundleTransport for PreparedBundles {
+    fn fetch(
+        &self,
+        repository: &str,
+        tag: &str,
+        build_key: &str,
+        destination: &Path,
+    ) -> Result<(), String> {
+        let repository = format!("ghcr.io/{}/prepared", repository.to_ascii_lowercase());
+        let user = command_text("gh", &["api", "user", "--jq", ".login"])?;
+        let token = command_text("gh", &["auth", "token"])?;
+        let mut login = Command::new("oras")
+            .args([
+                "login",
+                "ghcr.io",
+                "--username",
+                user.trim(),
+                "--password-stdin",
+            ])
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("could not launch oras login: {error}"))?;
+        login
+            .stdin
+            .take()
+            .expect("piped login input")
+            .write_all(token.trim().as_bytes())
+            .map_err(|error| format!("could not supply GHCR credential: {error}"))?;
+        let status = login
+            .wait()
+            .map_err(|error| format!("could not wait for oras login: {error}"))?;
+        if !status.success() {
+            return Err(format!("oras login refused with {status}"));
+        }
+        let result =
+            crate::prepared_artifact::fetch_bundle(&repository, tag, build_key, destination)
+                .map_err(|error| error.to_string());
+        let logout = Command::new("oras").args(["logout", "ghcr.io"]).status();
+        match (result, logout) {
+            (Ok(()), Ok(status)) if status.success() => Ok(()),
+            (Ok(()), Ok(status)) => Err(format!("oras logout refused with {status}")),
+            (Ok(()), Err(error)) => Err(format!("could not launch oras logout: {error}")),
+            (Err(error), _) => Err(error),
+        }
+    }
+}
+
+fn command_text(program: &str, arguments: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("could not launch {program}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{program} {} refused with {}: {}",
+            arguments.join(" "),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|error| format!("{program} returned non-UTF-8 output: {error}"))
+}
 
 /// Re-enter one provider preflight; its signed result names the source.
 pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHostedError> {
@@ -200,7 +269,7 @@ fn resumable_control<'a>(
         TargetWorkflow::Current => HostedWorkflow::Current,
         TargetWorkflow::Exact(blob) => HostedWorkflow::Exact(blob),
     };
-    HostedRunControl::resumable(observer, workflow)
+    HostedRunControl::resumable(observer, workflow).with_prepared_bundles(&PREPARED_BUNDLES)
 }
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine,
@@ -215,7 +284,7 @@ pub fn macos_hosted_stage(
         inputs,
         attach,
         Path::new("dist/stage"),
-        HostedRunControl::default(),
+        HostedRunControl::default().with_prepared_bundles(&PREPARED_BUNDLES),
         output,
     )
 }
@@ -300,7 +369,7 @@ pub fn windows_hosted_stage(
         inputs,
         attach,
         Path::new("dist/stage"),
-        HostedRunControl::default(),
+        HostedRunControl::default().with_prepared_bundles(&PREPARED_BUNDLES),
         output,
         error_output,
     )

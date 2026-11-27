@@ -52,6 +52,14 @@ on:
         description: Digest of the provider-built canvas this stage links
         required: true
         type: string
+      prepared_build_key:
+        description: Complete finalized macOS bundle build key
+        required: true
+        type: string
+      prepared_inputs:
+        description: Canonical finalized macOS bundle build-key inputs
+        required: true
+        type: string
 
 jobs:
 
@@ -493,6 +501,7 @@ jobs:
     permissions:
       actions: read
       contents: none
+      packages: write
     steps:
       - name: Download unsigned stage
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -612,13 +621,34 @@ jobs:
           (cd "$result" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
             | LC_ALL=C sort | jq -R . | jq -cs .) > "$result/subjects.json"
 
-      - name: Upload complete hosted artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
         with:
-          name: macos-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/result
-          if-no-files-found: error
-          retention-days: 1
+          version: 1.3.0
+
+      - name: Publish finalized macOS bundle
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          PREPARED_BUILD_KEY: ${{ inputs.prepared_build_key }}
+          PREPARED_INPUTS: ${{ inputs.prepared_inputs }}
+        run: |
+          set -euo pipefail
+          prepared="$RUNNER_TEMP/prepared"
+          mkdir -p "$prepared"
+          printf '%s' "$PREPARED_INPUTS" > "$prepared/build-key.json"
+          xtask="$RUNNER_TEMP/finalize/finalizer/xtask"
+          "$xtask" prepared-artifact pack "$RUNNER_TEMP/result" "$prepared/macos-stage.tar.gz"
+          "$xtask" prepared-artifact manifest \
+            bundle macos-arm64 "$prepared/build-key.json" application/gzip \
+            "$prepared/macos-stage.tar.gz" "$RUNNER_TEMP/result" - "$prepared/prepared.json"
+          tag="${PREPARED_BUILD_KEY#sha256:}"
+          test "${#tag}" -eq 64
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          "$xtask" prepared-artifact publish \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared" "$tag" \
+            "$prepared/prepared.json" "$prepared/macos-stage.tar.gz"
+          oras logout ghcr.io
 
   attest:
     name: Attest macOS
@@ -629,12 +659,47 @@ jobs:
       actions: read
       attestations: write
       id-token: write
+      packages: read
     steps:
-      - name: Download exact signed stage
+      - name: Download credential-free bundle client
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: macos-${{ inputs.challenge }}
-          path: ${{ runner.temp }}/result
+          name: macos-finalizer-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/transport
+
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Fetch immutable finalized bundle
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          PREPARED_BUILD_KEY: ${{ inputs.prepared_build_key }}
+          PREPARED_INPUTS: ${{ inputs.prepared_inputs }}
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/tools"
+          prepared="$RUNNER_TEMP/prepared"
+          mkdir -p "$tools" "$prepared"
+          tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$tools"
+          xtask="$tools/xtask"
+          printf '%s' "$PREPARED_INPUTS" > "$prepared/build-key.json"
+          tag="${PREPARED_BUILD_KEY#sha256:}"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          read -r label manifest _ < <(
+            "$xtask" prepared-artifact resolve "$repository:$tag" "$PREPARED_BUILD_KEY"
+          )
+          test "$label" = resolved
+          "$xtask" prepared-artifact fetch \
+            "$repository@$manifest" "$PREPARED_BUILD_KEY" "$prepared/pulled"
+          mkdir "$RUNNER_TEMP/result"
+          tar -xzf "$prepared/pulled/macos-stage.tar.gz" -C "$RUNNER_TEMP/result"
+          "$xtask" prepared-artifact admit-tree \
+            "$prepared/pulled/prepared.json" "$RUNNER_TEMP/result"
+          oras logout ghcr.io
 
       - name: Require the declared attestation subjects
         shell: bash

@@ -349,8 +349,15 @@ build-key tag. Input staging resolves and admits only the small config and
 records the resulting manifest, payload and runtime identities; it never
 builds, loads, saves, caches, uploads, or downloads the image. The Linux stage
 fetches that payload by manifest digest and re-admits it before loading.
-Windows and macOS prepared bundles use this same config, registry and ORAS
-surface.
+The finalized Windows result and the finalized notarized macOS stage are
+deterministic `tar.gz` prepared bundles. Their workflows publish by complete
+build key only after assembling the exact attestation subject tree; the coordinator
+resolves the discovery tag to one manifest digest, fetches by digest, admits
+the unpacked inventory, and then applies the existing provenance and stage
+admission. The macOS unsigned, credential-bearing signing, and credential-free
+finalization jobs remain separate: only the credential-free finalizer publishes
+the prepared bundle, and no repository-built program executes with Apple
+credentials.
 
 **Invariant —** Hosted caches hold only derivable bootstrap state, never
 release outputs, prepared OCI payloads, or result evidence. Each workflow keeps

@@ -17,7 +17,7 @@ const USAGE: &str = concat!(
     "[-- UP-OPTION...]|",
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
-    "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|admit-tree MANIFEST.json ROOT>|",
+    "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>|",
     "prove-staged-target TARGET|",
     "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
