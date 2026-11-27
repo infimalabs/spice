@@ -18,6 +18,7 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  packages: write
 
 jobs:
   stage:
@@ -235,8 +236,15 @@ jobs:
           $cargo = "$env:USERPROFILE\.rustup\toolchains\1.97.1-x86_64-pc-windows-msvc\bin\cargo.exe"
           & $cargo build --locked --release --package windows-execution --bin windows-hosted
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cargo build --locked --release --package xtask --bin xtask
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $cargo vendor --locked --versioned-dirs "$env:RUNNER_TEMP\vendor" | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
 
       - name: Execute sealed request
         shell: pwsh
@@ -274,13 +282,38 @@ jobs:
         with:
           subject-path: ${{ runner.temp }}/result/**
 
-      - name: Publish complete hosted artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: windows-${{ steps.request.outputs.challenge }}
-          path: ${{ runner.temp }}/result
-          if-no-files-found: error
-          retention-days: 1
+      - name: Publish finalized Windows bundle
+        shell: pwsh
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'result'
+          $request = Get-Content -Raw -LiteralPath (Join-Path $env:RUNNER_TEMP 'request.json') | ConvertFrom-Json
+          $prepared = Join-Path $env:RUNNER_TEMP 'prepared'
+          New-Item -ItemType Directory -Force $prepared | Out-Null
+          $key = Join-Path $prepared 'build-key.json'
+          [IO.File]::WriteAllText(
+            $key,
+            (ConvertTo-Json -Compress -InputObject $request.prepared_bundle.inputs),
+            [Text.UTF8Encoding]::new($false)
+          )
+          $xtask = Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\xtask.exe'
+          $archive = Join-Path $prepared 'windows-stage.tar.gz'
+          & $xtask prepared-artifact pack $root $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $manifest = Join-Path $prepared 'prepared.json'
+          & $xtask prepared-artifact manifest bundle windows-amd64 $key application/gzip `
+            $archive $root - $manifest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tag = $request.prepared_bundle.build_key.Substring(7)
+          $env:GHCR_TOKEN | oras login ghcr.io --username $env:GITHUB_ACTOR --password-stdin
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $xtask prepared-artifact publish `
+            "ghcr.io/$($env:GITHUB_REPOSITORY.ToLowerInvariant())/prepared" `
+            $tag $manifest $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          oras logout ghcr.io
 
       - name: Tear down disposable files
         if: always()

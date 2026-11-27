@@ -8,8 +8,13 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
+use flate2::Compression;
+use flate2::GzBuilder;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
+use tar::Archive;
 
 const SCHEMA: u16 = 1;
 const ORAS_VERSION: &str = "1.3.0";
@@ -79,6 +84,11 @@ pub fn prepared_artifact(
                     .display()
             )
             .map_err(PreparedArtifactError::Output)
+        }
+        [command, root, archive] if command == "pack" => {
+            pack_bundle(Path::new(root), Path::new(archive))?;
+            writeln!(output, "packed {}", Path::new(archive).display())
+                .map_err(PreparedArtifactError::Output)
         }
         [command, manifest, root] if command == "admit-tree" => {
             let manifest = read_manifest(Path::new(manifest))?;
@@ -264,6 +274,116 @@ fn build_key_digest(path: &Path) -> Result<String, PreparedArtifactError> {
     admit_inputs(&inputs)?;
     let encoded = serde_json::to_vec(&inputs).map_err(PreparedArtifactError::Encode)?;
     Ok(sha256_bytes(&encoded))
+}
+
+fn pack_bundle(root: &Path, output: &Path) -> Result<(), PreparedArtifactError> {
+    let files = inventory(root)?;
+    let destination = fs::File::create(output).map_err(|source| PreparedArtifactError::Io {
+        path: output.to_path_buf(),
+        source,
+    })?;
+    let encoder: GzEncoder<_> = GzBuilder::new()
+        .mtime(0)
+        .write(destination, Compression::best());
+    let mut archive = tar::Builder::new(encoder);
+    for entry in files {
+        let path = root.join(&entry.path);
+        let mut source = fs::File::open(&path).map_err(|source| PreparedArtifactError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let mut header = tar::Header::new_gnu();
+        header.set_size(entry.bytes);
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mode(file_mode(&path)?);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, &entry.path, &mut source)
+            .map_err(|source| PreparedArtifactError::Io {
+                path: output.to_path_buf(),
+                source,
+            })?;
+    }
+    let encoder = archive
+        .into_inner()
+        .map_err(|source| PreparedArtifactError::Io {
+            path: output.to_path_buf(),
+            source,
+        })?;
+    encoder
+        .finish()
+        .map(|_| ())
+        .map_err(|source| PreparedArtifactError::Io {
+            path: output.to_path_buf(),
+            source,
+        })
+}
+
+#[cfg(unix)]
+fn file_mode(path: &Path) -> Result<u32, PreparedArtifactError> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    fs::metadata(path)
+        .map(|metadata| metadata.permissions().mode() & 0o777)
+        .map_err(|source| PreparedArtifactError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+#[cfg(not(unix))]
+fn file_mode(path: &Path) -> Result<u32, PreparedArtifactError> {
+    fs::metadata(path)
+        .map(|metadata| {
+            if metadata.permissions().readonly() {
+                0o444
+            } else {
+                0o644
+            }
+        })
+        .map_err(|source| PreparedArtifactError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+/// Resolve one deterministic discovery tag, fetch its immutable bundle, unpack
+/// it into a fresh destination, and admit the complete unpacked inventory.
+///
+/// # Errors
+///
+/// Returns exact registry, archive, filesystem, or inventory admission errors.
+pub(crate) fn fetch_bundle(
+    repository: &str,
+    tag: &str,
+    expected_build_key: &str,
+    destination: &Path,
+) -> Result<(), PreparedArtifactError> {
+    let tagged = OsString::from(format!("{repository}:{tag}"));
+    let expected = OsString::from(expected_build_key);
+    let (digest, _) = resolve(&tagged, &expected)?;
+    let exact = OsString::from(format!("{repository}@{digest}"));
+    let scratch = Scratch::new()?;
+    let pulled = scratch.path.join("pulled");
+    let manifest = fetch(&exact, &expected, &pulled)?;
+    fs::create_dir(destination).map_err(|source| PreparedArtifactError::Io {
+        path: destination.to_path_buf(),
+        source,
+    })?;
+    let payload = pulled.join(&manifest.payload.path);
+    let file = fs::File::open(&payload).map_err(|source| PreparedArtifactError::Io {
+        path: payload,
+        source,
+    })?;
+    Archive::new(GzDecoder::new(file))
+        .unpack(destination)
+        .map_err(|source| PreparedArtifactError::Io {
+            path: destination.to_path_buf(),
+            source,
+        })?;
+    admit_tree(&manifest, destination)
 }
 
 impl PreparedManifest {
@@ -961,7 +1081,7 @@ pub enum PreparedArtifactError {
 impl fmt::Display for PreparedArtifactError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage => formatter.write_str("usage: prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|admit-tree MANIFEST.json ROOT>"),
+            Self::Usage => formatter.write_str("usage: prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>"),
             Self::Invalid(message) => formatter.write_str(message),
             Self::Conflict { reference, expected, observed } => write!(formatter, "prepared locator {reference} conflicts: expected {expected}, observed {observed}"),
             Self::OrasMissing(command) => write!(formatter, "prepared artifact is absent: `{command}`"),
@@ -1059,5 +1179,27 @@ mod tests {
             .is_ok()
         );
         assert!(admit_tag_reference("ghcr.io/infimalabs/spice/prepared:latest").is_err());
+    }
+
+    #[test]
+    fn prepared_bundle_bytes_are_reproducible_and_unpack_to_the_inventory() {
+        let scratch = Scratch::new().unwrap();
+        let root = scratch.path.join("root");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("candidate"), b"exact bytes").unwrap();
+        let first = scratch.path.join("first.tar.gz");
+        let second = scratch.path.join("second.tar.gz");
+
+        pack_bundle(&root, &first).unwrap();
+        pack_bundle(&root, &second).unwrap();
+        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
+
+        let unpacked = scratch.path.join("unpacked");
+        fs::create_dir(&unpacked).unwrap();
+        let archive = fs::File::open(first).unwrap();
+        Archive::new(GzDecoder::new(archive))
+            .unpack(&unpacked)
+            .unwrap();
+        assert_eq!(inventory(&unpacked).unwrap(), inventory(&root).unwrap());
     }
 }
