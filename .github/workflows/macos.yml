@@ -504,8 +504,6 @@ jobs:
 
       - name: Rebind, prove, and verify exact signed stage
         shell: bash
-        env:
-          CHALLENGE: ${{ inputs.challenge }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/finalize"
