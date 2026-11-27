@@ -372,6 +372,24 @@ mod tests {
     }
 
     #[test]
+    fn line_park_exposes_only_the_stable_public_reason() {
+        let mut lane = member(uuid(1));
+        lane.parked = Some(wire::body::LanePark::Line);
+
+        let label = lane.presence_label(lane.status(0));
+        assert_eq!(
+            wire::body::LanePark::Line.as_str(),
+            "line",
+            "browser hooks receive the stable reason"
+        );
+        assert_eq!(label, "agent running, parked on its armed peer lines");
+        assert!(
+            !label.contains("dZj") && !label.contains("00000000"),
+            "the public label carries no root or partner identity"
+        );
+    }
+
+    #[test]
     fn chat_targets_resolve_every_current_team_and_member() {
         let team = uuid(1);
         let first = uuid(2);

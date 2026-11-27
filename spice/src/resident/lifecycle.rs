@@ -244,6 +244,9 @@ pub(super) struct Runtime {
     /// Malformed newest arm facts already reported to their lane's current
     /// seating. A different newest fact is a different report.
     reported_line_arm_faults: BTreeSet<(CanonicalUuid, Seq, CanonicalUuid)>,
+    /// Open armed roots already reported to their lane's current seating.
+    /// A different arm or occupant is a different report.
+    reported_open_line_arms: BTreeSet<(CanonicalUuid, Seq, CanonicalUuid)>,
     continuations: Continuations,
     loose: loose::Loose,
 }
@@ -363,6 +366,7 @@ impl Runtime {
             projection: Projection::new(),
             held_findings: BTreeSet::new(),
             reported_line_arm_faults: BTreeSet::new(),
+            reported_open_line_arms: BTreeSet::new(),
             continuations: Continuations::default(),
             loose: loose::Loose::new(native_system),
         }
@@ -450,7 +454,7 @@ impl Runtime {
             .map(|target| target.lane)
             .collect::<BTreeSet<_>>();
         targets.extend(retained);
-        let invalid_line_arms = await_armed_lines(bus, &snapshot, &mut targets)?;
+        let armed_lines = await_armed_lines(bus, &snapshot, &mut targets)?;
         await_regular_jobs(&mut targets, now, |lane| {
             super::supervisor::terminal::Jobs::for_lane(paths, lane).finite_horizon()
         });
@@ -487,12 +491,7 @@ impl Runtime {
         };
         self.reconcile_job_parks(paths, &snapshot, now, &mut parks);
         self.journal_parks(bus, epoch, &snapshot, &parks, diagnostic);
-        line_arms::report_faults(
-            &mut self.reported_line_arm_faults,
-            paths,
-            &snapshot,
-            &invalid_line_arms,
-        );
+        line_arms::report(self, paths, &snapshot, &armed_lines);
         let hold = self.holds.next().map(|(lane, at)| WakeDeadline {
             lane,
             at,
