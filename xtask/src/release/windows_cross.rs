@@ -31,6 +31,8 @@ pub struct CrossImage<'a> {
 /// Cross-build the candidate, the hosted runner, the release publisher, and
 /// every proof member's test executables for `x86_64-pc-windows-msvc`, and lay
 /// them out under `out/root` with their build key at `out/build-key.json`.
+/// The toolchain the build observed lies beside the candidate, where the
+/// prebuilt stage checks it against the release pins.
 ///
 /// The source is the release archive, as [`stage_target`] builds it: a
 /// delivered archive's tree is the workspace, otherwise the stage root's
@@ -62,10 +64,11 @@ pub fn cross_build_windows(
     let programs = Programs::discover(&root, &environment, TARGET)?;
     let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
     let result = (|| {
+        let toolchain = observe_toolchain(&executor, &programs, TARGET)?;
         let outputs = build_set(&root, &build_root, &version, canvas, &programs, &executor)?;
         archive.verify()?;
         let inputs = build_key(&root, &archive, image, &programs, &executor)?;
-        publish(out, &outputs, &inputs)
+        publish(out, &outputs, &inputs, &toolchain)
     })();
     render_command_records(output, &executor.records())?;
     result?;
@@ -117,11 +120,11 @@ fn build_set<E: Executor>(
         .expect("a built candidate names its executable");
     let mut placed = vec![
         Placed {
-            path: "candidate/spice.exe".to_owned(),
+            path: prebuilt::CANDIDATE.to_owned(),
             source: executable.clone(),
         },
         Placed {
-            path: "candidate/spice.pdb".to_owned(),
+            path: prebuilt::DEBUG.to_owned(),
             source: executable.with_extension("pdb"),
         },
     ];
@@ -313,11 +316,13 @@ fn sha256(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
-/// Replace `out` with the artifact root and its build key.
+/// Replace `out` with the artifact root, the observed toolchain, and the
+/// build key.
 fn publish(
     out: &Path,
     placed: &[Placed],
     inputs: &BTreeMap<String, String>,
+    toolchain: &prebuilt::Toolchain,
 ) -> Result<(), TargetBuildError> {
     let io = |path: &Path| {
         let path = path.to_path_buf();
@@ -337,6 +342,12 @@ fn publish(
         fs::create_dir_all(parent).map_err(io(parent))?;
         fs::copy(&file.source, &destination).map_err(io(&file.source))?;
     }
+    let recorded = root.join(prebuilt::TOOLCHAIN);
+    let encoded = serde_json::to_vec(toolchain).map_err(|error| TargetBuildError::Observation {
+        label: "windows cross toolchain",
+        observed: error.to_string(),
+    })?;
+    fs::write(&recorded, encoded).map_err(io(&recorded))?;
     let key = out.join(BUILD_KEY);
     let encoded = serde_json::to_vec(inputs).map_err(|error| TargetBuildError::Observation {
         label: "windows cross build key",

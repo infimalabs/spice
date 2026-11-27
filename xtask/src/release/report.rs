@@ -107,6 +107,8 @@ pub enum TargetBuildError {
     Application(crate::app::AppBuildError),
     /// The canvas a non-Linux target adopts from the staged Linux payload.
     AdoptedCanvas(String),
+    /// The cross-built bundle a prebuilt stage adopts its candidate from.
+    Prebuilt(String),
     Build(dist::BuildError),
     Pins(dist::PinError),
     SourceVersion(String),
@@ -179,6 +181,9 @@ impl fmt::Display for TargetBuildError {
             Self::Application(error) => write!(formatter, "app build failed: {error}"),
             Self::AdoptedCanvas(reason) => {
                 write!(formatter, "release canvas adoption refused: {reason}")
+            }
+            Self::Prebuilt(reason) => {
+                write!(formatter, "prebuilt candidate refused: {reason}")
             }
             Self::Build(error) => write!(formatter, "native build failed: {error}"),
             Self::SourceVersion(detail) => write!(formatter, "product version refused: {detail}"),

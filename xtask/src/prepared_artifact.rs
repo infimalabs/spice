@@ -394,17 +394,38 @@ pub(crate) fn fetch_bundle(
 }
 
 /// The hosted Windows proof battery the cross-built bundle `manifest` names,
-/// admitted only when that bundle was built from the release source archive
-/// whose identity is `source`.
+/// admitted as [`windows_bundle_files`] admits it.
 ///
 /// # Errors
 ///
-/// Refuses an unreadable or invalid manifest, a non-Windows bundle, a bundle
-/// built from other source, or proof files that are not the current battery.
+/// Refuses what [`windows_bundle_files`] refuses and proof files that are not
+/// the current battery.
 pub(crate) fn windows_proof_battery(
     manifest: &Path,
     source: &wire::Digest,
 ) -> Result<proof::HostedBattery, PreparedArtifactError> {
+    let files = windows_bundle_files(manifest, source)?;
+    proof::HostedBattery::from_bundle(
+        files
+            .iter()
+            .map(|(path, digest)| (path.as_str(), digest.as_str())),
+    )
+    .map_err(|error| PreparedArtifactError::Invalid(error.to_string()))
+}
+
+/// Every file the cross-built Windows bundle `manifest` inventories, by
+/// relative path, with its bare lowercase SHA-256 digest, admitted only when
+/// that bundle was built from the release source archive whose identity is
+/// `source`.
+///
+/// # Errors
+///
+/// Refuses an unreadable or invalid manifest, a non-Windows bundle, or a
+/// bundle built from other source.
+pub(crate) fn windows_bundle_files(
+    manifest: &Path,
+    source: &wire::Digest,
+) -> Result<BTreeMap<String, String>, PreparedArtifactError> {
     let manifest = read_manifest(manifest)?;
     if manifest.kind != ArtifactKind::Bundle || manifest.platform != Platform::WindowsAmd64 {
         return Err(PreparedArtifactError::Invalid(
@@ -417,15 +438,18 @@ pub(crate) fn windows_proof_battery(
             "Windows bundle was not built from release source {source}"
         )));
     }
-    proof::HostedBattery::from_bundle(manifest.files.iter().map(|file| {
-        (
-            file.path.as_str(),
-            file.digest
+    Ok(manifest
+        .files
+        .into_iter()
+        .map(|file| {
+            let digest = file
+                .digest
                 .strip_prefix(DIGEST_PREFIX)
-                .unwrap_or(&file.digest),
-        )
-    }))
-    .map_err(|error| PreparedArtifactError::Invalid(error.to_string()))
+                .unwrap_or(&file.digest)
+                .to_owned();
+            (file.path, digest)
+        })
+        .collect())
 }
 
 impl PreparedManifest {

@@ -38,6 +38,8 @@ use source::{GuardedPublisher, SourceArchive, verify_checkout};
 
 mod windows_appliance;
 pub use windows_appliance::build_windows_appliance;
+mod prebuilt;
+pub use prebuilt::stage_prebuilt_target;
 mod windows_cross;
 pub use windows_cross::{CrossImage, cross_build_windows};
 
@@ -747,6 +749,16 @@ fn observe_pins<E: Executor>(
     target: ReleaseTarget,
     proof_container: &str,
 ) -> Result<BuildPins, TargetBuildError> {
+    observe_toolchain(executor, programs, target).map(|toolchain| toolchain.pins(proof_container))
+}
+
+/// The build tools a release build observes: the compiler with the app and
+/// `target` standard libraries installed, and Trunk.
+fn observe_toolchain<E: Executor>(
+    executor: &E,
+    programs: &Programs,
+    target: ReleaseTarget,
+) -> Result<prebuilt::Toolchain, TargetBuildError> {
     let rust = successful(executor.execute(CommandSpec::new(
         "rust-version",
         &programs.rustc,
@@ -773,11 +785,10 @@ fn observe_pins<E: Executor>(
         &programs.trunk,
         ["--version"],
     ))?)?;
-    Ok(BuildPins {
+    Ok(prebuilt::Toolchain {
         rust,
         wasm_target: WASM_TARGET.to_owned(),
         trunk: one_line(&trunk.stdout, "Trunk version")?,
-        proof_container: proof_container.to_owned(),
     })
 }
 
@@ -1138,6 +1149,25 @@ impl SystemExecutor {
             environment: Environment::new(entries)?,
             records: RefCell::new(Vec::new()),
         })
+    }
+
+    /// Seal the commands a prebuilt stage runs: the adopted executable only,
+    /// so no compiler, Cargo, or build-script variable is named.
+    fn prebuilt(root: &Path, release: &ReleaseEnvironment) -> Result<Self, TargetBuildError> {
+        let mut entries = [
+            ("PATH", release.path.as_ref()),
+            ("HOME", release.home.as_ref()),
+            ("TMPDIR", release.temporary.as_ref()),
+            ("TEMP", release.temp.as_ref()),
+            ("TMP", release.tmp.as_ref()),
+            ("SystemRoot", release.system_root.as_ref()),
+            ("PATHEXT", release.path_ext.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|value| (OsString::from(key), value.clone())))
+        .collect::<Vec<_>>();
+        entries.push((OsString::from("NO_COLOR"), OsString::from("true")));
+        Ok(Self::ambient(root, Environment::new(entries)?))
     }
 
     fn ambient(root: &Path, environment: Environment) -> Self {

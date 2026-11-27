@@ -23,7 +23,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -563,6 +563,7 @@ fn run_stage_target(
         route,
         attach,
         release_inputs,
+        prebuilt,
     }) = parse_stage_target(&arguments)
     else {
         eprintln!("{}", help());
@@ -572,6 +573,24 @@ fn run_stage_target(
         require_unsigned(target, unsigned)?;
     }
     let environment = release_environment(ambient);
+    if let Some((manifest, bundle)) = prebuilt {
+        let proof_container = proof_container.ok_or_else(usage_error)?;
+        let app = if environment.release_canvas.is_some() {
+            xtask::AppOrigin::Provider
+        } else {
+            xtask::AppOrigin::Linux
+        };
+        return xtask::stage_prebuilt_target(
+            environment,
+            proof_container,
+            app,
+            manifest,
+            bundle,
+            output,
+        )
+        .map(|_| ())
+        .map_err(Into::into);
+    }
     if target == "x86_64-pc-windows-msvc" && !environment.is_hosted_guest() {
         if scope != StageScope::Target {
             eprintln!("{}", help());
@@ -660,6 +679,9 @@ struct StageRequest<'a> {
     attach: Option<xtask::Attach>,
     /// The provider preflight run whose canonical inputs this stage consumes.
     release_inputs: Option<xtask::Attach>,
+    /// The cross-built bundle's manifest and unpacked root a prebuilt
+    /// Windows stage adopts its candidate from.
+    prebuilt: Option<(&'a Path, &'a Path)>,
 }
 
 fn parse_provider_controls(
@@ -692,6 +714,7 @@ fn parse_stage_route(arguments: &[OsString]) -> (StageRoute, &[OsString]) {
 fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     let (attach, release_inputs, arguments) = parse_provider_controls(arguments)?;
     let (route, arguments) = parse_stage_route(arguments);
+    let (prebuilt, arguments) = parse_prebuilt(arguments);
     let (proof_runner, arguments) = match arguments {
         [rest @ .., flag, runner] if flag == OsStr::new("--proof-runner") => {
             (Some(runner.to_str()?), rest)
@@ -752,7 +775,7 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     {
         return None;
     }
-    Some(StageRequest {
+    let request = StageRequest {
         target,
         unsigned,
         proof_container,
@@ -761,7 +784,35 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         route,
         attach,
         release_inputs,
-    })
+        prebuilt,
+    };
+    request.prebuilt_admitted().then_some(request)
+}
+
+fn parse_prebuilt(arguments: &[OsString]) -> (Option<(&Path, &Path)>, &[OsString]) {
+    match arguments {
+        [rest @ .., flag, manifest, bundle] if flag == OsStr::new("--prebuilt") => {
+            (Some((Path::new(manifest), Path::new(bundle))), rest)
+        }
+        _ => (None, arguments),
+    }
+}
+
+impl StageRequest<'_> {
+    /// A prebuilt stage adopts its candidate on the machine that runs it: an
+    /// unsigned Windows target stage with a named proof image and nothing to
+    /// dispatch or re-enter.
+    fn prebuilt_admitted(&self) -> bool {
+        self.prebuilt.is_none()
+            || (self.target == WINDOWS_TARGET
+                && self.unsigned
+                && self.proof_container.is_some()
+                && self.proof_runner.is_none()
+                && self.scope == StageScope::Target
+                && self.route == StageRoute::Default
+                && self.attach.is_none()
+                && self.release_inputs.is_none())
+    }
 }
 
 fn stage_route_admitted(
