@@ -202,6 +202,7 @@ struct OciManifest {
     #[serde(default)]
     annotations: BTreeMap<String, String>,
     #[serde(default)]
+    #[serde(rename = "artifactType")]
     artifact_type: Option<String>,
 }
 
@@ -716,19 +717,8 @@ fn fetch(
     Ok(pulled)
 }
 
-fn admit_remote(
-    reference: &str,
-    digest: &str,
-    expected_build_key: &str,
-) -> Result<PreparedManifest, PreparedArtifactError> {
-    admit_digest("manifest digest", digest)?;
-    let repository = reference
-        .split([':', '@'])
-        .next()
-        .ok_or(PreparedArtifactError::Usage)?;
-    let exact = format!("{repository}@{digest}");
-    let bytes = run_oras_stdout(&["manifest".into(), "fetch".into(), exact.clone().into()])?;
-    let oci: OciManifest = serde_json::from_slice(&bytes).map_err(PreparedArtifactError::Decode)?;
+fn admit_oci_manifest(bytes: &[u8]) -> Result<OciManifest, PreparedArtifactError> {
+    let oci: OciManifest = serde_json::from_slice(bytes).map_err(PreparedArtifactError::Decode)?;
     if oci.schema_version != 2
         || oci.media_type != OCI_MANIFEST_MEDIA_TYPE
         || oci.config.media_type != CONFIG_MEDIA_TYPE
@@ -745,6 +735,22 @@ fn admit_remote(
             "OCI manifest is not one prepared Spice artifact".to_owned(),
         ));
     }
+    Ok(oci)
+}
+
+fn admit_remote(
+    reference: &str,
+    digest: &str,
+    expected_build_key: &str,
+) -> Result<PreparedManifest, PreparedArtifactError> {
+    admit_digest("manifest digest", digest)?;
+    let repository = reference
+        .split([':', '@'])
+        .next()
+        .ok_or(PreparedArtifactError::Usage)?;
+    let exact = format!("{repository}@{digest}");
+    let bytes = run_oras_stdout(&["manifest".into(), "fetch".into(), exact.clone().into()])?;
+    let oci = admit_oci_manifest(&bytes)?;
     let config = run_oras_stdout(&[
         "blob".into(),
         "fetch".into(),
@@ -1236,6 +1242,37 @@ mod tests {
         let mut changed = descriptor;
         changed["unknown"] = serde_json::json!("field");
         assert!(admit_manifest_descriptor(&serde_json::to_vec(&changed).unwrap()).is_err());
+    }
+
+    #[test]
+    fn fetched_manifest_requires_the_provider_spelled_artifact_type() {
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": OCI_MANIFEST_MEDIA_TYPE,
+            "artifactType": ARTIFACT_MEDIA_TYPE,
+            "config": {
+                "mediaType": CONFIG_MEDIA_TYPE,
+                "digest": digest('a'),
+                "size": 17,
+            },
+            "layers": [{
+                "mediaType": "application/vnd.infimalabs.spice.payload.v1",
+                "digest": digest('b'),
+                "size": 29,
+            }],
+            "annotations": {},
+        });
+        assert!(admit_oci_manifest(&serde_json::to_vec(&manifest).unwrap()).is_ok());
+
+        let mut missing = manifest.clone();
+        missing.as_object_mut().unwrap().remove("artifactType");
+        assert!(admit_oci_manifest(&serde_json::to_vec(&missing).unwrap()).is_err());
+        let mut conflicting = manifest.clone();
+        conflicting["artifactType"] = serde_json::json!("application/vnd.example.wrong");
+        assert!(admit_oci_manifest(&serde_json::to_vec(&conflicting).unwrap()).is_err());
+        let mut unknown = manifest;
+        unknown["unknown"] = serde_json::json!("field");
+        assert!(admit_oci_manifest(&serde_json::to_vec(&unknown).unwrap()).is_err());
     }
 
     #[test]
