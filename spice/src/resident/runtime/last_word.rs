@@ -126,7 +126,7 @@ pub(super) fn closing_word(
                 && context
                     .turn_id
                     .as_deref()
-                    .is_some_and(|id| id.starts_with("spice-aside-"))
+                    .is_some_and(|id| id.starts_with(vendor::omp::ASIDE_ID_PREFIX))
             {
                 continue;
             }
