@@ -252,6 +252,15 @@ struct Indexes {
     >,
     held_lanes: HashSet<journal::crossing::CanonicalUuid>,
     parked_lanes: HashMap<journal::crossing::CanonicalUuid, journal::crossing::body::LanePark>,
+    /// Each lane's newest line-arm fact. `None` means its body was unreadable
+    /// or named a lane other than its author.
+    line_arms: HashMap<
+        journal::crossing::CanonicalUuid,
+        (
+            journal::crossing::Seq,
+            Option<journal::crossing::body::LineArmed>,
+        ),
+    >,
     /// First durable claim-win instant for every task that has ever been claimed.
     original_claims:
         persistent_index::PersistentIndex<journal::crossing::TaskStamp, journal::crossing::Instant>,
@@ -429,7 +438,8 @@ impl Indexes {
             | FactKind::LaneHeld
             | FactKind::LaneResumed
             | FactKind::LaneParked
-            | FactKind::LaneUnparked => self.observe_lane(row),
+            | FactKind::LaneUnparked
+            | FactKind::LineArmed => self.observe_lane(row),
             FactKind::TaskAdded => self.observe_task_added(row),
             FactKind::TaskRelated => self.observe_related(row),
             FactKind::TrustPended => self.observe_trust(row),
@@ -475,6 +485,16 @@ impl Indexes {
         }
         if let Some(unparked) = row.fact.read::<journal::crossing::body::LaneUnparked>() {
             self.parked_lanes.remove(&unparked.lane);
+            return;
+        }
+        if row.fact.kind() == journal::crossing::FactKind::LineArmed
+            && let journal::crossing::Actor::Lane(lane) = row.actor
+        {
+            let armed = row
+                .fact
+                .read::<journal::crossing::body::LineArmed>()
+                .filter(|armed| armed.lane == lane);
+            self.line_arms.insert(lane, (row.seq, armed));
             return;
         }
         if let Some(declared) = row
@@ -933,6 +953,22 @@ impl TaskFacts {
         lane: journal::crossing::CanonicalUuid,
     ) -> Option<journal::crossing::body::LanePark> {
         self.indexes.parked_lanes.get(&lane).copied()
+    }
+
+    /// Newest line-arm fact authored by `lane`. A missing body means the fact
+    /// was unreadable or its payload named another lane.
+    #[must_use]
+    pub fn latest_line_arm(
+        &self,
+        lane: journal::crossing::CanonicalUuid,
+    ) -> Option<(
+        journal::crossing::Seq,
+        Option<&journal::crossing::body::LineArmed>,
+    )> {
+        self.indexes
+            .line_arms
+            .get(&lane)
+            .map(|(position, armed)| (*position, armed.as_ref()))
     }
 
     /// Newest durable Design request recorded for this lane, whichever

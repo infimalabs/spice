@@ -31,6 +31,7 @@ use super::{lane_surface, supervisor};
 mod availability;
 mod holds;
 mod launch;
+mod line_arms;
 mod loose;
 mod materialization;
 mod parks;
@@ -42,7 +43,7 @@ mod review_feedback;
 mod targets;
 pub(in crate::resident) use launch::PendingLaunch;
 use launch::{Launching, begin_work, pending_launch, unlaunched_claim};
-use targets::{await_regular_jobs, project_retained_targets, project_targets};
+use targets::{await_armed_lines, await_regular_jobs, project_retained_targets, project_targets};
 #[cfg(test)]
 mod job_hold_tests;
 #[cfg(test)]
@@ -240,6 +241,9 @@ pub(super) struct Runtime {
     /// lane was between seats when judged; each is judged again until a seat
     /// continues the author's session, another session takes it, or it expires.
     held_findings: BTreeSet<Seq>,
+    /// Malformed newest arm facts already reported to their lane's current
+    /// seating. A different newest fact is a different report.
+    reported_line_arm_faults: BTreeSet<(CanonicalUuid, Seq, CanonicalUuid)>,
     continuations: Continuations,
     loose: loose::Loose,
 }
@@ -358,6 +362,7 @@ impl Runtime {
             hold: config.hold().get(),
             projection: Projection::new(),
             held_findings: BTreeSet::new(),
+            reported_line_arm_faults: BTreeSet::new(),
             continuations: Continuations::default(),
             loose: loose::Loose::new(native_system),
         }
@@ -445,6 +450,7 @@ impl Runtime {
             .map(|target| target.lane)
             .collect::<BTreeSet<_>>();
         targets.extend(retained);
+        let invalid_line_arms = await_armed_lines(bus, &snapshot, &mut targets)?;
         await_regular_jobs(&mut targets, now, |lane| {
             super::supervisor::terminal::Jobs::for_lane(paths, lane).finite_horizon()
         });
@@ -481,6 +487,12 @@ impl Runtime {
         };
         self.reconcile_job_parks(paths, &snapshot, now, &mut parks);
         self.journal_parks(bus, epoch, &snapshot, &parks, diagnostic);
+        line_arms::report_faults(
+            &mut self.reported_line_arm_faults,
+            paths,
+            &snapshot,
+            &invalid_line_arms,
+        );
         let hold = self.holds.next().map(|(lane, at)| WakeDeadline {
             lane,
             at,
