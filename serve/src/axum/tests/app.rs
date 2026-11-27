@@ -53,43 +53,54 @@ async fn etags_revalidate_without_retransmitting_the_asset() {
         Some("no-cache")
     );
 
-    let wasm_route = format!(
-        "{}/{FIXTURE_GENERATION}/app_bg.wasm",
-        crate::APP_GENERATION_ROUTE
-    );
-    let nonmatching = request_with_headers(
-        address,
-        &address.to_string(),
-        &wasm_route,
-        &[("If-None-Match", "\"not-this-asset\"")],
-    )
-    .await;
-    assert!(nonmatching.starts_with(b"HTTP/1.1 200 OK\r\n"));
-    assert_eq!(response_body(&nonmatching), b"test app app_bg.wasm");
-    assert_eq!(
-        response_header(&nonmatching, "content-type"),
-        Some("application/wasm")
-    );
-    let wasm_etag = response_header(&nonmatching, "etag")
-        .expect("the generation-qualified response carries an ETag")
-        .to_owned();
-    let wasm_revalidated = request_with_headers(
-        address,
-        &address.to_string(),
-        &wasm_route,
-        &[("If-None-Match", &wasm_etag)],
-    )
-    .await;
-    assert!(wasm_revalidated.starts_with(b"HTTP/1.1 304 Not Modified\r\n"));
-    assert!(response_body(&wasm_revalidated).is_empty());
-    assert_eq!(
-        response_header(&wasm_revalidated, "etag"),
-        Some(wasm_etag.as_str())
-    );
-    assert_eq!(
-        response_header(&wasm_revalidated, "content-type"),
-        Some("application/wasm")
-    );
+    task.abort();
+    assert!(task.await.expect_err("aborted server task").is_cancelled());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn generation_qualified_assets_are_immutable_and_retransmit_when_revalidated() {
+    let app = TestApp::new();
+    let (server, _control) = Server::bind(generation(&app, Capabilities::default()))
+        .await
+        .expect("binds");
+    let address = server.local_addr().expect("local address");
+    let task = tokio::spawn(server.up());
+
+    for file in ["style.css", "app_bg.wasm"] {
+        let route = format!(
+            "{}/{FIXTURE_GENERATION}/{file}",
+            crate::APP_GENERATION_ROUTE
+        );
+        let initial = request_with_headers(address, &address.to_string(), &route, &[]).await;
+        assert!(initial.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert_eq!(
+            response_header(&initial, "cache-control"),
+            Some("public, max-age=31536000, immutable")
+        );
+        assert_eq!(
+            response_header(&initial, "content-type"),
+            crate::content_type(file)
+        );
+        let etag = response_header(&initial, "etag")
+            .expect("the generation-qualified asset carries an ETag")
+            .to_owned();
+        let body = response_body(&initial);
+
+        let revalidated = request_with_headers(
+            address,
+            &address.to_string(),
+            &route,
+            &[("If-None-Match", &etag)],
+        )
+        .await;
+        assert!(revalidated.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        assert_eq!(response_body(&revalidated), body);
+        assert_eq!(response_header(&revalidated, "etag"), Some(etag.as_str()));
+        assert_eq!(
+            response_header(&revalidated, "cache-control"),
+            Some("public, max-age=31536000, immutable")
+        );
+    }
 
     task.abort();
     assert!(task.await.expect_err("aborted server task").is_cancelled());

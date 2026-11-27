@@ -416,9 +416,15 @@ unmodified. Owners:
 [`serve/src/axum.rs`](../serve/src/axum.rs).
 
 A resident restart keeps the app's last good surface on screen until the new
-session's scope is fully hydrated. Every app route answers `no-cache` with a
-content ETag, so an ordinary reload loads the served generation. A page whose
-generation the resident no longer serves reloads once into the served
+session's scope is fully hydrated. Unversioned app routes answer `no-cache`
+with a content ETag and may answer a matching validator with 304, so an
+ordinary reload finds the generation the resident serves. Generation-qualified
+routes are content-addressed and answer
+`public, max-age=31536000, immutable`; if a client nevertheless revalidates
+one, the resident retransmits the complete verified body rather than answering
+304 because WebKit applies subresource integrity to that empty payload instead
+of its retained asset. A page whose generation the resident no longer serves
+reloads once into the served
 generation, whether or not the app protocol changed: when its next
 connection's bootstrap names another generation, before any session opens, or
 when a qualified fetch answers 410 for the shell's module or wasm (caught by
