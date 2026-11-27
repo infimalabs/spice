@@ -93,7 +93,9 @@ impl Write for CountingSink {
 /// Receive the exit of each of `answering` threads.
 fn settled(exits: &mpsc::Receiver<()>, answering: usize) {
     for _ in 0..answering {
-        exits.recv().expect("an answering thread exits");
+        exits
+            .recv_timeout(test_support::DEADLOCK_GUARD)
+            .expect("an answering thread exits");
     }
 }
 
@@ -108,7 +110,9 @@ fn withdrawing_a_tool_does_not_make_its_running_work_quiescent() {
         Ok("finished".to_owned())
     });
     driver.serve_uri("pending", "read", TARGET, None);
-    entry.recv().expect("tool starts");
+    entry
+        .recv_timeout(test_support::DEADLOCK_GUARD)
+        .expect("tool starts");
     driver.withdraw_uri("pending");
     let while_running = driver.quiescent();
     drop(release);

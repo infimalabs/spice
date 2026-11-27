@@ -156,9 +156,21 @@ mod tests {
         send(&path, b"").expect("empty message sends");
         send(&path, &[7; CAPACITY]).expect("a message at capacity sends");
 
-        assert_eq!(door.recv(None).expect("first arrives"), b"first");
-        assert_eq!(door.recv(None).expect("empty arrives"), b"");
-        assert_eq!(door.recv(None).expect("full arrives"), [7; CAPACITY]);
+        assert_eq!(
+            door.recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("first arrives"),
+            b"first"
+        );
+        assert_eq!(
+            door.recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("empty arrives"),
+            b""
+        );
+        assert_eq!(
+            door.recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("full arrives"),
+            [7; CAPACITY]
+        );
     }
 
     /// Darwin sizes the door's queue by its receive buffer and Windows queues
@@ -180,7 +192,8 @@ mod tests {
         }
         for index in 0..BURST {
             assert_eq!(
-                door.recv(None).expect("queued message arrives"),
+                door.recv(Some(test_support::DEADLOCK_GUARD))
+                    .expect("queued message arrives"),
                 kick(index)
             );
         }
@@ -192,7 +205,7 @@ mod tests {
         let door = Door::bind(&path, KICK).expect("door binds");
 
         // Past Linux's default of ten unread datagrams, so its sender waits on
-        // the owner. The sender runs apart, so each receive lets it resume.
+        // the owner. The shared guard catches deadlocked fixture plumbing.
         let target = path.clone();
         let sending = std::thread::spawn(move || {
             let sender = Sender::new().expect("sender opens");
@@ -203,7 +216,11 @@ mod tests {
             }
         });
         for index in 0..BURST {
-            assert_eq!(door.recv(None).expect("burst message arrives"), kick(index));
+            assert_eq!(
+                door.recv(Some(test_support::DEADLOCK_GUARD))
+                    .expect("burst message arrives"),
+                kick(index)
+            );
         }
         sending.join().expect("the sender finishes");
     }
@@ -218,7 +235,11 @@ mod tests {
         let _ = send(&path, &[1; CAPACITY + 1]);
         send(&path, b"fits").expect("a fitting message sends");
 
-        assert_eq!(door.recv(None).expect("fitting message arrives"), b"fits");
+        assert_eq!(
+            door.recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("fitting message arrives"),
+            b"fits"
+        );
     }
 
     #[test]
@@ -251,14 +272,18 @@ mod tests {
 
         send(&path, b"to the successor").expect("message sends");
         assert_eq!(
-            current.recv(None).expect("successor receives"),
+            current
+                .recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("successor receives"),
             b"to the successor"
         );
 
         drop(stale);
         send(&path, b"still here").expect("the successor's endpoint survives");
         assert_eq!(
-            current.recv(None).expect("successor receives"),
+            current
+                .recv(Some(test_support::DEADLOCK_GUARD))
+                .expect("successor receives"),
             b"still here"
         );
     }

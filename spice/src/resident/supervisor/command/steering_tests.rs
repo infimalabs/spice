@@ -620,7 +620,12 @@ fn an_outbox_receipt_withdraws_its_acknowledged_reminder_before_catch_up() {
             },
         }),
     );
+    let deadline = std::time::Instant::now() + test_support::DEADLOCK_GUARD;
     while seat.notices("uri-write:w").is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the outbox write answers before the shared deadlock guard"
+        );
         std::thread::yield_now();
     }
 

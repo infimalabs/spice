@@ -217,10 +217,6 @@ fn answer_replacement_opening(
     1
 }
 
-/// A client bound no fixture reaches. Every fixture peer answers, so a bound
-/// that could elapse would let the host's speed decide the verdict.
-const UNREACHED_BOUND: Duration = Duration::from_secs(60 * 60 * 24 * 365);
-
 fn accept_fixture_session(listener: TcpListener, epoch: CanonicalUuid) -> WebSocket<TcpStream> {
     let (stream, _) = listener.accept().expect("fixture peer accepts");
     let mut socket = tungstenite::accept(stream).expect("fixture peer opens socket");
@@ -496,7 +492,7 @@ fn a_live_foreign_resident_refuses_the_lane_before_discovery_waits() {
             resident_lock: &resident_lock_path(&fixture.serve),
             foreign: Some(&foreign),
         },
-        UNREACHED_BOUND,
+        test_support::DEADLOCK_GUARD,
         |_| panic!("a proved foreign resident does not enter publication handoff"),
     ) {
         Err(outcome) => outcome,
@@ -554,7 +550,7 @@ fn a_local_lane_reacquires_its_surface_from_a_live_replacement() {
             resident_lock: &resident_lock_path(&fixture.serve),
             foreign: None,
         },
-        UNREACHED_BOUND,
+        test_support::DEADLOCK_GUARD,
         |fault| {
             transients.push(fault.reason.clone());
             discovery

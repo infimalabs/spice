@@ -20,6 +20,12 @@ use identity::{TestApp, app_version, bind_test_server};
 
 type ClientSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
+async fn fixture_completion<T>(future: impl Future<Output = T>) -> T {
+    tokio::time::timeout(test_support::DEADLOCK_GUARD, future)
+        .await
+        .expect("fixture completes before the shared deadlock guard")
+}
+
 /// The bootstrap principal [`crate::roles::operator_book`] bears holding the
 /// operator role.
 fn owner() -> wire::Actor {
@@ -349,7 +355,7 @@ async fn response(socket: &mut ClientSocket) -> wire::Response<serde_json::Value
 }
 
 async fn assert_socket_terminated(socket: &mut ClientSocket) {
-    let result = socket.next().await;
+    let result = fixture_completion(socket.next()).await;
     assert!(
         matches!(
             result,
@@ -510,7 +516,7 @@ async fn authenticated_socket_streams_bounded_bus_pages_updates_resume_and_typed
             if after.seq == seq(live_cursor) && after.epoch == epoch()
     ));
     assert_socket_terminated(&mut resumed).await;
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -584,7 +590,7 @@ async fn a_liveness_probe_is_answered_per_probe_and_still_admits_its_generation(
     ));
 
     shutdown.send(()).expect("shutdown signals");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -644,8 +650,7 @@ async fn a_held_recall_does_not_block_a_probe_or_sibling_recall_on_one_socket() 
     )
     .await;
     send_recall(&mut socket, recall_b, lane_b).await;
-    let second = control
-        .recv()
+    let second = fixture_completion(control.recv())
         .await
         .expect("sibling recall enters Control while the first response is held");
     assert!(matches!(
@@ -692,7 +697,7 @@ async fn a_held_recall_does_not_block_a_probe_or_sibling_recall_on_one_socket() 
     ));
 
     shutdown.send(()).expect("shutdown signals");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -772,7 +777,7 @@ async fn authenticated_socket_reads_and_pushes_agent_messages_with_each_author()
         wire::StreamFrame::Closing { .. }
     ));
     assert_socket_terminated(&mut socket).await;
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -897,8 +902,7 @@ async fn wait_for_admission(
     observed: &mut watch::Receiver<Option<AdmissionObservation>>,
     expected: AdmissionObservation,
 ) {
-    observed
-        .wait_for(|observation| *observation == Some(expected))
+    fixture_completion(observed.wait_for(|observation| *observation == Some(expected)))
         .await
         .expect("admission observer remains open");
 }

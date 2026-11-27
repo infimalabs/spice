@@ -35,7 +35,9 @@ fn live_changes_use_exact_requests_and_only_matching_provider_responses_apply() 
     driver.observe(&decoded(
         br#"{"id":"live-effort","type":"response","command":"set_thinking_level","success":true}"#,
     ));
-    let bytes = callback.recv(None).expect("the matching response answers");
+    let bytes = callback
+        .recv(Some(test_support::DEADLOCK_GUARD))
+        .expect("the matching response answers");
     let answer: RetuneReply = serde_json::from_slice(&bytes).expect("the callback is typed");
     assert_eq!(answer.request, "live-effort");
     assert!(matches!(answer.result, LiveRetuneResult::Applied));
@@ -60,7 +62,9 @@ fn live_changes_use_exact_requests_and_only_matching_provider_responses_apply() 
     driver.observe(&decoded(
         br#"{"id":"live-model","type":"response","command":"set_thinking_level","success":true}"#,
     ));
-    let bytes = callback.recv(None).expect("the mismatched command answers");
+    let bytes = callback
+        .recv(Some(test_support::DEADLOCK_GUARD))
+        .expect("the mismatched command answers");
     let answer: RetuneReply =
         serde_json::from_slice(&bytes).expect("the refusal callback is typed");
     assert_eq!(answer.request, "live-model");
@@ -87,7 +91,7 @@ fn live_changes_use_exact_requests_and_only_matching_provider_responses_apply() 
         br#"{"id":"live-model-success","type":"response","command":"set_model","success":true}"#,
     ));
     let bytes = callback
-        .recv(None)
+        .recv(Some(test_support::DEADLOCK_GUARD))
         .expect("the matching model response answers");
     let answer: RetuneReply = serde_json::from_slice(&bytes).expect("the model callback is typed");
     assert_eq!(answer.request, "live-model-success");
@@ -101,7 +105,9 @@ fn resolve(driver: &Driver<Sink>, spelling: &str, suffix: &str) -> ModelResoluti
     ));
     let callback = door::Door::bind(&reply, CALLBACK_REPLY_BYTES).expect("callback door binds");
     driver.resolve_model(spelling, &reply);
-    let bytes = callback.recv(None).expect("model resolution answers");
+    let bytes = callback
+        .recv(Some(test_support::DEADLOCK_GUARD))
+        .expect("model resolution answers");
     serde_json::from_slice::<ModelResolutionReply>(&bytes)
         .expect("the callback is typed")
         .result
@@ -180,7 +186,7 @@ fn fast_mode_requests_name_the_disposition_and_a_failed_response_refuses() {
         br#"{"id":"live-fast","type":"response","command":"set_fast_mode","success":false,"error":"Fast mode is unavailable for the current model."}"#,
     ));
     let bytes = callback
-        .recv(None)
+        .recv(Some(test_support::DEADLOCK_GUARD))
         .expect("the failed fast-mode response answers");
     let answer: RetuneReply = serde_json::from_slice(&bytes).expect("the fast callback is typed");
     assert_eq!(answer.request, "live-fast");

@@ -200,7 +200,7 @@ fn the_until_watcher_publishes_only_the_first_matching_log_line_once() {
 
     let (running, watcher, told) = arm("running", "compiling\nalmost read");
     append(&running, "y\nready 1\nready 2\n");
-    told.recv()
+    told.recv_timeout(test_support::DEADLOCK_GUARD)
         .expect("the first match is told while the command runs");
     append(&running, "ready 3\n");
     watcher.complete();

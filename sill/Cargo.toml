@@ -35,6 +35,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [dev-dependencies]
+test-support = { path = "../test-support" }
 toml = "1.1.4"
 
 [lints]

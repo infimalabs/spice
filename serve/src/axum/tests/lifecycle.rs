@@ -23,7 +23,7 @@ async fn authenticated_session_routes_multiple_typed_commands_and_correlates_ans
     answer_commands(&mut control).await;
     client.await.expect("client finishes");
     let _ = shutdown.send(());
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -65,8 +65,7 @@ async fn exact_capability_retirement_cancels_a_held_command_only_socket() {
 
     let sibling_id = identity(0xa7);
     send_recall(&mut socket, sibling_id, identity(0xa8)).await;
-    let sibling = control
-        .recv()
+    let sibling = fixture_completion(control.recv())
         .await
         .expect("unrelated retirement leaves the socket responsive");
     assert_eq!(sibling.command().id(), sibling_id);
@@ -104,7 +103,7 @@ async fn exact_capability_retirement_cancels_a_held_command_only_socket() {
     );
 
     shutdown.send(()).expect("shutdown signals");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -173,7 +172,7 @@ async fn dark_drains_an_earlier_same_socket_response_before_closing() {
     assert_socket_terminated(&mut socket).await;
 
     shutdown.send(()).expect("server stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -206,7 +205,7 @@ async fn shutdown_closes_partial_upgrade_pre_hello_and_active_sockets() {
 
     shutdown.send(()).expect("shutdown requests");
     // Graceful shutdown cannot wait on accepted sockets.
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -214,8 +213,7 @@ async fn shutdown_closes_partial_upgrade_pre_hello_and_active_sockets() {
     assert!(state.connections.is_cancelled());
 
     let mut remaining = Vec::new();
-    partial
-        .read_to_end(&mut remaining)
+    fixture_completion(partial.read_to_end(&mut remaining))
         .await
         .expect("partial upgrade reads to closure");
     assert_socket_terminated(&mut pre_hello).await;
@@ -234,7 +232,7 @@ async fn shutdown_forces_transport_closed_when_a_session_cannot_finish_draining(
     let session = SessionGuard::enter(&state);
 
     // The session never drains, so only the finite grace ends the close.
-    state.close_with_grace(Duration::from_millis(10)).await;
+    fixture_completion(state.close_with_grace(Duration::from_millis(10))).await;
     assert!(state.connections.is_cancelled());
     assert_eq!(state.sessions.load(Ordering::Acquire), 1);
 
@@ -301,7 +299,7 @@ async fn operator_lane_replacement_and_reconnect_cross_the_live_door() {
     assert_eq!(operator_response.id, operator_request);
 
     shutdown.send(()).expect("first generation stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -351,7 +349,7 @@ async fn operator_lane_replacement_and_reconnect_cross_the_live_door() {
     let (mut current, accepted) = authenticate(address, operator(), replacement_epoch).await;
     assert_eq!(accepted.actor, wire::Actor::Lane(lane));
     shutdown.send(()).expect("replacement stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -434,7 +432,7 @@ async fn saturated_queue_orders_concurrent_work_before_dark_and_refuses_later_wo
     assert!(control.is_empty());
 
     shutdown.send(()).expect("server stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -477,7 +475,7 @@ async fn a_session_waiting_for_a_slot_still_delivers_the_answer_the_resident_awa
         .respond(state_reply(seated))
         .expect("pipelining client waits");
     // A session waiting for a slot still writes its earlier answer.
-    receipt.wait().await;
+    fixture_completion(receipt.wait()).await;
     assert_eq!(response(&mut pipelining).await.id, answered_id);
     for (id, socket) in [(sibling_id, &mut sibling), (waiting_id, &mut pipelining)] {
         let request = control.recv().await.expect("queued request");
@@ -491,7 +489,7 @@ async fn a_session_waiting_for_a_slot_still_delivers_the_answer_the_resident_awa
     }
 
     shutdown.send(()).expect("server stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -552,7 +550,7 @@ async fn a_saturated_ordinary_class_cannot_block_an_authenticated_demand() {
     refuse_and_observe(blocked_request, &mut blocked, blocked_id).await;
 
     shutdown.send(()).expect("server stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -650,7 +648,7 @@ async fn priority_is_three_to_one_and_dark_waits_for_both_classes() {
     assert!(control.is_empty());
 
     shutdown.send(()).expect("server stops");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");
@@ -737,7 +735,7 @@ async fn shutdown_interrupts_a_queue_reservation_blocked_by_saturation() {
     wait_for_admission(&mut observed, AdmissionObservation::Reserving(blocked_id)).await;
 
     shutdown.send(()).expect("shutdown requests");
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task")
         .expect("server stops");

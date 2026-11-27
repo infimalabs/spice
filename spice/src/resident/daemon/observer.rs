@@ -126,7 +126,7 @@ mod tests {
         }
         drop(sender);
         assert!(
-            receiver.recv().is_err(),
+            receiver.recv_timeout(test_support::DEADLOCK_GUARD).is_err(),
             "a disarmed watch sent or outlived its follow"
         );
 
@@ -135,7 +135,10 @@ mod tests {
         let _armed = wait_for_change(observer, sender, Signal::woke).expect("watch arms");
         fs::write(root.join("changed"), b"").expect("fixture change writes");
         assert!(
-            matches!(receiver.recv(), Ok(Signal::Changed)),
+            matches!(
+                receiver.recv_timeout(test_support::DEADLOCK_GUARD),
+                Ok(Signal::Changed)
+            ),
             "an armed watch reports its directory's change"
         );
         fs::remove_dir_all(root).expect("fixture cleanup");

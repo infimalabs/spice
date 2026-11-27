@@ -90,6 +90,7 @@ windows = { version = "0.61.3", default-features = false, features = [
 [dev-dependencies]
 gix = { version = "0.86.0", default-features = false, features = ["tree-editor"] }
 rack = { path = "../rack", features = ["link"] }
+test-support = { path = "../test-support" }
 
 # Hardware SHA-256 on aarch64; see wire/Cargo.toml.
 [target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]

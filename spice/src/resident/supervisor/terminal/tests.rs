@@ -10,9 +10,8 @@ use wire::intent::{LaneJobKind, LaneJobStanding};
 use super::job::Ending;
 use super::{Control, Jobs, Terminal, WaitHints, kept, unheard, wait, wait_until};
 
-/// A wait bound no fixture outlives, so only the job's own ending, a match,
-/// or cancellation ends a wait whatever the host's speed.
-const UNREACHED: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+/// Outer fixture guard; job endings, matches, or cancellation decide behavior.
+const UNREACHED: Duration = test_support::DEADLOCK_GUARD;
 
 fn scratch(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(

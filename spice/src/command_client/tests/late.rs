@@ -211,11 +211,11 @@ fn open_against_peer(fixture: &mut Fixture, lose_publisher: bool) -> (ClientResu
     let outcome = open_session_with(
         &COMMAND_CONTRACT,
         read,
-        Instant::now() + UNREACHED_BOUND,
-        UNREACHED_BOUND,
+        Instant::now() + test_support::DEADLOCK_GUARD,
+        test_support::DEADLOCK_GUARD,
         || {
             connected
-                .recv()
+                .recv_timeout(test_support::DEADLOCK_GUARD)
                 .expect("peer accepts the connection before the publisher is decided");
             if lose_publisher {
                 fixture.release_publisher();

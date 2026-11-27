@@ -48,6 +48,7 @@ libc = "0.2.189"
 
 [dev-dependencies]
 gix = { version = "0.86.0", default-features = false, features = ["tree-editor"] }
+test-support = { path = "../test-support" }
 
 [lints]
 workspace = true

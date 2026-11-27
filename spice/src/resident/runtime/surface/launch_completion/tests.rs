@@ -164,8 +164,9 @@ async fn assert_pending_wakes_are_request_local(
         ),
     };
     for _ in 0..3 {
-        // The client submits the next command.
-        let request = controls.control.recv().await;
+        let request = tokio::time::timeout(test_support::DEADLOCK_GUARD, controls.control.recv())
+            .await
+            .expect("the client submits the next command");
         let dispatched = super::super::control_dispatch::dispatch_control(
             command_surface,
             seats,
@@ -244,6 +245,9 @@ fn exercise_commands(
     use tungstenite::http::header::ORIGIN;
 
     let stream = std::net::TcpStream::connect(address).expect("command client connects");
+    stream
+        .set_read_timeout(Some(test_support::DEADLOCK_GUARD))
+        .expect("client deadlock guard sets");
     let mut request = format!("ws://{address}/socket")
         .into_client_request()
         .expect("socket request builds");
