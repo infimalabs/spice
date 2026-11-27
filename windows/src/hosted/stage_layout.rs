@@ -133,7 +133,7 @@ impl RequiredRecord {
     }
 }
 
-/// The production packaging and admission contract for one native target.
+/// The repository-owned required-record schema shared by native producers and clients.
 #[derive(Clone, Copy)]
 pub struct NativeStageContract {
     target: &'static str,
@@ -200,13 +200,6 @@ impl NativeStageContract {
         }
         Ok(())
     }
-
-    fn representative(self) -> BTreeSet<PathBuf> {
-        self.records
-            .iter()
-            .map(|record| record.representative())
-            .collect()
-    }
 }
 
 /// Write the exact regular-file inventory a native producer packages and
@@ -227,16 +220,6 @@ pub fn declare_native_stage(target: &str, root: &Path) -> Result<(), StageLayout
         path: destination,
         source,
     })
-}
-
-/// Prove every production target's representative package is closed beneath
-/// the one root submitted to provider attestation.
-pub fn preflight_native_stage_contracts() -> Result<(), StageLayoutError> {
-    let root = Path::new("result");
-    for contract in NativeStageContract::ALL {
-        contract.admit_roots(root, root, &contract.representative())?;
-    }
-    Ok(())
 }
 
 fn collect_regular_files(
@@ -374,14 +357,44 @@ impl Error for StageLayoutError {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
 
-    use super::{NativeStageContract, RESULT_PATH};
+    use super::{LINUX_TARGET, MACOS_TARGET, NativeStageContract, RESULT_PATH, WINDOWS_TARGET};
+
+    fn observed_paths(target: &str) -> BTreeSet<PathBuf> {
+        let paths: &[&str] = match target {
+            LINUX_TARGET => &[
+                RESULT_PATH,
+                "stage.log",
+                "smoke.log",
+                "stage/targets/x86_64-unknown-linux-musl/payload.json",
+                "stage/objects/object",
+                "stage/proofs/proof/receipt.json",
+            ],
+            MACOS_TARGET => &[
+                RESULT_PATH,
+                "stage/targets/aarch64-apple-darwin/payload.json",
+                "stage/objects/object",
+                "stage/proofs/proof/receipt.json",
+            ],
+            WINDOWS_TARGET => &[
+                RESULT_PATH,
+                "runner/windows-hosted.exe",
+                "stage/targets/x86_64-pc-windows-msvc/payload.json",
+                "stage/objects/object",
+                "stage/proofs/proof/receipt.json",
+            ],
+            _ => panic!("unexpected production target {target}"),
+        };
+        paths.iter().map(PathBuf::from).collect()
+    }
 
     #[test]
-    fn every_target_names_missing_and_uncovered_records() {
+    fn independently_supplied_inventories_exercise_each_target_contract() {
         for contract in NativeStageContract::ALL {
-            let records = contract.representative();
+            let records = observed_paths(contract.target);
+            contract.require(&records).unwrap();
             let root_error = contract
                 .admit_roots(Path::new("result"), Path::new("result/stage"), &records)
                 .unwrap_err()
