@@ -1,5 +1,6 @@
 //! Pinned Windows MSVC C toolchain materialization and target-scoped admission.
 
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Read as _;
@@ -14,6 +15,10 @@ use super::IsolationError;
 
 const DECLARATION: &str = "dist/windows/msvc.toml";
 const ACCEPTANCE: &str = "dist/windows/msvc.local.toml";
+const HOSTED_XWIN: &str = "dist/windows/xwin-hosted.toml";
+/// The `ARCH-OS` platform whose xwin, LLVM, and host closure `DECLARATION`
+/// pins; every other host's xwin comes from `HOSTED_XWIN`.
+const RELEASE_HOST: &str = "aarch64-macos";
 const STORE: &str = "spice/windows-msvc-v1";
 const RECEIPT: &str = "receipt.json";
 const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
@@ -31,6 +36,7 @@ struct Declaration {
     sdk: String,
     channel_manifest_sha256: String,
     package_manifest_sha256: String,
+    /// The release host's pinned xwin.
     xwin: ToolPin,
     clang_cl: ToolPin,
     llvm_lib: ToolPin,
@@ -39,10 +45,14 @@ struct Declaration {
     host_closure: HostClosurePin,
 }
 
+/// `dist/windows/msvc.local.toml`: exactly one of the operator's directive
+/// key, resolved in the journal, or the acceptance statement a
+/// continuous-integration host writes from the repository's secret.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct OperatorAcceptance {
-    operator_acceptance: String,
+struct LicenceAcceptance {
+    operator_acceptance: Option<String>,
+    statement: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -91,31 +101,32 @@ struct Admitted {
     declaration: Declaration,
 }
 
-/// Materialize the declared Windows CRT and SDK under the recorded operator
-/// acceptance.
+/// Materialize the declared Windows CRT and SDK under the acceptance that
+/// `dist/windows/msvc.local.toml` names: an operator directive recorded in
+/// `authority` on a release host, or the statement continuous integration
+/// writes from the repository's secret.
 ///
-/// The xwin and LLVM executables must already be installed at the pinned paths;
-/// this surface verifies their bytes before xwin can fetch Microsoft payloads.
+/// This host's pinned xwin must already be installed at its pinned path; this
+/// surface verifies its bytes before xwin can fetch Microsoft payloads.
 ///
 /// # Errors
 ///
-/// Refuses an absent or malformed recorded acceptance, malformed declaration,
-/// altered host tool, changed upstream manifest, failed xwin run, or corrupt
-/// publication.
+/// Refuses an absent, malformed, or non-accepting acceptance, malformed
+/// declaration, a host without a pinned or with an altered xwin, changed
+/// upstream manifest, failed xwin run, or corrupt publication.
 pub fn materialize(
     repository: &Path,
     bootstrap_home: &Path,
     authority: &Path,
 ) -> Result<WindowsMsvcReport, IsolationError> {
     let (declaration, generation) = read_declaration(repository)?;
-    let operator_acceptance = configured_operator_acceptance(repository)?;
-    let authority = journal::JournalReader::open(authority).map_err(|error| {
-        IsolationError::new(
-            "cargo-isolation::windows-msvc-license-unaccepted",
-            format!("cannot read recorded operator acceptance: {error}"),
-        )
-    })?;
-    require_operator_acceptance(&authority, &operator_acceptance)?;
+    require_acceptance(repository, authority)?;
+    let (xwin, generation) = host_xwin(repository, &declaration, generation)?;
+    require_hash(
+        &xwin.path,
+        &xwin.sha256,
+        "cargo-isolation::windows-msvc-tool-altered",
+    )?;
     let generations = bootstrap_home.join(STORE).join("generations");
     fs::create_dir_all(&generations).map_err(|error| {
         IsolationError::io(
@@ -127,7 +138,7 @@ pub fn materialize(
     let destination = generations.join(&generation);
     if destination.exists() {
         let admitted = admit_at(&declaration, &generation, &destination)?;
-        return Ok(report(admitted, generation, true));
+        return Ok(report(admitted, generation, true, &xwin));
     }
 
     let staging = generations.join(format!(".{generation}-{}.tmp", std::process::id()));
@@ -147,7 +158,7 @@ pub fn materialize(
             error,
         )
     })?;
-    let result = populate(&declaration, &generation, &staging);
+    let result = populate(&declaration, &xwin, &generation, &staging);
     if let Err(error) = result {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
@@ -174,11 +185,12 @@ pub fn materialize(
         }
     }
     let admitted = admit_at(&declaration, &generation, &destination)?;
-    Ok(report(admitted, generation, false))
+    Ok(report(admitted, generation, false, &xwin))
 }
 
 fn populate(
     declaration: &Declaration,
+    xwin: &ToolPin,
     generation: &str,
     staging: &Path,
 ) -> Result<(), IsolationError> {
@@ -193,7 +205,7 @@ fn populate(
         )
     })?;
 
-    run_xwin(declaration, &cache, None, ["list"])?;
+    run_xwin(declaration, xwin, &cache, None, ["list"])?;
     let channel_manifest = cache.join("dl/manifest_17.json");
     require_hash(
         &channel_manifest,
@@ -203,6 +215,7 @@ fn populate(
     package_manifest(&cache, &declaration.package_manifest_sha256)?;
     run_xwin(
         declaration,
+        xwin,
         &cache,
         Some(&channel_manifest),
         [
@@ -254,11 +267,12 @@ fn populate(
 
 fn run_xwin<'a>(
     declaration: &Declaration,
+    xwin: &ToolPin,
     cache: &Path,
     manifest: Option<&Path>,
     operation: impl IntoIterator<Item = &'a str>,
 ) -> Result<(), IsolationError> {
-    let mut command = Command::new(&declaration.xwin.path);
+    let mut command = Command::new(&xwin.path);
     command
         .arg("--accept-license")
         .args(["--arch", "x86_64", "--cache-dir"])
@@ -271,7 +285,7 @@ fn run_xwin<'a>(
     let output = command.args(operation).output().map_err(|error| {
         IsolationError::io(
             "cargo-isolation::windows-msvc-materialization-failed",
-            &declaration.xwin.path,
+            &xwin.path,
             error,
         )
     })?;
@@ -564,8 +578,11 @@ fn admit_at(
     })
 }
 
-fn configured_operator_acceptance(repository: &Path) -> Result<String, IsolationError> {
+fn require_acceptance(repository: &Path, authority: &Path) -> Result<(), IsolationError> {
     let path = repository.join(ACCEPTANCE);
+    let unaccepted = |detail: String| {
+        IsolationError::new("cargo-isolation::windows-msvc-license-unaccepted", detail)
+    };
     let bytes = fs::read(&path).map_err(|error| {
         IsolationError::io(
             "cargo-isolation::windows-msvc-license-unaccepted",
@@ -573,13 +590,98 @@ fn configured_operator_acceptance(repository: &Path) -> Result<String, Isolation
             error,
         )
     })?;
-    let acceptance: OperatorAcceptance = toml::from_slice(&bytes).map_err(|error| {
-        IsolationError::new(
-            "cargo-isolation::windows-msvc-license-unaccepted",
-            format!("{}: {error}", path.display()),
+    let acceptance: LicenceAcceptance = toml::from_slice(&bytes)
+        .map_err(|error| unaccepted(format!("{}: {error}", path.display())))?;
+    let (text, source) = match (acceptance.operator_acceptance, acceptance.statement) {
+        (Some(key), None) => {
+            let authority = journal::JournalReader::open(authority).map_err(|error| {
+                unaccepted(format!("cannot read recorded operator acceptance: {error}"))
+            })?;
+            (operator_directive(&authority, &key)?, format!("{key:?}"))
+        }
+        (None, Some(statement)) => (statement, path.display().to_string()),
+        _ => {
+            return Err(unaccepted(format!(
+                "{} must name exactly one of operator_acceptance or statement",
+                path.display()
+            )));
+        }
+    };
+    if acceptance_text_matches(&text) {
+        Ok(())
+    } else {
+        Err(unaccepted(format!(
+            "{source} does not record acceptance of the Microsoft CRT and Windows SDK terms"
+        )))
+    }
+}
+
+/// The text of `key`'s directive when an operator-role human authored it.
+fn operator_directive(
+    authority: &journal::JournalReader,
+    key: &str,
+) -> Result<String, IsolationError> {
+    authority
+        .read(|read| {
+            let Some(presentation) = bus::SteeringPresentation::read(read, key)? else {
+                return Ok(None);
+            };
+            let actor = &presentation.created().actor;
+            let roles = read.principal_roles()?;
+            let text = &presentation.head().body().text;
+            Ok(operator_authored(actor, &roles).then(|| text.clone()))
+        })
+        .map_err(|error| {
+            IsolationError::new(
+                "cargo-isolation::windows-msvc-license-unaccepted",
+                format!("cannot resolve recorded operator acceptance {key:?}: {error}"),
+            )
+        })?
+        .ok_or_else(|| {
+            IsolationError::new(
+                "cargo-isolation::windows-msvc-license-unaccepted",
+                format!("{key:?} is not an operator-authored human directive"),
+            )
+        })
+}
+
+fn operator_authored(actor: &wire::Actor, roles: &wire::principal::PrincipalRoles) -> bool {
+    matches!(actor, wire::Actor::Principal(_))
+        && roles.holds(actor, wire::principal::PrincipalRole::Operator)
+}
+
+/// The xwin pinned for the platform this process runs on, and the generation
+/// it materializes. The release host keeps the declaration's own generation; any
+/// other host's generation also binds the hosted pin file, so changing that
+/// pin never reuses a sysroot another xwin produced.
+fn host_xwin(
+    repository: &Path,
+    declaration: &Declaration,
+    generation: String,
+) -> Result<(ToolPin, String), IsolationError> {
+    let platform = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    if platform == RELEASE_HOST {
+        return Ok((declaration.xwin.clone(), generation));
+    }
+    let invalid = |detail: String| {
+        IsolationError::new("cargo-isolation::windows-msvc-declaration-invalid", detail)
+    };
+    let path = repository.join(HOSTED_XWIN);
+    let bytes = fs::read(&path).map_err(|error| {
+        IsolationError::io(
+            "cargo-isolation::windows-msvc-declaration-unavailable",
+            &path,
+            error,
         )
     })?;
-    Ok(acceptance.operator_acceptance)
+    let mut pins: BTreeMap<String, ToolPin> = toml::from_slice(&bytes)
+        .map_err(|error| invalid(format!("{}: {error}", path.display())))?;
+    let pin = pins
+        .remove(&platform)
+        .ok_or_else(|| invalid(format!("{HOSTED_XWIN} pins no xwin for {platform}")))?;
+    require_digest(&pin.sha256)?;
+    let generation = generation_digest(&[generation.as_bytes(), b"\0", &bytes].concat());
+    Ok((pin, generation))
 }
 
 fn read_declaration(repository: &Path) -> Result<(Declaration, String), IsolationError> {
@@ -621,49 +723,6 @@ fn read_declaration(repository: &Path) -> Result<(Declaration, String), Isolatio
     validate_host_closure(&declaration.host_closure)?;
     let generation = generation_digest(&bytes);
     Ok((declaration, generation))
-}
-
-fn require_operator_acceptance(
-    authority: &journal::JournalReader,
-    key: &str,
-) -> Result<(), IsolationError> {
-    let text = authority
-        .read(|read| {
-            let Some(presentation) = bus::SteeringPresentation::read(read, key)? else {
-                return Ok(None);
-            };
-            let actor = &presentation.created().actor;
-            let roles = read.principal_roles()?;
-            let text = &presentation.head().body().text;
-            Ok(operator_authored(actor, &roles).then(|| text.clone()))
-        })
-        .map_err(|error| {
-            IsolationError::new(
-                "cargo-isolation::windows-msvc-license-unaccepted",
-                format!("cannot resolve recorded operator acceptance {key:?}: {error}"),
-            )
-        })?
-        .ok_or_else(|| {
-            IsolationError::new(
-                "cargo-isolation::windows-msvc-license-unaccepted",
-                format!("{key:?} is not an operator-authored human directive"),
-            )
-        })?;
-    if acceptance_text_matches(&text) {
-        Ok(())
-    } else {
-        Err(IsolationError::new(
-            "cargo-isolation::windows-msvc-license-unaccepted",
-            format!(
-                "{key:?} does not record acceptance of the Microsoft CRT and Windows SDK terms"
-            ),
-        ))
-    }
-}
-
-fn operator_authored(actor: &wire::Actor, roles: &wire::principal::PrincipalRoles) -> bool {
-    matches!(actor, wire::Actor::Principal(_))
-        && roles.holds(actor, wire::principal::PrincipalRole::Operator)
 }
 
 fn acceptance_text_matches(text: &str) -> bool {
@@ -840,12 +899,17 @@ fn host_closure_error(path: &Path) -> impl FnOnce(std::io::Error) -> IsolationEr
     move |error| IsolationError::io(HOST_CLOSURE_REASON, path, error)
 }
 
-fn report(admitted: Admitted, generation: String, reused: bool) -> WindowsMsvcReport {
+fn report(
+    admitted: Admitted,
+    generation: String,
+    reused: bool,
+    xwin: &ToolPin,
+) -> WindowsMsvcReport {
     WindowsMsvcReport {
         generation,
         sysroot: admitted.root.join("payload/sysroot"),
         reused,
-        xwin: admitted.declaration.xwin.version,
+        xwin: xwin.version.clone(),
         llvm: admitted.declaration.clang_cl.version,
     }
 }
@@ -1197,28 +1261,42 @@ mod tests {
     }
 
     #[test]
-    fn acceptance_key_comes_from_the_untracked_local_declaration() {
+    fn licence_acceptance_is_an_operator_directive_or_a_statement_naming_the_terms() {
         let root = std::env::temp_dir().join(format!(
             "spice-windows-msvc-acceptance-{}",
             std::process::id()
         ));
         let local = root.join(ACCEPTANCE);
+        let authority = root.join("absent-authority");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(local.parent().unwrap()).unwrap();
+        let refused = |contents: Option<&str>| {
+            if let Some(contents) = contents {
+                fs::write(&local, contents).unwrap();
+            }
+            assert_eq!(
+                require_acceptance(&root, &authority).unwrap_err().reason(),
+                "cargo-isolation::windows-msvc-license-unaccepted"
+            );
+        };
 
-        let missing = configured_operator_acceptance(&root).unwrap_err();
-        assert_eq!(
-            missing.reason(),
-            "cargo-isolation::windows-msvc-license-unaccepted"
-        );
-
-        fs::write(&local, "operator_acceptance = \"dYfzjNJtB\"\n").unwrap();
-        assert_eq!(configured_operator_acceptance(&root).unwrap(), "dYfzjNJtB");
+        refused(None);
+        refused(Some("operator_acceptance = \"dYfzjNJtB\"\n"));
+        refused(Some(
+            "operator_acceptance = \"dYfzjNJtB\"\nstatement = \"I accept the Microsoft Software License Terms for the Microsoft CRT and Windows SDK.\"\n",
+        ));
+        refused(Some(
+            "statement = \"Install the Microsoft CRT and Windows SDK.\"\n",
+        ));
+        for accepted in [
+            "I accept the applicable Microsoft Software License Terms for the Microsoft CRT and Windows SDK components.",
+            "I accept the Microsoft Software License Terms for both the CRT and the Windows SDK.",
+        ] {
+            fs::write(&local, format!("statement = {accepted:?}\n")).unwrap();
+            require_acceptance(&root, &authority).unwrap();
+        }
         fs::remove_dir_all(root).unwrap();
-    }
 
-    #[test]
-    fn licence_acceptance_requires_an_operator_human_and_the_named_terms() {
         let principal = "018f82d4-6f59-7d06-92e3-bce913116399".parse().unwrap();
         let operator = wire::Actor::Principal(principal);
         let roles = wire::principal::PrincipalRoles::new([wire::principal::PrincipalHead {
@@ -1228,17 +1306,8 @@ mod tests {
             roles: std::collections::BTreeSet::from([wire::principal::PrincipalRole::Operator]),
             capability: None,
         }]);
-        let accepted = "I accept the applicable Microsoft Software License Terms for the \
-                        Microsoft CRT and Windows SDK components.";
         assert!(operator_authored(&operator, &roles));
         assert!(!operator_authored(&wire::Actor::Lane(principal), &roles));
         assert!(!operator_authored(&wire::Actor::TEST_PRINCIPAL, &roles));
-        assert!(acceptance_text_matches(accepted));
-        assert!(acceptance_text_matches(
-            "I accept the Microsoft Software License Terms for both the CRT and the Windows SDK."
-        ));
-        assert!(!acceptance_text_matches(
-            "Install the Microsoft CRT and Windows SDK."
-        ));
     }
 }
