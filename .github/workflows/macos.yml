@@ -352,12 +352,10 @@ jobs:
               && "$prepared" fetch-extract "$repository@$manifest" "$key" "$root/restored" \
               && admit_restored; then
               mkdir -p "$CARGO_TARGET_DIR"
-              cp -R "$root/restored/target/." "$CARGO_TARGET_DIR/"
-              # Prepared archives normalize mtimes. The admitted dependency
-              # graph is immutable under this key, so make its outputs newer
-              # than the already-restored registry sources. Workspace outputs
-              # were removed before publication and cannot be made fresh here.
-              find "$CARGO_TARGET_DIR" -type f -exec touch {} +
+              # Cargo freshness is an ordering relation between dependency
+              # outputs, dependent outputs, and fingerprint markers. The
+              # cache archive preserves those mtimes; copy them intact.
+              cp -pR "$root/restored/target/." "$CARGO_TARGET_DIR/"
               hit=1
             else
               echo "prepared layer $manifest refused; building cold" >&2
@@ -529,7 +527,7 @@ jobs:
               > "$root/record.json"
             archive="$RUNNER_TEMP/native-dependencies/macos-dependencies.tar.gz"
             config="$RUNNER_TEMP/native-dependencies/prepared.json"
-            "$PREPARED_ARTIFACT_TOOL" pack "$root" "$archive"
+            "$PREPARED_ARTIFACT_TOOL" pack-preserve-times "$root" "$archive"
             "$PREPARED_ARTIFACT_TOOL" manifest \
               bundle macos-arm64 "$DEPENDENCY_BUILD_KEY_FILE" application/gzip \
               "$archive" "$root" - "$config"

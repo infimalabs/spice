@@ -104,7 +104,20 @@ pub fn prepared_artifact(
                 .map_err(PreparedArtifactError::Output)
         }
         [command, root, archive] if command == "pack" => {
-            pack_bundle(Path::new(root), Path::new(archive))?;
+            pack_bundle(
+                Path::new(root),
+                Path::new(archive),
+                ArchiveTimestamps::Normalized,
+            )?;
+            writeln!(output, "packed {}", Path::new(archive).display())
+                .map_err(PreparedArtifactError::Output)
+        }
+        [command, root, archive] if command == "pack-preserve-times" => {
+            pack_bundle(
+                Path::new(root),
+                Path::new(archive),
+                ArchiveTimestamps::Preserved,
+            )?;
             writeln!(output, "packed {}", Path::new(archive).display())
                 .map_err(PreparedArtifactError::Output)
         }
@@ -297,7 +310,17 @@ fn build_key_digest(path: &Path) -> Result<String, PreparedArtifactError> {
     Ok(sha256_bytes(&encoded))
 }
 
-fn pack_bundle(root: &Path, output: &Path) -> Result<(), PreparedArtifactError> {
+#[derive(Clone, Copy)]
+enum ArchiveTimestamps {
+    Normalized,
+    Preserved,
+}
+
+fn pack_bundle(
+    root: &Path,
+    output: &Path,
+    timestamps: ArchiveTimestamps,
+) -> Result<(), PreparedArtifactError> {
     let files = inventory(root)?;
     let destination = fs::File::create(output).map_err(|source| PreparedArtifactError::Io {
         path: output.to_path_buf(),
@@ -313,9 +336,26 @@ fn pack_bundle(root: &Path, output: &Path) -> Result<(), PreparedArtifactError> 
             path: path.clone(),
             source,
         })?;
+        let mtime = match timestamps {
+            ArchiveTimestamps::Normalized => 0,
+            ArchiveTimestamps::Preserved => fs::metadata(&path)
+                .and_then(|metadata| metadata.modified())
+                .map_err(|source| PreparedArtifactError::Io {
+                    path: path.clone(),
+                    source,
+                })?
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| {
+                    PreparedArtifactError::Invalid(format!(
+                        "{} has a pre-epoch modification time",
+                        path.display()
+                    ))
+                })?
+                .as_secs(),
+        };
         let mut header = tar::Header::new_gnu();
         header.set_size(entry.bytes);
-        header.set_mtime(0);
+        header.set_mtime(mtime);
         header.set_uid(0);
         header.set_gid(0);
         header.set_mode(file_mode(&path)?);
@@ -1349,8 +1389,8 @@ mod tests {
         let first = scratch.path.join("first.tar.gz");
         let second = scratch.path.join("second.tar.gz");
 
-        pack_bundle(&root, &first).unwrap();
-        pack_bundle(&root, &second).unwrap();
+        pack_bundle(&root, &first, ArchiveTimestamps::Normalized).unwrap();
+        pack_bundle(&root, &second, ArchiveTimestamps::Normalized).unwrap();
         assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
 
         let unpacked = scratch.path.join("unpacked");
@@ -1360,6 +1400,54 @@ mod tests {
             .unpack(&unpacked)
             .unwrap();
         assert_eq!(inventory(&unpacked).unwrap(), inventory(&root).unwrap());
+    }
+
+    #[test]
+    fn cache_bundle_preserves_fingerprint_ordering() {
+        let scratch = Scratch::new().unwrap();
+        let root = scratch.path.join("root");
+        fs::create_dir(&root).unwrap();
+        let dependency = root.join("dependency");
+        let dependent = root.join("dependent");
+        fs::write(&dependency, b"dependency").unwrap();
+        fs::write(&dependent, b"dependent").unwrap();
+        let dependency_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let dependent_time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&dependency)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(dependency_time))
+            .unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&dependent)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(dependent_time))
+            .unwrap();
+        let bundle = scratch.path.join("cache.tar.gz");
+
+        pack_bundle(&root, &bundle, ArchiveTimestamps::Preserved).unwrap();
+        let unpacked = scratch.path.join("unpacked");
+        fs::create_dir(&unpacked).unwrap();
+        Archive::new(GzDecoder::new(fs::File::open(bundle).unwrap()))
+            .unpack(&unpacked)
+            .unwrap();
+
+        assert_eq!(
+            fs::metadata(unpacked.join("dependency"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            dependency_time
+        );
+        assert_eq!(
+            fs::metadata(unpacked.join("dependent"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            dependent_time
+        );
     }
 
     #[cfg(feature = "windows-proof")]
