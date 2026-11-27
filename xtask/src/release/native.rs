@@ -50,7 +50,7 @@ pub(super) fn cargo_build(
     if target.debug_path().is_some() {
         arguments.extend([
             OsString::from("--config"),
-            OsString::from("profile.release.debug=\"line-tables-only\""),
+            OsString::from(super::candidate().debug_config()),
         ]);
     }
     if target == ReleaseTarget::X86_64UnknownLinuxMusl {
