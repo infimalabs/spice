@@ -48,8 +48,8 @@ impl Phase {
         match self {
             Self::Notes => (&[], "curated notes admit against the pinned commit"),
             Self::Inputs => (
-                &[Self::Notes],
-                "refused notes stop the release before any provider run",
+                &[],
+                "provider preflight admits the pinned source, canvas, and proof image",
             ),
             Self::Linux | Self::Macos | Self::Windows => (
                 &[Self::Inputs],
@@ -243,7 +243,7 @@ mod tests {
             spans: Vec::new(),
         };
         timeline.record(Phase::Notes, at(0), at(2), None);
-        timeline.record(Phase::Inputs, at(2), at(300), Some(1));
+        timeline.record(Phase::Inputs, at(0), at(300), Some(1));
         timeline.record(Phase::Linux, at(300), at(900), Some(2));
         timeline.record(Phase::Macos, at(300), at(2_100), Some(3));
         timeline.record(Phase::Windows, at(360), at(1_500), Some(4));
@@ -253,13 +253,7 @@ mod tests {
         let (path, duration) = timeline.critical_path();
         assert_eq!(
             path,
-            [
-                Phase::Notes,
-                Phase::Inputs,
-                Phase::Macos,
-                Phase::Proofs,
-                Phase::Plan
-            ]
+            [Phase::Inputs, Phase::Macos, Phase::Proofs, Phase::Plan]
         );
         assert_eq!(duration, Duration::from_secs(2_180));
 
@@ -271,6 +265,7 @@ mod tests {
                 .map(|span| Duration::from_millis(span.idle_ms))
                 .expect("phase recorded")
         };
+        assert_eq!(idle(Phase::Inputs), Duration::ZERO);
         assert_eq!(idle(Phase::Windows), Duration::from_secs(60));
         assert_eq!(idle(Phase::Proofs), Duration::from_secs(60));
         assert_eq!(idle(Phase::Macos), Duration::ZERO);
