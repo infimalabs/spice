@@ -299,29 +299,46 @@ fn an_addressed_arrival_projects_one_distinct_update_to_each_active_partner() {
 
 #[test]
 fn an_addressed_free_reaches_only_partners_already_in_the_round() {
-    assert_addressed_departure(false);
+    assert_addressed_departure(Ending::Free);
 }
 
 #[test]
 fn an_addressed_lapse_reaches_only_partners_already_in_the_round() {
-    assert_addressed_departure(true);
+    assert_addressed_departure(Ending::Lapse);
 }
 
-fn assert_addressed_departure(lapsed: bool) {
+#[test]
+fn a_lapse_after_occupant_carry_names_the_carried_participant() {
+    assert_addressed_departure(Ending::CarriedLapse);
+}
+
+#[derive(Clone, Copy)]
+enum Ending {
+    Free,
+    Lapse,
+    CarriedLapse,
+}
+
+fn assert_addressed_departure(ending: Ending) {
     let fixture = LaunchFixture::new();
     let (bus, task) = automatic_claimed_fixture(&fixture);
     target_shared_todo(&bus, &task);
 
     let lane = uuid(30);
     let occupant = uuid(31);
-    let left_address = add_participant_lane(&bus, &fixture, lane, Some(occupant), "leaver")
+    let mut left_address = add_participant_lane(&bus, &fixture, lane, Some(occupant), "leaver")
         .expect("seated participant has an address");
     let _partner_address = seed_birth(&bus, fixture.lane, fixture.occupant, fixture.epoch);
     join_participant(&bus, &task, lane, occupant, fixture.epoch);
-    if lapsed {
-        lapse_claim(&bus, &task);
-    } else {
-        end_claim(&bus, &task);
+    match ending {
+        Ending::Free => end_claim(&bus, &task),
+        Ending::Lapse => lapse_claim(&bus, &task),
+        Ending::CarriedLapse => {
+            let successor = uuid(34);
+            left_address = seed_birth(&bus, lane, successor, fixture.epoch);
+            carry_claim(&bus, &task, successor);
+            lapse_claim(&bus, &task);
+        }
     }
 
     let snapshot = bus.task_snapshot().expect("released snapshot reads");
@@ -335,11 +352,14 @@ fn assert_addressed_departure(lapsed: bool) {
         .fact
         .get();
     let notices = round_update_notices(&snapshot);
-    let update = notices
+    let departures = notices
         .iter()
-        .find(|(recipient, notice)| *recipient == fixture.lane && notice.event == left_event)
+        .filter(|(recipient, notice)| *recipient == fixture.lane && notice.event == left_event)
         .map(|(_, notice)| notice)
-        .expect("the departure reaches the remaining partner");
+        .collect::<Vec<_>>();
+    let [update] = departures.as_slice() else {
+        panic!("the departure reaches the remaining partner once: {departures:?}");
+    };
     assert_eq!(update.action, TaskRoundUpdateKind::Left);
     assert_eq!(update.participant, format!("leaver {left_address}"));
 
@@ -956,6 +976,8 @@ fn lapse_claim(bus: &Bus, task: &TaskStamp) {
     committed(bus.commit(write).expect("claim lapse commits"));
 }
 
+/// Free the latest claim as `task free`, self-deferral, and automatic release
+/// write it: a root fact naming the holder, with no cause.
 fn end_claim(bus: &Bus, task: &TaskStamp) {
     let snapshot = bus.task_snapshot().expect("pre-release snapshot reads");
     let claim = snapshot.tasks()[0]
@@ -977,7 +999,7 @@ fn end_claim(bus: &Bus, task: &TaskStamp) {
                 actor: claim.actor.clone(),
                 parked: None,
             },
-            FactCause::Existing(claim.claimed),
+            FactCause::Root,
         )
         .expect("claim release fact builds");
     write.claim_head(task.clone(), freed, move |position| wire::ClaimHead {
@@ -986,6 +1008,42 @@ fn end_claim(bus: &Bus, task: &TaskStamp) {
         ..claim
     });
     committed(bus.commit(write).expect("claim release commits"));
+}
+
+/// Carry the latest claim to `occupant` as resident restart writes it.
+fn carry_claim(bus: &Bus, task: &TaskStamp, occupant: CanonicalUuid) {
+    let snapshot = bus.task_snapshot().expect("pre-carry snapshot reads");
+    let claim = snapshot.tasks()[0]
+        .latest_claim()
+        .map(|held| held.claim())
+        .expect("claim head")
+        .body()
+        .clone();
+    let mut write = JournalWrite::new(
+        Actor::Spice,
+        task_origin(task),
+        now(),
+        Producer::ResidentRecognition,
+    );
+    let carried = write
+        .fact(
+            wire::body::ClaimCarried {
+                task: task.clone(),
+                lane: claim.lane,
+                occupant,
+                ancestor: claim.occupant,
+                epoch: claim.epoch,
+                source: wire::body::SourceBoundary::Proven { heads: Vec::new() },
+            },
+            FactCause::Root,
+        )
+        .expect("claim carry fact builds");
+    write.claim_head(task.clone(), carried, move |position| wire::ClaimHead {
+        fact: position,
+        occupant,
+        ..claim
+    });
+    committed(bus.commit(write).expect("claim carry commits"));
 }
 
 fn task_origin(task: &TaskStamp) -> Origin {
