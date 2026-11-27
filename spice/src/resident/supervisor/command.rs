@@ -42,7 +42,15 @@ use work::{ActiveCall, StepState};
 pub(in crate::resident) const KICK_BYTES: usize = 1024;
 const ROOM_CATCH_UP_PURPOSE: &str = "room-catch-up";
 /// What an occupied lane is told while room activity it has not read waits.
-const ROOM_CATCH_UP_MARKER: &str = "<system-notice>\nUnread room activity waits in rooms you listen to. Read `spice://room/inbox` (or run `spice room inbox`) to see it. This background notice needs no acknowledgment and starts no work.\n</system-notice>";
+const ROOM_CATCH_UP_MARKER: &str = concat!(
+    "<system-notice>\n",
+    "Unread room activity waits in rooms you listen to. ",
+    "This notice needs no visible acknowledgment and starts no new task. ",
+    "Before parking, read `spice://room/inbox` (or run `spice room inbox`) and ",
+    "follow every `more unread activity remains` continuation until the inbox is drained. ",
+    "Then remain silent; let a finite job or substantive steering wake the lane.\n",
+    "</system-notice>",
+);
 const CALLBACK_REPLY_BYTES: usize = 4096;
 const RETUNE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// Correlates the driver's own fast-mode release after a vendor refused it;
