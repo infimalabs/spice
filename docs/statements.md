@@ -316,12 +316,13 @@ unless it is about to finish or pass it cleanly.
   an existing description. The Design request prints the stored pitch.
 - A title holds at most 160 characters. Every authored route refuses a longer
   title and never cuts it: `task add`, `task modify`, review follow-ups, import,
-  sweep documents, and the browser composer. A `task oops` report longer than
-  the bound keeps its complete text as the description, and its title is that
-  text cut to the bound. A hand-written commit subject has the same 160
-  bound, while body prose still folds at 100. An automatic landing subject
-  carries the full title framed by scope, handle and phase, so it may run past
-  that bound.
+  and the browser composer. A synthesized title is cut to the bound where it
+  is written, so the route never refuses: a `task oops` report longer than the
+  bound keeps its complete text as the description, and a gate sweep child
+  keeps its full path or arm in its description. A hand-written commit subject
+  has the same 160 bound, while body prose still folds at 100. An automatic
+  landing subject carries the full title framed by scope, handle and phase, so
+  it may run past that bound.
 - `task review --then` creates one follow-up from `title`, `topic`,
   `description`, `term`, `flow`, and `intent` `key=value` fields. A pipe (`|`)
   or newline separates fields; repeated `term` and `flow` fields accrue in
