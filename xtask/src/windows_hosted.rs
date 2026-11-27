@@ -51,7 +51,8 @@ fn prepared_repository(repository: &str) -> String {
 fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let user = command_text("gh", &["api", "user", "--jq", ".login"])?;
     let token = command_text("gh", &["auth", "token"])?;
-    let mut login = Command::new("oras")
+    let mut login = crate::prepared_artifact::exact_oras_command()
+        .map_err(|error| error.to_string())?
         .args([
             "login",
             "ghcr.io",
@@ -75,11 +76,16 @@ fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T
         return Err(format!("oras login refused with {status}"));
     }
     let result = operation();
-    let logout = Command::new("oras").args(["logout", "ghcr.io"]).status();
+    let logout = crate::prepared_artifact::exact_oras_command().and_then(|mut command| {
+        command
+            .args(["logout", "ghcr.io"])
+            .status()
+            .map_err(prepared_artifact::PreparedArtifactError::Launch)
+    });
     match (result, logout) {
         (Ok(value), Ok(status)) if status.success() => Ok(value),
         (Ok(_), Ok(status)) => Err(format!("oras logout refused with {status}")),
-        (Ok(_), Err(error)) => Err(format!("could not launch oras logout: {error}")),
+        (Ok(_), Err(error)) => Err(error.to_string()),
         (Err(error), _) => Err(error),
     }
 }
