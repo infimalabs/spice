@@ -549,8 +549,9 @@ pub fn replay(environment: &SealedEnvironment) -> Result<ReplayVerdict, ReplayEr
 /// # Errors
 ///
 /// Refuses any command, output count, completion, or capture that is not the
-/// exact battery, and a run whose request or verified identity names
-/// executable bytes other than `battery`'s.
+/// exact battery, and a run whose request names executable bytes other than
+/// `battery`'s or whose verified identity lists executables other than the
+/// request names, the commands before `offset` included.
 pub fn replay_hosted_windows(
     execution: &HostedExecution,
     offset: usize,
@@ -580,7 +581,9 @@ pub fn replay_hosted_windows(
             "hosted Windows proof request names executables other than the bundle's".to_owned(),
         ));
     }
-    if execution.result.identity.executables != bundle::executables(commands) {
+    if execution.result.identity.executables
+        != bundle::executables(&execution.result.request.commands)
+    {
         return Err(ReplayError::execution(
             CheckKind::Gate,
             "hosted Windows identity verified executables other than the bundle's".to_owned(),

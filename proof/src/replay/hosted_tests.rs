@@ -9,7 +9,9 @@ use windows_execution::hosted::{
     GITHUB_PROVIDER, Identity, ImagePin, Isolation, PROTOCOL_VERSION, PreparedBundlePin, Request,
     ResultDocument, ToolchainPins, WORKFLOW,
 };
-use windows_execution::protocol::{Capture, Command, CommandResult, Completion, Limits};
+use windows_execution::protocol::{
+    BUNDLE_PROGRAM, BundleProgram, Capture, Command, CommandResult, Completion, Limits,
+};
 use wire::manifest::{ProofEnvironment, ProofStanding};
 use wire::{Digest, Domain};
 
@@ -60,11 +62,27 @@ fn pins() -> ToolchainPins {
     }
 }
 
-/// One provider run that staged, then ran `requested` and verified
-/// `verified`, each command exiting with the matching `codes` entry.
+/// The bundled publisher's stage command a release run sends before its
+/// battery.
+fn stage() -> Command {
+    Command {
+        program: format!("{BUNDLE_PROGRAM}runner/xtask.exe"),
+        arguments: vec!["stage-target".to_owned()],
+        bundle: Some(BundleProgram {
+            sha256: "0".repeat(64),
+            directory: bundle::SOURCE_ROOT_DIRECTORY.to_owned(),
+        }),
+    }
+}
+
+/// One provider run that staged with the bundled publisher, then ran
+/// `requested` and verified `verified`, each command exiting with the
+/// matching `codes` entry.
 fn execution(requested: &[Command], verified: &[Command], codes: &[i32]) -> HostedExecution {
-    let mut commands = vec![Command::new("@cargo", vec!["run".to_owned()])];
+    let mut commands = vec![stage()];
     commands.extend_from_slice(requested);
+    let mut verified_commands = vec![stage()];
+    verified_commands.extend_from_slice(verified);
     let image = ImagePin {
         label: "windows-2025".to_owned(),
         provider_os: "win25".to_owned(),
@@ -119,7 +137,7 @@ fn execution(requested: &[Command], verified: &[Command], codes: &[i32]) -> Host
             runner: Digest::compute(Domain::ProofNativeRunner, b"runner"),
             source: request.source.clone(),
             toolchain: Some(pins()),
-            executables: bundle::executables(verified),
+            executables: bundle::executables(&verified_commands),
         },
         outputs: outputs
             .iter()
@@ -233,7 +251,7 @@ fn the_replay_environment_binds_the_verified_executable_digests() {
         .collect::<Vec<_>>();
     let nine = "9".repeat(64);
     assert!(bound.contains(&("proof/gate/test-suite.exe", nine.as_str())));
-    assert_eq!(bound.len(), battery.commands().len());
+    assert_eq!(bound.len(), 1 + battery.commands().len());
 }
 
 #[test]
