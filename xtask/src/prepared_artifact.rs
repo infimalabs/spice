@@ -182,6 +182,8 @@ struct OciDescriptor {
     size: u64,
     #[serde(default)]
     annotations: BTreeMap<String, String>,
+    #[serde(rename = "artifactType", default)]
+    artifact_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -818,8 +820,19 @@ fn descriptor(
     }
     arguments.push(reference.into());
     let bytes = run_oras_stdout(&arguments)?;
+    admit_manifest_descriptor(&bytes)
+}
+
+fn admit_manifest_descriptor(bytes: &[u8]) -> Result<OciDescriptor, PreparedArtifactError> {
     let descriptor: OciDescriptor =
-        serde_json::from_slice(&bytes).map_err(PreparedArtifactError::Decode)?;
+        serde_json::from_slice(bytes).map_err(PreparedArtifactError::Decode)?;
+    if descriptor.media_type != OCI_MANIFEST_MEDIA_TYPE
+        || descriptor.artifact_type.as_deref() != Some(ARTIFACT_MEDIA_TYPE)
+    {
+        return Err(PreparedArtifactError::Invalid(
+            "OCI descriptor does not name one prepared Spice artifact".to_owned(),
+        ));
+    }
     admit_digest("OCI manifest digest", &descriptor.digest)?;
     Ok(descriptor)
 }
@@ -1179,6 +1192,34 @@ mod tests {
             .is_ok()
         );
         assert!(admit_tag_reference("ghcr.io/infimalabs/spice/prepared:latest").is_err());
+    }
+
+    #[test]
+    fn top_level_descriptor_requires_the_prepared_artifact_type() {
+        let descriptor = serde_json::json!({
+            "mediaType": OCI_MANIFEST_MEDIA_TYPE,
+            "artifactType": ARTIFACT_MEDIA_TYPE,
+            "digest": digest('a'),
+            "size": 17,
+            "annotations": {},
+        });
+        let bytes = serde_json::to_vec(&descriptor).unwrap();
+        assert_eq!(
+            admit_manifest_descriptor(&bytes).unwrap().digest,
+            digest('a')
+        );
+
+        for field in ["artifactType", "mediaType"] {
+            let mut changed = descriptor.clone();
+            changed.as_object_mut().unwrap().remove(field);
+            assert!(admit_manifest_descriptor(&serde_json::to_vec(&changed).unwrap()).is_err());
+        }
+        let mut wrong_type = descriptor.clone();
+        wrong_type["artifactType"] = serde_json::json!("application/vnd.example.wrong");
+        assert!(admit_manifest_descriptor(&serde_json::to_vec(&wrong_type).unwrap()).is_err());
+        let mut changed = descriptor;
+        changed["unknown"] = serde_json::json!("field");
+        assert!(admit_manifest_descriptor(&serde_json::to_vec(&changed).unwrap()).is_err());
     }
 
     #[test]
