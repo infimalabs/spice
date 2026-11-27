@@ -430,12 +430,17 @@ Linux workflow. It inventories every `prepared` package version and every live
 GitHub Release before classifying anything. A release publishes
 `spice-prepared-references.json` beside its evidence; releases predating that
 asset conservatively retain every prepared version that existed when they were
-published. `.github/prepared-retention.json` is the explicit current-locator
-authority. Live-release references and current locators always win, followed by
-the newest 50 versions and every version updated within 30 days. The workflow
-prints and preserves the complete dry-run plan with each rule, then refetches
-package and release authority before any scheduled or explicitly requested
-deletion. Missing, malformed, stale, or changing authority refuses mutation.
+published. `.github/prepared-retention.json` is the explicit hand-maintained
+current-locator authority. Before classification, the workflow also derives
+the current proof-image build-key tag from the checked-out tree through the
+same repository-owned input derivation and prepared-artifact contract used by
+proof-image publication and release-input resolution; derivation failure
+refuses the plan. Live-release references and current locators always win,
+followed by the newest 50 versions and every version updated within 30 days.
+The workflow prints and preserves the complete dry-run plan with each rule,
+then refetches package and release authority before any scheduled or explicitly
+requested deletion. Missing, malformed, stale, or changing authority refuses
+mutation.
 
 **Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
 sole publication command. The notes file must carry authored Highlights;
