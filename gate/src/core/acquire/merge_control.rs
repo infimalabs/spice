@@ -193,15 +193,20 @@ mod tests {
             .expect_err("control removal must invalidate the source");
         fs::write(&mode, mode_bytes).expect("restore removed merge control");
 
-        let message = fixture.join(".git/MERGE_MSG");
-        let replacement = fixture.join(".git/MERGE_MSG.replacement");
-        let replaced =
-            GitControlSeal::capture(fixture.path()).expect("capture replaceable control");
-        fs::copy(&message, &replacement).expect("copy merge control replacement");
-        fs::rename(replacement, &message).expect("replace merge control");
-        replaced
-            .verify()
-            .expect_err("same-byte replacement must invalidate the source");
+        // Only Unix exposes the inode and change time that distinguish a
+        // byte-identical replacement; a Windows copy keeps the length and mtime.
+        #[cfg(unix)]
+        {
+            let message = fixture.join(".git/MERGE_MSG");
+            let replacement = fixture.join(".git/MERGE_MSG.replacement");
+            let replaced =
+                GitControlSeal::capture(fixture.path()).expect("capture replaceable control");
+            fs::copy(&message, &replacement).expect("copy merge control replacement");
+            fs::rename(replacement, &message).expect("replace merge control");
+            replaced
+                .verify()
+                .expect_err("same-byte replacement must invalidate the source");
+        }
 
         let optional = fixture.join(".git/ORIG_HEAD");
         fs::remove_file(&optional).expect("remove optional control before absence capture");

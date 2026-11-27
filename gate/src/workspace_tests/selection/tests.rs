@@ -224,9 +224,14 @@ fn an_unowned_rust_file_still_on_disk_is_refused() {
     cargo_check_selections(&inventory, fixture.path(), &present)
         .expect_err("a present unowned Rust source is refused");
 
-    let inaccessible = ["wire/tests/fixture/absence/bare.rs/child.rs".to_owned()];
-    cargo_check_selections(&inventory, fixture.path(), &inaccessible)
-        .expect_err("a filesystem error other than absence must remain a refusal");
+    // Unix reports a path through a regular file as "not a directory";
+    // Windows reports it as absent, so only Unix has this other error.
+    #[cfg(unix)]
+    {
+        let inaccessible = ["wire/tests/fixture/absence/bare.rs/child.rs".to_owned()];
+        cargo_check_selections(&inventory, fixture.path(), &inaccessible)
+            .expect_err("a filesystem error other than absence must remain a refusal");
+    }
 }
 
 /// A deleted package's paths are gone and outside every current package,

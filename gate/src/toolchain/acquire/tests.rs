@@ -14,7 +14,7 @@ struct Fixture {
 impl Fixture {
     fn new(label: &str) -> Self {
         let root = crate::toolchain::exclusive_scratch_root(label);
-        fs::create_dir_all(root.join("rim/bin")).expect("create fixture rim");
+        fs::create_dir_all(root.join("rim").join("bin")).expect("create fixture rim");
         let tree = root.join("tree");
         fs::create_dir(&tree).expect("create fixture tree");
         Self {
@@ -44,7 +44,12 @@ impl Fixture {
         let path = self.program_with_mode(name, bytes, 0o755);
         #[cfg(windows)]
         let path = {
-            let path = self.root.join("rim/bin").join(name).with_extension("exe");
+            let path = self
+                .root
+                .join("rim")
+                .join("bin")
+                .join(name)
+                .with_extension("exe");
             fs::write(&path, bytes).expect("write fixture program");
             path
         };
@@ -56,7 +61,7 @@ impl Fixture {
     fn program_with_mode(&self, name: &str, bytes: &[u8], mode: u32) -> PathBuf {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let path = self.root.join("rim/bin").join(name);
+        let path = self.root.join("rim").join("bin").join(name);
         fs::write(&path, bytes).expect("write fixture program");
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))
             .expect("set fixture program mode");

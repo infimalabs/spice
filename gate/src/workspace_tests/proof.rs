@@ -813,7 +813,10 @@ fn shard_environment(
     );
     entries.insert(
         OsString::from(CARGO_BUILD_BUILD_DIR),
-        writable_root.join("target/cargo-build").into_os_string(),
+        writable_root
+            .join("target")
+            .join("cargo-build")
+            .into_os_string(),
     );
     entries.insert(OsString::from(RUSTC_WRAPPER), OsString::new());
     entries.insert(OsString::from("RUSTC_WORKSPACE_WRAPPER"), OsString::new());
