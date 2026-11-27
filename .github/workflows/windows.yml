@@ -248,26 +248,35 @@ jobs:
           & $runner $request $result $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Assemble canonical result layout
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'result'
+          $stage = Join-Path $env:RUNNER_TEMP 'windows-stage-${{ steps.request.outputs.challenge }}'
+          New-Item -ItemType Directory -Force (Join-Path $root 'stage') | Out-Null
+          New-Item -ItemType Directory -Force (Join-Path $root 'runner') | Out-Null
+          Copy-Item -Force (Join-Path $env:RUNNER_TEMP 'result.json') (Join-Path $root 'result.json')
+          Copy-Item -Force (Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe') (Join-Path $root 'runner\windows-hosted.exe')
+          Copy-Item -Recurse -Force (Join-Path $stage '*') (Join-Path $root 'stage')
+
+
       - name: Sign repository-owned runner
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
-          subject-path: ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
+          subject-path: ${{ runner.temp }}/result/runner/windows-hosted.exe
 
       - name: Sign result and staged files with GitHub OIDC identity
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
           subject-path: |
-            ${{ runner.temp }}\result.json
-            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}\**
+            ${{ runner.temp }}/result/result.json
+            ${{ runner.temp }}/result/stage/**
 
       - name: Publish immutable result, runner, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-${{ steps.request.outputs.challenge }}
-          path: |
-            ${{ runner.temp }}\result.json
-            ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
-            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}
+          path: ${{ runner.temp }}/result
           if-no-files-found: error
           retention-days: 1
 
@@ -281,4 +290,5 @@ jobs:
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\input-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result.json"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\result"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\source.tar"

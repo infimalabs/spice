@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod release_inputs;
+mod stage_layout;
 
 use std::error::Error;
 use std::fmt;
