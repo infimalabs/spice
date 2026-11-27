@@ -26,6 +26,8 @@ pub struct ResultManifest {
     pub tree: String,
     pub app: Digest,
     pub canvas: Digest,
+    pub proof_build_key: String,
+    pub proof_manifest: String,
     pub proof_identity: String,
     pub proof_archive_sha256: String,
     pub workflow: String,
@@ -81,6 +83,15 @@ impl ResultManifest {
         require_hex("archive_sha256", &self.archive_sha256, DIGEST_HEX_LENGTH)?;
         require_hex("tree", &self.tree, DIGEST_HEX_LENGTH)?;
         require_hex("workflow_sha", &self.workflow_sha, COMMIT_HEX_LENGTH)?;
+        for (field, value) in [
+            ("proof_build_key", &self.proof_build_key),
+            ("proof_manifest", &self.proof_manifest),
+        ] {
+            let digest = value
+                .strip_prefix("sha256:")
+                .ok_or_else(|| AdmissionError::new(format!("{field} must be a sha256 digest")))?;
+            require_hex(field, digest, DIGEST_HEX_LENGTH)?;
+        }
         let proof = self
             .proof_identity
             .strip_prefix("sha256:")

@@ -84,6 +84,8 @@ pub fn windows_release_commands_into_controlled(
             challenge: inputs.challenge.clone(),
             app: inputs.app.clone(),
             canvas: inputs.canvas.clone(),
+            proof_build_key: inputs.proof_build_key.clone(),
+            proof_manifest: inputs.proof_manifest.clone(),
             proof_identity: inputs.proof_identity.clone(),
             workflow_sha: inputs.workflow_sha.clone(),
         }),

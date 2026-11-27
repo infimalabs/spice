@@ -17,7 +17,7 @@ const USAGE: &str = concat!(
     "[-- UP-OPTION...]|",
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
-    "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|",
+    "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|admit-tree MANIFEST.json ROOT>|",
     "prove-staged-target TARGET|",
     "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
@@ -82,6 +82,9 @@ fn main() -> ExitCode {
         Some(value) if value == OsStr::new("proof-image") => {
             drop(output);
             return run_proof_image(arguments.collect());
+        }
+        Some(value) if value == OsStr::new("prepared-artifact") => {
+            xtask::prepared_artifact(arguments.collect(), &mut output).map_err(Into::into)
         }
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("seal-darwin") => {

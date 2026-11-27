@@ -480,6 +480,10 @@ struct ReleaseInputIdentity {
     tree: String,
     app: String,
     canvas: String,
+    #[serde(default)]
+    proof_build_key: String,
+    #[serde(default)]
+    proof_manifest: String,
     proof_identity: String,
     proof_archive_sha256: String,
     workflow_sha: String,
@@ -497,6 +501,8 @@ impl From<&ReleaseInputs> for ReleaseInputIdentity {
             tree: manifest.tree.clone(),
             app: manifest.app.to_string(),
             canvas: manifest.canvas.to_string(),
+            proof_build_key: manifest.proof_build_key.clone(),
+            proof_manifest: manifest.proof_manifest.clone(),
             proof_identity: manifest.proof_identity.clone(),
             proof_archive_sha256: manifest.proof_archive_sha256.clone(),
             workflow_sha: manifest.workflow_sha.clone(),
@@ -608,6 +614,8 @@ mod tests {
             tree: "tree".to_owned(),
             app: "app".to_owned(),
             canvas: "canvas".to_owned(),
+            proof_build_key: "proof-build-key".to_owned(),
+            proof_manifest: "proof-manifest".to_owned(),
             proof_identity: "proof".to_owned(),
             proof_archive_sha256: "proof-archive".to_owned(),
             workflow_sha: "workflow".to_owned(),

@@ -36,6 +36,14 @@ on:
         description: Exact canonical source tree digest
         required: true
         type: string
+      proof_build_key:
+        description: Complete prepared proof-image build key
+        required: true
+        type: string
+      proof_manifest:
+        description: Immutable prepared proof-image OCI manifest
+        required: true
+        type: string
       proof_container:
         description: Exact admitted vendor-set proof image
         required: true
@@ -72,6 +80,8 @@ jobs:
           INPUTS_CHALLENGE: ${{ inputs.release_inputs_challenge }}
           APP: ${{ inputs.app }}
           CANVAS: ${{ inputs.canvas }}
+          PROOF_BUILD_KEY: ${{ inputs.proof_build_key }}
+          PROOF_MANIFEST: ${{ inputs.proof_manifest }}
           PROOF_IDENTITY: ${{ inputs.proof_container }}
           TREE: ${{ inputs.tree }}
         run: |
@@ -86,6 +96,8 @@ jobs:
           test "$(jq -r .tree "$result")" = "$TREE"
           test "$(jq -r .app "$result")" = "$APP"
           test "$(jq -r .canvas "$result")" = "$CANVAS"
+          test "$(jq -r .proof_build_key "$result")" = "$PROOF_BUILD_KEY"
+          test "$(jq -r .proof_manifest "$result")" = "$PROOF_MANIFEST"
           test "$(jq -r .proof_identity "$result")" = "$PROOF_IDENTITY"
           archive="$root/source.tar"
           test "$(shasum -a 256 "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"

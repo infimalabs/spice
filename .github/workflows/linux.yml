@@ -36,6 +36,14 @@ on:
         description: Canonical app canvas identity
         required: true
         type: string
+      proof_build_key:
+        description: Complete prepared proof-image build key
+        required: true
+        type: string
+      proof_manifest:
+        description: Immutable prepared proof-image OCI manifest
+        required: true
+        type: string
       proof_identity:
         description: Shared proof image identity
         required: true
@@ -54,6 +62,7 @@ jobs:
     timeout-minutes: 75
     permissions:
       actions: read
+      packages: read
     steps:
       - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -63,14 +72,11 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/input
 
-      - name: Download shared proof image archive
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: proof-image-${{ inputs.release_inputs_challenge }}
-          run-id: ${{ inputs.release_inputs_run }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/proof-image
 
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
       - name: Admit runner and canonical release inputs
         env:
           CHALLENGE: ${{ inputs.challenge }}
@@ -81,6 +87,8 @@ jobs:
           INPUTS_CHALLENGE: ${{ inputs.release_inputs_challenge }}
           APP: ${{ inputs.app }}
           CANVAS: ${{ inputs.canvas }}
+          PROOF_BUILD_KEY: ${{ inputs.proof_build_key }}
+          PROOF_MANIFEST: ${{ inputs.proof_manifest }}
           PROOF_IDENTITY: ${{ inputs.proof_identity }}
           TREE: ${{ inputs.tree }}
         run: |
@@ -93,6 +101,8 @@ jobs:
           [[ "$INPUTS_CHALLENGE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$APP" =~ ^[0-9a-f]{64}$ ]]
           [[ "$CANVAS" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PROOF_BUILD_KEY" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$PROOF_MANIFEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$PROOF_IDENTITY" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TREE" =~ ^[0-9a-f]{64}$ ]]
           [[ "$GITHUB_REF" == refs/heads/main ]]
@@ -107,6 +117,8 @@ jobs:
           test "$(jq -r .tree "$result")" = "$TREE"
           test "$(jq -r .app "$result")" = "$APP"
           test "$(jq -r .canvas "$result")" = "$CANVAS"
+          test "$(jq -r .proof_build_key "$result")" = "$PROOF_BUILD_KEY"
+          test "$(jq -r .proof_manifest "$result")" = "$PROOF_MANIFEST"
           test "$(jq -r .proof_identity "$result")" = "$PROOF_IDENTITY"
           archive="$root/source.tar"
           test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
@@ -141,7 +153,23 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
         run: cargo build --locked --package xtask
 
-      - name: Load shared proof image
+      - name: Fetch admitted proof image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          "$xtask" prepared-artifact fetch \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared@${{ inputs.proof_manifest }}" \
+            "${{ inputs.proof_build_key }}" "$RUNNER_TEMP/proof-image"
+          jq -r .proof_archive_sha256 "$RUNNER_TEMP/input/result.json" \
+            > "$RUNNER_TEMP/proof-image/proof-image.tar.sha256"
+          printf '%s\n' '${{ inputs.proof_identity }}' \
+            > "$RUNNER_TEMP/proof-image/proof-image.tar.identity"
+          oras logout ghcr.io
+
+      - name: Load admitted proof image
         id: image
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
@@ -214,6 +242,8 @@ jobs:
           APP: ${{ inputs.app }}
           CANVAS: ${{ inputs.canvas }}
           TREE: ${{ inputs.tree }}
+          PROOF_BUILD_KEY: ${{ inputs.proof_build_key }}
+          PROOF_MANIFEST: ${{ inputs.proof_manifest }}
           PROOF_IMAGE: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
@@ -253,6 +283,8 @@ jobs:
             --arg image_os "$ImageOS" \
             --arg image_version "$ImageVersion" \
             --arg architecture "$RUNNER_ARCH" \
+            --arg proof_build_key "$PROOF_BUILD_KEY" \
+            --arg proof_manifest "$PROOF_MANIFEST" \
             --arg proof_image "$PROOF_IMAGE" \
             --argjson exit_code "$(cat "$RUNNER_TEMP/stage.exit")" \
             --arg log_sha256 "$(sha256sum "$out/stage.log" | cut -d' ' -f1)" \
@@ -265,6 +297,7 @@ jobs:
               release_inputs_challenge: $release_inputs_challenge, tree: $tree,
               app: $app, canvas: $canvas, run_id: $run_id, image_os: $image_os,
               image_version: $image_version, architecture: $architecture,
+              proof_build_key: $proof_build_key, proof_manifest: $proof_manifest,
               proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
               smoke_exit_code: $smoke_exit_code, smoke_log_sha256: $smoke_log_sha256,
               artifacts: $artifacts[0], smoke_artifacts: $smoke_artifacts[0]}' > "$out/result.json"

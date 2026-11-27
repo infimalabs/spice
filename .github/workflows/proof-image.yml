@@ -1,0 +1,112 @@
+name: Proof image preparation
+run-name: Proof image preparation ${{ github.sha }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .cargo/config.toml
+      - .github/workflows/proof-image.yml
+      - Cargo.lock
+      - dist/proof-image/**
+      - rust-toolchain.toml
+      - xtask/src/prepared_artifact.rs
+      - xtask/src/proof_image.rs
+      - proof/**
+      - xtask/Cargo.toml
+      - xtask/src/lib.rs
+      - xtask/src/main.rs
+      - wire/src/manifest.rs
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish proof image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Restore derivable producer environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/bootstrap-cargo
+            ${{ runner.temp }}/bootstrap-target
+          key: proof-producer-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Build repository-owned producer
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
+        run: |
+          set -euo pipefail
+          rustup toolchain install --no-self-update
+          cargo build --locked --package xtask
+
+      - name: Build and admit proof image
+        id: image
+        env:
+          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/prepared"
+          mkdir -p "$root/inventory"
+          archive="$root/proof-image.tar"
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          "$xtask" proof-image build "$archive" | tee "$root/build.out"
+          ln "$archive" "$root/inventory/proof-image.tar"
+          identity="$(sed -n 's/^proof image //p' "$root/build.out")"
+          [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Describe prepared artifact
+        id: prepared
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/prepared"
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          jq -n \
+            --arg cargo_lock "sha256:$(sha256sum Cargo.lock | cut -d' ' -f1)" \
+            --arg cargo_config "sha256:$(sha256sum .cargo/config.toml | cut -d' ' -f1)" \
+            --arg rust_toolchain "sha256:$(sha256sum rust-toolchain.toml | cut -d' ' -f1)" \
+            --arg proof_image "sha256:$(git ls-tree -r -z HEAD -- dist/proof-image proof xtask/src/proof_image.rs | sha256sum | cut -d' ' -f1)" \
+            --arg contract "sha256:$(git ls-tree -r -z HEAD -- .github/workflows/proof-image.yml wire/src/manifest.rs xtask/Cargo.toml xtask/src/lib.rs xtask/src/main.rs xtask/src/prepared_artifact.rs | sha256sum | cut -d' ' -f1)" \
+            '{cargo_lock:$cargo_lock,cargo_config:$cargo_config,rust_toolchain:$rust_toolchain,proof_image:$proof_image,contract:$contract}' \
+            > "$root/build-key.json"
+          "$xtask" prepared-artifact manifest \
+            image linux-amd64 "$root/build-key.json" \
+            application/vnd.infimalabs.spice.proof-image.v1+tar \
+            "$root/proof-image.tar" "$root/inventory" \
+            '${{ steps.image.outputs.identity }}' "$root/prepared.json"
+          key="$($xtask prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
+          [[ "$key" =~ ^[0-9a-f]{64}$ ]]
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Publish immutable prepared image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/prepared"
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          "$xtask" prepared-artifact publish \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared" \
+            '${{ steps.prepared.outputs.key }}' \
+            "$root/prepared.json" "$root/proof-image.tar"
+          oras logout ghcr.io
