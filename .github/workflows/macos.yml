@@ -262,6 +262,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
         run: |
           set -euo pipefail
@@ -473,6 +474,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
         run: |
           set -euo pipefail
@@ -863,6 +865,7 @@ jobs:
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           PREPARED_BUILD_KEY: ${{ inputs.prepared_build_key }}
           PREPARED_INPUTS: ${{ inputs.prepared_inputs }}
         run: |
@@ -911,6 +914,7 @@ jobs:
         shell: bash
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
           PREPARED_BUILD_KEY: ${{ inputs.prepared_build_key }}
           PREPARED_INPUTS: ${{ inputs.prepared_inputs }}
         run: |

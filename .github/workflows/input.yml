@@ -90,6 +90,7 @@ jobs:
         id: proof
         env:
           GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
