@@ -234,6 +234,7 @@ jobs:
           # absolute paths every sealed run compiles under.
           layout=$(printf '%s' 'workspace=/workspace;home=/cargo-home;target=/cargo-target' \
             | digest_text)
+          workflow=$(printf '%s' "$GITHUB_WORKFLOW_SHA" | digest_text)
           jq -n --sort-keys \
             --arg target "$(printf '%s' x86_64-unknown-linux-musl | digest_text)" \
             --arg image "$PROOF_IMAGE" --arg layout "$layout" \
@@ -241,8 +242,8 @@ jobs:
             --arg cargo_config "$(file_digest .cargo/config.toml)" \
             --arg candidate "$(file_digest dist/release/candidate.toml)" \
             --arg resolved "$resolved" --arg profile "$profile" \
-            --arg workflow_sha "$GITHUB_WORKFLOW_SHA" --arg contract "$contract" \
-            '{target:$target,image:$image,layout:$layout,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,resolved:$resolved,profile:$profile,workflow_sha:$workflow_sha,contract:$contract}' \
+            --arg workflow "$workflow" --arg contract "$contract" \
+            '{target:$target,image:$image,layout:$layout,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,resolved:$resolved,profile:$profile,workflow:$workflow,contract:$contract}' \
             > "$root/build-key.json"
           key=$("$xtask" prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key //p')
           tag="${key#sha256:}"
