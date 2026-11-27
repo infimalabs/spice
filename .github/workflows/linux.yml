@@ -62,7 +62,7 @@ jobs:
     timeout-minutes: 75
     permissions:
       actions: read
-      packages: read
+      packages: write
     steps:
       - name: Download input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -188,13 +188,139 @@ jobs:
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           rm -rf "$RUNNER_TEMP/proof-image"
 
+      - name: Restore admitted Linux dependency layer
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PROOF_IMAGE: ${{ steps.image.outputs.identity }}
+        run: |
+          set -euo pipefail
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          root="$RUNNER_TEMP/linux-dependencies"
+          target="$RUNNER_TEMP/sealed-target"
+          mkdir -p "$root"
+          digest_text() {
+            sha256sum | cut -d' ' -f1 | sed 's/^/sha256:/'
+          }
+          file_digest() {
+            sha256sum "$1" | cut -d' ' -f1 | sed 's/^/sha256:/'
+          }
+          # The image's own Cargo resolves the third-party feature plan over
+          # its vendored sources: the musl release graph and the host graph
+          # its in-image xtask compiles under.
+          resolved_plan() {
+            docker run --rm --platform linux/amd64 --network=none --read-only \
+              --cap-drop=ALL --security-opt=no-new-privileges \
+              --mount "type=bind,source=$GITHUB_WORKSPACE,destination=/workspace,readonly" \
+              --tmpfs /cargo-home:rw,noexec,mode=0700 --tmpfs /cargo-target:rw,mode=0700 \
+              --workdir /workspace --env CARGO_HOME=/cargo-home \
+              --env CARGO_TARGET_DIR=/cargo-target \
+              "$PROOF_IMAGE" cargo metadata --locked --offline --format-version 1 "$@"
+          }
+          resolved=$( { resolved_plan --filter-platform x86_64-unknown-linux-musl \
+              --features spice/canvas
+            resolved_plan --filter-platform x86_64-unknown-linux-gnu; } \
+            | jq -cs --sort-keys 'map(.workspace_members as $members
+              | [.resolve.nodes[] | select(.id as $id | $members | index($id) | not)
+              | {id, features}] | sort_by(.id))' \
+            | digest_text)
+          # Cargo.lock records no profiles: the root manifest owns them for
+          # both the dev xtask build and the release candidate.
+          profile=$(python3 -c 'import json, tomllib; print(json.dumps(tomllib.load(open("Cargo.toml", "rb")).get("profile", {}), sort_keys=True))' \
+            | digest_text)
+          contract=$(cat .github/workflows/linux.yml prepared/Cargo.toml prepared/src/lib.rs \
+            | digest_text)
+          # The image fixes rustc, Cargo, the vendored sources, and the
+          # absolute paths every sealed run compiles under.
+          layout=$(printf '%s' 'workspace=/workspace;home=/cargo-home;target=/cargo-target' \
+            | digest_text)
+          jq -n --sort-keys \
+            --arg target "$(printf '%s' x86_64-unknown-linux-musl | digest_text)" \
+            --arg image "$PROOF_IMAGE" --arg layout "$layout" \
+            --arg lock "$(file_digest Cargo.lock)" \
+            --arg cargo_config "$(file_digest .cargo/config.toml)" \
+            --arg candidate "$(file_digest dist/release/candidate.toml)" \
+            --arg resolved "$resolved" --arg profile "$profile" --arg contract "$contract" \
+            '{target:$target,image:$image,layout:$layout,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,resolved:$resolved,profile:$profile,contract:$contract}' \
+            > "$root/build-key.json"
+          key=$("$xtask" prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key //p')
+          tag="${key#sha256:}"
+          [[ "$tag" =~ ^[0-9a-f]{64}$ ]]
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          # The credential lives only for this lookup; the sealed stage below
+          # builds and runs third-party and repository code without it.
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'oras logout ghcr.io' EXIT
+
+          # A canonically absent layer builds cold. Resolver failures refuse;
+          # a resolved layer that fails byte or record admission builds cold
+          # without overwriting its occupied discovery tag.
+          admit_restored() {
+            local record="$root/restored/record.json"
+            test "$(jq -r .schema "$record")" = 1 \
+              && test "$(jq -r .build_key "$record")" = "$key" \
+              && baseline=$(jq -r .cold_build_seconds "$record") \
+              && [[ "$baseline" =~ ^[0-9]+$ ]] \
+              && test -d "$root/restored/target/debug" \
+              && test -d "$root/restored/target/release-appliance-build"
+          }
+          hit=0
+          present=0
+          manifest=-
+          baseline=0
+          if ! resolved_layer=$("$xtask" prepared-artifact resolve-if-present \
+            "$repository:$tag" "$key"); then
+            exit 1
+          fi
+          # The sealed container runs as root without capabilities, so its
+          # target is a root-owned directory it may write without overrides.
+          sudo install -d -o 0 -g 0 -m 0755 "$target"
+          case "$resolved_layer" in
+            absent)
+              ;;
+            resolved\ *)
+              present=1
+              read -r label manifest _ <<< "$resolved_layer"
+              test "$label" = resolved
+              if "$xtask" prepared-artifact fetch-extract "$repository@$manifest" "$key" \
+                "$root/restored" && admit_restored; then
+                # Cargo freshness is an ordering relation between dependency
+                # outputs, dependent outputs, and fingerprint markers. The
+                # archive preserves those mtimes; copy them intact.
+                sudo cp -pR "$root/restored/target/." "$target/"
+                sudo chown -R 0:0 "$target"
+                hit=1
+              else
+                echo "prepared layer $manifest refused; building cold" >&2
+                baseline=0
+              fi
+              rm -rf "$root/restored"
+              ;;
+            *)
+              echo "prepared resolver returned malformed output: $resolved_layer" >&2
+              exit 65
+              ;;
+          esac
+          {
+            printf 'DEPENDENCY_BUILD_KEY=%s\n' "$key"
+            printf 'DEPENDENCY_REPOSITORY=%s\n' "$repository"
+            printf 'DEPENDENCY_TAG=%s\n' "$tag"
+            printf 'DEPENDENCY_MANIFEST=%s\n' "$manifest"
+            printf 'DEPENDENCY_HIT=%s\n' "$hit"
+            printf 'DEPENDENCY_PRESENT=%s\n' "$present"
+            printf 'DEPENDENCY_BASELINE_SECONDS=%s\n' "$baseline"
+          } >> "$GITHUB_ENV"
+
       - name: Stage and prove in the sealed image
         env:
           SPICE_SOURCE_ARCHIVE: ${{ inputs.source }}
           SPICE_RELEASE_CANVAS: ${{ runner.temp }}/input/canvas.zip
           SPICE_RELEASE_APP: ${{ inputs.app }}
+          SPICE_SEALED_TARGET: ${{ runner.temp }}/sealed-target
         run: |
           set -uo pipefail
+          started=$(date +%s)
           sudo install -d -o 0 -g 0 -m 0755 dist/stage
           common="$(git rev-parse --git-common-dir)"
           mkdir -p "$common/.spice"
@@ -212,6 +338,111 @@ jobs:
             status="${PIPESTATUS[0]}"
           fi
           echo "$status" > "$RUNNER_TEMP/stage.exit"
+          printf 'STAGE_SECONDS=%s\n' "$(($(date +%s) - started))" >> "$GITHUB_ENV"
+
+      # Publication is an optimization: any failure here records the layer
+      # unpublished and never fails the stage.
+      - name: Publish Linux dependency layer
+        id: dependency_publish
+        if: env.DEPENDENCY_HIT == '0' && env.DEPENDENCY_PRESENT == '0'
+        continue-on-error: true
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          PROOF_IMAGE: ${{ steps.image.outputs.identity }}
+        run: |
+          set -euo pipefail
+          if [[ "$(cat "$RUNNER_TEMP/stage.exit")" != 0 ]]; then
+            echo 'the stage failed; the layer stays unpublished' >&2
+            exit 1
+          fi
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          root="$RUNNER_TEMP/linux-dependencies"
+          target="$RUNNER_TEMP/sealed-target"
+          packages=()
+          while IFS= read -r package; do
+            packages+=(--package "$package")
+          done < <(cargo metadata --locked --offline --no-deps --format-version 1 \
+            | jq -r '.workspace_members[] as $id | .packages[] | select(.id == $id) | .name')
+          # Prune repository packages with the image's own Cargo. Cargo refuses
+          # to clean a directory without its cache tag, and neither target root
+          # was created by Cargo: this job made the mounted root, and the
+          # release target's canvas object lands before Cargo first writes it.
+          docker run --rm --platform linux/amd64 --network=none --read-only \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,destination=/workspace,readonly" \
+            --mount "type=bind,source=$target,destination=/cargo-target" \
+            --tmpfs /cargo-home:rw,noexec,mode=0700 \
+            --workdir /workspace --env CARGO_HOME=/cargo-home \
+            --env CARGO_TARGET_DIR=/cargo-target \
+            --env CARGO_INCREMENTAL=0 --env RUSTC_WRAPPER= --env RUSTC_WORKSPACE_WRAPPER= \
+            "$PROOF_IMAGE" sh -euc '
+              release=/cargo-target/release-appliance
+              for directory in /cargo-target "$release"; do
+                test -f "$directory/CACHEDIR.TAG" \
+                  || printf "Signature: 8a477f597d28d172789f06886806bc55\n" \
+                    > "$directory/CACHEDIR.TAG"
+              done
+              cargo clean "$@"
+              CARGO_BUILD_BUILD_DIR=/cargo-target/release-appliance-build \
+                cargo clean --release --target x86_64-unknown-linux-musl \
+                --target-dir "$release" "$@"
+            ' sh "${packages[@]}"
+          sudo chown -R "$(id -u):$(id -g)" "$target"
+          publish="$root/publish"
+          mkdir -p "$publish/target"
+          # Only Cargo's own outputs travel: the canvas object and the
+          # temporary directory belong to this run.
+          for entry in CACHEDIR.TAG debug release-appliance release-appliance-build; do
+            mv "$target/$entry" "$publish/target/"
+          done
+          rm -rf "$publish/target/release-appliance/canvas"
+          # Cold hosted run 45949529571 spent 740s staging. Keep the reference
+          # fixed so the prepared payload is idempotent.
+          jq -n --sort-keys --arg build_key "$DEPENDENCY_BUILD_KEY" \
+            --argjson seconds 740 --argjson run 45949529571 \
+            '{schema:1,build_key:$build_key,cold_build_seconds:$seconds,cold_build_run:$run}' \
+            > "$publish/record.json"
+          archive="$root/linux-dependencies.tar.gz"
+          config="$root/prepared.json"
+          "$xtask" prepared-artifact pack-preserve-times "$publish" "$archive"
+          "$xtask" prepared-artifact manifest \
+            bundle linux-amd64 "$root/build-key.json" application/gzip \
+            "$archive" "$publish" - "$config"
+          printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'oras logout ghcr.io' EXIT
+          output=$("$xtask" prepared-artifact publish \
+            "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive")
+          read -r label published <<< "$output"
+          test "$label" = published
+          printf '%s\n' "$published" > "$root/published"
+
+      - name: Record Linux dependency layer
+        if: always()
+        env:
+          PUBLISH_OUTCOME: ${{ steps.dependency_publish.outcome }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/linux-dependencies"
+          manifest="${DEPENDENCY_MANIFEST:--}"
+          case "${DEPENDENCY_HIT:-0}:${DEPENDENCY_PRESENT:-0}:$PUBLISH_OUTCOME" in
+            1:*) publication=reused ;;
+            0:1:*) publication='unpublished: the tag names a refused layer' ;;
+            0:0:success)
+              publication=published
+              manifest=$(cat "$root/published")
+              ;;
+            *) publication="unpublished: publication $PUBLISH_OUTCOME" ;;
+          esac
+          {
+            printf '### Linux dependency layer\n\n'
+            printf -- '- build key: `%s`\n' "${DEPENDENCY_BUILD_KEY:-unknown}"
+            printf -- '- cache hit: `%s`\n' "${DEPENDENCY_HIT:-0}"
+            printf -- '- sealed stage: `%ss`\n' "${STAGE_SECONDS:-unknown}"
+            printf -- '- cold reference: `%ss`\n' "${DEPENDENCY_BASELINE_SECONDS:-0}"
+            printf -- '- layer: `%s` (%s)\n' "$manifest" "$publication"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Smoke staged Linux payload version
         run: |

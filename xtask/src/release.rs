@@ -162,6 +162,10 @@ pub struct ReleaseEnvironment {
     pub release_canvas: Option<OsString>,
     /// App generation carried by `release_canvas`.
     pub release_app: Option<OsString>,
+    /// Host directory the sealed Linux stage mounts as its Cargo target in
+    /// place of fresh scratch, so a restored third-party layer is reused and
+    /// the stage's output can be published as the next one.
+    pub sealed_target: Option<OsString>,
 }
 
 impl ReleaseEnvironment {

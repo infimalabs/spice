@@ -58,8 +58,10 @@ five production surfaces invoke one:
   [`proof/src/container/stage.rs`](../../proof/src/container/stage.rs). The
   worktree and its Git common directory are read-only, `dist/stage` is the one
   writable worktree path, the Cargo home is a fresh tmpfs, the Cargo target is
-  a fresh anonymous volume, and the network is disabled. A Linux host stages
-  natively.
+  a fresh anonymous volume unless `SPICE_SEALED_TARGET` names a host directory
+  to mount writable in its place, and the network is disabled. Hosted Linux
+  staging names one so it can restore and publish a prepared third-party
+  dependency layer there. A Linux host stages natively.
 - `windows-cross` builds the Windows cross image from
   [`dist/windows-cross`](../windows-cross/Dockerfile) over this resolved
   image, adding Debian's pinned LLVM 19, the Windows Rust target, and a copy
