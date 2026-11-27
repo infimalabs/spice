@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message as ClientMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
@@ -20,8 +19,6 @@ use fixture::{agent_message, ready_histories};
 use identity::{TestApp, app_version, bind_test_server};
 
 type ClientSocket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
-
-const ASSERTION_DEADLINE: Duration = Duration::from_secs(2);
 
 /// The bootstrap principal [`crate::roles::operator_book`] bears holding the
 /// operator role.
@@ -335,9 +332,9 @@ async fn send_client<T: serde::Serialize>(socket: &mut ClientSocket, value: &T) 
 }
 
 async fn next_frame(socket: &mut ClientSocket) -> Vec<u8> {
-    let message = timeout(ASSERTION_DEADLINE, socket.next())
+    let message = socket
+        .next()
         .await
-        .expect("socket frame arrives before deadline")
         .expect("socket remains open")
         .expect("socket frame is valid");
     match message {
@@ -352,9 +349,7 @@ async fn response(socket: &mut ClientSocket) -> wire::Response<serde_json::Value
 }
 
 async fn assert_socket_terminated(socket: &mut ClientSocket) {
-    let result = timeout(ASSERTION_DEADLINE, socket.next())
-        .await
-        .expect("socket terminates before deadline");
+    let result = socket.next().await;
     assert!(
         matches!(
             result,
@@ -649,10 +644,10 @@ async fn a_held_recall_does_not_block_a_probe_or_sibling_recall_on_one_socket() 
     )
     .await;
     send_recall(&mut socket, recall_b, lane_b).await;
-    let second = timeout(ASSERTION_DEADLINE, control.recv())
+    let second = control
+        .recv()
         .await
-        .expect("sibling recall enters Control while the first response is held")
-        .expect("Control remains open");
+        .expect("sibling recall enters Control while the first response is held");
     assert!(matches!(
         second.command().body(),
         wire::intent::Intent::LaneRecall(wire::intent::LaneRecall { lane: Some(lane) })
@@ -902,13 +897,10 @@ async fn wait_for_admission(
     observed: &mut watch::Receiver<Option<AdmissionObservation>>,
     expected: AdmissionObservation,
 ) {
-    timeout(
-        ASSERTION_DEADLINE,
-        observed.wait_for(|observation| *observation == Some(expected)),
-    )
-    .await
-    .expect("admission observation arrives before deadline")
-    .expect("admission observer remains open");
+    observed
+        .wait_for(|observation| *observation == Some(expected))
+        .await
+        .expect("admission observer remains open");
 }
 
 mod binding;

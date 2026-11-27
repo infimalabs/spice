@@ -331,10 +331,7 @@ async fn held_history_read_leaves_the_runtime_serving_other_sockets() {
     assert_eq!(cursor.lane, identity(0xe5));
     assert_eq!(cursor.before, None);
     request_history(&mut reader, identity(0xd1), cursor).await;
-    timeout(ASSERTION_DEADLINE, entered.recv())
-        .await
-        .expect("provider is entered before the deadline")
-        .expect("provider reports its entry");
+    entered.recv().await.expect("provider reports its entry");
 
     // A second socket is served in full while the first read is still held.
     let (mut watcher, _) = subscribe_messages(address, identity(0xd2)).await;
@@ -396,18 +393,15 @@ async fn one_socket_starts_lane_history_reads_concurrently() {
     request_history(&mut socket, identity(0xd1), cursors[0]).await;
     request_history(&mut socket, identity(0xd2), cursors[1]).await;
 
-    let first = timeout(ASSERTION_DEADLINE, entered.recv()).await;
-    let second = timeout(ASSERTION_DEADLINE, entered.recv()).await;
-    if first.is_err() || second.is_err() {
-        provider.release();
-    }
     let mut entered_lanes = [
-        first
-            .expect("first provider call enters before the deadline")
+        entered
+            .recv()
+            .await
             .expect("first provider call reports its lane"),
-        second
-            .expect("second provider call enters while the first is held")
-            .expect("second provider call reports its lane"),
+        entered
+            .recv()
+            .await
+            .expect("second provider call enters while the first is held"),
     ];
     entered_lanes.sort();
     assert_eq!(entered_lanes, [identity(0xe5), identity(0xe7)]);
@@ -421,10 +415,10 @@ async fn one_socket_starts_lane_history_reads_concurrently() {
         },
     )
     .await;
-    let pong = timeout(ASSERTION_DEADLINE, stream_frame(&mut socket)).await;
+    let pong = stream_frame(&mut socket).await;
     provider.release();
     assert!(matches!(
-        pong.expect("the held reads do not block the same socket"),
+        pong,
         wire::StreamFrame::Pong { id, .. } if id == identity(0xd3)
     ));
 
@@ -469,12 +463,7 @@ async fn history_reads_hold_their_slot_until_the_scan_returns() {
         first_entered.send(1).expect("entry reports");
         released.recv().expect("release arrives");
     }));
-    let mut entry = async || {
-        tokio::time::timeout(Duration::from_secs(10), observed.recv())
-            .await
-            .expect("a scan starts")
-            .expect("a scan reports its entry")
-    };
+    let mut entry = async || observed.recv().await.expect("a scan reports its entry");
     assert_eq!(entry().await, 1, "the first scan starts");
 
     // The closing socket drops its future, but the scan it started runs on

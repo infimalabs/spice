@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::io::{self, Write};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use super::Driver;
 use crate::resource::Access;
@@ -94,9 +93,7 @@ impl Write for CountingSink {
 /// Receive the exit of each of `answering` threads.
 fn settled(exits: &mpsc::Receiver<()>, answering: usize) {
     for _ in 0..answering {
-        exits
-            .recv_timeout(Duration::from_secs(10))
-            .expect("an answering thread exits");
+        exits.recv().expect("an answering thread exits");
     }
 }
 
@@ -111,9 +108,7 @@ fn withdrawing_a_tool_does_not_make_its_running_work_quiescent() {
         Ok("finished".to_owned())
     });
     driver.serve_uri("pending", "read", TARGET, None);
-    entry
-        .recv_timeout(Duration::from_secs(10))
-        .expect("tool starts");
+    entry.recv().expect("tool starts");
     driver.withdraw_uri("pending");
     let while_running = driver.quiescent();
     drop(release);

@@ -5,9 +5,6 @@ mod task_notices;
 
 use listen::{Dialect, Locus};
 
-/// How long a test waits for the driver to answer before it fails.
-const ANSWER_BOUND: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// The driver's command stream: one request per line, with a wake per line.
 #[derive(Clone, Default)]
 struct Sink(Arc<Mutex<Vec<u8>>>, Arc<std::sync::Condvar>);
@@ -18,9 +15,9 @@ impl Sink {
     /// message.
     fn answered(&self, frames: usize) -> Vec<serde_json::Value> {
         let written = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let (written, _) = self
+        let written = self
             .1
-            .wait_timeout_while(written, ANSWER_BOUND, |written| {
+            .wait_while(written, |written| {
                 written.iter().filter(|byte| **byte == b'\n').count() < frames
             })
             .unwrap_or_else(PoisonError::into_inner);

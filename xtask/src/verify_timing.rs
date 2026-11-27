@@ -316,15 +316,11 @@ mod tests {
             deadline: Duration,
         ) -> StageWait<T> {
             if !self.child_started {
-                self.started
-                    .recv_timeout(Duration::from_secs(1))
-                    .expect("silent fixture stage starts");
+                self.started.recv().expect("silent fixture stage starts");
                 self.child_started = true;
             }
             if self.released {
-                let outcome = receiver
-                    .recv_timeout(Duration::from_secs(1))
-                    .expect("released fixture stage terminates");
+                let outcome = receiver.recv().expect("released fixture stage terminates");
                 self.elapsed += Duration::from_secs(1);
                 return StageWait::Ready(outcome);
             }

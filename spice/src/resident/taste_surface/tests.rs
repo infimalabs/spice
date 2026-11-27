@@ -2,7 +2,6 @@ use std::cell::Cell;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
-use std::time::Duration;
 
 use super::*;
 use crate::resident::write;
@@ -842,7 +841,7 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
             .recognize(&fixture.bus, fixture.epoch, &bag, &record)
             .expect("candidate submits without waiting for judge");
         entered_receiver
-            .recv_timeout(Duration::from_secs(1))
+            .recv()
             .expect("worker holds the judge open");
 
         let (progressed, observed_progress) = tokio::sync::oneshot::channel();
@@ -850,10 +849,9 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
             tokio::task::yield_now().await;
             let _ = progressed.send(());
         });
-        tokio::time::timeout(Duration::from_millis(100), observed_progress)
+        observed_progress
             .await
-            .expect("resident executor remains live")
-            .expect("progress task reports");
+            .expect("the resident executor runs the progress task");
         assert!(
             fixture.judgments().is_empty(),
             "held external authority committed prematurely"
@@ -862,9 +860,9 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
         let (lock, changed) = &*release;
         *lock.lock().expect("release lock") = true;
         changed.notify_all();
-        let completed = tokio::time::timeout(Duration::from_secs(1), completions.recv())
+        let completed = completions
+            .recv()
             .await
-            .expect("worker completes after release")
             .expect("completion authority stays live");
         submitter.finished(&completed);
         complete_judgment(

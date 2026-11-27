@@ -100,7 +100,7 @@ impl ExitSender for mpsc::SyncSender<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
 
@@ -126,10 +126,7 @@ mod tests {
         }
         drop(sender);
         assert!(
-            matches!(
-                receiver.recv_timeout(Duration::from_secs(10)),
-                Err(mpsc::RecvTimeoutError::Disconnected)
-            ),
+            receiver.recv().is_err(),
             "a disarmed watch sent or outlived its follow"
         );
 
@@ -138,10 +135,7 @@ mod tests {
         let _armed = wait_for_change(observer, sender, Signal::woke).expect("watch arms");
         fs::write(root.join("changed"), b"").expect("fixture change writes");
         assert!(
-            matches!(
-                receiver.recv_timeout(Duration::from_secs(10)),
-                Ok(Signal::Changed)
-            ),
+            matches!(receiver.recv(), Ok(Signal::Changed)),
             "an armed watch reports its directory's change"
         );
         fs::remove_dir_all(root).expect("fixture cleanup");

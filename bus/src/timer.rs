@@ -267,14 +267,15 @@ mod native {
             self.entries.remove(&(due, id)).is_some()
         }
 
-        fn wait(&self) -> Option<Duration> {
+        /// How long from `now` until the earliest armed deadline.
+        fn wait(&self, now: Instant) -> Option<Duration> {
             self.entries
                 .first_key_value()
-                .map(|((due, _), _)| due.saturating_duration_since(Instant::now()))
+                .map(|((due, _), _)| due.saturating_duration_since(now))
         }
 
-        fn emit_due(&mut self, events: &mpsc::Sender<TimerEvent>) {
-            let now = Instant::now();
+        /// Emit, in deadline order, every armed wait due by `now`.
+        fn emit_due(&mut self, events: &mpsc::Sender<TimerEvent>, now: Instant) {
             let keys = self
                 .entries
                 .range(..=(now, TimerId(u64::MAX)))
@@ -304,7 +305,7 @@ mod native {
     fn run(requests: Receiver<Request>, events: mpsc::Sender<TimerEvent>) {
         let mut schedule = Schedule::new();
         loop {
-            let request = match schedule.wait() {
+            let request = match schedule.wait(Instant::now()) {
                 Some(wait) => match requests.recv_timeout(wait) {
                     Ok(request) => Some(request),
                     Err(RecvTimeoutError::Timeout) => None,
@@ -333,7 +334,7 @@ mod native {
                     let _ = answer.send(schedule.clear());
                     break;
                 }
-                None => schedule.emit_due(&events),
+                None => schedule.emit_due(&events, Instant::now()),
             }
         }
     }
@@ -393,11 +394,12 @@ mod native {
                 )
                 .expect("early timer arms last");
 
-            assert_eq!(schedule.wait(), Some(Duration::ZERO));
+            assert_eq!(schedule.wait(now), Some(Duration::ZERO));
             let (sender, receiver) = mpsc::channel();
-            schedule.emit_due(&sender);
+            schedule.emit_due(&sender, now);
             assert_eq!(receiver.recv().expect("early event").id(), early);
             assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+            assert_eq!(schedule.wait(now), Some(Duration::from_secs(60)));
             assert!(schedule.cancel(late));
         }
 
@@ -425,7 +427,7 @@ mod native {
                 .expect("earlier timer arms last");
             let (sender, receiver) = mpsc::channel();
 
-            schedule.emit_due(&sender);
+            schedule.emit_due(&sender, now);
 
             assert_eq!(receiver.recv().expect("earlier event").id(), earlier);
             assert_eq!(receiver.recv().expect("later event").id(), later);

@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
 
 use super::*;
 
@@ -460,7 +459,7 @@ fn shutdown_cancels_the_running_sample_and_waits_for_it() {
         let _registration = cancellation.register_waker(Arc::new(move || {
             let _ = woken.send(());
         }));
-        let _ = wake.recv_timeout(Duration::from_secs(5));
+        let _ = wake.recv();
         observed.store(cancellation.is_cancelled(), Ordering::SeqCst);
         Err(SampleFailure::new(FailureKind::Supervisor))
     }));

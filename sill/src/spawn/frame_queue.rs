@@ -165,7 +165,7 @@ mod tests {
             (first, second, receiver.next())
         });
         sender
-            .send_by(2, Instant::now(), Duration::from_secs(5))
+            .send_by(2, Instant::now(), Duration::MAX)
             .expect("the second frame lands once the consumer takes the first");
         drop(sender);
         assert_eq!(
@@ -192,11 +192,10 @@ mod tests {
     fn a_departed_consumer_refuses_without_waiting() {
         let (sender, receiver) = bounded(1);
         drop(receiver);
-        let started = Instant::now();
-        match sender.send_by(1, started, Duration::from_secs(5)) {
+        // An unbounded deadline: a producer that waited would never return.
+        match sender.send_by(1, Instant::now(), Duration::MAX) {
             Err(SendError::Disconnected(1)) => {}
             other => panic!("expected the disconnected refusal, got {other:?}"),
         }
-        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

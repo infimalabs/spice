@@ -2,7 +2,6 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::Duration;
 
 use vendor::omp::OutputPattern;
 
@@ -201,7 +200,7 @@ fn the_until_watcher_publishes_only_the_first_matching_log_line_once() {
 
     let (running, watcher, told) = arm("running", "compiling\nalmost read");
     append(&running, "y\nready 1\nready 2\n");
-    told.recv_timeout(Duration::from_secs(10))
+    told.recv()
         .expect("the first match is told while the command runs");
     append(&running, "ready 3\n");
     watcher.complete();

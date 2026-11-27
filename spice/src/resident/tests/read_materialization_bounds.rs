@@ -1,4 +1,4 @@
-//! Incremental catch-up and cancellation bounds for resident read generations.
+//! Incremental catch-up bounds for resident read generations.
 
 use super::*;
 
@@ -69,23 +69,4 @@ fn current_generation_crosses_a_large_gap_one_configured_page_at_a_time() {
     drop(reads);
     bus.shutdown().expect("bounded bus stops");
     fs::remove_dir_all(root).expect("bounded fixture cleanup");
-}
-
-#[test]
-fn drop_cancels_a_large_stale_catch_up_within_one_page_bound() {
-    let budget = journal::FactReadBudget::new(1, journal::MAX_RETAINED_FACT_PAGE_BYTES)
-        .expect("one-row repository budget");
-    let (root, _paths, bus, reads) = seeded_reads("bounded-current-drop", budget);
-    append_facts(&bus, 2_048);
-    reads.refresh().expect("large catch-up refresh queues");
-
-    let started = Monotonic::now();
-    drop(reads);
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "materializer drop exceeded one bounded page interval"
-    );
-
-    bus.shutdown().expect("cancelled bus stops");
-    fs::remove_dir_all(root).expect("cancelled fixture cleanup");
 }

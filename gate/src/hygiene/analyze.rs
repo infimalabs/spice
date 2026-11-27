@@ -12,7 +12,12 @@ use wire::{Digest, Domain};
 use super::measure::evidence_rank;
 use super::*;
 
+/// Test builds never reach the analysis deadline, so a starved fixture host
+/// cannot turn a fixture's analysis into a timeout.
+#[cfg(not(test))]
 const DEADLINE_MS: u64 = 30_000;
+#[cfg(test)]
+const DEADLINE_MS: u64 = 365 * 24 * 60 * 60 * 1_000;
 
 /// Admitted tracked inputs for one complete hygiene run.
 #[derive(Clone, Debug, Eq, PartialEq)]

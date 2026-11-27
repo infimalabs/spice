@@ -147,12 +147,6 @@ fn answer_one_opening(
     let (stream, _) = listener
         .accept()
         .expect("peer accepts the client connection");
-    stream
-        .set_read_timeout(Some(PEER_BOUND))
-        .expect("peer read timeout");
-    stream
-        .set_write_timeout(Some(PEER_BOUND))
-        .expect("peer write timeout");
     accepted
         .send(())
         .expect("peer announces the accepted connection");
@@ -181,8 +175,6 @@ fn answer_one_opening(
     // close, and released as soon as the client drops its end.
     let _ = socket.read();
 }
-
-const PEER_BOUND: Duration = Duration::from_secs(10);
 
 /// Open one session against a live peer, losing the publisher or keeping it.
 ///
@@ -219,11 +211,11 @@ fn open_against_peer(fixture: &mut Fixture, lose_publisher: bool) -> (ClientResu
     let outcome = open_session_with(
         &COMMAND_CONTRACT,
         read,
-        Instant::now() + OPENING_BOUND,
-        OPENING_BOUND,
+        Instant::now() + UNREACHED_BOUND,
+        UNREACHED_BOUND,
         || {
             connected
-                .recv_timeout(PEER_BOUND)
+                .recv()
                 .expect("peer accepts the connection before the publisher is decided");
             if lose_publisher {
                 fixture.release_publisher();

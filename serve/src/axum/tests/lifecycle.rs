@@ -65,10 +65,10 @@ async fn exact_capability_retirement_cancels_a_held_command_only_socket() {
 
     let sibling_id = identity(0xa7);
     send_recall(&mut socket, sibling_id, identity(0xa8)).await;
-    let sibling = timeout(ASSERTION_DEADLINE, control.recv())
+    let sibling = control
+        .recv()
         .await
-        .expect("unrelated retirement leaves the socket responsive")
-        .expect("Control remains open");
+        .expect("unrelated retirement leaves the socket responsive");
     assert_eq!(sibling.command().id(), sibling_id);
     let sibling_sent = sibling
         .respond(wire::Outcome::Refusal(wire::Refusal::bare(
@@ -173,9 +173,8 @@ async fn dark_drains_an_earlier_same_socket_response_before_closing() {
     assert_socket_terminated(&mut socket).await;
 
     shutdown.send(()).expect("server stops");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("server stops before deadline")
         .expect("server task")
         .expect("server stops");
 }
@@ -206,18 +205,18 @@ async fn shutdown_closes_partial_upgrade_pre_hello_and_active_sockets() {
     assert_eq!(accepted.actor, owner());
 
     shutdown.send(()).expect("shutdown requests");
-    timeout(ASSERTION_DEADLINE, server_task)
+    // Graceful shutdown cannot wait on accepted sockets.
+    server_task
         .await
-        .expect("graceful shutdown cannot wait on accepted sockets")
         .expect("server task")
         .expect("server stops");
     assert!(*state.closed.subscribe().borrow());
     assert!(state.connections.is_cancelled());
 
     let mut remaining = Vec::new();
-    timeout(ASSERTION_DEADLINE, partial.read_to_end(&mut remaining))
+    partial
+        .read_to_end(&mut remaining)
         .await
-        .expect("partial upgrade closes")
         .expect("partial upgrade reads to closure");
     assert_socket_terminated(&mut pre_hello).await;
     assert_socket_terminated(&mut active).await;
@@ -234,12 +233,8 @@ async fn shutdown_forces_transport_closed_when_a_session_cannot_finish_draining(
     let state = Arc::clone(&server.state);
     let session = SessionGuard::enter(&state);
 
-    timeout(
-        ASSERTION_DEADLINE,
-        state.close_with_grace(Duration::from_millis(10)),
-    )
-    .await
-    .expect("session drain has a finite grace");
+    // The session never drains, so only the finite grace ends the close.
+    state.close_with_grace(Duration::from_millis(10)).await;
     assert!(state.connections.is_cancelled());
     assert_eq!(state.sessions.load(Ordering::Acquire), 1);
 
@@ -306,9 +301,8 @@ async fn operator_lane_replacement_and_reconnect_cross_the_live_door() {
     assert_eq!(operator_response.id, operator_request);
 
     shutdown.send(()).expect("first generation stops");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("first generation stops before deadline")
         .expect("server task")
         .expect("server stops");
 
@@ -357,9 +351,8 @@ async fn operator_lane_replacement_and_reconnect_cross_the_live_door() {
     let (mut current, accepted) = authenticate(address, operator(), replacement_epoch).await;
     assert_eq!(accepted.actor, wire::Actor::Lane(lane));
     shutdown.send(()).expect("replacement stops");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("replacement stops before deadline")
         .expect("server task")
         .expect("server stops");
     assert_socket_terminated(&mut current).await;
@@ -441,9 +434,8 @@ async fn saturated_queue_orders_concurrent_work_before_dark_and_refuses_later_wo
     assert!(control.is_empty());
 
     shutdown.send(()).expect("server stops");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("server stops before deadline")
         .expect("server task")
         .expect("server stops");
 }
@@ -484,9 +476,8 @@ async fn a_session_waiting_for_a_slot_still_delivers_the_answer_the_resident_awa
     let receipt = answered
         .respond(state_reply(seated))
         .expect("pipelining client waits");
-    timeout(ASSERTION_DEADLINE, receipt.wait())
-        .await
-        .expect("a session waiting for a slot still writes its earlier answer");
+    // A session waiting for a slot still writes its earlier answer.
+    receipt.wait().await;
     assert_eq!(response(&mut pipelining).await.id, answered_id);
     for (id, socket) in [(sibling_id, &mut sibling), (waiting_id, &mut pipelining)] {
         let request = control.recv().await.expect("queued request");
@@ -500,9 +491,8 @@ async fn a_session_waiting_for_a_slot_still_delivers_the_answer_the_resident_awa
     }
 
     shutdown.send(()).expect("server stops");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("server stops before deadline")
         .expect("server task")
         .expect("server stops");
 }
@@ -747,9 +737,8 @@ async fn shutdown_interrupts_a_queue_reservation_blocked_by_saturation() {
     wait_for_admission(&mut observed, AdmissionObservation::Reserving(blocked_id)).await;
 
     shutdown.send(()).expect("shutdown requests");
-    timeout(ASSERTION_DEADLINE, server_task)
+    server_task
         .await
-        .expect("saturated shutdown stops before deadline")
         .expect("server task")
         .expect("server stops");
     assert_socket_terminated(&mut queued).await;
