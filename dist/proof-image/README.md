@@ -57,11 +57,14 @@ five production surfaces invoke one:
   Linux `stage-target` in that same resolved image, launched by
   [`proof/src/container/stage.rs`](../../proof/src/container/stage.rs). The
   worktree and its Git common directory are read-only, `dist/stage` is the one
-  writable worktree path, the Cargo home is a fresh tmpfs, the Cargo target is
-  a fresh anonymous volume unless `SPICE_SEALED_TARGET` names a host directory
-  to mount writable in its place, and the network is disabled. Hosted Linux
-  staging names one so it can restore and publish a prepared third-party
-  dependency layer there. A Linux host stages natively.
+  writable worktree path, the Cargo home is a fresh tmpfs, and the network is
+  disabled. When `SPICE_SEALED_TARGET` names a host directory, it is mounted
+  writable as the Cargo target; hosted Linux staging names one so it can
+  restore and publish a prepared third-party dependency layer there.
+  Otherwise the Cargo target is the persistent runtime volume
+  `spice-release-target-linux-stage-<image digest>`, so a later stage under
+  the same image recompiles only what Cargo finds stale. A Linux host stages
+  natively.
 - `windows-cross` builds the Windows cross image from
   [`dist/windows-cross`](../windows-cross/Dockerfile) over this resolved
   image, adding Debian's pinned LLVM 19, the Windows Rust target, and a copy
@@ -70,12 +73,22 @@ five production surfaces invoke one:
   local and is never published. It then runs the image's
   `windows-cross-build` under the `stage-target` boundary above, with
   `windows-cross/out` under the build root as the one writable path in place
-  of `dist/stage`. That run cross-builds the candidate, `windows-hosted`,
+  of `dist/stage` and the persistent volume
+  `spice-release-target-windows-cross-<cross image digest>` as its Cargo
+  target. That run cross-builds the candidate, `windows-hosted`,
   `xtask`, and every proof member's test executables for
   `x86_64-pc-windows-msvc`. The host packs the artifact root and writes its
   prepared manifest, which names every output's path and SHA-256 under a build
   key over the source archive, `Cargo.lock`, compiler, target, Cargo
   arguments, MSVC generation, and cross image.
+
+Each persistent target volume carries the label
+`org.spice.release-target=<purpose>`. The first run under a new image removes
+that purpose's volumes for other images, so at most one volume per purpose
+outlives a run unless another run still mounts it. When the runtime cannot list
+or create the volume, the run compiles in fresh scratch and says so first on
+its standard error. Remove a volume with `docker volume rm NAME` to force a
+cold build.
 
 All three sealed containers also mount an empty, non-executable tmpfs at `/tmp`.
 Nothing in the build is pointed at it (`TMPDIR` stays under the target

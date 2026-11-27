@@ -40,6 +40,41 @@ pub struct ProviderCanvas<'a> {
 /// outside the read-only workspace.
 const CROSS_OUT: &str = "/windows-cross";
 
+/// Label that marks a persistent sealed Cargo target with the purpose it
+/// serves, so the first run under a new image finds the volumes it supersedes.
+const TARGET_PURPOSE_LABEL: &str = "org.spice.release-target";
+
+/// Purposes of the persistent sealed Cargo targets, one volume each per image.
+const LINUX_STAGE_PURPOSE: &str = "linux-stage";
+const WINDOWS_CROSS_PURPOSE: &str = "windows-cross";
+
+/// The Cargo target one sealed release run compiles into.
+#[derive(Debug)]
+enum SealedTarget {
+    /// A caller-owned host directory the run leaves behind.
+    Host(PathBuf),
+    /// A runtime volume kept for one purpose and image across runs, so Cargo
+    /// freshness rather than a cold build decides what compiles.
+    Volume(String),
+    /// An anonymous volume `--rm` destroys with this exact container, rather
+    /// than tmpfs: a release link and the `xtask` it runs outgrow a default
+    /// Docker VM's memory.
+    Scratch,
+}
+
+impl SealedTarget {
+    fn mount(&self) -> String {
+        match self {
+            Self::Host(path) => format!(
+                "type=bind,source={},destination={CARGO_TARGET}",
+                path.display()
+            ),
+            Self::Volume(name) => format!("type=volume,source={name},destination={CARGO_TARGET}"),
+            Self::Scratch => format!("type=volume,destination={CARGO_TARGET}"),
+        }
+    }
+}
+
 /// One Windows cross build: the cross image layered over this vendor set's
 /// image and the MSVC generation it carries, the repository's Git common
 /// directory, the host output directory, and the source and canvas
@@ -73,10 +108,14 @@ impl Container {
     /// read-only at the paths Git records for them, with `dist/stage` the one
     /// writable workspace path. The Cargo home is fresh scratch owned by this
     /// run and the network is disabled, so neither the host's Cargo
-    /// configuration nor its tools reach the build. The Cargo target is fresh
-    /// scratch too unless `target` names a host directory, which the run
-    /// mounts writable as its target and leaves behind: a caller restores a
-    /// prepared third-party layer into it beforehand and may publish it after.
+    /// configuration nor its tools reach the build. When `target` names a host
+    /// directory, the run mounts it writable as its Cargo target and leaves it
+    /// behind: a caller restores a prepared third-party layer into it
+    /// beforehand and may publish it after. Otherwise the target is this
+    /// image's persistent Linux staging volume, so a later stage under the
+    /// same image compiles only what Cargo finds stale; when the runtime
+    /// cannot provide that volume, the run compiles in fresh scratch and says
+    /// so first on its standard error.
     ///
     /// Without `delivered`, the app generation is read from the workspace as
     /// already staged, never compiled here. With `delivered`, the workspace is
@@ -103,13 +142,17 @@ impl Container {
             path: stage.clone(),
             source,
         })?;
+        let (target, notice) = match target {
+            Some(path) => (SealedTarget::Host(representable(path)?), None),
+            None => self.persistent_target(LINUX_STAGE_PURPOSE, self.image.as_str()),
+        };
         let mut runtime_arguments = self.sealed_release_arguments(
             git_common,
             &stage,
             &format!("{WORKSPACE_MOUNT}/{STAGE}"),
             delivered,
             canvas,
-            target,
+            &target,
         )?;
         runtime_arguments.extend([
             self.image.to_string(),
@@ -130,6 +173,7 @@ impl Container {
         }
         self.sealed_release_run(
             runtime_arguments,
+            notice,
             "sealed Linux release staging",
             "complete Linux release staging",
         )
@@ -139,9 +183,13 @@ impl Container {
     /// cross layer over this vendor set's image, writing its artifact root,
     /// build key, and command records under `out`.
     ///
-    /// The workspace, Git, Cargo, network, and canvas boundary is exactly
+    /// The workspace, Git, Cargo home, network, and canvas boundary is exactly
     /// [`Container::stage_release`]'s; `out` replaces `dist/stage` as the one
-    /// writable host path, mounted outside the workspace.
+    /// writable host path, mounted outside the workspace. The Cargo target is
+    /// the cross image's persistent volume, so a later build under the same
+    /// cross image compiles only what Cargo finds stale; when the runtime
+    /// cannot provide that volume, the run compiles in fresh scratch and says
+    /// so first on its standard error.
     ///
     /// # Errors
     ///
@@ -165,8 +213,9 @@ impl Container {
             source,
         })?;
         let out = representable(out)?;
+        let (target, notice) = self.persistent_target(WINDOWS_CROSS_PURPOSE, cross_image);
         let mut runtime_arguments =
-            self.sealed_release_arguments(git_common, &out, CROSS_OUT, delivered, canvas, None)?;
+            self.sealed_release_arguments(git_common, &out, CROSS_OUT, delivered, canvas, &target)?;
         runtime_arguments.extend([
             cross_image.to_owned(),
             "cargo".to_owned(),
@@ -187,6 +236,7 @@ impl Container {
         }
         self.sealed_release_run(
             runtime_arguments,
+            notice,
             "sealed Windows cross build",
             "complete Windows cross build",
         )
@@ -196,8 +246,8 @@ impl Container {
     ///
     /// The workspace and its Git common directory are read-only, `writable`
     /// is the one host path mounted writable at `destination`, the Cargo home
-    /// is fresh scratch owned by this run, the Cargo target is `target` or
-    /// fresh scratch, and the network is disabled.
+    /// is fresh scratch owned by this run, the Cargo target is `target`, and
+    /// the network is disabled.
     fn sealed_release_arguments(
         &self,
         git_common: &Path,
@@ -205,10 +255,9 @@ impl Container {
         destination: &str,
         delivered: Option<&str>,
         canvas: Option<ProviderCanvas<'_>>,
-        target: Option<&Path>,
+        target: &SealedTarget,
     ) -> Result<Vec<String>, ContainerError> {
         let git_common = representable(git_common)?;
-        let target = target.map(representable).transpose()?;
         let mut runtime_arguments = vec![
             "run".to_owned(),
             "--rm".to_owned(),
@@ -246,19 +295,7 @@ impl Container {
             "--tmpfs".to_owned(),
             format!("{CARGO_HOME}:rw,noexec,mode=0700"),
             "--mount".to_owned(),
-            // Without a named host target, an anonymous volume rather than
-            // tmpfs: a release link and the `xtask` it runs outgrow a default
-            // Docker VM's memory, and `--rm` destroys the volume with this
-            // exact container.
-            target.map_or_else(
-                || format!("type=volume,destination={CARGO_TARGET}"),
-                |target| {
-                    format!(
-                        "type=bind,source={},destination={CARGO_TARGET}",
-                        target.display()
-                    )
-                },
-            ),
+            target.mount(),
             // Rosetta's thread-context temporary file; see `battery_spec`.
             "--tmpfs".to_owned(),
             format!("{TEMPORARY}:rw,nosuid,nodev,noexec,mode=1777"),
@@ -291,9 +328,88 @@ impl Container {
         Ok(runtime_arguments)
     }
 
+    /// The persistent Cargo target volume for `purpose` under the image
+    /// `identity`, created on first use. Volumes this purpose kept for other
+    /// images are removed, so disk use stays bounded to the current image; a
+    /// volume another run still mounts stays until a later run. When the
+    /// runtime cannot list or create the volume, the run compiles in fresh
+    /// scratch and the returned notice says why.
+    fn persistent_target(&self, purpose: &str, identity: &str) -> (SealedTarget, Option<String>) {
+        match self.prepare_volume(purpose, identity) {
+            Ok(name) => (SealedTarget::Volume(name), None),
+            Err(reason) => (
+                SealedTarget::Scratch,
+                Some(format!(
+                    "persistent {purpose} Cargo target unavailable ({reason}); compiling in fresh scratch\n"
+                )),
+            ),
+        }
+    }
+
+    fn prepare_volume(&self, purpose: &str, identity: &str) -> Result<String, String> {
+        let digest = identity.strip_prefix("sha256:").unwrap_or(identity);
+        if digest.is_empty() || !digest.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            return Err(format!("image identity {identity:?} cannot name a volume"));
+        }
+        let name = format!("spice-release-target-{purpose}-{digest}");
+        let label = format!("{TARGET_PURPOSE_LABEL}={purpose}");
+        let listed = self.volume_control(
+            &[
+                "volume",
+                "ls",
+                "--quiet",
+                "--filter",
+                &format!("label={label}"),
+            ],
+            "list sealed Cargo target volumes",
+        )?;
+        let mut present = false;
+        for existing in listed.lines().filter(|line| !line.is_empty()) {
+            if existing == name {
+                present = true;
+            } else {
+                // A refusal here is a volume another run still mounts; the
+                // first run after it ends removes it.
+                let _ = self.volume_control(
+                    &["volume", "rm", existing],
+                    "remove superseded sealed Cargo target",
+                );
+            }
+        }
+        if !present {
+            self.volume_control(
+                &["volume", "create", "--label", &label, &name],
+                "create sealed Cargo target",
+            )?;
+        }
+        Ok(name)
+    }
+
+    fn volume_control(
+        &self,
+        arguments: &[&str],
+        operation: &'static str,
+    ) -> Result<String, String> {
+        let execution = self
+            .run(
+                self.runtime_spec(
+                    arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect(),
+                    operation,
+                )
+                .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        Self::require_control(operation, &execution).map_err(|error| error.to_string())?;
+        String::from_utf8(execution.stdout.bytes).map_err(|error| error.to_string())
+    }
+
     fn sealed_release_run(
         &self,
         runtime_arguments: Vec<String>,
+        notice: Option<String>,
         label: &'static str,
         operation: &'static str,
     ) -> Result<ReleaseStage, ContainerError> {
@@ -301,11 +417,13 @@ impl Container {
         let ExecutionCompletion::Exited { success, code } = execution.completion else {
             return Err(Self::control_refusal(operation, &execution));
         };
+        let mut stderr = notice.map(String::into_bytes).unwrap_or_default();
+        stderr.extend(execution.stderr.bytes);
         Ok(ReleaseStage {
             success,
             code,
             stdout: execution.stdout.bytes,
-            stderr: execution.stderr.bytes,
+            stderr,
         })
     }
 }
