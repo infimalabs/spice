@@ -25,6 +25,7 @@ mod admission;
 mod exit;
 mod lane_inbox;
 mod line;
+mod line_arm;
 mod line_control;
 mod message;
 pub(in crate::resident) mod outbox;
@@ -42,6 +43,7 @@ pub(super) use admission::admitted;
 #[cfg(test)]
 pub(crate) use exit::dispose_acknowledged;
 pub(super) use exit::{dispose_at_exit, dispose_at_startup, dispose_heard};
+pub(in crate::resident) use line_arm::arm as line_arm;
 pub(in crate::resident) use line_control::control as line_control;
 pub(super) use message::{
     AuthoredRecord, LANE_REMOVED, MessageRecordedNotice, MessageRefusalNotice, Refusals,

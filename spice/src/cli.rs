@@ -207,6 +207,7 @@ pub const fn answer_bound(kind: CommandKind) -> Duration {
         | CommandKind::SteerSend
         | CommandKind::SteerInbox
         | CommandKind::SteerLineControl
+        | CommandKind::LineArm
         | CommandKind::QuoteRead
         | CommandKind::TopicRead
         | CommandKind::TopicEdit
@@ -405,6 +406,7 @@ fn coordination_landed(path: &[&str]) -> bool {
             | ["room", "ack"]
             | ["room", "nak"]
             | ["room", "fin"]
+            | ["line", "arm"]
             | ["room", "awareness"]
             | ["principal", "list"]
             | ["principal", "admit"]

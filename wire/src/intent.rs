@@ -71,7 +71,7 @@ pub use rooms::{
     RoomListeningDuty, RoomScore, RoomScoreAnswer, RoomScoreQualification, RoomScoreView,
 };
 mod steering;
-pub use steering::{SteerLineAction, SteerLineAnswer, SteerLineControl};
+pub use steering::{LineArm, LineArmAnswer, SteerLineAction, SteerLineAnswer, SteerLineControl};
 mod trust;
 pub use trust::{
     TrustBaseline, TrustDiffLine, TrustDocumentDiff, TrustLineEnding, TrustReportAnswer,

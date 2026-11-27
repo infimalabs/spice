@@ -93,6 +93,7 @@ pub(super) fn kind_for(path: &[&str]) -> Option<CommandKind> {
         ["room", "leave"] => CommandKind::RoomLeave,
         ["room", "contribute"] => CommandKind::RoomContribute,
         ["room", "ack" | "nak" | "fin"] => CommandKind::SteerLineControl,
+        ["line", "arm"] => CommandKind::LineArm,
         ["principal", verb @ ..] => return principal_kind_for(verb),
         ["task", verb] => return task_kind_for(verb),
         ["taste", "add"] | ["taste", "drop"] => CommandKind::TaskAdd,

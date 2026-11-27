@@ -61,6 +61,7 @@ impl CommandKind {
         Self::SteerRecover,
         Self::SteerCancel,
         Self::SteerLineControl,
+        Self::LineArm,
         Self::QuoteRead,
         Self::TopicRead,
         Self::TopicEdit,
@@ -150,6 +151,7 @@ impl CommandKind {
             | Self::SteerRecover
             | Self::SteerCancel
             | Self::SteerLineControl
+            | Self::LineArm
             | Self::QuoteRead
             | Self::TopicRead
             | Self::TopicEdit
@@ -283,6 +285,7 @@ impl CommandKind {
             Self::SteerRecover => "steer::recover",
             Self::SteerCancel => "steer::cancel",
             Self::SteerLineControl => "steer::line-control",
+            Self::LineArm => "line::arm",
             Self::QuoteRead => "quote::read",
             Self::TopicRead => "topic::read",
             Self::TopicEdit => "topic::edit",

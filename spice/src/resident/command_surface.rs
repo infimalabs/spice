@@ -603,6 +603,9 @@ impl<'a> Surface<'a> {
                     &mut effects,
                 ))
             }
+            (CommandKind::LineArm, Intent::LineArm(request)) => {
+                Some(steering::line_arm(self.bus, self.epoch, command, request))
+            }
             (CommandKind::SteerCancel, Intent::DirectiveRef(cancel)) => Some(steering::cancel(
                 self.bus,
                 self.epoch,

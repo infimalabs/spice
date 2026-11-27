@@ -605,6 +605,7 @@ impl NativeInvocation<'_> {
             | ["room", "contribute"]
             | ["room", "ack"]
             | ["room", "nak"]
+            | ["line", "arm"]
             | ["room", "reply"]
             | ["room", "recover"]
             | ["task", "list"]

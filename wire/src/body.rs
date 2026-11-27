@@ -76,6 +76,27 @@ pub struct PeerLineRef {
     pub opening: CanonicalUuid,
 }
 
+/// A lane replaced the set of open peer lines with its round partners that it
+/// waits on in one claimed task phase round; an empty set clears it.
+///
+/// The arm binds the claim's task, phase and round opening and never its
+/// lease, so renewal neither changes nor lifts it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineArmed {
+    /// Lane that armed the set.
+    pub lane: CanonicalUuid,
+    /// Task the lane's claim held.
+    pub task: TaskStamp,
+    /// Phase that task occupied.
+    pub phase: Phase,
+    /// Fact that opened that task's current round.
+    pub round: Seq,
+    /// Root of each armed line, ascending and distinct.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roots: Vec<CanonicalUuid>,
+}
+
 /// Meaning of one peer body on its line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

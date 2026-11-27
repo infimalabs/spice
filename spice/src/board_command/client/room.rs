@@ -15,6 +15,7 @@ pub(super) fn dispatch_room_client(
         ["room", "leave"] => client_room_leave(repository, contract, matches),
         ["room", "contribute"] => client_room_contribute(repository, contract, matches),
         ["room", "ack" | "nak" | "fin"] => client_line_control(repository, contract, matches),
+        ["line", "arm"] => client_line_arm(repository, contract, matches),
         _ => return None,
     };
     Some(outcome)
@@ -416,6 +417,41 @@ fn render_line_control(outcome: Outcome<CommandAnswer>, key: &str) -> Outcome<Co
             text.push_str("; its body was not sent");
         }
     }
+    Outcome::Reply(Reply {
+        position,
+        body: CommandAnswer::Text(TextAnswer { text }),
+    })
+}
+
+/// Replace this lane's armed set with the open lines `ROOT` keys name.
+fn client_line_arm(
+    repository: Host<'_>,
+    contract: &Contract,
+    matches: &ArgMatches,
+) -> Outcome<CommandAnswer> {
+    let roots = matches
+        .get_many::<String>("ROOT")
+        .map(|roots| roots.cloned().collect())
+        .unwrap_or_default();
+    let outcome = crate::command_client::execute_typed(
+        repository,
+        contract,
+        CommandKind::LineArm,
+        Vec::new(),
+        &wire::intent::LineArm { roots },
+    );
+    let Outcome::Reply(Reply {
+        position,
+        body: CommandAnswer::LineArm(answer),
+    }) = outcome
+    else {
+        return outcome;
+    };
+    let text = if answer.roots.is_empty() {
+        "armed no lines".to_owned()
+    } else {
+        format!("armed {}", answer.roots.join(" "))
+    };
     Outcome::Reply(Reply {
         position,
         body: CommandAnswer::Text(TextAnswer { text }),
