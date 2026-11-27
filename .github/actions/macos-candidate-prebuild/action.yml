@@ -1,0 +1,186 @@
+name: Admit macOS candidate prebuild
+description: Restore an exact digest-addressed unsigned candidate build layer
+
+inputs:
+  source_commit:
+    description: Canonical source commit recorded by source.tar
+    required: true
+  source:
+    description: Canonical source archive identity
+    required: true
+  tree:
+    description: Canonical source tree digest
+    required: true
+  archive_sha256:
+    description: Raw source.tar SHA-256
+    required: true
+  cargo_home:
+    description: Exact Cargo home used by the native build
+    required: true
+  target_dir:
+    description: Exact Cargo target root used by the native build
+    required: true
+  token:
+    description: GHCR package credential
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare build-key destination
+      shell: bash
+      run: mkdir -p "$RUNNER_TEMP/candidate-prebuild"
+
+    - name: Compute exact candidate prebuild key
+      uses: ./.github/actions/macos-prebuild-key
+      with:
+        tree: ${{ inputs.tree }}
+        archive-sha256: ${{ inputs.archive_sha256 }}
+        cargo-home: ${{ inputs.cargo_home }}
+        target-dir: ${{ inputs.target_dir }}
+        output: ${{ runner.temp }}/candidate-prebuild/build-key.json
+
+    - name: Build credential-free prepared client
+      id: client
+      shell: bash
+      env:
+        CARGO_HOME: ${{ inputs.cargo_home }}
+      run: |
+        set -euo pipefail
+        root="$RUNNER_TEMP/candidate-prebuild"
+        cargo="$RUST_BIN/cargo"
+        bootstrap="$RUNNER_TEMP/prepared-artifact-target"
+        "$cargo" build --locked --release \
+          --target aarch64-apple-darwin --target-dir "$bootstrap" \
+          --package prepared-artifact --bin prepared-artifact
+        prepared="$bootstrap/aarch64-apple-darwin/release/prepared-artifact"
+        test -x "$prepared"
+        key=$("$prepared" build-key "$root/build-key.json" | sed -n 's/^build key //p')
+        case "$key" in sha256:*) ;; *) exit 65 ;; esac
+        digest=${key#sha256:}
+        case "$digest" in *[!0-9a-f]*|'') exit 65 ;; esac
+        test "${#digest}" -eq 64
+        printf 'prepared=%s\nkey=%s\n' "$prepared" "$key" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve and admit exact candidate prebuild
+      shell: bash
+      env:
+        ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+        CARGO_HOME: ${{ inputs.cargo_home }}
+        CARGO_TARGET_DIR: ${{ inputs.target_dir }}
+        GHCR_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ inputs.token }}
+        PREPARED: ${{ steps.client.outputs.prepared }}
+        PREBUILD_KEY: ${{ steps.client.outputs.key }}
+        SOURCE: ${{ inputs.source }}
+        SOURCE_COMMIT: ${{ inputs.source_commit }}
+        TREE: ${{ inputs.tree }}
+      run: |
+        set -euo pipefail
+        restore_started=$(date +%s)
+        root="$RUNNER_TEMP/candidate-prebuild"
+        repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+        repository="ghcr.io/$repository/prepared"
+        tag=${PREBUILD_KEY#sha256:}
+        manifest=-
+        hit=0
+        prebuild_run=-
+        prebuild_seconds=0
+
+        printf '%s' "$GHCR_TOKEN" \
+          | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        trap 'oras logout ghcr.io >/dev/null 2>&1 || true' EXIT
+        resolved=$("$PREPARED" resolve-if-present "$repository:$tag" "$PREBUILD_KEY")
+        case "$resolved" in
+          absent)
+            ;;
+          resolved\ *)
+            read -r label manifest _ <<< "$resolved"
+            test "$label" = resolved
+            "$PREPARED" fetch-extract \
+              "$repository@$manifest" "$PREBUILD_KEY" "$root/restored"
+            oras logout ghcr.io
+            trap - EXIT
+            unset GHCR_TOKEN GH_TOKEN
+
+            record="$root/restored/record.json"
+            test "$(jq -r .schema "$record")" = 1
+            test "$(jq -r .build_key "$record")" = "$PREBUILD_KEY"
+            test "$(jq -r .source_commit "$record")" = "$SOURCE_COMMIT"
+            test "$(jq -r .source "$record")" = "$SOURCE"
+            test "$(jq -r .tree "$record")" = "$TREE"
+            test "$(jq -r .archive_sha256 "$record")" = "$ARCHIVE_SHA256"
+            test "$(jq -r .workflow_sha "$record")" = "$GITHUB_WORKFLOW_SHA"
+            prebuild_run=$(jq -r .run "$record")
+            prebuild_attempt=$(jq -r .attempt "$record")
+            prebuild_seconds=$(jq -r .build_seconds "$record")
+            prebuild_started=$(jq -r .started "$record")
+            prebuild_completed=$(jq -r .finished "$record")
+            [[ "$prebuild_run" =~ ^[0-9]+$ ]]
+            [[ "$prebuild_attempt" =~ ^[0-9]+$ ]]
+            [[ "$prebuild_seconds" =~ ^[0-9]+$ ]]
+            [[ "$prebuild_started" =~ ^[0-9]+$ ]]
+            [[ "$prebuild_completed" =~ ^[0-9]+$ ]]
+            test "$prebuild_run" -gt 0
+            test "$prebuild_attempt" -gt 0
+            test "$prebuild_started" -gt 0
+            test "$prebuild_completed" -ge "$prebuild_started"
+            test "$prebuild_seconds" -gt 0
+            test "$prebuild_seconds" -le "$((prebuild_completed - prebuild_started))"
+            test -d "$root/restored/target"
+            test -d "$root/restored/proof-native-darwin"
+            read -r release_target release_build < <(python3 - <<'PY'
+        import tomllib
+        with open("dist/release/candidate.toml", "rb") as source:
+            candidate = tomllib.load(source)
+        print(candidate["target_dir"], candidate["build_dir"])
+        PY
+            )
+            test -d "$root/restored/target/$release_build"
+            test -x "$root/restored/target/$release_target/aarch64-apple-darwin/release/xtask"
+            test -x "$root/restored/target/$release_target/aarch64-apple-darwin/release/spice"
+            test -f "$root/restored/target/canvas/release.aarch64-apple-darwin.link-plan"
+            test -f "$root/restored/target/canvas/release.aarch64-apple-darwin.o"
+            test -x "$root/restored/proof-native-darwin/bin/spice-proof-darwin-runner"
+            test -f "$root/restored/proof-native-darwin/pins.toml"
+
+            rm -rf "$CARGO_TARGET_DIR" "$GITHUB_WORKSPACE/target/proof-native-darwin"
+            mkdir -p "$CARGO_TARGET_DIR" "$GITHUB_WORKSPACE/target"
+            cp -pR "$root/restored/target/." "$CARGO_TARGET_DIR/"
+            cp -pR "$root/restored/proof-native-darwin" "$GITHUB_WORKSPACE/target/"
+            git ls-files -z | xargs -0 touch -h -t 200001010000
+            for sources in "$CARGO_HOME/registry/src" "$CARGO_HOME/git/checkouts"; do
+              if test -d "$sources"; then
+                find "$sources" -type f -exec touch -t 200001010000 {} +
+              fi
+            done
+            hit=1
+            ;;
+          *)
+            echo "candidate prebuild resolver returned malformed output: $resolved" >&2
+            exit 65
+            ;;
+        esac
+        if test "$hit" = 0; then
+          oras logout ghcr.io
+          trap - EXIT
+        fi
+        restore_seconds=$(($(date +%s) - restore_started))
+        {
+          printf 'PREPARED_ARTIFACT_TOOL=%s\n' "$PREPARED"
+          printf 'CANDIDATE_PREBUILD_KEY_FILE=%s\n' "$root/build-key.json"
+          printf 'CANDIDATE_PREBUILD_KEY=%s\n' "$PREBUILD_KEY"
+          printf 'CANDIDATE_PREBUILD_MANIFEST=%s\n' "$manifest"
+          printf 'CANDIDATE_PREBUILD_HIT=%s\n' "$hit"
+          printf 'CANDIDATE_PREBUILD_RUN=%s\n' "$prebuild_run"
+          printf 'CANDIDATE_PREBUILD_SECONDS=%s\n' "$prebuild_seconds"
+        } >> "$GITHUB_ENV"
+        {
+          printf '### macOS unsigned candidate prebuild\n\n'
+          printf -- '- build key: `%s`\n' "$PREBUILD_KEY"
+          printf -- '- manifest: `%s`\n' "$manifest"
+          printf -- '- cache hit: `%s`\n' "$hit"
+          printf -- '- producer run: `%s`\n' "$prebuild_run"
+          printf -- '- overlapped prebuild: `%ss`\n' "$prebuild_seconds"
+          printf -- '- resolve and admission: `%ss`\n' "$restore_seconds"
+        } >> "$GITHUB_STEP_SUMMARY"

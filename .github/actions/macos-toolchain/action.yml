@@ -1,0 +1,107 @@
+name: Admit macOS host and install exact tools
+description: >-
+  Admits the runner image against dist/darwin/hosted.toml, exports its policy
+  pins, and installs the exact Rust toolchain and app tools it names. Release
+  staging and the exact-tree candidate prebuild share these steps so their
+  builds see identical tools and paths.
+
+runs:
+  using: composite
+  steps:
+    - name: Admit runner image
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(uname -m)" = arm64
+        python3 - <<'PY' >> "$GITHUB_ENV"
+        import tomllib
+        with open("dist/darwin/hosted.toml", "rb") as source:
+            policy = tomllib.load(source)
+        values = {
+            "EXPECTED_IMAGE_OS": policy["image"]["provider_os"],
+            "EXPECTED_MACOS_VERSION": policy["image"]["os_version"],
+            "EXPECTED_MACOS_BUILD": policy["image"]["os_build"],
+            "DEVELOPER_DIR": policy["xcode"]["developer_dir"],
+            "EXPECTED_SDK": policy["xcode"]["sdk"],
+            "EXPECTED_XCODE_BUILD": policy["xcode"]["build"],
+            "EXPECTED_RUST": policy["toolchain"]["rust"],
+            "EXPECTED_CARGO": policy["toolchain"]["cargo"],
+            "EXPECTED_TRUNK": policy["toolchain"]["trunk"],
+            "EXPECTED_WASM_BINDGEN": policy["toolchain"]["wasm_bindgen"],
+            "EXPECTED_WASM_OPT": policy["toolchain"]["wasm_opt"],
+        }
+        for key, value in values.items():
+            if "\n" in value:
+                raise SystemExit(f"multiline policy value: {key}")
+            print(f"{key}={value}")
+        PY
+        test "$ImageOS" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["provider_os"])')"
+        test "$(sw_vers -productVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_version"])')"
+        test "$(sw_vers -buildVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_build"])')"
+
+    - name: Install exact Rust and release tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo xcode-select --switch "$DEVELOPER_DIR"
+        xcode_build=$(xcodebuild -version | sed -n '2s/^Build version //p')
+        sdk="macosx$(xcrun --sdk macosx --show-sdk-version)"
+        git_version=$(git --version)
+        rustup_version=$(rustup --version | sed -n 's/^rustup \([0-9.]*\).*/\1/p')
+        printf 'runner tools: xcode_build=%s sdk=%s git=%s rustup=%s\n' \
+          "$xcode_build" "$sdk" "$git_version" "$rustup_version"
+        test "$xcode_build" = "$EXPECTED_XCODE_BUILD"
+        test "$sdk" = "$EXPECTED_SDK"
+
+        rustup toolchain install 1.97.1-aarch64-apple-darwin --profile minimal --no-self-update
+        rustup target add --toolchain 1.97.1-aarch64-apple-darwin wasm32-unknown-unknown
+        rust_bin=$(dirname "$(rustup which --toolchain 1.97.1-aarch64-apple-darwin cargo)")
+        test "$("$rust_bin/rustc" --version)" = "$EXPECTED_RUST"
+        test "$("$rust_bin/cargo" --version)" = "$EXPECTED_CARGO"
+
+        tools="$RUNNER_TEMP/hosted-tools/bin"
+        mkdir -p "$tools"
+        checked_archive() {
+          name=$1
+          url=$2
+          expected=$3
+          archive="$RUNNER_TEMP/$name"
+          curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "$url"
+          observed=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+          test "$observed" = "$expected"
+          printf '%s\n' "$archive"
+        }
+        policy_value() {
+          python3 - "$1" "$2" <<'PY'
+        import sys, tomllib
+        with open("dist/darwin/hosted.toml", "rb") as source:
+            policy = tomllib.load(source)
+        print(policy["tools"][sys.argv[1]][sys.argv[2]])
+        PY
+        }
+
+        trunk=$(checked_archive "$(policy_value trunk archive)" "$(policy_value trunk url)" "$(policy_value trunk sha256)")
+        tar -xzf "$trunk" -C "$tools"
+        rm -f "$trunk"
+
+        bindgen=$(checked_archive "$(policy_value wasm_bindgen archive)" "$(policy_value wasm_bindgen url)" "$(policy_value wasm_bindgen sha256)")
+        bindgen_root="$RUNNER_TEMP/wasm-bindgen"
+        mkdir -p "$bindgen_root"
+        tar -xzf "$bindgen" -C "$bindgen_root"
+        cp "$bindgen_root/wasm-bindgen-0.2.126-aarch64-apple-darwin/wasm-bindgen" "$tools/wasm-bindgen"
+        rm -rf "$bindgen" "$bindgen_root"
+
+        binaryen=$(checked_archive "$(policy_value wasm_opt archive)" "$(policy_value wasm_opt url)" "$(policy_value wasm_opt sha256)")
+        binaryen_root="$RUNNER_TEMP/binaryen"
+        binaryen_home="$RUNNER_TEMP/hosted-tools"
+        mkdir -p "$binaryen_root" "$binaryen_home/lib"
+        tar -xzf "$binaryen" -C "$binaryen_root"
+        cp "$binaryen_root/binaryen-version_131/bin/wasm-opt" "$tools/wasm-opt"
+        cp -R "$binaryen_root/binaryen-version_131/lib/." "$binaryen_home/lib/"
+        rm -rf "$binaryen" "$binaryen_root"
+        chmod 0555 "$tools/trunk" "$tools/wasm-bindgen" "$tools/wasm-opt"
+        test "$("$tools/trunk" --version)" = "$EXPECTED_TRUNK"
+        test "$("$tools/wasm-bindgen" --version)" = "$EXPECTED_WASM_BINDGEN"
+        test "$("$tools/wasm-opt" --version)" = "$EXPECTED_WASM_OPT"
+        printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
+        printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"

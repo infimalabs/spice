@@ -1,0 +1,72 @@
+name: Derive the macOS candidate prebuild key inputs
+description: >-
+  Writes the build-key inputs of one exact-tree macOS candidate prebuild layer.
+  Runs from the admitted source root after the macos-toolchain action. The tree
+  and archive digests name the canonical source, which carries every repository
+  input that shapes compiled bytes: the lockfile, Cargo and candidate
+  configuration, profiles, feature selections, host policy, and the workflows
+  and actions that build; the synthetic source commit and vendor digest the
+  sealed proof runner pins follow from it. The remaining inputs are the
+  observed target, compiler, Cargo, and SDK, and the host strings compiled
+  outputs embed: absolute build paths and the path and digest of every tool the
+  proof runner pins. The app canvas is deliberately absent: release staging
+  links its selected canvas through the saved final-link plan, and the link
+  verification admits no other canvas.
+
+inputs:
+  tree:
+    description: Exact canonical source tree digest, lowercase hex
+    required: true
+  archive-sha256:
+    description: Raw SHA-256 of source.tar, lowercase hex
+    required: true
+  cargo-home:
+    description: Cargo home the macos-unsigned-stage action builds with
+    required: true
+  target-dir:
+    description: Cargo target directory the macos-unsigned-stage action builds with
+    required: true
+  output:
+    description: Path the build-key inputs JSON is written to
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Derive the macOS candidate prebuild key inputs
+      shell: bash
+      env:
+        TREE: ${{ inputs.tree }}
+        ARCHIVE_SHA256: ${{ inputs.archive-sha256 }}
+        KEY_CARGO_HOME: ${{ inputs.cargo-home }}
+        KEY_TARGET_DIR: ${{ inputs.target-dir }}
+        OUTPUT: ${{ inputs.output }}
+      run: |
+        set -euo pipefail
+        [[ "$TREE" =~ ^[0-9a-f]{64}$ ]]
+        [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+        [[ "$GITHUB_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+        digest_text() {
+          shasum -a 256 | cut -d' ' -f1 | sed 's/^/sha256:/'
+        }
+        layer=$(printf '%s' 'macos-candidate-prebuild-v1' | digest_text)
+        target=$(printf '%s' 'aarch64-apple-darwin' | digest_text)
+        rust=$("$RUST_BIN/rustc" -vV | digest_text)
+        cargo=$("$RUST_BIN/cargo" -Vv | digest_text)
+        sdk=$(printf '%s\n%s\n%s' "$EXPECTED_SDK" "$EXPECTED_XCODE_BUILD" "$DEVELOPER_DIR" | digest_text)
+        workflow=$(printf '%s' "$GITHUB_WORKFLOW_SHA" | digest_text)
+        # Each probe is its own assignment so any failure stops the step.
+        git_path=$(PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin" command -v git)
+        workspace=$(pwd -P)
+        sdk_path=$(xcrun --show-sdk-path)
+        developer_dir=$(xcode-select -p)
+        tools=$(shasum -a 256 "$RUST_BIN/cargo" "$RUST_BIN/rustc" "$git_path" /usr/bin/sandbox-exec)
+        host=$(printf 'workspace %s\ncargo_home %s\ntarget_dir %s\nsdk_path %s\ndeveloper_dir %s\n%s\n' \
+          "$workspace" "$KEY_CARGO_HOME" "$KEY_TARGET_DIR" "$sdk_path" "$developer_dir" "$tools" \
+          | digest_text)
+        jq -n --sort-keys \
+          --arg layer "$layer" --arg tree "sha256:$TREE" --arg archive "sha256:$ARCHIVE_SHA256" \
+          --arg target "$target" --arg rust "$rust" --arg cargo "$cargo" --arg sdk "$sdk" \
+          --arg host "$host" --arg workflow "$workflow" \
+          '{layer:$layer,tree:$tree,archive:$archive,target:$target,rust:$rust,cargo:$cargo,sdk:$sdk,host:$host,workflow:$workflow}' \
+          > "$OUTPUT"

@@ -124,7 +124,7 @@ jobs:
           GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
             git commit -q -m "canonical source $SOURCE_COMMIT"
           test "$(git ls-tree -r -z --full-tree HEAD | shasum -a 256 | cut -d' ' -f1)" = "$TREE"
-      - name: Admit request and runner image
+      - name: Admit request
         shell: bash
         env:
           EXPECTED_SOURCE: ${{ inputs.source_commit }}
@@ -146,101 +146,9 @@ jobs:
           test "${#proof_digest}" -eq 64
           case "$CANVAS" in *[!0-9a-f]*|'') exit 65 ;; esac
           test "${#CANVAS}" -eq 64
-          test "$(uname -m)" = arm64
-          python3 - <<'PY' >> "$GITHUB_ENV"
-          import tomllib
-          with open("dist/darwin/hosted.toml", "rb") as source:
-              policy = tomllib.load(source)
-          values = {
-              "EXPECTED_IMAGE_OS": policy["image"]["provider_os"],
-              "EXPECTED_MACOS_VERSION": policy["image"]["os_version"],
-              "EXPECTED_MACOS_BUILD": policy["image"]["os_build"],
-              "DEVELOPER_DIR": policy["xcode"]["developer_dir"],
-              "EXPECTED_SDK": policy["xcode"]["sdk"],
-              "EXPECTED_XCODE_BUILD": policy["xcode"]["build"],
-              "EXPECTED_RUST": policy["toolchain"]["rust"],
-              "EXPECTED_CARGO": policy["toolchain"]["cargo"],
-              "EXPECTED_TRUNK": policy["toolchain"]["trunk"],
-              "EXPECTED_WASM_BINDGEN": policy["toolchain"]["wasm_bindgen"],
-              "EXPECTED_WASM_OPT": policy["toolchain"]["wasm_opt"],
-          }
-          for key, value in values.items():
-              if "\n" in value:
-                  raise SystemExit(f"multiline policy value: {key}")
-              print(f"{key}={value}")
-          PY
-          test "$ImageOS" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["provider_os"])')"
-          test "$(sw_vers -productVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_version"])')"
-          test "$(sw_vers -buildVersion)" = "$(python3 -c 'import tomllib; print(tomllib.load(open("dist/darwin/hosted.toml", "rb"))["image"]["os_build"])')"
 
-      - name: Install exact Rust and release tools
-        shell: bash
-        env:
-          EXPECTED_SOURCE: ${{ inputs.source_commit }}
-        run: |
-          set -euo pipefail
-          sudo xcode-select --switch "$DEVELOPER_DIR"
-          xcode_build=$(xcodebuild -version | sed -n '2s/^Build version //p')
-          sdk="macosx$(xcrun --sdk macosx --show-sdk-version)"
-          git_version=$(git --version)
-          rustup_version=$(rustup --version | sed -n 's/^rustup \([0-9.]*\).*/\1/p')
-          printf 'runner tools: xcode_build=%s sdk=%s git=%s rustup=%s\n' \
-            "$xcode_build" "$sdk" "$git_version" "$rustup_version"
-          test "$xcode_build" = "$EXPECTED_XCODE_BUILD"
-          test "$sdk" = "$EXPECTED_SDK"
-
-          rustup toolchain install 1.97.1-aarch64-apple-darwin --profile minimal --no-self-update
-          rustup target add --toolchain 1.97.1-aarch64-apple-darwin wasm32-unknown-unknown
-          rust_bin=$(dirname "$(rustup which --toolchain 1.97.1-aarch64-apple-darwin cargo)")
-          test "$("$rust_bin/rustc" --version)" = "$EXPECTED_RUST"
-          test "$("$rust_bin/cargo" --version)" = "$EXPECTED_CARGO"
-
-          tools="$RUNNER_TEMP/hosted-tools/bin"
-          mkdir -p "$tools"
-          checked_archive() {
-            name=$1
-            url=$2
-            expected=$3
-            archive="$RUNNER_TEMP/$name"
-            curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "$url"
-            observed=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
-            test "$observed" = "$expected"
-            printf '%s\n' "$archive"
-          }
-          policy_value() {
-            python3 - "$1" "$2" <<'PY'
-          import sys, tomllib
-          with open("dist/darwin/hosted.toml", "rb") as source:
-              policy = tomllib.load(source)
-          print(policy["tools"][sys.argv[1]][sys.argv[2]])
-          PY
-          }
-
-          trunk=$(checked_archive "$(policy_value trunk archive)" "$(policy_value trunk url)" "$(policy_value trunk sha256)")
-          tar -xzf "$trunk" -C "$tools"
-          rm -f "$trunk"
-
-          bindgen=$(checked_archive "$(policy_value wasm_bindgen archive)" "$(policy_value wasm_bindgen url)" "$(policy_value wasm_bindgen sha256)")
-          bindgen_root="$RUNNER_TEMP/wasm-bindgen"
-          mkdir -p "$bindgen_root"
-          tar -xzf "$bindgen" -C "$bindgen_root"
-          cp "$bindgen_root/wasm-bindgen-0.2.126-aarch64-apple-darwin/wasm-bindgen" "$tools/wasm-bindgen"
-          rm -rf "$bindgen" "$bindgen_root"
-
-          binaryen=$(checked_archive "$(policy_value wasm_opt archive)" "$(policy_value wasm_opt url)" "$(policy_value wasm_opt sha256)")
-          binaryen_root="$RUNNER_TEMP/binaryen"
-          binaryen_home="$RUNNER_TEMP/hosted-tools"
-          mkdir -p "$binaryen_root" "$binaryen_home/lib"
-          tar -xzf "$binaryen" -C "$binaryen_root"
-          cp "$binaryen_root/binaryen-version_131/bin/wasm-opt" "$tools/wasm-opt"
-          cp -R "$binaryen_root/binaryen-version_131/lib/." "$binaryen_home/lib/"
-          rm -rf "$binaryen" "$binaryen_root"
-          chmod 0555 "$tools/trunk" "$tools/wasm-bindgen" "$tools/wasm-opt"
-          test "$("$tools/trunk" --version)" = "$EXPECTED_TRUNK"
-          test "$("$tools/wasm-bindgen" --version)" = "$EXPECTED_WASM_BINDGEN"
-          test "$("$tools/wasm-opt" --version)" = "$EXPECTED_WASM_OPT"
-          printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
-          printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
+      - name: Admit runner image and install exact tools
+        uses: ./.github/actions/macos-toolchain
 
       - name: Install exact ORAS
         uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
@@ -256,7 +164,19 @@ jobs:
           path: ${{ runner.temp }}/release-cargo
           key: macos-registry-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
 
+      - name: Restore exact unsigned candidate prebuild
+        uses: ./.github/actions/macos-candidate-prebuild
+        with:
+          source_commit: ${{ inputs.source_commit }}
+          source: ${{ inputs.source }}
+          tree: ${{ inputs.tree }}
+          archive_sha256: ${{ inputs.archive_sha256 }}
+          cargo_home: ${{ runner.temp }}/release-cargo
+          target_dir: ${{ runner.temp }}/release-target
+          token: ${{ github.token }}
+
       - name: Restore admitted native dependency layer
+        if: env.CANDIDATE_PREBUILD_HIT != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -267,10 +187,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo="$RUST_BIN/cargo"
-          bootstrap="$RUNNER_TEMP/prepared-artifact-target"
-          "$cargo" build --locked --release --target aarch64-apple-darwin \
-            --target-dir "$bootstrap" --package prepared-artifact --bin prepared-artifact
-          prepared="$bootstrap/aarch64-apple-darwin/release/prepared-artifact"
+          prepared="$PREPARED_ARTIFACT_TOOL"
           test -x "$prepared"
 
           digest_text() {
@@ -390,93 +307,36 @@ jobs:
             printf 'DEPENDENCY_PRESENT=%s\n' "$present"
           } >> "$GITHUB_ENV"
 
-      - name: Build and execute the sealed unsigned stage
+      - name: Mark native build start
         shell: bash
-        env:
-          CARGO_HOME: ${{ runner.temp }}/release-cargo
-          CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
-          RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
-          EXPECTED_ARCHIVE: ${{ inputs.source }}
-          PROOF_CONTAINER: ${{ inputs.proof_container }}
-          RELEASE_CANVAS: ${{ runner.temp }}/input/canvas.zip
-          RELEASE_APP: ${{ inputs.app }}
+        run: printf 'NATIVE_BUILD_STARTED=%s\n' "$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Build and execute the sealed unsigned stage
+        uses: ./.github/actions/macos-unsigned-stage
+        with:
+          cargo-home: ${{ runner.temp }}/release-cargo
+          target-dir: ${{ runner.temp }}/release-target
+          archive: ${{ inputs.source }}
+          proof-container: ${{ inputs.proof_container }}
+          canvas: ${{ runner.temp }}/input/canvas.zip
+          app: ${{ inputs.app }}
+
+      - name: Record native build duration
+        shell: bash
         run: |
           set -euo pipefail
-          build_started=$(date +%s)
-          python=$(command -v python3)
-          "$python" -c 'import tomllib'
-          cargo="$RUST_BIN/cargo"
-          candidate() {
-            "$python" - "$1" <<'PY'
-          import sys, tomllib
-          with open("dist/release/candidate.toml", "rb") as source:
-              print(tomllib.load(source)[sys.argv[1]])
-          PY
-          }
-          release_target="$CARGO_TARGET_DIR/$(candidate target_dir)"
-          debug_config=$(candidate debug_config)
-          target_output="$release_target/aarch64-apple-darwin"
-          xtask="$target_output/release/xtask"
-          # The candidate build's unit-affecting environment, one NAME=VALUE
-          # per line, as xtask's release executor sets it.
-          candidate_env=()
-          while IFS= read -r assignment; do
-            candidate_env+=("$assignment")
-          done < <("$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
-          import os, sys, tomllib
-          workspace, build_root = sys.argv[1:]
-          with open("dist/release/candidate.toml", "rb") as source:
-              candidate = tomllib.load(source)
-          for name, value in candidate["environment"].items():
-              print(f"{name}={value}")
-          print("CARGO_BUILD_BUILD_DIR=" + os.path.join(build_root, candidate["build_dir"]))
-          print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
-          PY
-          )
-          export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
-          env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
-            --target-dir "$release_target" --config "$debug_config" \
-            --package xtask --bin xtask
-          SPICE_PROOF_CARGO="$cargo" \
-            dist/proof-runner/build.sh "$CARGO_TARGET_DIR" --seal-only
-          runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
-          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
-            SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
-            "$xtask" \
-            stage-target aarch64-apple-darwin --unsigned \
-            --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
-
-          payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
-          python3 - "$payload" "$EXPECTED_ARCHIVE" "$RUNNER_TEMP/unsigned-stage" <<'PY'
-          import json, os, shutil, sys
-          payload_path, expected_archive, output = sys.argv[1:]
-          with open(payload_path, "rb") as source:
-              payload = json.load(source)
-          if payload["target"] != "aarch64-apple-darwin":
-              raise SystemExit("wrong staged target")
-          if payload["archive"] != expected_archive:
-              raise SystemExit(f"archive drifted: {payload['archive']} != {expected_archive}")
-          destination = os.path.join(output, "targets", "aarch64-apple-darwin")
-          os.makedirs(destination)
-          shutil.copyfile(payload_path, os.path.join(destination, "payload.json"))
-          objects = os.path.join(output, "objects")
-          os.makedirs(objects)
-          for entry in payload["inventory"]:
-              name = f"{entry['digest']}-{entry['mode']:04o}"
-              shutil.copyfile(os.path.join("dist/stage/objects", name), os.path.join(objects, name))
-          PY
-          "$xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
-          tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
-          cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
-          finalizer="$RUNNER_TEMP/finalizer"
-          mkdir -p "$finalizer"
-          cp "$xtask" "$finalizer/"
-          cp -R target/proof-native-darwin "$finalizer/"
-          tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .
-          build_seconds=$(($(date +%s) - build_started))
+          build_seconds=$(($(date +%s) - NATIVE_BUILD_STARTED))
           printf 'DEPENDENCY_BUILD_SECONDS=%s\n' "$build_seconds" >> "$GITHUB_ENV"
+          if test "$CANDIDATE_PREBUILD_HIT" = 1; then
+            {
+              printf '### macOS candidate rebind\n\n'
+              printf -- '- Cargo freshness, canvas relink, and sealed stage: `%ss`\n' \
+                "$build_seconds"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Publish or record native dependency layer
+        if: env.CANDIDATE_PREBUILD_HIT != '1'
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -601,7 +461,9 @@ jobs:
       - name: Tear down build roots
         if: always()
         shell: bash
-        run: rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage"
+        run: |
+          rm -rf "$RUNNER_TEMP/hosted-tools" "$RUNNER_TEMP/unsigned-stage" \
+            "$RUNNER_TEMP/candidate-prebuild" "$RUNNER_TEMP/prepared-artifact-target"
 
   sign:
     name: Sign macOS
@@ -678,6 +540,7 @@ jobs:
           NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+          sign_started=$(date +%s)
           work="$RUNNER_TEMP/sign"
           native="$work/native"
           keychain="$RUNNER_TEMP/signing.keychain-db"
@@ -720,6 +583,11 @@ jobs:
           PY
           codesign --verify --deep --strict --verbose=2 "$native"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$native"
+          sign_seconds=$(($(date +%s) - sign_started))
+          {
+            printf '### macOS signing and notarization\n\n'
+            printf -- '- signing, notarization, and assessment: `%ss`\n' "$sign_seconds"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload signed native bytes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -796,6 +664,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          proof_started=$(date +%s)
           work="$RUNNER_TEMP/finalize"
           finalizer="$work/finalizer"
           stage="$GITHUB_WORKSPACE/dist/stage"
@@ -865,6 +734,11 @@ jobs:
           cp -R "$stage/." "$result/stage/"
           (cd "$result" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
             | LC_ALL=C sort | jq -R . | jq -cs .) > "$result/subjects.json"
+          proof_seconds=$(($(date +%s) - proof_started))
+          {
+            printf '### macOS signed proof\n\n'
+            printf -- '- finalization, native proof, and assessment: `%ss`\n' "$proof_seconds"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install exact ORAS
         uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
