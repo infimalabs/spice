@@ -248,26 +248,33 @@ jobs:
           & $runner $request $result $archive
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Sign repository-owned runner
+      - name: Assemble complete hosted artifact
+        shell: pwsh
+        env:
+          CHALLENGE: ${{ inputs.challenge }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifact = Join-Path $env:RUNNER_TEMP "windows-$env:CHALLENGE"
+          New-Item -ItemType Directory -Path $artifact | Out-Null
+          Move-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'result.json') `
+            -Destination (Join-Path $artifact 'result.json')
+          Move-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'bootstrap-target\release\windows-hosted.exe') `
+            -Destination (Join-Path $artifact 'windows-hosted.exe')
+          $stage = Join-Path $env:RUNNER_TEMP "windows-stage-$env:CHALLENGE"
+          if (Test-Path -LiteralPath $stage) {
+            Move-Item -LiteralPath $stage -Destination (Join-Path $artifact 'stage')
+          }
+
+      - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
         with:
-          subject-path: ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
+          subject-path: ${{ runner.temp }}\windows-${{ inputs.challenge }}\**
 
-      - name: Sign result and staged files with GitHub OIDC identity
-        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
-        with:
-          subject-path: |
-            ${{ runner.temp }}\result.json
-            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}\**
-
-      - name: Publish immutable result, runner, and staged output
+      - name: Publish complete hosted artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: windows-${{ steps.request.outputs.challenge }}
-          path: |
-            ${{ runner.temp }}\result.json
-            ${{ runner.temp }}\bootstrap-target\release\windows-hosted.exe
-            ${{ runner.temp }}\windows-stage-${{ steps.request.outputs.challenge }}
+          path: ${{ runner.temp }}\windows-${{ inputs.challenge }}
           if-no-files-found: error
           retention-days: 1
 
@@ -277,6 +284,7 @@ jobs:
         run: |
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\vendor"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-stage-*"
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\windows-${{ inputs.challenge }}"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\linux-stage-*"
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\input-*"
           Remove-Item -Force -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\request.json"

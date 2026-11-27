@@ -390,6 +390,21 @@ fn complete_dispatched_run(
         serde_json::from_slice(&result_bytes).map_err(WindowsHostedError::ResultSchema)?;
     let identity =
         admit_result(request, &result, &runner).map_err(WindowsHostedError::Admission)?;
+    let stage = artifact_dir.join("stage");
+    for artifact in &result.artifacts {
+        verify_attestation(run, WORKFLOW, run_id, &stage.join(&artifact.path))?;
+    }
+    let mut files = vec![
+        PathBuf::from("result.json"),
+        PathBuf::from("windows-hosted.exe"),
+    ];
+    files.extend(
+        result
+            .artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    admit_file_set(&artifact_dir, files)?;
     if identity.run_id != run_id {
         return Err(WindowsHostedError::RunIdentity {
             dispatched: run_id,
@@ -419,7 +434,7 @@ fn complete_dispatched_run(
             .all(|output| matches!(output.completion, Completion::Exited { code: 0 }))
         {
             publish_artifacts(
-                &artifact_dir.join(format!("windows-stage-{}", request.challenge)),
+                &stage,
                 &result.artifacts,
                 destination,
                 &request.source,
@@ -457,7 +472,7 @@ fn download_attested_artifact(
 ) -> Result<(PathBuf, PathBuf, PathBuf), WindowsHostedError> {
     let artifact_dir = download_artifact(run, run_id, &format!("windows-{challenge}"))?;
     let result_path = artifact_dir.join("result.json");
-    let runner_path = artifact_dir.join("bootstrap-target/release/windows-hosted.exe");
+    let runner_path = artifact_dir.join("windows-hosted.exe");
     for path in [&runner_path, &result_path] {
         verify_attestation(run, WORKFLOW, run_id, path)?;
     }
@@ -536,6 +551,7 @@ fn publish_artifacts(
     canvas: Option<&canvas::LinuxCanvas>,
     release_inputs: Option<&super::release_inputs::ResultManifest>,
 ) -> Result<(), WindowsHostedError> {
+    admit_artifact_file_set(source, artifacts)?;
     for artifact in artifacts {
         let path = source.join(&artifact.path);
         let metadata = fs::metadata(&path).map_err(|source| WindowsHostedError::Io {
@@ -574,6 +590,69 @@ fn publish_artifacts(
             path: path.clone(),
             source,
         })?;
+    }
+    Ok(())
+}
+
+fn admit_artifact_file_set(
+    source: &Path,
+    artifacts: &[super::Artifact],
+) -> Result<(), WindowsHostedError> {
+    admit_file_set(
+        source,
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from(&artifact.path))
+            .collect(),
+    )
+}
+
+fn admit_file_set(root: &Path, mut expected: Vec<PathBuf>) -> Result<(), WindowsHostedError> {
+    expected.sort();
+    let mut observed = Vec::new();
+    collect_artifact_files(root, root, &mut observed)?;
+    observed.sort();
+    if observed != expected {
+        return Err(WindowsHostedError::ProviderResponse(
+            "hosted artifact differs from its signed inventory".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_artifact_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), WindowsHostedError> {
+    let entries = fs::read_dir(directory).map_err(|source| WindowsHostedError::Io {
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| WindowsHostedError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| WindowsHostedError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_dir() {
+            collect_artifact_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            files.push(
+                path.strip_prefix(root)
+                    .expect("collected artifact stays below its root")
+                    .to_path_buf(),
+            );
+        } else {
+            return Err(WindowsHostedError::ProviderResponse(format!(
+                "hosted stage contains non-regular path {}",
+                path.display()
+            )));
+        }
     }
     Ok(())
 }

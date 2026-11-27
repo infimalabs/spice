@@ -7,7 +7,7 @@
 //! only staged files the result inventories.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -204,6 +204,7 @@ fn complete_run(
         serde_json::from_slice(&bytes).map_err(WindowsHostedError::ResultSchema)?;
     admit_result(&result, challenge, source, manifest, run_id)?;
     let log_path = artifact.join("stage.log");
+    verify_attestation(run, WORKFLOW_PATH, run_id, &log_path)?;
     let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
         path: log_path.clone(),
         source,
@@ -213,6 +214,9 @@ fn complete_run(
     }
     let stage = artifact.join("stage");
     let artifacts = admit_inventory(&stage, &result.artifacts)?;
+    for artifact in &artifacts {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
+    }
     let smoke_log_path = artifact.join("smoke.log");
     verify_attestation(run, WORKFLOW_PATH, run_id, &smoke_log_path)?;
     let smoke_log = fs::read(&smoke_log_path).map_err(|source| WindowsHostedError::Io {
@@ -224,6 +228,25 @@ fn complete_run(
     }
     let smoke = artifact.join("smoke");
     let smoke_artifacts = admit_inventory(&smoke, &result.smoke_artifacts)?;
+    for artifact in &smoke_artifacts {
+        verify_attestation(run, WORKFLOW_PATH, run_id, &smoke.join(&artifact.path))?;
+    }
+    let mut files = vec![
+        PathBuf::from("result.json"),
+        PathBuf::from("stage.log"),
+        PathBuf::from("smoke.log"),
+    ];
+    files.extend(
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    files.extend(
+        smoke_artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("smoke").join(&artifact.path)),
+    );
+    super::admit_file_set(&artifact, files)?;
     admit_smoke_result(result.exit_code, result.smoke_exit_code, &smoke_artifacts)?;
     if result.exit_code == 0 {
         publish_artifacts(

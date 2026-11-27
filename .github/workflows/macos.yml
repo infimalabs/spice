@@ -499,6 +499,8 @@ jobs:
 
       - name: Rebind, prove, and verify exact signed stage
         shell: bash
+        env:
+          CHALLENGE: ${{ inputs.challenge }}
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/finalize"
@@ -565,11 +567,16 @@ jobs:
               destination.write("\n")
           PY
 
-      - name: Upload exact signed stage
+          artifact="$RUNNER_TEMP/macos-$CHALLENGE"
+          mkdir -p "$artifact"
+          mv "$stage/result.json" "$artifact/result.json"
+          mv "$stage" "$artifact/stage"
+
+      - name: Upload complete hosted artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-${{ inputs.challenge }}
-          path: ${{ github.workspace }}/dist/stage
+          path: ${{ runner.temp }}/macos-${{ inputs.challenge }}
           if-no-files-found: error
           retention-days: 1
 
@@ -589,9 +596,8 @@ jobs:
           name: macos-${{ inputs.challenge }}
           path: ${{ runner.temp }}/stage
 
-      - name: Attest payload and exact inventoried objects
+      - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          subject-path: |
-            ${{ runner.temp }}/stage/**
+          subject-path: ${{ runner.temp }}/stage/**
 

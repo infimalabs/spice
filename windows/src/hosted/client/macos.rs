@@ -182,8 +182,8 @@ pub fn macos_hosted_stage_controlled(
         |authority| {
             watch_run(run.root, run.repository, authority, &cancellation)?;
             let run_id = authority.run_id();
-            let stage = download_artifact(&run, run_id, &format!("macos-{challenge}"))?;
-            let result_path = stage.join(RESULT_PATH);
+            let artifact = download_artifact(&run, run_id, &format!("macos-{challenge}"))?;
+            let result_path = artifact.join(RESULT_PATH);
             verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             let result: MacosResult =
                 serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
@@ -198,6 +198,7 @@ pub fn macos_hosted_stage_controlled(
                     image: &policy.image,
                 },
             )?;
+            let stage = artifact.join("stage");
             let artifacts = admit_stage(
                 &stage,
                 &source.canonical_commit,
@@ -210,6 +211,7 @@ pub fn macos_hosted_stage_controlled(
             for artifact in &artifacts {
                 verify_attestation(&run, WORKFLOW_PATH, run_id, &stage.join(&artifact.path))?;
             }
+            admit_hosted_file_set(&artifact, &artifacts)?;
             publish_artifacts(
                 &stage,
                 &artifacts,
@@ -228,6 +230,19 @@ pub fn macos_hosted_stage_controlled(
         },
     )
 }
+fn admit_hosted_file_set(
+    root: &Path,
+    artifacts: &[crate::hosted::Artifact],
+) -> Result<(), WindowsHostedError> {
+    let mut files = vec![PathBuf::from(RESULT_PATH)];
+    files.extend(
+        artifacts
+            .iter()
+            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
+    );
+    super::admit_file_set(root, files)
+}
+
 fn admit_result(
     result: &MacosResult,
     expected: &ExpectedResult<'_>,
@@ -320,7 +335,6 @@ fn admit_stage(
 
     let expected = BTreeSet::from([
         PathBuf::from(PAYLOAD_PATH),
-        PathBuf::from(RESULT_PATH),
         relative(stage, &native_path)?,
         relative(stage, &symbol_path)?,
         receipt_relative.clone(),
