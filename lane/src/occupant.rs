@@ -109,6 +109,15 @@ impl ToolCall {
         self.started
     }
 }
+/// Whether the oldest unanswered call is clear, approaching its bound, or
+/// blocked. The pending duration lets readers schedule the exact transition
+/// without polling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallStatus<'a> {
+    Clear,
+    Pending(Duration),
+    Blocked(&'a ToolCall),
+}
 
 impl Occupant {
     /// The lane this occupant sits in.
@@ -362,19 +371,27 @@ impl Seats {
         removed
     }
 
-    /// Oldest unanswered tool call for this lane, once it crosses `horizon`.
+    /// State of the oldest unanswered tool call at `now`.
     #[must_use]
-    pub fn blocked_tool_call(
+    pub fn tool_call_status(
         &self,
         lane: CanonicalUuid,
         now: Monotonic,
         horizon: Duration,
-    ) -> Option<&ToolCall> {
-        self.tool_calls
-            .get(&lane)?
-            .iter()
-            .filter(|call| now.duration_since(call.started) >= horizon)
-            .min_by_key(|call| call.started)
+    ) -> ToolCallStatus<'_> {
+        let Some(call) = self
+            .tool_calls
+            .get(&lane)
+            .and_then(|calls| calls.iter().min_by_key(|call| call.started))
+        else {
+            return ToolCallStatus::Clear;
+        };
+        let elapsed = now.duration_since(call.started);
+        if elapsed >= horizon {
+            ToolCallStatus::Blocked(call)
+        } else {
+            ToolCallStatus::Pending(horizon - elapsed)
+        }
     }
 
     /// Every occupied lane, ordered by lane.
@@ -469,7 +486,7 @@ impl Seats {
 mod tests {
     use std::time::Duration;
 
-    use super::{DetachedProcess, DetachedWait, SeatError, Seats};
+    use super::{DetachedProcess, DetachedWait, SeatError, Seats, ToolCallStatus};
     use journal::crossing::CanonicalUuid;
     use sill::{WaitError, WaitOutcome};
 
@@ -550,33 +567,31 @@ mod tests {
             started,
         ));
 
-        assert!(
-            seats
-                .blocked_tool_call(
-                    uuid(1),
-                    started + Duration::from_secs(19),
-                    Duration::from_secs(20),
-                )
-                .is_none()
-        );
-        let blocked = seats
-            .blocked_tool_call(
+        assert_eq!(
+            seats.tool_call_status(
                 uuid(1),
-                started + Duration::from_secs(20),
+                started + Duration::from_secs(19),
                 Duration::from_secs(20),
-            )
-            .expect("the unanswered call crosses the exact bound");
+            ),
+            ToolCallStatus::Pending(Duration::from_secs(1))
+        );
+        let ToolCallStatus::Blocked(blocked) = seats.tool_call_status(
+            uuid(1),
+            started + Duration::from_secs(20),
+            Duration::from_secs(20),
+        ) else {
+            panic!("the unanswered call crosses the exact bound");
+        };
         assert_eq!(blocked.command(), "spice room contribute DIRECTI-example");
 
         assert!(seats.finish_tool_call(uuid(1), uuid(3), "call-1"));
-        assert!(
-            seats
-                .blocked_tool_call(
-                    uuid(1),
-                    started + Duration::from_secs(30),
-                    Duration::from_secs(20),
-                )
-                .is_none()
+        assert_eq!(
+            seats.tool_call_status(
+                uuid(1),
+                started + Duration::from_secs(30),
+                Duration::from_secs(20),
+            ),
+            ToolCallStatus::Clear
         );
     }
 
