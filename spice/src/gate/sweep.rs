@@ -360,7 +360,7 @@ fn arm_text(timing: &ArmTiming) -> SweepText {
         );
     }
     SweepText {
-        title: format!("Speed up the slow gate arm {arm}"),
+        title: wire::title::fit(&format!("Speed up the slow gate arm {arm}")),
         pitch: "A slow arm costs every lane on every commit, so repairing it once on purpose \
                 pays back on every proof."
             .to_owned(),
@@ -384,7 +384,7 @@ fn child_text(path: &str, rows: &[(&LatchEntry, Option<&LatchOrigin>)]) -> Sweep
         }
     }
     SweepText {
-        title: format!("Heal latched bound debt in {path}"),
+        title: wire::title::fit(&format!("Heal latched bound debt in {path}")),
         pitch: "Repairing this file's inherited bound debt once, on purpose, stops every lane \
                 that touches it from repairing it inline."
             .to_owned(),
