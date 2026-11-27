@@ -95,6 +95,9 @@ runs:
         SPICE_PROOF_CARGO="$cargo" \
           dist/proof-runner/build.sh "${proof_arguments[@]}"
         proof_seconds=$(($(date +%s) - proof_started))
+        dependency_marker="$RUNNER_TEMP/native-dependencies/builds-complete"
+        mkdir -p "$(dirname "$dependency_marker")"
+        printf '1\n' > "$dependency_marker"
         candidate_started=$(date +%s)
         runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
         SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \

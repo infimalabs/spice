@@ -330,12 +330,17 @@ jobs:
           proof-dependencies-restored: ${{ env.CANDIDATE_PREBUILD_HIT == '1' || env.DEPENDENCY_HIT == '1' }}
 
       - name: Record native build duration
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "${NATIVE_BUILD_STARTED:-}" =~ ^[0-9]+$ ]]; then
+            printf 'Native build did not start; no duration recorded.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           build_seconds=$(($(date +%s) - NATIVE_BUILD_STARTED))
           printf 'DEPENDENCY_BUILD_SECONDS=%s\n' "$build_seconds" >> "$GITHUB_ENV"
-          if test "$CANDIDATE_PREBUILD_HIT" = 1; then
+          if test "${CANDIDATE_PREBUILD_HIT:-0}" = 1; then
             {
               printf '### macOS candidate rebind\n\n'
               printf -- '- Cargo freshness, canvas relink, and sealed stage: `%ss`\n' \
@@ -344,7 +349,7 @@ jobs:
           fi
 
       - name: Publish or record native dependency layer
-        if: steps.candidate_prebuild.outputs.hit != '1'
+        if: ${{ always() && steps.candidate_prebuild.outputs.hit != '1' }}
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
@@ -353,28 +358,50 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          if test -z "${DEPENDENCY_BUILD_KEY:-}"; then
+            {
+              printf '### macOS native dependency layer\n\n'
+              printf -- '- publication: unpublished: dependency admission incomplete\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          state="$RUNNER_TEMP/native-dependencies"
+          marker="$state/builds-complete"
+          result="$state/publication-result"
+          error="$state/publication-error"
           manifest="$DEPENDENCY_MANIFEST"
           publication=reused
+          rm -f "$result" "$error"
           if test "$DEPENDENCY_HIT" = 0 && test "$DEPENDENCY_PRESENT" = 1; then
             # The tag already names content this run refused; never publish
             # over it.
             publication='unpublished: the tag names a refused layer'
           fi
           if test "$DEPENDENCY_HIT" = 0 && test "$DEPENDENCY_PRESENT" = 0; then
-            python=$(command -v python3)
-            cargo="$RUST_BIN/cargo"
-            release_target="$CARGO_TARGET_DIR/$("$python" -c \
-              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["target_dir"])')"
-            build_dir="$CARGO_TARGET_DIR/$("$python" -c \
-              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["build_dir"])')"
-            proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
-            debug_config=$("$python" -c \
-              'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["debug_config"])')
-            candidate_env=()
-            while IFS= read -r assignment; do
-              candidate_env+=("$assignment")
-            done < <("$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
+            manifest=-
+            if test ! -s "$marker"; then
+              publication='unpublished: dependency-bearing builds incomplete'
+            else
+              (
+                set -eEuo pipefail
+                phase=initialization
+                trap 'rc=$?; printf "%s\t%s\n" "$phase" "$rc" > "$error"; exit "$rc"' ERR
+                python=$(command -v python3)
+                cargo="$RUST_BIN/cargo"
+                phase='read candidate configuration'
+                release_name=$("$python" -c \
+                  'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["target_dir"])')
+                build_name=$("$python" -c \
+                  'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["build_dir"])')
+                debug_config=$("$python" -c \
+                  'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["debug_config"])')
+                release_target="$CARGO_TARGET_DIR/$release_name"
+                build_dir="$CARGO_TARGET_DIR/$build_name"
+                proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
+                candidate_env_file="$state/candidate.env"
+                packages_file="$state/workspace-packages"
+                "$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" > "$candidate_env_file" <<'PY'
           import os, sys, tomllib
           workspace, build_root = sys.argv[1:]
           with open("dist/release/candidate.toml", "rb") as source:
@@ -384,50 +411,74 @@ jobs:
           print("CARGO_BUILD_BUILD_DIR=" + os.path.join(build_root, candidate["build_dir"]))
           print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
           PY
-            )
-            packages=()
-            while IFS= read -r package; do
-              packages+=(--package "$package")
-            done < <("$cargo" metadata --locked --no-deps --format-version 1 \
-              | jq -r '.workspace_members[] as $id | .packages[] | select(.id == $id) | .name')
-            env "${candidate_env[@]}" "$cargo" clean --release \
-              --target aarch64-apple-darwin --target-dir "$release_target" \
-              --config "$debug_config" "${packages[@]}"
-            "$cargo" clean --release --target-dir "$proof_target" "${packages[@]}"
+                candidate_env=()
+                while IFS= read -r assignment; do
+                  candidate_env+=("$assignment")
+                done < "$candidate_env_file"
+                phase='resolve workspace packages'
+                "$cargo" metadata --locked --no-deps --format-version 1 \
+                  | jq -r '.workspace_members[] as $id | .packages[] | select(.id == $id) | .name' \
+                  > "$packages_file"
+                packages=()
+                while IFS= read -r package; do
+                  packages+=(--package "$package")
+                done < "$packages_file"
 
-            root="$RUNNER_TEMP/native-dependencies/publish"
-            mkdir -p "$root/target" "$root/proof-native-darwin"
-            mv "$release_target" "$root/target/release-appliance"
-            mv "$build_dir" "$root/target/release-appliance-build"
-            mv "$proof_target" "$root/target/proof-native-dependencies"
-            cp -pR "$GITHUB_WORKSPACE/target/proof-native-darwin/vendor" \
-              "$root/proof-native-darwin/"
-            # Cold hosted run 45989936318 spent 23m30s in this native build.
-            # Keep the reference fixed so the prepared payload is idempotent.
-            jq -n --sort-keys --arg build_key "$DEPENDENCY_BUILD_KEY" \
-              --argjson seconds 1410 --argjson run 45989936318 \
-              '{schema:1,build_key:$build_key,cold_build_seconds:$seconds,cold_build_run:$run}' \
-              > "$root/record.json"
-            archive="$RUNNER_TEMP/native-dependencies/macos-dependencies.tar.gz"
-            config="$RUNNER_TEMP/native-dependencies/prepared.json"
-            "$PREPARED_ARTIFACT_TOOL" pack-preserve-times "$root" "$archive"
-            "$PREPARED_ARTIFACT_TOOL" manifest \
-              bundle macos-arm64 "$DEPENDENCY_BUILD_KEY_FILE" application/gzip \
-              "$archive" "$root" - "$config"
-            # Publication is an optimization: a refused publication records
-            # the cold build unpublished instead of failing the stage.
-            manifest=-
-            publication='unpublished: publication refused'
-            if printf '%s' "$GHCR_TOKEN" \
-              | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin; then
-              trap 'oras logout ghcr.io' EXIT
-              if output=$("$PREPARED_ARTIFACT_TOOL" publish \
-                "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive"); then
-                read -r label published <<< "$output"
-                if test "$label" = published; then
-                  manifest="$published"
-                  publication=published
+                phase='clean candidate workspace packages'
+                env "${candidate_env[@]}" "$cargo" clean --release \
+                  --target aarch64-apple-darwin --target-dir "$release_target" \
+                  --config "$debug_config" "${packages[@]}"
+                phase='clean proof workspace packages'
+                "$cargo" clean --release --target-dir "$proof_target" "${packages[@]}"
+
+                phase='assemble dependency payload'
+                root="$state/publish"
+                rm -rf "$root"
+                mkdir -p "$root/target" "$root/proof-native-darwin"
+                mv "$release_target" "$root/target/release-appliance"
+                mv "$build_dir" "$root/target/release-appliance-build"
+                mv "$proof_target" "$root/target/proof-native-dependencies"
+                cp -pR "$GITHUB_WORKSPACE/target/proof-native-darwin/vendor" \
+                  "$root/proof-native-darwin/"
+                # Cold hosted run 45989936318 spent 23m30s in this native build.
+                # Keep the reference fixed so the prepared payload is idempotent.
+                jq -n --sort-keys --arg build_key "$DEPENDENCY_BUILD_KEY" \
+                  --argjson seconds 1410 --argjson run 45989936318 \
+                  '{schema:1,build_key:$build_key,cold_build_seconds:$seconds,cold_build_run:$run}' \
+                  > "$root/record.json"
+                archive="$state/macos-dependencies.tar.gz"
+                config="$state/prepared.json"
+                phase='pack dependency payload'
+                "$PREPARED_ARTIFACT_TOOL" pack-preserve-times "$root" "$archive"
+                phase='record dependency manifest'
+                "$PREPARED_ARTIFACT_TOOL" manifest \
+                  bundle macos-arm64 "$DEPENDENCY_BUILD_KEY_FILE" application/gzip \
+                  "$archive" "$root" - "$config"
+                phase='authenticate dependency publication'
+                printf '%s' "$GHCR_TOKEN" \
+                  | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+                trap 'oras logout ghcr.io >/dev/null 2>&1 || true' EXIT
+                phase='publish dependency payload'
+                output=$("$PREPARED_ARTIFACT_TOOL" publish \
+                  "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive")
+                read -r label published extra <<< "$output"
+                test "$label" = published
+                test -n "$published"
+                test -z "${extra:-}"
+                printf '%s\n' "$published" > "$result"
+              )
+              publication_status=$?
+              if test "$publication_status" = 0; then
+                manifest=$(cat "$result")
+                publication=published
+              else
+                failed_phase=unknown
+                failed_status="$publication_status"
+                if test -s "$error"; then
+                  IFS=$'\t' read -r failed_phase failed_status < "$error"
                 fi
+                publication="unpublished: $failed_phase failed (exit $failed_status)"
+                printf '%s\n' "$publication" >&2
               fi
             fi
           fi

@@ -413,12 +413,18 @@ and final executable rebuilds from the admitted source.
 Only a canonically absent Darwin dependency tag or a resolved layer that
 fails fetch, inventory, or record admission selects the ordinary cold build.
 Authentication, transport, tool, and malformed resolution failures refuse
-before the build. After successful staging, a build whose tag was absent removes
-workspace artifacts, packages the remaining dependency target beneath the
-common prepared-artifact manifest, and publishes it with conflict-refusing
-idempotence; a tag naming a refused layer is never overwritten, and a refused
-publication leaves the build recorded as unpublished. The GHCR credential is
-held only around the lookup and the publication, never while the sealed stage
+before the build. Once the release-driver and proof-dependency builds finish,
+the unsigned stage records a completion marker. An absent tag then publishes
+from an `always()` step even when later candidate staging or proof refuses, so
+a retry can restore the completed third-party work while the original failure
+remains authoritative. Publication removes workspace artifacts and packages
+the remaining dependency target beneath the common prepared-artifact manifest
+with conflict-refusing idempotence. A tag naming a refused layer is never
+overwritten. Cleanup, packing, authentication, or publication failure records
+the exact failed phase as unpublished and cannot fail an otherwise successful
+stage.
+The GHCR credential is held only around the lookup and the publication, never
+while the sealed stage
 builds and runs third-party or repository code. The hosted summary records the
 manifest digest, publication outcome, cold baseline, observed build time, and
 savings. The mutable provider cache carries only Cargo registry sources; its
