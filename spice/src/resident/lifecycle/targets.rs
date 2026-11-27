@@ -247,8 +247,9 @@ pub(super) fn await_armed_lines(
     let candidates = targets
         .iter()
         .filter_map(|target| {
-            let (_, armed) = snapshot.facts().latest_line_arm(target.lane)?;
-            let armed = armed.filter(|armed| arm_matches_claim(snapshot, target.lane, armed))?;
+            let (position, armed) = snapshot.facts().latest_line_arm(target.lane)?;
+            let armed =
+                armed.filter(|armed| arm_matches_claim(snapshot, target.lane, position, armed))?;
             (!armed.roots.is_empty()).then_some((target.lane, armed.clone()))
         })
         .collect::<Vec<_>>();
@@ -300,18 +301,21 @@ pub(super) fn await_armed_lines(
 fn arm_matches_claim(
     snapshot: &bus::TaskSnapshot,
     lane: CanonicalUuid,
+    armed_at: Seq,
     armed: &wire::body::LineArmed,
 ) -> bool {
-    let mut claims = snapshot.tasks().iter().filter(|heads| {
-        heads.claims().iter().any(|held| {
+    let mut claims = snapshot.tasks().iter().filter_map(|heads| {
+        heads.claims().iter().find_map(|held| {
             let claim = held.claim().body();
-            claim.lane == lane && claim.disposition == ClaimDisposition::Active
+            (claim.lane == lane && claim.disposition == ClaimDisposition::Active)
+                .then_some((heads, claim.claimed))
         })
     });
-    let Some(heads) = claims.next() else {
+    let Some((heads, claimed)) = claims.next() else {
         return false;
     };
     claims.next().is_none()
+        && claimed < armed_at
         && heads.statement().body().born == armed.task
         && heads.workflow().body().phase == armed.phase
         && heads.completion().body().round == armed.round

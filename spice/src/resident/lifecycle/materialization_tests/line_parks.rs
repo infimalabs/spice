@@ -16,8 +16,9 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
             .expect("partner claim commits"),
     );
     let claimed = bus.task_snapshot().expect("claimed snapshot reads");
+    let opening = lane_at(OPENING);
     committed(
-        bus.commit(open_and_arm_write(&claimed, lane_at(OPENING)))
+        bus.commit(open_and_arm_write(&claimed, opening))
             .expect("open line and arm commit"),
     );
     let snapshot = bus.task_snapshot().expect("armed snapshot reads");
@@ -66,7 +67,7 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     );
 
     committed(
-        bus.commit(close_write(&bus, lane_at(OPENING)))
+        bus.commit(close_write(&bus, opening))
             .expect("line close commits"),
     );
     let closed = bus.task_snapshot().expect("closed snapshot reads");
@@ -86,7 +87,7 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     assert_eq!(parked_again[0].park, Some(body::LanePark::Line));
 
     committed(
-        bus.commit(free_partner_write(&reopened))
+        bus.commit(free_claim_write(&reopened, lane_at(PARTNER), instant(10)))
             .expect("partner departure commits"),
     );
     let departed = bus.task_snapshot().expect("departed snapshot reads");
@@ -107,6 +108,51 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     assert_eq!(invalid[0].0, lane());
     assert_eq!(no_park[0].park, None);
 
+    bus.shutdown().expect("line park fixture stops");
+}
+
+#[test]
+fn reclaiming_in_the_same_round_lifts_the_old_arm_until_rearmed() {
+    let (bus, _) = caught_up_fixture(0);
+    committed(
+        bus.commit(held_claim_write(&bus, instant(2), |_, _| {}))
+            .expect("caller claim commits"),
+    );
+    committed(
+        bus.commit(partner_claim_write(&bus))
+            .expect("partner claim commits"),
+    );
+    let opening = lane_at(OPENING);
+    let claimed = bus.task_snapshot().expect("claimed snapshot reads");
+    committed(
+        bus.commit(open_and_arm_write(&claimed, opening))
+            .expect("open line and arm commit"),
+    );
+    let armed = bus.task_snapshot().expect("armed snapshot reads");
+    committed(
+        bus.commit(free_claim_write(&armed, lane(), instant(5)))
+            .expect("caller claim frees"),
+    );
+    committed(
+        bus.commit(held_claim_write(&bus, instant(6), |_, _| {}))
+            .expect("caller replacement claim commits"),
+    );
+    let reclaimed = bus
+        .task_snapshot()
+        .expect("replacement claim snapshot reads");
+    let mut stale = [target(true)];
+    await_armed_lines(&bus, &reclaimed, &mut stale).expect("stale arm projects");
+    assert_eq!(stale[0].park, None, "the old arm binds no later claim");
+    assert_eq!(stale[0].held_claim, Available::Ready);
+
+    committed(
+        bus.commit(arm_write(&reclaimed, opening, instant(7)))
+            .expect("replacement claim arm commits"),
+    );
+    let rearmed = bus.task_snapshot().expect("replacement arm snapshot reads");
+    let mut bound = [target(true)];
+    await_armed_lines(&bus, &rearmed, &mut bound).expect("replacement arm projects");
+    assert_eq!(bound[0].park, Some(body::LanePark::Line));
     bus.shutdown().expect("line park fixture stops");
 }
 
@@ -252,6 +298,30 @@ fn open_and_arm_write(snapshot: &bus::TaskSnapshot, root: CanonicalUuid) -> Jour
     write
 }
 
+fn arm_write(snapshot: &bus::TaskSnapshot, root: CanonicalUuid, at: Instant) -> JournalWrite {
+    let heads = &snapshot.tasks()[0];
+    let caller = lane();
+    let mut write = JournalWrite::new(
+        Actor::Lane(caller),
+        "steer:fixture".parse().expect("fixture steer origin"),
+        at,
+        Producer::CommandDoor,
+    );
+    write
+        .fact(
+            body::LineArmed {
+                lane: caller,
+                task: heads.statement().body().born.clone(),
+                phase: heads.workflow().body().phase,
+                round: heads.completion().body().round,
+                roots: vec![root],
+            },
+            FactCause::Root,
+        )
+        .expect("replacement arm fact builds");
+    write
+}
+
 fn close_write(bus: &Bus, root: CanonicalUuid) -> JournalWrite {
     let partner = lane_at(PARTNER);
     let at = instant(6);
@@ -302,36 +372,39 @@ fn close_write(bus: &Bus, root: CanonicalUuid) -> JournalWrite {
     write
 }
 
-fn free_partner_write(snapshot: &bus::TaskSnapshot) -> JournalWrite {
+fn free_claim_write(
+    snapshot: &bus::TaskSnapshot,
+    lane: CanonicalUuid,
+    at: Instant,
+) -> JournalWrite {
     let heads = &snapshot.tasks()[0];
     let task = heads.statement().body().born.clone();
-    let partner = lane_at(PARTNER);
     let claim = heads
         .claims()
         .iter()
-        .find(|held| held.claim().body().lane == partner)
-        .expect("partner holds one claim")
+        .find(|held| held.claim().body().lane == lane)
+        .expect("lane holds one claim")
         .claim()
         .body()
         .clone();
     let mut write = JournalWrite::new(
-        Actor::Lane(partner),
+        Actor::Lane(lane),
         format!("task:{}", handle(TASK_MOMENT))
             .parse()
             .expect("fixture task origin"),
-        instant(7),
+        at,
         Producer::CommandDoor,
     );
     let freed = write
         .fact(
             body::ClaimFreed {
                 task: task.clone(),
-                actor: Actor::Lane(partner),
+                actor: Actor::Lane(lane),
                 parked: None,
             },
             FactCause::Root,
         )
-        .expect("partner free fact builds");
+        .expect("claim free fact builds");
     write.claim_head(task, freed, move |position| wire::ClaimHead {
         fact: position,
         disposition: wire::ClaimDisposition::Freed,
