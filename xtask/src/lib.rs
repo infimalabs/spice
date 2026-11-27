@@ -32,6 +32,7 @@ mod stage_proof;
 mod verify_error;
 mod verify_execution;
 mod verify_timing;
+mod windows_cross;
 #[cfg(target_os = "macos")]
 mod windows_guest;
 mod windows_hosted;
@@ -60,8 +61,9 @@ pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
 pub use prepared_artifact::{PreparedArtifactError, prepared_artifact};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
-    AppOrigin, CommandRecord, MacSymbols, ReleaseEnvironment, TargetBuild, TargetBuildError,
-    build_windows_appliance, release_proof_image, stage_target, stage_target_app,
+    AppOrigin, CommandRecord, CrossImage, MacSymbols, ReleaseEnvironment, TargetBuild,
+    TargetBuildError, build_windows_appliance, cross_build_windows, release_proof_image,
+    stage_target, stage_target_app,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use release_inputs::{
@@ -80,6 +82,7 @@ pub use share_darwin_stage::{
 pub use source_archive::source_archive;
 #[cfg(not(target_arch = "wasm32"))]
 pub use stage_proof::{StageProofError, prove_staged_target};
+pub use windows_cross::{WindowsCrossError, windows_cross};
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{

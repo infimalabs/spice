@@ -1,0 +1,9 @@
+
+# Appended to the proof image's root Cargo config by the Windows cross image.
+[target.x86_64-pc-windows-msvc]
+linker = "/opt/spice/msvc/bin/link.exe"
+
+[env]
+CC_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/cl.exe"
+CXX_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/cl.exe"
+AR_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/lib.exe"

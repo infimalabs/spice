@@ -36,6 +36,24 @@ pub struct ProviderCanvas<'a> {
     pub app: &'a str,
 }
 
+/// Where the Windows cross build's one writable host directory is mounted,
+/// outside the read-only workspace.
+const CROSS_OUT: &str = "/windows-cross";
+
+/// One Windows cross build: the cross image layered over this vendor set's
+/// image and the MSVC generation it carries, the repository's Git common
+/// directory, the host output directory, and the source and canvas
+/// [`Container::stage_release`] also takes.
+#[derive(Clone, Copy, Debug)]
+pub struct WindowsCross<'a> {
+    pub cross_image: &'a str,
+    pub msvc_generation: &'a str,
+    pub git_common: &'a Path,
+    pub out: &'a Path,
+    pub delivered: Option<&'a str>,
+    pub canvas: Option<ProviderCanvas<'a>>,
+}
+
 /// One completed staging run: the in-image command's exit and both streams.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReleaseStage {
@@ -80,6 +98,108 @@ impl Container {
             path: stage.clone(),
             source,
         })?;
+        let mut runtime_arguments = self.sealed_release_arguments(
+            git_common,
+            &stage,
+            &format!("{WORKSPACE_MOUNT}/{STAGE}"),
+            delivered,
+            canvas,
+        )?;
+        runtime_arguments.extend([
+            self.image.to_string(),
+            "cargo".to_owned(),
+            "run".to_owned(),
+            "--locked".to_owned(),
+            "-p".to_owned(),
+            "xtask".to_owned(),
+            "--".to_owned(),
+            "stage-target".to_owned(),
+            LINUX_TARGET.to_owned(),
+            "--unsigned".to_owned(),
+            "--proof-container".to_owned(),
+            self.image.to_string(),
+        ]);
+        if delivered.is_none() {
+            runtime_arguments.push("--staged-app".to_owned());
+        }
+        self.sealed_release_run(
+            runtime_arguments,
+            "sealed Linux release staging",
+            "complete Linux release staging",
+        )
+    }
+
+    /// Cross-build the Windows MSVC release set in `cross_image`, the Windows
+    /// cross layer over this vendor set's image, writing its artifact root,
+    /// build key, and command records under `out`.
+    ///
+    /// The workspace, Git, Cargo, network, and canvas boundary is exactly
+    /// [`Container::stage_release`]'s; `out` replaces `dist/stage` as the one
+    /// writable host path, mounted outside the workspace.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a Git common directory, output directory, or canvas path the
+    /// OCI mount grammar cannot represent, and returns runtime launch, wait,
+    /// and capture failures or a run the deadline or a cancellation ended.
+    pub fn cross_build_windows(
+        &self,
+        request: WindowsCross<'_>,
+    ) -> Result<ReleaseStage, ContainerError> {
+        let WindowsCross {
+            cross_image,
+            msvc_generation,
+            git_common,
+            out,
+            delivered,
+            canvas,
+        } = request;
+        fs::create_dir_all(out).map_err(|source| ContainerError::InspectWorkspace {
+            path: out.to_path_buf(),
+            source,
+        })?;
+        let out = representable(out)?;
+        let mut runtime_arguments =
+            self.sealed_release_arguments(git_common, &out, CROSS_OUT, delivered, canvas)?;
+        runtime_arguments.extend([
+            cross_image.to_owned(),
+            "cargo".to_owned(),
+            "run".to_owned(),
+            "--locked".to_owned(),
+            "-p".to_owned(),
+            "xtask".to_owned(),
+            "--".to_owned(),
+            "windows-cross-build".to_owned(),
+            CROSS_OUT.to_owned(),
+            "--cross-image".to_owned(),
+            cross_image.to_owned(),
+            "--msvc-generation".to_owned(),
+            msvc_generation.to_owned(),
+        ]);
+        if delivered.is_none() {
+            runtime_arguments.push("--staged-app".to_owned());
+        }
+        self.sealed_release_run(
+            runtime_arguments,
+            "sealed Windows cross build",
+            "complete Windows cross build",
+        )
+    }
+
+    /// Runtime arguments every sealed release run shares, up to its image.
+    ///
+    /// The workspace and its Git common directory are read-only, `writable`
+    /// is the one host path mounted writable at `destination`, the Cargo home
+    /// and target are fresh scratch owned by this run, and the network is
+    /// disabled.
+    fn sealed_release_arguments(
+        &self,
+        git_common: &Path,
+        writable: &Path,
+        destination: &str,
+        delivered: Option<&str>,
+        canvas: Option<ProviderCanvas<'_>>,
+    ) -> Result<Vec<String>, ContainerError> {
         let git_common = representable(git_common)?;
         let mut runtime_arguments = vec![
             "run".to_owned(),
@@ -112,8 +232,8 @@ impl Container {
         runtime_arguments.extend([
             "--mount".to_owned(),
             format!(
-                "type=bind,source={},destination={WORKSPACE_MOUNT}/{STAGE}",
-                stage.display()
+                "type=bind,source={},destination={destination}",
+                writable.display()
             ),
             "--tmpfs".to_owned(),
             format!("{CARGO_HOME}:rw,noexec,mode=0700"),
@@ -151,30 +271,18 @@ impl Container {
                 format!("{RELEASE_APP}={}", canvas.app),
             ]);
         }
-        runtime_arguments.extend([
-            self.image.to_string(),
-            "cargo".to_owned(),
-            "run".to_owned(),
-            "--locked".to_owned(),
-            "-p".to_owned(),
-            "xtask".to_owned(),
-            "--".to_owned(),
-            "stage-target".to_owned(),
-            LINUX_TARGET.to_owned(),
-            "--unsigned".to_owned(),
-            "--proof-container".to_owned(),
-            self.image.to_string(),
-        ]);
-        if delivered.is_none() {
-            runtime_arguments.push("--staged-app".to_owned());
-        }
-        let execution =
-            self.run(self.runtime_spec(runtime_arguments, "sealed Linux release staging")?)?;
+        Ok(runtime_arguments)
+    }
+
+    fn sealed_release_run(
+        &self,
+        runtime_arguments: Vec<String>,
+        label: &'static str,
+        operation: &'static str,
+    ) -> Result<ReleaseStage, ContainerError> {
+        let execution = self.run(self.runtime_spec(runtime_arguments, label)?)?;
         let ExecutionCompletion::Exited { success, code } = execution.completion else {
-            return Err(Self::control_refusal(
-                "complete Linux release staging",
-                &execution,
-            ));
+            return Err(Self::control_refusal(operation, &execution));
         };
         Ok(ReleaseStage {
             success,

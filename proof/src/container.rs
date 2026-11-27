@@ -21,7 +21,7 @@ mod stage;
 
 pub use error::ContainerError;
 pub(crate) use error::{is_executable, validate_command};
-pub use stage::{ProviderCanvas, ReleaseStage};
+pub use stage::{ProviderCanvas, ReleaseStage, WindowsCross};
 
 const WORKSPACE_MOUNT: &str = "/workspace";
 const CARGO_HOME: &str = "/cargo-home";

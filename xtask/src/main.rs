@@ -23,7 +23,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|publish-hosted-release <--notes FILE|COMMIT --notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -134,6 +134,12 @@ fn main() -> ExitCode {
         Some(value) if value == OsStr::new("windows-appliance") => {
             run_windows_appliance(arguments.collect(), &ambient, &mut output)
         }
+        Some(value) if is_exact_command(value, "windows-cross", arguments.len(), 0) => {
+            run_windows_cross(&ambient, &mut output)
+        }
+        Some(value) if value == OsStr::new("windows-cross-build") => {
+            run_windows_cross_build(arguments.collect(), &ambient, &mut output)
+        }
         Some(value) if is_exact_command(value, "windows-msvc", arguments.len(), 0) => {
             run_windows_msvc(&ambient, &mut output)
         }
@@ -231,6 +237,52 @@ fn run_windows_appliance(
     xtask::build_windows_appliance(release_environment(ambient), ambient.environment()?, output)
         .map(|_| ())
         .map_err(Into::into)
+}
+
+/// The in-image half of `windows-cross`, which names the image it runs in and
+/// the MSVC generation that image carries.
+fn run_windows_cross_build(
+    arguments: Vec<OsString>,
+    ambient: &Ambient,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    let (arguments, staged_app) = match arguments.as_slice() {
+        [rest @ .., flag] if flag == OsStr::new("--staged-app") => (rest, true),
+        all => (all, false),
+    };
+    let [out, image_flag, image, generation_flag, generation] = arguments else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    if image_flag != OsStr::new("--cross-image")
+        || generation_flag != OsStr::new("--msvc-generation")
+    {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    }
+    let (Some(image), Some(generation)) = (image.to_str(), generation.to_str()) else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let environment = release_environment(ambient);
+    let app = if staged_app {
+        xtask::AppOrigin::Workspace
+    } else if environment.release_canvas.is_some() {
+        xtask::AppOrigin::Provider
+    } else {
+        xtask::AppOrigin::Compile
+    };
+    xtask::cross_build_windows(
+        environment,
+        xtask::CrossImage {
+            image,
+            msvc_generation: generation,
+        },
+        app,
+        Path::new(out),
+        output,
+    )
+    .map_err(Into::into)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -796,6 +848,16 @@ fn run_windows_msvc(ambient: &Ambient, output: &mut impl io::Write) -> CommandRe
     xtask::windows_msvc(&ambient.environment()?, output)
         .map(|_| ())
         .map_err(Into::into)
+}
+
+fn run_windows_cross(ambient: &Ambient, output: &mut impl io::Write) -> CommandResult {
+    xtask::windows_cross(
+        &release_environment(ambient),
+        &ambient.environment()?,
+        output,
+        &mut io::stderr().lock(),
+    )
+    .map_err(Into::into)
 }
 
 #[derive(Debug)]
