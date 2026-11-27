@@ -5,6 +5,11 @@ main() { # env-policy: allow
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_REPOSITORY_OWNER_TYPE:?GITHUB_REPOSITORY_OWNER_TYPE is required}"
+if [[ "$#" != 1 ]]; then
+  echo 'usage: prepared-retention.sh PREPARED_ARTIFACT' >&2
+  exit 2
+fi
+prepared_artifact="$1"
 
 keep_days="${PREPARED_KEEP_DAYS:-30}"
 keep_count="${PREPARED_KEEP_COUNT:-50}"
@@ -45,6 +50,15 @@ mkdir "$scratch/reference-fragments"
 # env-policy: allow
 printf '[]\n' > "$scratch/reference-fragments/empty.json"
 
+# env-policy: allow
+.github/scripts/proof-image-build-key.sh "$scratch/proof-image-build-key.json"
+# env-policy: allow
+key_line="$("$prepared_artifact" build-key "$scratch/proof-image-build-key.json")"
+# env-policy: allow
+[[ "$key_line" =~ ^build\ key\ sha256:[0-9a-f]{64}$ ]]
+# env-policy: allow
+proof_tag="${key_line#build key sha256:}"
+
 fetch_versions() {
   local destination="$1"
   # env-policy: allow
@@ -65,7 +79,10 @@ fetch_versions "$scratch/versions.json"
 fetch_releases "$scratch/releases.json"
 
 # env-policy: allow
-jq -e --arg mode locators -f "$policy" "$locators" > "$scratch/locators.json"
+jq -e --arg mode locators -f "$policy" "$locators" > "$scratch/declared-locators.json"
+# env-policy: allow
+jq -e --arg mode add-locator --arg tag "$proof_tag" -f "$policy" \
+  "$scratch/declared-locators.json" > "$scratch/locators.json"
 
 # env-policy: allow
 printf '[]\n' > "$scratch/legacy-releases.json"

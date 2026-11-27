@@ -53,6 +53,11 @@ def locators:
     tags: (.tags | unique | sort)
   } end;
 
+def add_locator:
+  if ($ARGS.named.tag | test("^[0-9a-f]{64}$")) | not
+  then error("derived prepared locator is malformed")
+  else .tags = ((.tags + [$ARGS.named.tag]) | unique | sort) end;
+
 def references:
   if keys != ["manifests", "schema"]
     or .schema != 1
@@ -140,6 +145,7 @@ def plan:
 if $ARGS.named.mode == "versions" then versions
 elif $ARGS.named.mode == "releases" then releases
 elif $ARGS.named.mode == "locators" then locators
+elif $ARGS.named.mode == "add-locator" then add_locator
 elif $ARGS.named.mode == "references" then references
 elif $ARGS.named.mode == "authority" then authority
 elif $ARGS.named.mode == "plan" then plan

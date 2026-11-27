@@ -7,6 +7,7 @@ on:
     paths:
       - .cargo/config.toml
       - .github/workflows/proof-image.yml
+      - .github/scripts/proof-image-build-key.sh
       - Cargo.lock
       - dist/proof-image/**
       - rust-toolchain.toml
@@ -81,14 +82,7 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          jq -n \
-            --arg cargo_lock "sha256:$(sha256sum Cargo.lock | cut -d' ' -f1)" \
-            --arg cargo_config "sha256:$(sha256sum .cargo/config.toml | cut -d' ' -f1)" \
-            --arg rust_toolchain "sha256:$(sha256sum rust-toolchain.toml | cut -d' ' -f1)" \
-            --arg proof_image "sha256:$(git ls-tree -r -z HEAD -- dist/proof-image proof vendor-set xtask/src/proof_image.rs | sha256sum | cut -d' ' -f1)" \
-            --arg contract "sha256:$(git ls-tree -r -z HEAD -- .github/workflows/proof-image.yml prepared wire/src/manifest.rs xtask/Cargo.toml xtask/src/lib.rs xtask/src/main.rs xtask/src/prepared_artifact.rs | sha256sum | cut -d' ' -f1)" \
-            '{cargo_lock:$cargo_lock,cargo_config:$cargo_config,rust_toolchain:$rust_toolchain,proof_image:$proof_image,contract:$contract}' \
-            > "$root/build-key.json"
+          .github/scripts/proof-image-build-key.sh "$root/build-key.json"
           "$xtask" prepared-artifact manifest \
             image linux-amd64 "$root/build-key.json" \
             application/vnd.infimalabs.spice.proof-image.v1+tar \

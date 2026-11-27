@@ -28,6 +28,15 @@ jobs:
       - name: Check out exact cleanup policy
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
+      - name: Build repository-owned locator
+        env:
+          CARGO_HOME: ${{ runner.temp }}/retention-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/retention-target
+        run: |
+          set -euo pipefail
+          rustup toolchain install --no-self-update
+          cargo build --locked --package prepared-artifact --bin prepared-artifact
+
       - name: Inventory, classify, and optionally delete
         env:
           GH_TOKEN: ${{ github.token }}
@@ -35,7 +44,7 @@ jobs:
           PREPARED_DELETE: ${{ github.event_name == 'schedule' || inputs.delete }}
           PREPARED_KEEP_COUNT: '50'
           PREPARED_KEEP_DAYS: '30'
-        run: .github/scripts/prepared-retention.sh
+        run: .github/scripts/prepared-retention.sh '${{ runner.temp }}/retention-target/debug/prepared-artifact'
 
       - name: Preserve exact retention plan
         if: ${{ always() && hashFiles('prepared-retention-plan.json') != '' }}
