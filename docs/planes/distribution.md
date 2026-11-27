@@ -367,8 +367,11 @@ artifact, which only their coordinator downloads.
 **Invariant —** Darwin's compiled dependency reuse is a prepared OCI bundle,
 not provider-cache authority. Its build key covers the target, exact Rust and
 Cargo identities, lockfile, Cargo and candidate configuration, feature plan,
+the resolved third-party feature set, the root manifest's release profile,
 SDK/Xcode boundary, canonical vendor-set identity, and the preparation
-contract. An exact-source `prepared-artifact` bootstrap resolves the
+contract, so a manifest feature or profile change selects a new key rather
+than restoring units Cargo would discard. An exact-source `prepared-artifact`
+bootstrap resolves the
 deterministic discovery tag, admits its config and manifest, fetches by
 manifest digest, and safely unpacks the inventoried target directories inside
 the native build boundary. Before publication, Cargo removes every workspace
@@ -376,11 +379,16 @@ package from a cold target copy; restored bytes can therefore satisfy only
 unchanged third-party units. Every workspace crate, repository-sensitive build
 script, and the final executable recompiles from the admitted source.
 
-An absent or unadmittable Darwin dependency layer selects the ordinary cold
-build. After successful staging, that build removes workspace artifacts,
-packages the remaining dependency target beneath the common prepared-artifact
-manifest, and publishes it with conflict-refusing idempotence. The hosted
-summary records the manifest digest, cold baseline, observed build time, and
+An absent or unadmittable Darwin dependency layer, or a refused GHCR login,
+selects the ordinary cold build; the stage then succeeds or fails on that
+build alone. After successful staging, a build whose tag was absent removes
+workspace artifacts, packages the remaining dependency target beneath the
+common prepared-artifact manifest, and publishes it with conflict-refusing
+idempotence; a tag naming a refused layer is never overwritten, and a refused
+publication leaves the build recorded as unpublished. The GHCR credential is
+held only around the lookup and the publication, never while the sealed stage
+builds and runs third-party or repository code. The hosted summary records the
+manifest digest, publication outcome, cold baseline, observed build time, and
 savings. The mutable provider cache carries only Cargo registry sources; its
 eviction affects download time but cannot select compiled release authority.
 Prepared bytes survive independently in GHCR by digest.

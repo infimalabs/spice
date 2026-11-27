@@ -288,6 +288,17 @@ jobs:
           cargo_config="sha256:$(shasum -a 256 .cargo/config.toml | cut -d' ' -f1)"
           candidate="sha256:$(shasum -a 256 dist/release/candidate.toml | cut -d' ' -f1)"
           features=$(printf '%s' 'xtask:default;spice:canvas' | digest_text)
+          # Cargo.lock records no feature selection, and the root manifest
+          # alone owns profiles: the resolved third-party feature plan and the
+          # release profile key the layer so either change republishes it.
+          resolved=$("$cargo" metadata --locked --format-version 1 \
+            --filter-platform aarch64-apple-darwin --features spice/canvas \
+            | jq -c --sort-keys '.workspace_members as $members
+              | [.resolve.nodes[] | select(.id as $id | $members | index($id) | not)
+              | {id, features}] | sort_by(.id)' \
+            | digest_text)
+          profile=$(python3 -c 'import json, tomllib; print(json.dumps(tomllib.load(open("Cargo.toml", "rb")).get("profile", {}).get("release", {}), sort_keys=True))' \
+            | digest_text)
           sdk=$(printf '%s\n%s\n%s' "$EXPECTED_SDK" "$EXPECTED_XCODE_BUILD" "$DEVELOPER_DIR" | digest_text)
           contract=$(cat prepared/Cargo.toml prepared/src/lib.rs .github/workflows/macos.yml \
             | digest_text)
@@ -295,8 +306,9 @@ jobs:
             --arg target "$target" --arg rust "$rust" --arg cargo "$cargo_identity" \
             --arg lock "$lock" --arg cargo_config "$cargo_config" \
             --arg candidate "$candidate" --arg features "$features" --arg sdk "$sdk" \
+            --arg resolved "$resolved" --arg profile "$profile" \
             --arg vendor "$vendor" --arg contract "$contract" \
-            '{target:$target,rust:$rust,cargo:$cargo,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,features:$features,sdk:$sdk,vendor:$vendor,contract:$contract}' \
+            '{target:$target,rust:$rust,cargo:$cargo,lock:$lock,cargo_config:$cargo_config,candidate:$candidate,features:$features,resolved:$resolved,profile:$profile,sdk:$sdk,vendor:$vendor,contract:$contract}' \
             > "$root/build-key.json"
           key=$("$prepared" build-key "$root/build-key.json" | sed -n 's/^build key //p')
           test -n "$key"
@@ -305,23 +317,39 @@ jobs:
           test "${#tag}" -eq 64
           repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
           repository="ghcr.io/$repository/prepared"
-          printf '%s' "$GHCR_TOKEN" \
-            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          # The credential lives only for this lookup; the sealed stage below
+          # builds and runs third-party and repository code without it. A
+          # refused login builds cold like any other unavailable layer.
+          logged_in=0
+          if printf '%s' "$GHCR_TOKEN" \
+            | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin; then
+            logged_in=1
+            trap 'oras logout ghcr.io' EXIT
+          fi
 
+          # A layer that is absent or fails any admission selects the ordinary
+          # cold build; only a layer whose tag is absent is published later.
+          admit_restored() {
+            local record="$root/restored/record.json"
+            test "$(jq -r .schema "$record")" = 1 \
+              && test "$(jq -r .build_key "$record")" = "$key" \
+              && baseline=$(jq -r .cold_build_seconds "$record") \
+              && [[ "$baseline" =~ ^[0-9]+$ ]] \
+              && test -d "$root/restored/target/release-appliance" \
+              && test -d "$root/restored/target/release-appliance-build"
+          }
           hit=0
+          present=0
           manifest=-
           baseline=0
-          if resolved=$("$prepared" resolve "$repository:$tag" "$key" 2>"$root/resolve.err"); then
-            read -r label manifest _ <<< "$resolved"
-            test "$label" = resolved
-            if "$prepared" fetch-extract \
-              "$repository@$manifest" "$key" "$root/restored"; then
-              test "$(jq -r .schema "$root/restored/record.json")" = 1
-              test "$(jq -r .build_key "$root/restored/record.json")" = "$key"
-              baseline=$(jq -r .cold_build_seconds "$root/restored/record.json")
-              case "$baseline" in *[!0-9]*|'') exit 65 ;; esac
-              test -d "$root/restored/target/release-appliance"
-              test -d "$root/restored/target/release-appliance-build"
+          : > "$root/resolve.err"
+          if test "$logged_in" = 1 \
+            && resolved_layer=$("$prepared" resolve "$repository:$tag" "$key" 2>"$root/resolve.err"); then
+            present=1
+            read -r label manifest _ <<< "$resolved_layer"
+            if test "$label" = resolved \
+              && "$prepared" fetch-extract "$repository@$manifest" "$key" "$root/restored" \
+              && admit_restored; then
               mkdir -p "$CARGO_TARGET_DIR"
               cp -R "$root/restored/target/." "$CARGO_TARGET_DIR/"
               # Prepared archives normalize mtimes. The admitted dependency
@@ -330,6 +358,9 @@ jobs:
               # were removed before publication and cannot be made fresh here.
               find "$CARGO_TARGET_DIR" -type f -exec touch {} +
               hit=1
+            else
+              echo "prepared layer $manifest refused; building cold" >&2
+              baseline=0
             fi
           else
             cat "$root/resolve.err" >&2
@@ -347,6 +378,7 @@ jobs:
             printf 'DEPENDENCY_MANIFEST=%s\n' "$manifest"
             printf 'DEPENDENCY_HIT=%s\n' "$hit"
             printf 'DEPENDENCY_BASELINE_SECONDS=%s\n' "$baseline"
+            printf 'DEPENDENCY_PRESENT=%s\n' "$present"
           } >> "$GITHUB_ENV"
 
       - name: Build and execute the sealed unsigned stage
@@ -440,11 +472,18 @@ jobs:
         env:
           CARGO_HOME: ${{ runner.temp }}/release-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
+          GHCR_TOKEN: ${{ github.token }}
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
         run: |
           set -euo pipefail
           manifest="$DEPENDENCY_MANIFEST"
-          if test "$DEPENDENCY_HIT" = 0; then
+          publication=reused
+          if test "$DEPENDENCY_HIT" = 0 && test "$DEPENDENCY_PRESENT" = 1; then
+            # The tag already names content this run refused; never publish
+            # over it.
+            publication='unpublished: the tag names a refused layer'
+          fi
+          if test "$DEPENDENCY_HIT" = 0 && test "$DEPENDENCY_PRESENT" = 0; then
             python=$(command -v python3)
             cargo="$RUST_BIN/cargo"
             release_target="$CARGO_TARGET_DIR/$("$python" -c \
@@ -492,10 +531,22 @@ jobs:
             "$PREPARED_ARTIFACT_TOOL" manifest \
               bundle macos-arm64 "$DEPENDENCY_BUILD_KEY_FILE" application/gzip \
               "$archive" "$root" - "$config"
-            output=$("$PREPARED_ARTIFACT_TOOL" publish \
-              "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive")
-            read -r label manifest <<< "$output"
-            test "$label" = published
+            # Publication is an optimization: a refused publication records
+            # the cold build unpublished instead of failing the stage.
+            manifest=-
+            publication='unpublished: publication refused'
+            if printf '%s' "$GHCR_TOKEN" \
+              | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin; then
+              trap 'oras logout ghcr.io' EXIT
+              if output=$("$PREPARED_ARTIFACT_TOOL" publish \
+                "$DEPENDENCY_REPOSITORY" "$DEPENDENCY_TAG" "$config" "$archive"); then
+                read -r label published <<< "$output"
+                if test "$label" = published; then
+                  manifest="$published"
+                  publication=published
+                fi
+              fi
+            fi
           fi
           savings=$((DEPENDENCY_BASELINE_SECONDS - DEPENDENCY_BUILD_SECONDS))
           if test "$DEPENDENCY_HIT" = 0; then
@@ -506,12 +557,12 @@ jobs:
             printf -- '- build key: `%s`\n' "$DEPENDENCY_BUILD_KEY"
             printf -- '- manifest: `%s`\n' "$manifest"
             printf -- '- cache hit: `%s`\n' "$DEPENDENCY_HIT"
+            printf -- '- publication: %s\n' "$publication"
             printf -- '- native build: `%ss`\n' "$DEPENDENCY_BUILD_SECONDS"
             printf -- '- cold baseline: `%ss`\n' \
               "$([[ "$DEPENDENCY_HIT" = 1 ]] && printf '%s' "$DEPENDENCY_BASELINE_SECONDS" || printf '%s' "$DEPENDENCY_BUILD_SECONDS")"
             printf -- '- compile-time savings: `%ss`\n' "$savings"
           } >> "$GITHUB_STEP_SUMMARY"
-          oras logout ghcr.io
 
       - name: Upload unsigned stage transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
