@@ -22,6 +22,7 @@ mod diagrams;
 pub(crate) mod document;
 mod image_flow;
 pub(crate) mod inline;
+mod lazy_lines;
 mod math;
 mod media_quotes;
 mod quotes;
@@ -567,6 +568,11 @@ fn render<'r>(
     finish: Finish<'r>,
 ) -> RenderedMarkdown {
     let math = math::normalize(markdown, annotations.directives, annotations.sends, OPTIONS);
+    // Rack documents are hard-wrapped and keep CommonMark's lazy reading.
+    let math = match finish {
+        Finish::Document { .. } => math,
+        _ => lazy_lines::separate(math, OPTIONS),
+    };
     let markdown = math.markdown;
     let mut media_quotes = media_quotes::Matcher::new(media_quotes, &math.directives);
     let (events, outer_quotes) = parse_events(
