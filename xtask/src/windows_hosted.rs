@@ -17,6 +17,10 @@ use windows_execution::hosted::client::{
     HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight, PreparedBundleTransport,
 };
 
+/// The manifest `windows-cross` writes for the cross-built bundle whose proof
+/// executables the hosted Windows battery runs.
+const WINDOWS_BUNDLE_MANIFEST: &str = "target/windows-cross/out/prepared.json";
+
 struct PreparedBundles;
 
 static PREPARED_BUNDLES: PreparedBundles = PreparedBundles;
@@ -396,12 +400,18 @@ fn windows_hosted_stage_controlled(
         "--proof-container".to_owned(),
         inputs.manifest().proof_identity.to_owned(),
     ];
-    let command = windows_execution::protocol::Command {
-        program: "@cargo".to_owned(),
-        arguments,
-    };
+    let command = windows_execution::protocol::Command::new("@cargo", arguments);
+    let manifest = Path::new(WINDOWS_BUNDLE_MANIFEST);
+    let battery =
+        crate::prepared_artifact::windows_proof_battery(manifest, &inputs.manifest().source)
+            .map_err(|error| {
+                WindowsHostedError::ProviderResponse(format!(
+                    "cross-built Windows bundle {} refused: {error}",
+                    manifest.display()
+                ))
+            })?;
     let mut commands = vec![command];
-    commands.extend(proof::Battery::current().hosted_commands());
+    commands.extend_from_slice(battery.commands());
     let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
         commands, stage_root, inputs, attach, control,
     )?;
@@ -418,7 +428,7 @@ fn windows_hosted_stage_controlled(
             stage_root.join("proofs"),
             wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc,
         );
-        proof::seal_hosted_windows(&layout, &execution, 1).map_err(|error| {
+        proof::seal_hosted_windows(&layout, &execution, 1, &battery).map_err(|error| {
             WindowsHostedError::ProviderResponse(format!(
                 "hosted Windows proof receipt refused: {error}"
             ))

@@ -96,13 +96,13 @@ pub fn windows_hosted(
     let (program, command_arguments) = arguments
         .split_first()
         .ok_or(WindowsHostedError::MissingProgram)?;
-    let command = HostedCommand {
-        program: unicode("program", program)?,
-        arguments: command_arguments
+    let command = HostedCommand::new(
+        unicode("program", program)?,
+        command_arguments
             .iter()
             .map(|argument| unicode("argument", argument))
             .collect::<Result<Vec<_>, _>>()?,
-    };
+    );
     let execution = windows_hosted_commands(vec![command])?;
     let first = &execution.outputs[0];
     output

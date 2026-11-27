@@ -200,10 +200,7 @@ pub(super) fn run(
     let request = Request {
         version: PROTOCOL_VERSION,
         limits: run.limits,
-        command: GuestCommand {
-            program: run.program,
-            arguments: run.arguments,
-        },
+        command: GuestCommand::new(run.program, run.arguments),
     };
     request.admit().map_err(|error| error.to_string())?;
     require_running(machine)?;

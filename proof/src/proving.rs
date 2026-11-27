@@ -21,7 +21,7 @@ use crate::environment::{EnvironmentError, SealedEnvironment};
 use crate::evidence::{AdmittedReceipt, EvidenceError, VerifiedEvidence, verify_admitted};
 use crate::layout::{InputError, Layout, LayoutError, ReceiptInput};
 use crate::payload::{AdmittedPayload, PayloadError, admit};
-use crate::replay::{ReplayError, ReplayVerdict, replay, replay_hosted_windows};
+use crate::replay::{HostedBattery, ReplayError, ReplayVerdict, replay, replay_hosted_windows};
 
 #[cfg(test)]
 pub(crate) mod fixture;
@@ -69,14 +69,16 @@ impl Staged {
         self.bind(environment.target(), || replay(&environment))
     }
 
-    /// Admit one already provider-authenticated hosted Windows battery.
+    /// Admit one already provider-authenticated hosted Windows run of the
+    /// prebuilt `battery`.
     pub(crate) fn replay_hosted_windows(
         self,
         execution: &HostedExecution,
         offset: usize,
+        battery: &HostedBattery,
     ) -> Result<Proved, ProofError> {
         self.bind(ReleaseTarget::X86_64PcWindowsMsvc, || {
-            replay_hosted_windows(execution, offset)
+            replay_hosted_windows(execution, offset, battery)
         })
     }
 

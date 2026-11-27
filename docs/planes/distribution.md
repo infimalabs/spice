@@ -616,10 +616,20 @@ spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned --app-only
 ```
 
 `PROGRAM` is either a path beneath the selected worktree or one admitted tool
-token: `@runner`, `@cargo`, `@rustc`, `@git`, `@cl`, or `@rc`. Proof replay
-sends its five commands as one bounded batch, so one signed provider run
-identity covers the complete battery. The client materializes an ad hoc
-worktree or accepts the canonical release archive, derives one exact
+token: `@runner`, `@cargo`, `@rustc`, `@git`, `@cl`, or `@rc`. A release
+stage's proof battery instead names each prebuilt test executable of the
+cross-built bundle as `@bundle/PATH` with the SHA-256 its bytes must have and
+the package directory it runs from. The client reads the bundle manifest that
+`spice dev xtask -- windows-cross` writes to
+`target/windows-cross/out/prepared.json` and refuses a bundle whose build key
+names a source archive other than the release inputs'. The runner takes the
+bundle unpacked as `bundle-CHALLENGE` in its temporary directory, seals it
+read-only, and refuses a command whose executable bytes differ before running
+it. The signed identity lists every executable digest the run verified, and
+the replay and its receipt bind that list, so a run whose request names other
+bytes than the bundle refuses. The complete battery runs as one bounded batch,
+so one signed provider run identity covers it. The client materializes an ad
+hoc worktree or accepts the canonical release archive, derives one exact
 `source.tar`, and uploads those unchanged bytes as the sole asset of a
 challenge-bound draft GitHub Release. The request binds the asset ID, raw
 SHA-256, canonical archive identity and commit, and the cross-platform SHA-256

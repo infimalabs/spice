@@ -289,6 +289,16 @@ pub struct HostedWindowsToolchain {
     pub lib: String,
 }
 
+/// One prebuilt executable a hosted Windows run verified byte for byte before
+/// running it: its path in the cross-built bundle and the lowercase hex
+/// SHA-256 of its exact bytes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostedWindowsExecutable {
+    pub path: String,
+    pub sha256: String,
+}
+
 /// Provider-authenticated identity of one ephemeral Windows environment.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -302,6 +312,11 @@ pub struct HostedWindowsIdentity {
     pub runner: Digest,
     pub source: String,
     pub toolchain: HostedWindowsToolchain,
+    /// Every bundle executable the run verified, in request order. Runs that
+    /// executed only admitted tools carry none, and encode exactly as they did
+    /// before bundle executables existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executables: Vec<HostedWindowsExecutable>,
 }
 
 /// The one sealed execution identity carried by replay evidence.

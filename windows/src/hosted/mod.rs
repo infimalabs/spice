@@ -1,5 +1,6 @@
 //! Typed request, result, and admission contract for one disposable hosted Windows execution.
 
+pub mod bundle;
 pub mod client;
 pub mod release_inputs;
 mod stage_layout;
@@ -247,6 +248,7 @@ impl Request {
             if command.program.is_empty() || command.program.contains('\0') {
                 return Err(AdmissionError::Program);
             }
+            bundle::admit(command)?;
             if command.arguments.len() > MAX_ARGUMENTS
                 || command
                     .arguments
@@ -364,6 +366,9 @@ pub fn admit_result(
     }
     if &identity.runner != runner {
         return Err(AdmissionError::Runner);
+    }
+    if identity.executables != bundle::executables(&request.commands) {
+        return Err(AdmissionError::Executables);
     }
     if !result.isolation.complete() {
         return Err(AdmissionError::Isolation);
@@ -520,6 +525,7 @@ pub enum AdmissionError {
     RunIdentity,
     Source,
     Runner,
+    Executables,
     Isolation,
     Capture,
     Artifacts,
@@ -555,7 +561,9 @@ impl fmt::Display for AdmissionError {
                 "hosted output bound {bytes} is outside 1..=8388608"
             ),
             Self::Commands => formatter.write_str("hosted command batch count is outside 1..=8"),
-            Self::Program => formatter.write_str("hosted program is empty or contains NUL"),
+            Self::Program => formatter.write_str(
+                "hosted program is empty, contains NUL, or names no exact bundle executable",
+            ),
             Self::Arguments => {
                 formatter.write_str("hosted argv exceeds its count bound or contains NUL")
             }
@@ -573,6 +581,8 @@ impl fmt::Display for AdmissionError {
             Self::RunIdentity => formatter.write_str("hosted result has no provider run identity"),
             Self::Source => formatter.write_str("hosted result names changed source"),
             Self::Runner => formatter.write_str("hosted result names a changed runner executable"),
+            Self::Executables => formatter
+                .write_str("hosted result names bundle executables other than the request's"),
             Self::Isolation => formatter
                 .write_str("hosted result did not establish the complete isolation contract"),
             Self::Capture => formatter.write_str("hosted result contains malformed output capture"),
@@ -633,10 +643,10 @@ mod tests {
                 runtime_seconds: 60,
                 output_bytes: 1024,
             },
-            commands: vec![Command {
-                program: "@runner".to_owned(),
-                arguments: vec!["space value".to_owned(), "雪".to_owned()],
-            }],
+            commands: vec![Command::new(
+                "@runner",
+                vec!["space value".to_owned(), "雪".to_owned()],
+            )],
             canvas: None,
             prepared_bundle: PreparedBundlePin::new(
                 &"1".repeat(64),
@@ -662,6 +672,7 @@ mod tests {
                 runner: Digest::compute(Domain::ProofNativeRunner, b"runner"),
                 source: request.source.clone(),
                 toolchain: request.toolchain.clone(),
+                executables: Vec::new(),
             },
             outputs: vec![CommandResult {
                 completion: Completion::Exited { code: 37 },
@@ -689,6 +700,36 @@ mod tests {
         assert_eq!(
             result.outputs[0].stdout.bytes().expect("capture"),
             "space value\n雪\n".as_bytes()
+        );
+    }
+
+    #[test]
+    fn results_admit_only_the_bundle_executables_the_request_named() {
+        let mut request = request();
+        request.commands = vec![Command {
+            program: format!(
+                "{}proof/gate/test-suite.exe",
+                crate::protocol::BUNDLE_PROGRAM
+            ),
+            arguments: Vec::new(),
+            bundle: Some(crate::protocol::BundleProgram {
+                sha256: "9".repeat(64),
+                directory: "gate".to_owned(),
+            }),
+        }];
+        let mut result = result(&request);
+        result.identity.executables = bundle::executables(&request.commands);
+        admit_result(&request, &result, &result.identity.runner).expect("attested bytes admit");
+
+        result.identity.executables[0].sha256 = "8".repeat(64);
+        assert_eq!(
+            admit_result(&request, &result, &result.identity.runner),
+            Err(AdmissionError::Executables)
+        );
+        result.identity.executables.clear();
+        assert_eq!(
+            admit_result(&request, &result, &result.identity.runner),
+            Err(AdmissionError::Executables)
         );
     }
 
