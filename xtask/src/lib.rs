@@ -14,6 +14,7 @@ mod hosted_release_publish;
 mod hosted_release_session;
 mod linux_sealed;
 mod native_link;
+mod prepared_artifact;
 mod proof_image;
 mod release;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +57,7 @@ pub use hosted_release_publish::{
     PublishEffect, PublishError, PublishRequest, publish_hosted_release,
 };
 pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
+pub use prepared_artifact::{PreparedArtifactError, prepared_artifact};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
     AppOrigin, CommandRecord, MacSymbols, ReleaseEnvironment, TargetBuild, TargetBuildError,

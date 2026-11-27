@@ -317,34 +317,49 @@ the app itself, offline, so no host toolchain touches any part of the release.
 **Invariant —** Hosted release input production precedes every native build.
 `.github/workflows/input.yml` checks out one exact landed `main`
 commit, runs `spice dev xtask -- release-inputs OUT` on a GitHub-hosted Linux
-runner, and publishes `input-CHALLENGE`. That artifact contains the
+runner, and publishes `input-CHALLENGE`. That artifact contains only the
 canonical `source.tar`, the one compiled app rack as `canvas.zip`, and
 `result.json`. The result binds their byte counts, SHA-256 checksums,
 domain-separated archive and canvas identities, source commit and recursive
-tree, app generation, proof-image identity and archive SHA-256, workflow and
-run, runner image, and toolchain. The same run publishes the `docker save`
-archive of the proof image it built as the separate artifact
-`proof-image-CHALLENGE`, so only the Linux stage downloads it. A separate job
-that runs no repository code signs all three release-input files with GitHub
-OIDC provenance; the signed result carries the proof archive's checksum.
-Linux, Darwin, and Windows download and admit those exact files independently,
-so no workstation or native target creates release input bytes and the three
-native builds can run in parallel.
+tree, app generation, workflow and run, runner image, and toolchain. A separate
+job that runs no repository code signs all three files with GitHub OIDC
+provenance. Linux, Darwin, and Windows download and admit those exact common
+files independently.
 
-**Invariant —** Hosted caches hold only derivable bootstrap state and the
-proof-image archive, never release outputs or result evidence. Each workflow
-keeps its own `actions/cache` entry for the bootstrap `CARGO_HOME` and target,
-keyed by provider OS and architecture, plus `rust-toolchain.toml`,
-`Cargo.lock`, `.cargo/config.toml`, and that platform's tool pins (the
-preflight's trunk version, `dist/darwin/hosted.toml`, or
-`dist/windows/hosted.toml`). Native jobs extract `source.tar` with fresh
-modification times, so Cargo rebuilds every workspace crate on a restored
-target and reuses only registry dependencies. The preflight keys the
-proof-image archive by `dist/proof-image/`, `Cargo.lock`, `.cargo/config.toml`,
-and `xtask/src/proof_image.rs`. A hit is admitted through `proof-image load`
-(checksum sidecar, loaded image ID, vendor-set label), and if load refuses it,
-the preflight rebuilds the image. The preflight re-checks the cached trunk
-version on every run.
+Platform preparation uses one other transport and authority contract.
+`prepared-artifact` describes an image or `tar.gz` bundle with one canonical
+JSON config: kind, target platform, every named build input and their combined
+build-key digest, payload media type, size and SHA-256, optional runtime image
+identity, and a sorted file inventory. Pinned ORAS 1.3.0 stores that config and
+exactly one payload beneath one OCI manifest in
+`ghcr.io/infimalabs/spice/prepared`. A deterministic build-key tag is discovery
+only: a consumer resolves it once, admits the config and OCI descriptor, and
+thereafter fetches only `repository@sha256:…`. Publication first computes the
+local OCI digest. An absent tag is created, the same digest is an idempotent
+success, and a tag already naming different bytes is a conflict. Missing or
+mismatched GHCR content refuses without consulting a workflow artifact or
+another store.
+
+`.github/workflows/proof-image.yml` prepares the Linux/amd64 proof image when
+one of its exact inputs changes. It builds and exercises the image, packages
+the runnable archive through the common OCI contract, and publishes it by
+build-key tag. Input staging resolves and admits only the small config and
+records the resulting manifest, payload and runtime identities; it never
+builds, loads, saves, caches, uploads, or downloads the image. The Linux stage
+fetches that payload by manifest digest and re-admits it before loading.
+Windows and macOS prepared bundles use this same config, registry and ORAS
+surface.
+
+**Invariant —** Hosted caches hold only derivable bootstrap state, never
+release outputs, prepared OCI payloads, or result evidence. Each workflow keeps
+its own `actions/cache` entry for the bootstrap `CARGO_HOME` and target, keyed
+by provider OS and architecture, plus `rust-toolchain.toml`, `Cargo.lock`,
+`.cargo/config.toml`, and that platform's tool pins (the preflight's trunk
+version, `dist/darwin/hosted.toml`, or `dist/windows/hosted.toml`). Native jobs
+extract `source.tar` with fresh modification times, so Cargo rebuilds every
+workspace crate on a restored target and reuses only registry dependencies.
+Prepared bytes survive independently in GHCR by digest; a cache eviction can
+cost compilation time but cannot select release authority.
 
 **Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
 sole publication command. The notes file must carry authored Highlights;
@@ -413,15 +428,15 @@ run with `--attach RUN_ID`. An attached preflight's signed result names its own
 landed commit, and its workflow must equal the one that commit carries.
 
 The Linux client dispatches `.github/workflows/linux.yml` from `main`. The
-workflow downloads the preflight artifacts, admits their signed source, app,
-canvas, proof, tree, workflow, and run identities, then builds `xtask`. It
-loads the preflight's proof-image archive only after its SHA-256 equals the
-signed result and `proof-image load` admits the loaded image ID as the signed
-proof identity with the vendor-set label and Linux/amd64 platform. No native
-stage rebuilds the proof image, because independent image builds need not be
-byte-identical. It runs `stage-target … --sealed` with the raw provider
-canvas, and uploads its log, staged files, and `result.json`. A separate
-credential-only job attests those outputs. The client verifies every
+workflow downloads the common input artifact, admits its signed source, app,
+canvas, tree, workflow and run identities, then builds `xtask`. It resolves no
+mutable OCI reference: the input result supplies the already-admitted prepared
+manifest and complete build key. The workflow fetches
+`ghcr.io/infimalabs/spice/prepared@sha256:…` through the pinned ORAS surface,
+admits the config, payload descriptor, payload SHA-256 and runtime identity,
+then loads and exercises the image. It runs `stage-target … --sealed` with the
+raw provider canvas, and uploads its log, staged files, and `result.json`. A
+separate credential-only job attests those outputs. The client verifies every
 attestation against the exact admitted workflow blob and publishes only a
 zero-exit payload recording the requested archive, app, and canvas.
 

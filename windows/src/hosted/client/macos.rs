@@ -160,18 +160,12 @@ pub fn macos_hosted_stage_controlled(
         run_title_prefix: RUN_TITLE_PREFIX,
         transport: None,
     };
-    let inputs = Ok(serde_json::json!({
-        "challenge": challenge,
-        "source_commit": source.canonical_commit,
-        "source": source_archive,
-        "archive_sha256": source.archive_sha256,
-        "release_inputs_run": manifest.run_id.to_string(),
-        "release_inputs_challenge": manifest.challenge,
-        "tree": source.tree,
-        "proof_container": manifest.proof_identity,
-        "app": manifest.app,
-        "canvas": manifest.canvas,
-    }));
+    let inputs = Ok(dispatch_inputs(
+        &challenge,
+        &source,
+        &source_archive,
+        manifest,
+    ));
     drive(
         &run,
         attached,
@@ -232,6 +226,28 @@ pub fn macos_hosted_stage_controlled(
             })
         },
     )
+}
+
+fn dispatch_inputs(
+    challenge: &str,
+    source: &super::source::PreparedSource,
+    source_archive: &str,
+    manifest: &crate::hosted::release_inputs::ResultManifest,
+) -> serde_json::Value {
+    serde_json::json!({
+        "challenge": challenge,
+        "source_commit": source.canonical_commit,
+        "source": source_archive,
+        "archive_sha256": source.archive_sha256,
+        "release_inputs_run": manifest.run_id.to_string(),
+        "release_inputs_challenge": manifest.challenge,
+        "tree": source.tree,
+        "proof_build_key": manifest.proof_build_key,
+        "proof_manifest": manifest.proof_manifest,
+        "proof_container": manifest.proof_identity,
+        "app": manifest.app,
+        "canvas": manifest.canvas,
+    })
 }
 fn verify_stage_attestations(
     run: &HostedRun<'_>,

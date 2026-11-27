@@ -89,6 +89,8 @@ pub struct ReleaseInputsPin {
     pub challenge: String,
     pub app: Digest,
     pub canvas: Digest,
+    pub proof_build_key: String,
+    pub proof_manifest: String,
     pub proof_identity: String,
     pub workflow_sha: String,
 }
@@ -103,11 +105,17 @@ impl ReleaseInputsPin {
             DIGEST_HEX_LENGTH,
         )?;
         require_hex("release input workflow", &self.workflow_sha, 40)?;
-        let proof = self
-            .proof_identity
-            .strip_prefix("sha256:")
-            .ok_or(AdmissionError::Digest("release input proof identity"))?;
-        require_hex("release input proof identity", proof, DIGEST_HEX_LENGTH)
+        for (field, value) in [
+            ("release input proof build key", &self.proof_build_key),
+            ("release input proof manifest", &self.proof_manifest),
+            ("release input proof identity", &self.proof_identity),
+        ] {
+            let digest = value
+                .strip_prefix("sha256:")
+                .ok_or(AdmissionError::Digest(field))?;
+            require_hex(field, digest, DIGEST_HEX_LENGTH)?;
+        }
+        Ok(())
     }
 }
 

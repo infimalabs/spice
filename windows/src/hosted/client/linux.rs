@@ -57,6 +57,8 @@ struct LinuxResult {
     image_os: String,
     image_version: String,
     architecture: String,
+    proof_build_key: String,
+    proof_manifest: String,
     proof_image: String,
     exit_code: i32,
     log_sha256: String,
@@ -149,6 +151,8 @@ pub fn linux_hosted_stage_controlled(
         "release_inputs_challenge": manifest.challenge,
         "app": manifest.app,
         "canvas": manifest.canvas,
+        "proof_build_key": manifest.proof_build_key,
+        "proof_manifest": manifest.proof_manifest,
         "proof_identity": manifest.proof_identity,
         "tree": source.tree,
     }));
@@ -297,6 +301,8 @@ fn admit_result(
         || result.app != inputs.app.to_string()
         || result.canvas != inputs.canvas.to_string()
         || result.tree != source.tree
+        || result.proof_build_key != inputs.proof_build_key
+        || result.proof_manifest != inputs.proof_manifest
         || result.proof_image != inputs.proof_identity
     {
         return Err(WindowsHostedError::ProviderResponse(

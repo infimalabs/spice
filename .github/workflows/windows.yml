@@ -82,6 +82,8 @@ jobs:
                 $result.tree -cne $request.tree -or
                 $result.app -cne $request.release_inputs.app -or
                 $result.canvas -cne $request.release_inputs.canvas -or
+                $result.proof_build_key -cne $request.release_inputs.proof_build_key -or
+                $result.proof_manifest -cne $request.release_inputs.proof_manifest -or
                 $result.proof_identity -cne $request.release_inputs.proof_identity -or
                 $result.workflow_sha -cne $request.release_inputs.workflow_sha) {
               throw 'release input result differs from request'
