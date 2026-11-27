@@ -482,11 +482,7 @@ fn download_attested_artifact(
     challenge: &str,
     run_id: u64,
 ) -> Result<(StageLayout, DeclaredSubjects, PathBuf, PathBuf), WindowsHostedError> {
-    let layout = StageLayout::new(download_artifact(
-        run,
-        run_id,
-        &format!("windows-{challenge}"),
-    )?);
+    let layout = StageLayout::new(download_artifact(run, run_id, &result_artifact(challenge))?);
     let declared = DeclaredSubjects::load(run, WORKFLOW, run_id, &layout)?;
     declared.require(&[RESULT_PATH, RUNNER_PATH])?;
     let result_path = layout.result();
@@ -495,6 +491,12 @@ fn download_attested_artifact(
         verify_attestation(run, WORKFLOW, run_id, path)?;
     }
     Ok((layout, declared, runner_path, result_path))
+}
+
+/// The run artifact through which an ad hoc batch's workflow returns its
+/// attested result; release requests fetch a prepared bundle instead.
+fn result_artifact(challenge: &str) -> String {
+    format!("windows-{challenge}")
 }
 
 /// Download the run's one artifact `name` into a fresh scratch directory.
