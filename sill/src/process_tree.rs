@@ -603,7 +603,10 @@ mod tests {
             Ok(())
         };
         // The late member ignores the request to leave, so no exit arrives
-        // before the deadline each wait is given.
+        // before the deadline each wait is given. Only the grace boundary is
+        // traversed; once KILL leaves the tree terminal the loop re-observes
+        // without waiting, so the test's reap and drain bounds are effectively
+        // unbounded.
         let (_exits, exited) = std::sync::mpsc::channel::<()>();
         let mut waited = Vec::new();
         let mut wait = |members: &[u32], deadline: Instant| {
@@ -616,8 +619,8 @@ mod tests {
             .reap_while_root_terminates_with(
                 ReapBounds {
                     grace: Duration::from_millis(20),
-                    reap: Duration::from_millis(50),
-                    output_drain: Duration::from_millis(50),
+                    reap: Duration::MAX,
+                    output_drain: Duration::MAX,
                 },
                 &root_terminal,
                 &mut snapshot,
