@@ -20,6 +20,7 @@
 
 use wire::intent::{BoardTask, TaskAdd, TaskEdit, TaskMedia};
 use wire::pitch::{PITCH_CHARS, PitchRefusal};
+use wire::title::{TITLE_CHARS, TitleTooLong};
 use wire::{Media, TaskHandle, TaskIntent, TaskIntentEdit, TaskStamp, Witness};
 
 use crate::client_action::DraftRequest;
@@ -75,7 +76,7 @@ pub(crate) fn creation(
     if title.is_empty() {
         return Err("A Draft needs a title.".to_owned());
     }
-    let title = title.to_owned();
+    let title = admitted_title(title)?;
     let pitch = admitted_pitch(pitch)?;
     let intent = if fields.intent.is_empty() {
         None
@@ -285,7 +286,9 @@ impl DraftForm {
         let pitch = admitted_pitch(&self.fields.pitch)?;
         let request = TaskEdit {
             task: statement.handle.clone(),
-            title: moved(DraftField::Title, &self.basis.presentation_title),
+            title: moved(DraftField::Title, &self.basis.presentation_title)
+                .map(|title| admitted_title(&title))
+                .transpose()?,
             pitch: (pitch != statement.pitch).then_some(pitch),
             description: moved(
                 DraftField::Description,
@@ -330,6 +333,17 @@ pub(crate) fn admitted_pitch(text: &str) -> Result<String, String> {
         Err(PitchRefusal::Multiline) => Err("A pitch stays on one line.".to_owned()),
         Err(PitchRefusal::TooLong { chars }) => Err(format!(
             "A pitch stays within {PITCH_CHARS} characters; this one has {chars}."
+        )),
+    }
+}
+
+/// The trimmed title, or the sentence the editor shows instead of sending a
+/// title the appliance would refuse.
+pub(crate) fn admitted_title(text: &str) -> Result<String, String> {
+    match wire::title::admit(text) {
+        Ok(()) => Ok(text.trim().to_owned()),
+        Err(TitleTooLong { chars }) => Err(format!(
+            "A title stays within {TITLE_CHARS} characters; this one has {chars}."
         )),
     }
 }

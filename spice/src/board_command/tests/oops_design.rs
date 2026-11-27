@@ -240,6 +240,48 @@ fn collapse_and_open_next_generation(bus: &Bus, epoch: CanonicalUuid, design: Ta
     );
 }
 
+/// A report longer than the title bound never refuses: its title is the text
+/// cut to the bound and its description keeps the complete report.
+#[test]
+fn an_overlong_report_keeps_its_full_text_beneath_a_bounded_title() {
+    let (_root, bus, epoch, _seats) = fixture("oops-long-report", 0);
+    let design = task(1_760_000_000_200_000);
+    let report = task(1_760_000_000_200_001);
+    let text = "friction ".repeat(wire::title::TITLE_CHARS);
+    let CommandAnswer::Task(answer) = assert_committed(issue(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        CommandKind::TaskOopsAdd,
+        vec![
+            Witness::Absence { task: report },
+            Witness::Absence {
+                task: design.clone(),
+            },
+            Witness::OopsGeneration {
+                head: None,
+                design: None,
+            },
+        ],
+        &TaskOopsAdd {
+            design,
+            title: text.clone(),
+            origin: Some(fixture_origin()),
+            topic: Some("/board/test".parse().expect("fixture topic")),
+        },
+    )) else {
+        panic!("OOPS intake returned another answer shape");
+    };
+    let view = board(&bus, epoch, Actor::TEST_PRINCIPAL);
+    let created = at(&view, &answer.task);
+    assert_eq!(created.presentation_title(), wire::title::fit(&text));
+    assert_eq!(wire::title::admit(created.presentation_title()), Ok(()));
+    assert_eq!(
+        created.statement.body.description.as_deref(),
+        Some(text.as_str())
+    );
+}
+
 /// Reports gather under one Design: deciding it refuses until a holder's pass
 /// ends, and that pass offers exactly the reports given acceptance.
 #[test]

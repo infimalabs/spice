@@ -124,7 +124,8 @@ pub(in crate::board_command) fn task_oops_add(
             "OOPS intake requires exactly one intended absent report birth stamp",
         );
     };
-    let report_pitch = wire::pitch::derive(&add.title, None);
+    let report_title = wire::title::fit(&add.title);
+    let report_pitch = wire::pitch::derive(&report_title, None);
     let default_topic = add.topic.is_none().then(|| {
         wire::OOPS_TOPIC
             .parse::<wire::TopicInput>()
@@ -146,7 +147,13 @@ pub(in crate::board_command) fn task_oops_add(
         &snapshot,
         command.actor(),
         add.topic.as_ref().or(default_topic.as_ref()),
-        super::super::routing::Statement::new(&add.title, &report_pitch, None, &[], &report_phase),
+        super::super::routing::Statement::new(
+            &report_title,
+            &report_pitch,
+            None,
+            &[],
+            &report_phase,
+        ),
         origin_view.clone(),
         None,
     ) {
@@ -176,6 +183,7 @@ pub(in crate::board_command) fn task_oops_add(
     };
     let report = match prepare_oops_report(
         add,
+        &report_title,
         &report_pitch,
         placement.topic.clone(),
         origin,
@@ -272,8 +280,11 @@ fn prepare_oops_design(
     )
 }
 
+/// The report row: a title cut to the bound when the report text runs past
+/// it, with the complete report text kept as its description.
 fn prepare_oops_report(
     add: &TaskOopsAdd,
+    title: &str,
     pitch: &str,
     topic: wire::TaskTopic,
     cause: CreationCause,
@@ -283,12 +294,12 @@ fn prepare_oops_report(
     let report_add = TaskAdd {
         preparation: None,
         intent: Some(wire::TaskIntent::Plan),
-        title: add.title.clone(),
+        title: title.to_owned(),
         // A friction report must not be refused, so its pitch derives once
         // from the report text instead of being asked for.
         pitch: pitch.to_owned(),
         topic: topic.named.clone(),
-        description: None,
+        description: (title != add.title).then(|| add.title.clone()),
         term: Vec::new(),
         requirements: wire::EnvironmentRequirements::default(),
         origin: add.origin.clone(),

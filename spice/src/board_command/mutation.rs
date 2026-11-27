@@ -904,7 +904,7 @@ pub(super) fn prepare_task_for(
         intent: add.intent,
         born: born.clone(),
         topic_origin: Seq::new(1).expect("placeholder topic origin is non-zero"),
-        title: add.title.clone(),
+        title: validate_title(&add.title).map(|()| add.title.clone())?,
         pitch: add.pitch.trim().to_owned(),
         description: add.description.clone(),
         term: add.term.clone(),

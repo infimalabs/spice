@@ -137,7 +137,10 @@ pub(crate) fn import(matches: &ArgMatches, ambient: &Ambient) -> Outcome<TaskSet
         }
     };
     for task in &set.tasks {
-        if let Err(outcome) = validate_term(&task.term).and_then(|()| validate_pitch(&task.pitch)) {
+        if let Err(outcome) = validate_term(&task.term)
+            .and_then(|()| validate_pitch(&task.pitch))
+            .and_then(|()| validate_title(&task.title))
+        {
             return failure(outcome);
         }
     }

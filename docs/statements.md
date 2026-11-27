@@ -314,6 +314,14 @@ unless it is about to finish or pass it cleanly.
   a review follow-up from the first substantive description sentence or else
   the title, a `task oops` report from its title. The appliance never rewrites
   an existing description. The Design request prints the stored pitch.
+- A title holds at most 160 characters. Every authored route refuses a longer
+  title and never cuts it: `task add`, `task modify`, review follow-ups, import,
+  sweep documents, and the browser composer. A `task oops` report longer than
+  the bound keeps its complete text as the description, and its title is that
+  text cut to the bound. A hand-written commit subject has the same 160
+  bound, while body prose still folds at 100. An automatic landing subject
+  carries the full title framed by scope, handle and phase, so it may run past
+  that bound.
 - `task review --then` creates one follow-up from `title`, `topic`,
   `description`, `term`, `flow`, and `intent` `key=value` fields. A pipe (`|`)
   or newline separates fields; repeated `term` and `flow` fields accrue in
