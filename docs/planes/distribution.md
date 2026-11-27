@@ -384,12 +384,15 @@ the resolved third-party feature set, the root manifest's release profile,
 SDK/Xcode boundary, canonical vendor-set identity, and the preparation
 contract, so a manifest feature or profile change selects a new key rather
 than restoring units Cargo would discard. An exact-source `prepared-artifact`
-bootstrap resolves the
-deterministic discovery tag, admits its config and manifest, fetches by
-manifest digest, and safely unpacks the inventoried target directories inside
-the native build boundary. Before publication, Cargo removes every workspace
-package from a cold target copy; restored bytes can therefore satisfy only
-unchanged third-party units. Every workspace crate, repository-sensitive build
+bootstrap resolves the deterministic discovery tag, admits its config and
+manifest, fetches by manifest digest, and safely unpacks the inventoried
+target directories inside the native build boundary. Dependency-cache
+archives preserve Cargo's output and fingerprint modification-time ordering;
+the restore copies those times intact so Cargo can keep admitted third-party
+units fresh.
+Before publication, Cargo removes every workspace package from a cold target
+copy; restored bytes can therefore satisfy only unchanged third-party units.
+Every workspace crate, repository-sensitive build
 script, and the final executable recompiles from the admitted source.
 
 An absent or unadmittable Darwin dependency layer, or a refused GHCR login,
