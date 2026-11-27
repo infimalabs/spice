@@ -7,6 +7,7 @@ use spice::serve::canvas::BUILD;
 mod artifact_capture;
 mod canvas_adoption;
 mod environment;
+mod prebuilt;
 #[cfg(unix)]
 mod signing;
 

@@ -638,6 +638,24 @@ workspace and creates a local credential-free Git repository; the guest
 re-verifies the commit and tree before vouching for the archive. No temporary
 Git ref is created, pushed, discovered, or deleted.
 
+A machine holding an unpacked cross-built bundle stages the same target from
+its prebuilt candidate instead, with no Cargo command:
+
+```sh
+spice dev xtask -- stage-target x86_64-pc-windows-msvc --unsigned \
+  --proof-container IMAGE --prebuilt MANIFEST ROOT
+```
+
+`MANIFEST` is the bundle's prepared manifest and `ROOT` its unpacked artifact
+root. The stage admits the manifest only when its build key names this
+release's source archive, and reads `candidate/spice.exe`,
+`candidate/spice.pdb`, and the cross build's observed
+`candidate/toolchain.json` only when their bytes match the manifest. The
+recorded toolchain must meet the release pins, the candidate must link the
+canvas the stage adopts, and its executed version report must name the
+release, as on the built route; the candidate is digested again before the
+target payload publishes. The stage layout and payload are the built route's.
+
 GitHub registers `workflow_dispatch` only from the default branch. The
 repository command therefore becomes live only after
 `.github/workflows/windows.yml` has landed there; a checkout that has the
