@@ -394,11 +394,13 @@ sorted list of every other file in the one root it uploads and submits to
 provider attestation, and its attesting job refuses unless that list equals the
 root. The client verifies the list's attestation, then requires it to declare
 exactly the records the platform's signed result requires before reading any of
-them, and the downloaded root to hold exactly the declared files. A declared
-record whose attestation the provider does not yet show keeps the run attached
-and resumable; an omitted, extra, or malformed declaration proves the result
-unadmittable. Once a target's result proves unadmittable, every
-later fresh dispatch of that target instead binds the blob `main` carries when
+them, and the downloaded root to hold exactly the declared files. The client
+first asks the provider whether the exact subject has a build-provenance
+bundle. A 404 keeps the completed run attached and resumable; once a bundle
+exists, any signature, signer, source, or runner-policy mismatch is a terminal
+refusal rather than propagation delay. An omitted, extra, or malformed
+declaration proves the target's result unadmittable. Every later fresh
+dispatch of that target instead binds the blob `main` carries when
 it is requested, and re-entering that run admits the recorded blob, while
 successful siblings stay attached; the signed
 source and input identities stay unchanged. The publication plan takes its

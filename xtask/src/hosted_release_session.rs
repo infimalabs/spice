@@ -530,6 +530,7 @@ pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
             } | WindowsHostedError::Cancelled { run_id: Some(_) }
                 | WindowsHostedError::ResultSchema(_)
                 | WindowsHostedError::OutputContract(_)
+                | WindowsHostedError::AttestationRefused { .. }
         ),
     }
 }
@@ -801,11 +802,8 @@ mod tests {
         session.targets.linux.succeeded().unwrap();
         session.targets.windows.succeeded().unwrap();
 
-        let pending = WindowsHostedError::Command {
-            operation: "artifact attestation",
-            code: Some(1),
-            stdout: String::new(),
-            stderr: "no attestations found".to_owned(),
+        let pending = WindowsHostedError::AttestationPending {
+            path: PathBuf::from("stage/proof/receipt.json"),
         };
         session
             .targets
@@ -820,6 +818,21 @@ mod tests {
             session.target(NativeTarget::Macos).attachment(),
             Some(Attach::Run(102)),
             "a declared subject not yet verifiable stays attached"
+        );
+
+        let refused = WindowsHostedError::AttestationRefused {
+            path: PathBuf::from("stage/proof/receipt.json"),
+            code: Some(1),
+            stdout: String::new(),
+            stderr: "signer digest did not match".to_owned(),
+        };
+        assert!(
+            terminal_provider_failure(&refused),
+            "an available but invalid attestation is terminal"
+        );
+        assert!(
+            !schema_provider_failure(&refused),
+            "an attestation refusal must not select a different workflow schema"
         );
 
         let omitted = WindowsHostedError::OutputContract(

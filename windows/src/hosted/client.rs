@@ -27,6 +27,7 @@ use serde::Deserialize;
 use wire::{Digest, Domain};
 
 mod attach;
+mod attestation;
 mod canvas;
 mod control;
 mod dispatch;
@@ -42,6 +43,7 @@ mod source;
 mod subjects;
 mod transport;
 pub use attach::Attach;
+use attestation::verify_attestation;
 pub use control::{
     HostedRunBinding, HostedRunControl, HostedRunObserver, HostedWorkflow, ReleaseWorkflowBlobs,
 };
@@ -515,38 +517,6 @@ fn download_artifact(
         )?,
     )?;
     Ok(artifact_dir)
-}
-
-/// Require a GitHub Sigstore attestation over `path` signed by the exact
-/// workflow commit independently admitted for this run on the policy branch.
-fn verify_attestation(
-    run: &HostedRun<'_>,
-    workflow: &str,
-    run_id: u64,
-    path: &Path,
-) -> Result<String, WindowsHostedError> {
-    let workflow_commit = attach::workflow_commit(run, workflow, run_id)?;
-    let verification = command(
-        run.root,
-        "gh",
-        [
-            OsString::from("attestation"),
-            OsString::from("verify"),
-            path.as_os_str().to_owned(),
-            OsString::from("--repo"),
-            OsString::from(run.repository),
-            OsString::from("--signer-workflow"),
-            OsString::from(format!("{}/{workflow}", run.repository)),
-            OsString::from("--signer-digest"),
-            OsString::from(&workflow_commit),
-            OsString::from("--source-digest"),
-            OsString::from(&workflow_commit),
-            OsString::from("--deny-self-hosted-runners"),
-            OsString::from("--format=json"),
-        ],
-    )?;
-    successful("artifact attestation", verification)?;
-    Ok(workflow_commit)
 }
 
 fn publish_artifacts(
@@ -1275,6 +1245,19 @@ pub enum WindowsHostedError {
     /// this client requires: the producer is authentic but out of contract,
     /// so only a fresh dispatch of the current workflow can supply it.
     OutputContract(String),
+    /// The exact declared subject has not reached the provider's attestation
+    /// view yet. The completed run remains eligible for exact attachment.
+    AttestationPending {
+        path: PathBuf,
+    },
+    /// The provider exposes an attestation for the exact subject, but it fails
+    /// this client's signature or workflow-identity policy.
+    AttestationRefused {
+        path: PathBuf,
+        code: Option<i32>,
+        stdout: String,
+        stderr: String,
+    },
     Random(String),
     Clock(String),
     Io {
@@ -1336,6 +1319,37 @@ pub enum WindowsHostedError {
     },
 }
 
+fn format_attestation_error(
+    error: &WindowsHostedError,
+    formatter: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    match error {
+        WindowsHostedError::AttestationPending { path } => write!(
+            formatter,
+            "build-provenance attestation for {} is not visible through the provider yet",
+            path.display()
+        ),
+        WindowsHostedError::AttestationRefused {
+            path,
+            code,
+            stdout,
+            stderr,
+        } => write!(
+            formatter,
+            "build-provenance attestation for {} was refused with exit {code:?}: stdout={stdout:?} stderr={stderr:?}",
+            path.display()
+        ),
+        _ => unreachable!("only attestation errors are routed here"),
+    }
+}
+
+fn format_cancellation(run_id: Option<u64>, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match run_id {
+        Some(run_id) => write!(formatter, "hosted provider run {run_id} was cancelled"),
+        None => formatter.write_str("hosted execution was cancelled before provider dispatch"),
+    }
+}
+
 impl fmt::Display for WindowsHostedError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1363,6 +1377,9 @@ impl fmt::Display for WindowsHostedError {
                 formatter,
                 "completed hosted workflow violated its output contract: {detail}"
             ),
+            error @ (Self::AttestationPending { .. } | Self::AttestationRefused { .. }) => {
+                format_attestation_error(error, formatter)
+            }
             Self::Random(detail) => {
                 write!(formatter, "fresh hosted challenge is unavailable: {detail}")
             }
@@ -1404,14 +1421,7 @@ impl fmt::Display for WindowsHostedError {
                 formatter,
                 "dispatched hosted provider run {run_id} remained unreadable after {observations} bounded observations: {reason}; the run and archive transport for challenge {challenge} remain for --attach {run_id}"
             ),
-            Self::Cancelled {
-                run_id: Some(run_id),
-            } => {
-                write!(formatter, "hosted provider run {run_id} was cancelled")
-            }
-            Self::Cancelled { run_id: None } => {
-                formatter.write_str("hosted execution was cancelled before provider dispatch")
-            }
+            Self::Cancelled { run_id } => format_cancellation(*run_id, formatter),
             Self::Detached { run_id, reason } => write!(
                 formatter,
                 "lost observation of hosted provider run {run_id}: {reason}; the run, its artifacts, and its archive transport remain for --attach {run_id}"
