@@ -35,6 +35,22 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     assert_eq!(reminder[0].held_claim, Available::None);
     assert_eq!(reminder[0].park, Some(body::LanePark::Line));
 
+    let mut authority = [Target {
+        held_claim: Available::None,
+        park: Some(body::LanePark::Authority),
+        ..target(true)
+    }];
+    await_armed_lines(&bus, &snapshot, &mut authority).expect("authority park projects");
+    assert!(
+        !authority[0].pending_inbox,
+        "repeat-only presentation still waits"
+    );
+    assert_eq!(
+        authority[0].park,
+        Some(body::LanePark::Authority),
+        "a standing line never relabels another park"
+    );
+
     let mut fresh = [target(false)];
     await_armed_lines(&bus, &snapshot, &mut fresh).expect("fresh-input park projects");
     assert!(
