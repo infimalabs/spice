@@ -603,11 +603,7 @@ fn native_disposition(error: &NativeError) -> RuntimeDisposition {
 /// added to the battery could reach an operator under a name the receipt never
 /// carried. The standing renders itself, so there is one spelling to change.
 fn standing(standing: CheckStanding) -> String {
-    format!("{}{}", standing.as_str(), code_suffix(standing.code()))
-}
-
-fn code_suffix(code: Option<i32>) -> String {
-    code.map_or_else(String::new, |code| format!("(code={code})"))
+    standing.to_string()
 }
 
 #[cfg(test)]

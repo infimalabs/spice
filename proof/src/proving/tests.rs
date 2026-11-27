@@ -5,7 +5,7 @@ use wire::manifest::ReleaseTarget;
 use super::ProofError;
 use super::fixture::Fixture;
 use crate::evidence::admit_receipt;
-use crate::replay::{CheckKind, CheckStanding, ReplayError};
+use crate::replay::{Battery, CheckKind, CheckStanding, ReplayError, ReplayVerdict};
 
 #[test]
 fn a_clean_replay_runs_once_and_verifies_the_receipt_it_derives() {
@@ -74,4 +74,40 @@ fn target_mismatch_infrastructure_and_non_clean_standings_stay_distinct() {
         };
         assert_eq!(refusal.replay().checks()[0].standing(), standing);
     }
+}
+
+#[test]
+fn a_refused_replay_displays_every_failing_member_and_its_bounded_output() {
+    let fixture = Fixture::new(ReleaseTarget::X86_64UnknownLinuxMusl);
+    let mut standings = [CheckStanding::Clean; CheckKind::ALL.len()];
+    standings[0] = CheckStanding::Failed { code: Some(101) };
+    standings[2] = CheckStanding::TimedOut { code: None };
+    let gate_output = format!(
+        "obsolete beginning\n{}error: gate verification failed\n",
+        "   Compiling fixture\n".repeat(400)
+    );
+    let replay = ReplayVerdict::fixture_with(
+        fixture.target,
+        fixture.environment(),
+        Battery::current().digest().clone(),
+        standings,
+    )
+    .fixture_output(0, gate_output.as_bytes(), b"")
+    .fixture_output(2, b"", b"wait-and-process exceeded its deadline\n");
+
+    let displayed = fixture
+        .staged()
+        .bind(fixture.target, || Ok(replay))
+        .err()
+        .expect("non-clean replay refuses")
+        .to_string();
+
+    assert!(displayed.starts_with("sealed proof replay did not establish clean standing"));
+    assert!(displayed.contains("gate failed(code=101):\nstdout:\n"));
+    assert!(displayed.contains("error: gate verification failed"));
+    assert!(displayed.contains("wait-and-process timed-out:\nstderr:\n"));
+    assert!(displayed.contains("wait-and-process exceeded its deadline"));
+    assert!(!displayed.contains("obsolete beginning"));
+    assert!(!displayed.contains("dialect-refusals"));
+    assert!(!displayed.contains("supply-rebuild"));
 }

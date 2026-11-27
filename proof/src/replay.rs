@@ -251,6 +251,16 @@ impl CheckStanding {
     }
 }
 
+impl fmt::Display for CheckStanding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())?;
+        if let Some(code) = self.code() {
+            write!(formatter, "(code={code})")?;
+        }
+        Ok(())
+    }
+}
+
 /// One typed verdict over the complete battery.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReplayVerdict {
@@ -361,6 +371,13 @@ impl ReplayVerdict {
             standing,
             checks,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_output(mut self, index: usize, stdout: &[u8], stderr: &[u8]) -> Self {
+        self.checks[index].stdout = stdout.to_vec();
+        self.checks[index].stderr = stderr.to_vec();
+        self
     }
 }
 
