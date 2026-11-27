@@ -39,11 +39,18 @@ pub fn is_enhanced(voice: &OfferedVoice<'_>) -> bool {
         && (tier_uri(voice.uri, ENHANCED_URI_PREFIX) || tier_name(voice.name, ENHANCED_NAME_MARKER))
 }
 
+/// Whether `voice` is a macOS novelty voice, which automatic spreading never
+/// selects.
+#[must_use]
+pub fn is_novelty(voice: &OfferedVoice<'_>) -> bool {
+    voice.uri.starts_with(NOVELTY_URI_PREFIX)
+}
+
 /// Whether `voice` is a voice the device serves that is meant for speech:
 /// local and not one of the macOS novelty voices.
 #[must_use]
 pub fn is_speaking(voice: &OfferedVoice<'_>) -> bool {
-    voice.local && !voice.uri.starts_with(NOVELTY_URI_PREFIX)
+    voice.local && !is_novelty(voice)
 }
 
 /// `<prefix><language>.<name>` with both parts present.
