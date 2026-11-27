@@ -833,7 +833,10 @@ fn admit_manifest_descriptor(bytes: &[u8]) -> Result<OciDescriptor, PreparedArti
     let descriptor: OciDescriptor =
         serde_json::from_slice(bytes).map_err(PreparedArtifactError::Decode)?;
     if descriptor.media_type != OCI_MANIFEST_MEDIA_TYPE
-        || descriptor.artifact_type.as_deref() != Some(ARTIFACT_MEDIA_TYPE)
+        || descriptor
+            .artifact_type
+            .as_deref()
+            .is_some_and(|artifact_type| artifact_type != ARTIFACT_MEDIA_TYPE)
     {
         return Err(PreparedArtifactError::Invalid(
             "OCI descriptor does not name one prepared Spice artifact".to_owned(),
@@ -1201,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn top_level_descriptor_requires_the_prepared_artifact_type() {
+    fn top_level_descriptor_allows_registry_normalization_but_rejects_conflicts() {
         let descriptor = serde_json::json!({
             "mediaType": OCI_MANIFEST_MEDIA_TYPE,
             "artifactType": ARTIFACT_MEDIA_TYPE,
@@ -1215,11 +1218,18 @@ mod tests {
             digest('a')
         );
 
-        for field in ["artifactType", "mediaType"] {
-            let mut changed = descriptor.clone();
-            changed.as_object_mut().unwrap().remove(field);
-            assert!(admit_manifest_descriptor(&serde_json::to_vec(&changed).unwrap()).is_err());
-        }
+        let mut normalized = descriptor.clone();
+        normalized.as_object_mut().unwrap().remove("artifactType");
+        assert!(admit_manifest_descriptor(&serde_json::to_vec(&normalized).unwrap()).is_ok());
+
+        let mut missing_media_type = descriptor.clone();
+        missing_media_type
+            .as_object_mut()
+            .unwrap()
+            .remove("mediaType");
+        assert!(
+            admit_manifest_descriptor(&serde_json::to_vec(&missing_media_type).unwrap()).is_err()
+        );
         let mut wrong_type = descriptor.clone();
         wrong_type["artifactType"] = serde_json::json!("application/vnd.example.wrong");
         assert!(admit_manifest_descriptor(&serde_json::to_vec(&wrong_type).unwrap()).is_err());
