@@ -357,7 +357,10 @@ the unpacked inventory, and then applies the existing provenance and stage
 admission. The macOS unsigned, credential-bearing signing, and credential-free
 finalization jobs remain separate: only the credential-free finalizer publishes
 the prepared bundle, and no repository-built program executes with Apple
-credentials.
+credentials. Windows release requests publish from a separate job that alone
+holds package-write authority; ad hoc hosted Windows batches execute worktree
+commands without it and return their attested result as a one-day run
+artifact, which only their coordinator downloads.
 
 **Invariant —** Hosted caches hold only derivable bootstrap state, never
 release outputs, prepared OCI payloads, or result evidence. Each workflow keeps
