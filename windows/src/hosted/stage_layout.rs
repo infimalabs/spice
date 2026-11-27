@@ -1,4 +1,9 @@
-use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
+use std::error::Error;
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 
 pub(super) const RESULT_PATH: &str = "result.json";
 pub(super) const STAGE_DIRECTORY: &str = "stage";
@@ -9,6 +14,38 @@ pub(super) const RUNNER_PATH: &str = "runner/windows-hosted.exe";
 /// The attested inventory of every other file a native workflow submitted to
 /// provider attestation from this root.
 pub(super) const SUBJECTS_PATH: &str = "subjects.json";
+
+const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
+const MACOS_TARGET: &str = "aarch64-apple-darwin";
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
+
+const LINUX_RECORDS: &[RequiredRecord] = &[
+    RequiredRecord::exact("result", RESULT_PATH),
+    RequiredRecord::exact("stage log", STAGE_LOG_PATH),
+    RequiredRecord::exact("smoke record", SMOKE_LOG_PATH),
+    RequiredRecord::exact(
+        "payload",
+        "stage/targets/x86_64-unknown-linux-musl/payload.json",
+    ),
+    RequiredRecord::nested("object", "stage/objects/", ""),
+    RequiredRecord::nested("proof", "stage/proofs/", "/receipt.json"),
+];
+const MACOS_RECORDS: &[RequiredRecord] = &[
+    RequiredRecord::exact("result", RESULT_PATH),
+    RequiredRecord::exact("payload", "stage/targets/aarch64-apple-darwin/payload.json"),
+    RequiredRecord::nested("object", "stage/objects/", ""),
+    RequiredRecord::nested("proof", "stage/proofs/", "/receipt.json"),
+];
+const WINDOWS_RECORDS: &[RequiredRecord] = &[
+    RequiredRecord::exact("result", RESULT_PATH),
+    RequiredRecord::exact("runner", RUNNER_PATH),
+    RequiredRecord::exact(
+        "payload",
+        "stage/targets/x86_64-pc-windows-msvc/payload.json",
+    ),
+    RequiredRecord::nested("object", "stage/objects/", ""),
+    RequiredRecord::nested("proof", "stage/proofs/", "/receipt.json"),
+];
 
 /// The one relative layout published by every native hosted stage.
 pub(super) struct StageLayout {
@@ -53,113 +90,310 @@ impl StageLayout {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
+#[derive(Clone, Copy)]
+struct RequiredRecord {
+    name: &'static str,
+    prefix: &'static str,
+    suffix: &'static str,
+}
 
-    use super::{RESULT_PATH, RUNNER_PATH, SMOKE_LOG_PATH, STAGE_LOG_PATH};
-
-    const SUBJECT_ROOT: &str = "${{ runner.temp }}/result/";
-    const STAGE_PAYLOAD: &str = "stage/targets/native/payload.json";
-    const STAGE_RECEIPT: &str = "stage/proofs/source/native/receipt.json";
-    const SMOKE_PAYLOAD: &str = "smoke/targets/native/payload.json";
-    const LINUX_WORKFLOW: &str = include_str!("../../../.github/workflows/linux.yml");
-    const MACOS_WORKFLOW: &str = include_str!("../../../.github/workflows/macos.yml");
-    const WINDOWS_WORKFLOW: &str = include_str!("../../../.github/workflows/windows.yml");
-
-    #[test]
-    fn native_workflows_attest_the_admitted_stage_layout() {
-        let contracts = [
-            (
-                "Linux",
-                LINUX_WORKFLOW,
-                &[
-                    RESULT_PATH,
-                    STAGE_PAYLOAD,
-                    STAGE_RECEIPT,
-                    STAGE_LOG_PATH,
-                    SMOKE_LOG_PATH,
-                    SMOKE_PAYLOAD,
-                ][..],
-            ),
-            (
-                "macOS",
-                MACOS_WORKFLOW,
-                &[RESULT_PATH, STAGE_PAYLOAD, STAGE_RECEIPT][..],
-            ),
-            (
-                "Windows",
-                WINDOWS_WORKFLOW,
-                &[RESULT_PATH, STAGE_PAYLOAD, STAGE_RECEIPT, RUNNER_PATH][..],
-            ),
-        ];
-
-        for (platform, workflow, admitted_paths) in contracts {
-            let observed = relative_subjects(workflow);
-            assert_eq!(
-                observed,
-                BTreeSet::from(["**".to_owned()]),
-                "{platform} must attest its complete artifact root exactly once"
-            );
-            for admitted in admitted_paths {
-                assert!(
-                    observed.iter().any(|subject| matches(subject, admitted)),
-                    "{platform} does not attest admitted path {admitted}"
-                );
-            }
+impl RequiredRecord {
+    const fn exact(name: &'static str, path: &'static str) -> Self {
+        Self {
+            name,
+            prefix: path,
+            suffix: path,
         }
     }
 
-    fn relative_subjects(workflow: &str) -> BTreeSet<String> {
-        subject_paths(workflow)
+    const fn nested(name: &'static str, prefix: &'static str, suffix: &'static str) -> Self {
+        Self {
+            name,
+            prefix,
+            suffix,
+        }
+    }
+
+    fn matches(self, path: &str) -> bool {
+        if self.prefix == self.suffix {
+            path == self.prefix
+        } else {
+            path.starts_with(self.prefix)
+                && path.len() > self.prefix.len() + self.suffix.len()
+                && path.ends_with(self.suffix)
+        }
+    }
+
+    fn representative(self) -> PathBuf {
+        if self.prefix == self.suffix {
+            PathBuf::from(self.prefix)
+        } else {
+            PathBuf::from(format!("{}representative{}", self.prefix, self.suffix))
+        }
+    }
+}
+
+/// The production packaging and admission contract for one native target.
+#[derive(Clone, Copy)]
+pub struct NativeStageContract {
+    target: &'static str,
+    records: &'static [RequiredRecord],
+}
+
+impl NativeStageContract {
+    const ALL: [Self; 3] = [
+        Self {
+            target: LINUX_TARGET,
+            records: LINUX_RECORDS,
+        },
+        Self {
+            target: MACOS_TARGET,
+            records: MACOS_RECORDS,
+        },
+        Self {
+            target: WINDOWS_TARGET,
+            records: WINDOWS_RECORDS,
+        },
+    ];
+
+    /// Resolve the sole contract for `target`.
+    pub fn for_target(target: &str) -> Result<Self, StageLayoutError> {
+        Self::ALL
             .into_iter()
-            .map(|path| path.replace('\\', "/"))
-            .map(|path| {
-                path.strip_prefix(SUBJECT_ROOT)
-                    .unwrap_or_else(|| {
-                        panic!("attestation subject is outside {SUBJECT_ROOT}: {path}")
-                    })
-                    .to_owned()
-            })
+            .find(|contract| contract.target == target)
+            .ok_or_else(|| StageLayoutError::UnknownTarget(target.to_owned()))
+    }
+
+    pub(super) fn require(self, paths: &BTreeSet<PathBuf>) -> Result<(), StageLayoutError> {
+        for record in self.records {
+            if !paths
+                .iter()
+                .filter_map(|path| portable_path(path).ok())
+                .any(|path| record.matches(&path))
+            {
+                return Err(StageLayoutError::MissingRecord {
+                    target: self.target,
+                    record: record.name,
+                    expected: record.representative(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn admit_roots(
+        self,
+        uploaded_root: &Path,
+        attested_root: &Path,
+        paths: &BTreeSet<PathBuf>,
+    ) -> Result<(), StageLayoutError> {
+        self.require(paths)?;
+        for path in paths {
+            let uploaded = uploaded_root.join(path);
+            if !uploaded.starts_with(attested_root) {
+                return Err(StageLayoutError::UncoveredRecord {
+                    target: self.target,
+                    record: path.clone(),
+                    attested_root: attested_root.to_path_buf(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn representative(self) -> BTreeSet<PathBuf> {
+        self.records
+            .iter()
+            .map(|record| record.representative())
             .collect()
     }
+}
 
-    fn subject_paths(workflow: &str) -> Vec<String> {
-        let mut lines = workflow.lines().peekable();
-        let mut subjects = Vec::new();
-        while let Some(line) = lines.next() {
-            let trimmed = line.trim_start();
-            let Some(value) = trimmed.strip_prefix("subject-path:") else {
-                continue;
-            };
-            let indent = line.len() - trimmed.len();
-            let value = value.trim();
-            if value != "|" {
-                subjects.push(value.to_owned());
-                continue;
+/// Write the exact regular-file inventory a native producer packages and
+/// submits to provider attestation.
+pub fn declare_native_stage(target: &str, root: &Path) -> Result<(), StageLayoutError> {
+    let contract = NativeStageContract::for_target(target)?;
+    let mut paths = BTreeSet::new();
+    collect_regular_files(root, root, &mut paths)?;
+    paths.remove(Path::new(SUBJECTS_PATH));
+    contract.admit_roots(root, root, &paths)?;
+    let portable = paths
+        .iter()
+        .map(|path| portable_path(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let bytes = serde_json::to_vec(&portable).map_err(StageLayoutError::Encode)?;
+    let destination = root.join(SUBJECTS_PATH);
+    fs::write(&destination, bytes).map_err(|source| StageLayoutError::Io {
+        path: destination,
+        source,
+    })
+}
+
+/// Prove every production target's representative package is closed beneath
+/// the one root submitted to provider attestation.
+pub fn preflight_native_stage_contracts() -> Result<(), StageLayoutError> {
+    let root = Path::new("result");
+    for contract in NativeStageContract::ALL {
+        contract.admit_roots(root, root, &contract.representative())?;
+    }
+    Ok(())
+}
+
+fn collect_regular_files(
+    root: &Path,
+    directory: &Path,
+    paths: &mut BTreeSet<PathBuf>,
+) -> Result<(), StageLayoutError> {
+    for entry in fs::read_dir(directory).map_err(|source| StageLayoutError::Io {
+        path: directory.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| StageLayoutError::Io {
+            path: directory.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| StageLayoutError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if file_type.is_dir() {
+            collect_regular_files(root, &path, paths)?;
+        } else if file_type.is_file() {
+            paths.insert(
+                path.strip_prefix(root)
+                    .expect("walked stage path remains beneath its root")
+                    .to_path_buf(),
+            );
+        } else {
+            return Err(StageLayoutError::NonRegular(path));
+        }
+    }
+    Ok(())
+}
+
+fn portable_path(path: &Path) -> Result<String, StageLayoutError> {
+    path.components()
+        .map(|component| match component {
+            Component::Normal(part) => part
+                .to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| StageLayoutError::NonUnicode(path.to_path_buf())),
+            _ => Err(StageLayoutError::NonCanonical(path.to_path_buf())),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|parts| parts.join("/"))
+}
+
+/// Why a native stage package cannot satisfy its production admission
+/// contract.
+#[derive(Debug)]
+pub enum StageLayoutError {
+    UnknownTarget(String),
+    MissingRecord {
+        target: &'static str,
+        record: &'static str,
+        expected: PathBuf,
+    },
+    UncoveredRecord {
+        target: &'static str,
+        record: PathBuf,
+        attested_root: PathBuf,
+    },
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
+    Encode(serde_json::Error),
+    NonRegular(PathBuf),
+    NonUnicode(PathBuf),
+    NonCanonical(PathBuf),
+}
+
+impl fmt::Display for StageLayoutError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownTarget(target) => write!(formatter, "unknown native target {target}"),
+            Self::MissingRecord {
+                target,
+                record,
+                expected,
+            } => write!(
+                formatter,
+                "{target} stage layout omits required {record} record {}",
+                expected.display()
+            ),
+            Self::UncoveredRecord {
+                target,
+                record,
+                attested_root,
+            } => write!(
+                formatter,
+                "{target} stage record {} is not covered by provenance root {}",
+                record.display(),
+                attested_root.display()
+            ),
+            Self::Io { path, source } => {
+                write!(formatter, "cannot inspect {}: {source}", path.display())
             }
-            while let Some(line) = lines.peek().copied() {
-                if line.trim().is_empty() {
-                    lines.next();
-                    continue;
-                }
-                let nested = line.len() - line.trim_start().len();
-                if nested <= indent {
-                    break;
-                }
-                subjects.push(line.trim().to_owned());
-                lines.next();
+            Self::Encode(error) => write!(formatter, "cannot encode stage subjects: {error}"),
+            Self::NonRegular(path) => {
+                write!(
+                    formatter,
+                    "native stage contains non-regular path {}",
+                    path.display()
+                )
+            }
+            Self::NonUnicode(path) => {
+                write!(
+                    formatter,
+                    "native stage path is not Unicode: {}",
+                    path.display()
+                )
+            }
+            Self::NonCanonical(path) => {
+                write!(
+                    formatter,
+                    "native stage path is not relative: {}",
+                    path.display()
+                )
             }
         }
-        subjects
     }
+}
 
-    fn matches(subject: &str, path: &str) -> bool {
-        subject == "**"
-            || subject == path
-            || subject.strip_suffix("/**").is_some_and(|prefix| {
-                path.strip_prefix(prefix)
-                    .is_some_and(|suffix| suffix.starts_with('/'))
-            })
+impl Error for StageLayoutError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Encode(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{NativeStageContract, RESULT_PATH};
+
+    #[test]
+    fn every_target_names_missing_and_uncovered_records() {
+        for contract in NativeStageContract::ALL {
+            let records = contract.representative();
+            let root_error = contract
+                .admit_roots(Path::new("result"), Path::new("result/stage"), &records)
+                .unwrap_err()
+                .to_string();
+            assert!(root_error.contains(contract.target));
+            assert!(root_error.contains(RESULT_PATH));
+
+            let mut incomplete = records;
+            incomplete.remove(Path::new(RESULT_PATH));
+            let record_error = contract.require(&incomplete).unwrap_err().to_string();
+            assert!(record_error.contains(contract.target));
+            assert!(record_error.contains(RESULT_PATH));
+        }
     }
 }

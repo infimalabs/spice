@@ -745,8 +745,7 @@ jobs:
           mkdir -p "$result/stage"
           mv "$stage/result.json" "$result/result.json"
           cp -R "$stage/." "$result/stage/"
-          (cd "$result" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
-            | LC_ALL=C sort | jq -R . | jq -cs .) > "$result/subjects.json"
+          "$finalizer/xtask" declare-native-stage aarch64-apple-darwin "$result"
           proof_seconds=$(($(date +%s) - proof_started))
           {
             printf '### macOS signed proof\n\n'

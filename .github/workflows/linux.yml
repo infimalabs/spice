@@ -302,8 +302,8 @@ jobs:
               proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
               smoke_exit_code: $smoke_exit_code, smoke_log_sha256: $smoke_log_sha256,
               artifacts: $artifacts[0], smoke_artifacts: $smoke_artifacts[0]}' > "$out/result.json"
-          (cd "$out" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
-            | LC_ALL=C sort | jq -R . | jq -cs .) > "$out/subjects.json"
+          "$RUNNER_TEMP/bootstrap-target/debug/xtask" declare-native-stage \
+            x86_64-unknown-linux-musl "$out"
 
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

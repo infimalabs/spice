@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::hosted::Request;
-use crate::hosted::stage_layout::{RESULT_PATH, RUNNER_PATH, StageLayout};
+use crate::hosted::stage_layout::{NativeStageContract, StageLayout};
 
 use super::{
     DeclaredSubjects, HostedRun, PreparedBundleTransport, WindowsHostedError,
@@ -13,6 +13,7 @@ use super::{
 
 /// The job that publishes a Windows release request's finalized bundle.
 const PUBLISH_JOB: &str = "Publish Windows release bundle";
+const TARGET: &str = "x86_64-pc-windows-msvc";
 
 pub(super) fn admitted_artifact(
     run: &HostedRun<'_>,
@@ -40,7 +41,10 @@ pub(super) fn admitted_artifact(
         .map_err(WindowsHostedError::ProviderResponse)?;
     let layout = StageLayout::new(artifact);
     let declared = DeclaredSubjects::load(run, super::WORKFLOW, run_id, &layout)?;
-    declared.require(&[RESULT_PATH, RUNNER_PATH])?;
+    declared.require_contract(
+        NativeStageContract::for_target(TARGET)
+            .expect("the hosted Windows target has one stage contract"),
+    )?;
     let runner = layout.runner();
     let result = layout.result();
     for path in [&runner, &result] {
