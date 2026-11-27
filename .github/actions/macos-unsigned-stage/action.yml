@@ -1,0 +1,113 @@
+name: Build and execute the sealed unsigned macOS stage
+description: >-
+  Builds xtask and the sealed proof runner under the candidate build settings,
+  runs the unsigned aarch64-apple-darwin stage, and writes the unsigned stage,
+  host policy, and finalizer beneath RUNNER_TEMP. Release staging and the
+  exact-tree candidate prebuild run these identical commands, so a prebuilt
+  target directory stays fresh for the release stage's own Cargo invocations.
+
+inputs:
+  cargo-home:
+    description: Cargo home every build uses
+    required: true
+  target-dir:
+    description: Cargo target directory every build uses
+    required: true
+  archive:
+    description: Canonical source-archive identity
+    required: true
+  proof-container:
+    description: Proof image identity the unsigned stage records
+    required: true
+  canvas:
+    description: Path of the canvas archive the candidate links
+    required: true
+  app:
+    description: App generation that canvas carries
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Build and execute the sealed unsigned stage
+      shell: bash
+      env:
+        CARGO_HOME: ${{ inputs.cargo-home }}
+        CARGO_TARGET_DIR: ${{ inputs.target-dir }}
+        RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
+        EXPECTED_ARCHIVE: ${{ inputs.archive }}
+        PROOF_CONTAINER: ${{ inputs.proof-container }}
+        RELEASE_CANVAS: ${{ inputs.canvas }}
+        RELEASE_APP: ${{ inputs.app }}
+      run: |
+        set -euo pipefail
+        python=$(command -v python3)
+        "$python" -c 'import tomllib'
+        cargo="$RUST_BIN/cargo"
+        candidate() {
+          "$python" - "$1" <<'PY'
+        import sys, tomllib
+        with open("dist/release/candidate.toml", "rb") as source:
+            print(tomllib.load(source)[sys.argv[1]])
+        PY
+        }
+        release_target="$CARGO_TARGET_DIR/$(candidate target_dir)"
+        debug_config=$(candidate debug_config)
+        target_output="$release_target/aarch64-apple-darwin"
+        xtask="$target_output/release/xtask"
+        # The candidate build's unit-affecting environment, one NAME=VALUE
+        # per line, as xtask's release executor sets it.
+        candidate_env=()
+        while IFS= read -r assignment; do
+          candidate_env+=("$assignment")
+        done < <("$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
+        import os, sys, tomllib
+        workspace, build_root = sys.argv[1:]
+        with open("dist/release/candidate.toml", "rb") as source:
+            candidate = tomllib.load(source)
+        for name, value in candidate["environment"].items():
+            print(f"{name}={value}")
+        print("CARGO_BUILD_BUILD_DIR=" + os.path.join(build_root, candidate["build_dir"]))
+        print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
+        PY
+        )
+        export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
+        env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
+          --target-dir "$release_target" --config "$debug_config" \
+          --package xtask --bin xtask
+        SPICE_PROOF_CARGO="$cargo" \
+          dist/proof-runner/build.sh "$CARGO_TARGET_DIR" --seal-only
+        runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
+        SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
+          SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
+          "$xtask" \
+          stage-target aarch64-apple-darwin --unsigned \
+          --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
+
+        payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
+        python3 - "$payload" "$EXPECTED_ARCHIVE" "$RUNNER_TEMP/unsigned-stage" <<'PY'
+        import json, os, shutil, sys
+        payload_path, expected_archive, output = sys.argv[1:]
+        with open(payload_path, "rb") as source:
+            payload = json.load(source)
+        if payload["target"] != "aarch64-apple-darwin":
+            raise SystemExit("wrong staged target")
+        if payload["archive"] != expected_archive:
+            raise SystemExit(f"archive drifted: {payload['archive']} != {expected_archive}")
+        destination = os.path.join(output, "targets", "aarch64-apple-darwin")
+        os.makedirs(destination)
+        shutil.copyfile(payload_path, os.path.join(destination, "payload.json"))
+        objects = os.path.join(output, "objects")
+        os.makedirs(objects)
+        for entry in payload["inventory"]:
+            name = f"{entry['digest']}-{entry['mode']:04o}"
+            shutil.copyfile(os.path.join("dist/stage/objects", name), os.path.join(objects, name))
+        PY
+        "$xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
+        tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
+        cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
+        finalizer="$RUNNER_TEMP/finalizer"
+        mkdir -p "$finalizer"
+        cp "$xtask" "$finalizer/"
+        cp -R target/proof-native-darwin "$finalizer/"
+        tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .

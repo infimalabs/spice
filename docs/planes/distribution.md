@@ -316,7 +316,9 @@ worktree is, the sealed route hands that identity to the in-image
 `stage-target` instead of linking a host-staged generation: the image builds
 the app itself, offline, so no host toolchain touches any part of the release.
 
-**Invariant —** Hosted release input production precedes every native build.
+**Invariant —** Hosted release input production precedes every native release
+stage; only the exact-tree macOS candidate prebuild compiles before it, and
+the canvas that prebuild links never reaches a release.
 `.github/workflows/input.yml` checks out one exact landed `main`
 commit, runs `spice dev xtask -- release-inputs OUT` on a GitHub-hosted Linux
 runner, and publishes `input-CHALLENGE`. That artifact contains only the
@@ -591,6 +593,27 @@ its candidate build, so the candidate reuses every unit of that bootstrap and
 compiles only the `spice` binary unit.
 Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
 dynamic libraries; extracting the executable alone is not an executable tool.
+
+`.github/workflows/macos-prebuild.yml` starts on every push to `main`, or on
+dispatch naming one exact landed commit, without waiting for release inputs,
+the proof image, or another platform. It runs `release-inputs` on the admitted
+macOS image, then rebuilds inside the same synthetic commit of the extracted
+archive that release staging builds in. It runs the same
+`.github/actions/macos-toolchain` and `.github/actions/macos-unsigned-stage`
+composite actions, with its own canvas and a zero proof identity standing in
+for the release canvas and proof image. `.github/actions/macos-prebuild-key`
+keys the result by the source tree and archive digest, which carry every
+repository input that shapes compiled bytes, plus the observed target,
+compiler, Cargo, SDK, absolute build paths, and the path and digest of every
+tool the proof runner pins; it binds no app, canvas, or proof image. The
+workflow publishes one prepared `tar.gz` bundle under that key: the complete
+candidate target directory with its saved final-link plan,
+`proof-native-darwin`, and `record.json`, which binds the source identities,
+the stand-ins, the key, the run and attempt, and the start, finish, and build
+seconds. Every packaged entry carries one fixed instant. An already-published
+key skips the build. Release staging links its selected canvas through the
+saved plan, and the existing linked-canvas check refuses any candidate that
+carries other canvas bytes.
 
 The repository variable `MACOS_DEVELOPER_IDENTITY` names the dedicated CI
 Developer ID Application identity. Actions secrets
