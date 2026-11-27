@@ -1,7 +1,6 @@
 //! Provider client for one disposable hosted signed macOS release stage.
 
 use std::collections::BTreeSet;
-use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -226,7 +225,7 @@ impl MacosCompletion<'_> {
     ) -> Result<MacosHostedStage, WindowsHostedError> {
         watch_run(self.run.root, self.run.repository, authority, cancellation)?;
         let run_id = authority.run_id();
-        let attempt = finalize_attempt(self.run, run_id)?;
+        let attempt = super::prepared::published_attempt(self.run, run_id, FINALIZE_JOB)?;
         let artifact = self.scratch.join("artifact");
         self.prepared_bundles
             .fetch(
@@ -281,38 +280,6 @@ impl MacosCompletion<'_> {
             ),
         })
     }
-}
-
-/// The attempt of run `run_id` whose finalize job last succeeded. Its signed
-/// bundle is the one that run's attestation consumed.
-fn finalize_attempt(run: &HostedRun<'_>, run_id: u64) -> Result<u32, WindowsHostedError> {
-    let attempts = super::successful_text(
-        "finalize job attempt",
-        super::command(
-            run.root,
-            "gh",
-            [
-                OsString::from("api"),
-                OsString::from(format!(
-                    "repos/{}/actions/runs/{run_id}/jobs?filter=latest",
-                    run.repository
-                )),
-                OsString::from("--jq"),
-                OsString::from(format!(
-                    ".jobs[] | select(.name == \"{FINALIZE_JOB}\" and .conclusion == \"success\") | .run_attempt"
-                )),
-            ],
-        )?,
-    )?;
-    match attempts.split_whitespace().collect::<Vec<_>>().as_slice() {
-        [attempt] => attempt.parse().ok().filter(|attempt| *attempt > 0),
-        _ => None,
-    }
-    .ok_or_else(|| {
-        WindowsHostedError::ProviderResponse(format!(
-            "run {run_id} names no single successful {FINALIZE_JOB} attempt: {attempts:?}"
-        ))
-    })
 }
 
 fn dispatch_inputs(

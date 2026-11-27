@@ -460,7 +460,12 @@ jobs:
           & $xtask prepared-artifact manifest bundle windows-amd64 $key application/gzip `
             $archive $root - $manifest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $tag = $request.prepared_bundle.build_key.Substring(7)
+          # The result records this run attempt, so each attempt publishes
+          # beneath its own discovery tag: SHA-256 of KEY:ATTEMPT.
+          $discovery = "$($request.prepared_bundle.build_key.Substring(7)):$env:GITHUB_RUN_ATTEMPT"
+          $tag = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($discovery))
+          ).ToLowerInvariant()
           $env:GHCR_TOKEN | oras login ghcr.io --username $env:GITHUB_ACTOR --password-stdin
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $xtask prepared-artifact publish `

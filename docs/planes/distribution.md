@@ -363,12 +363,14 @@ deterministic `tar.gz` prepared bundles. Their workflows publish by complete
 build key only after assembling the exact attestation subject tree; the coordinator
 resolves the discovery tag to one manifest digest, fetches by digest, admits
 the unpacked inventory, and then applies the existing provenance and stage
-admission. Signing is not reproducible, so an exact macOS rerun yields new
-bytes under the same build key: each finalize attempt publishes beneath the
-SHA-256 of `KEY:ATTEMPT`, its attest job fetches the manifest digest that
-finalize reported, and the coordinator asks the provider which attempt's
-finalize job last succeeded before resolving that attempt's tag. The same
-attempt republishing different bytes still conflicts. The macOS unsigned,
+admission. macOS signing is not reproducible and the Windows result records
+its run attempt, so an exact rerun yields new bytes under the same build key:
+each publishing attempt tags its bundle with the SHA-256 of `KEY:ATTEMPT`, the
+macOS attest job fetches the manifest digest that finalize reported, and the
+coordinator asks the provider which attempt's publishing job (`Finalize
+macOS` or `Publish Windows release bundle`) last succeeded before resolving
+that attempt's tag. The same attempt republishing different bytes still
+conflicts. The macOS unsigned,
 credential-bearing signing, and credential-free
 finalization jobs remain separate: only the credential-free finalizer publishes
 the prepared bundle, and no repository-built program executes with Apple

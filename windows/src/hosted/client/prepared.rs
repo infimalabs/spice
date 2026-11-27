@@ -1,5 +1,6 @@
 //! Coordinator admission for finalized prepared platform bundles.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::hosted::Request;
@@ -9,6 +10,9 @@ use super::{
     DeclaredSubjects, HostedRun, PreparedBundleTransport, WindowsHostedError,
     download_attested_artifact, verify_attestation,
 };
+
+/// The job that publishes a Windows release request's finalized bundle.
+const PUBLISH_JOB: &str = "Publish Windows release bundle";
 
 pub(super) fn admitted_artifact(
     run: &HostedRun<'_>,
@@ -25,10 +29,11 @@ pub(super) fn admitted_artifact(
         )
     })?;
     let artifact = run.scratch.join("artifact");
+    let attempt = published_attempt(run, run_id, PUBLISH_JOB)?;
     transport
         .fetch(
             run.repository,
-            request.prepared_bundle.tag(),
+            &request.prepared_bundle.attempt_tag(attempt),
             &request.prepared_bundle.build_key,
             &artifact,
         )
@@ -42,6 +47,42 @@ pub(super) fn admitted_artifact(
         verify_attestation(run, super::WORKFLOW, run_id, path)?;
     }
     Ok((layout, declared, runner, result))
+}
+
+/// The attempt of run `run_id` whose `job` last succeeded. Each attempt signs
+/// or records its own bytes and publishes them beneath its own discovery tag.
+pub(super) fn published_attempt(
+    run: &HostedRun<'_>,
+    run_id: u64,
+    job: &str,
+) -> Result<u32, WindowsHostedError> {
+    let attempts = super::successful_text(
+        "publishing job attempt",
+        super::command(
+            run.root,
+            "gh",
+            [
+                OsString::from("api"),
+                OsString::from(format!(
+                    "repos/{}/actions/runs/{run_id}/jobs?filter=latest",
+                    run.repository
+                )),
+                OsString::from("--jq"),
+                OsString::from(format!(
+                    ".jobs[] | select(.name == \"{job}\" and .conclusion == \"success\") | .run_attempt"
+                )),
+            ],
+        )?,
+    )?;
+    match attempts.split_whitespace().collect::<Vec<_>>().as_slice() {
+        [attempt] => attempt.parse().ok().filter(|attempt| *attempt > 0),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        WindowsHostedError::ProviderResponse(format!(
+            "run {run_id} names no single successful {job} attempt: {attempts:?}"
+        ))
+    })
 }
 
 #[cfg(test)]

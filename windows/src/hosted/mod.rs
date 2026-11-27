@@ -79,22 +79,19 @@ impl PreparedBundlePin {
         Ok(())
     }
 
-    /// Lowercase build-key digest used only as the deterministic discovery tag.
-    #[must_use]
-    pub fn tag(&self) -> &str {
-        self.build_key
-            .strip_prefix("sha256:")
-            .expect("admitted build key has its algorithm")
-    }
-
-    /// Discovery tag of the bundle one finalize attempt signed and published:
-    /// an exact rerun signs the same source again into different bytes, so
+    /// Discovery tag of the bundle one publishing attempt produced: the
+    /// SHA-256 of `KEY:ATTEMPT` over the lowercase build-key digest. An exact
+    /// rerun signs or records the same source again into different bytes, so
     /// every attempt owns its own tag beneath the shared build key.
     #[must_use]
     pub fn attempt_tag(&self, attempt: u32) -> String {
+        let key = self
+            .build_key
+            .strip_prefix("sha256:")
+            .expect("admitted build key has its algorithm");
         format!(
             "{:x}",
-            Sha256::digest(format!("{}:{attempt}", self.tag()).as_bytes())
+            Sha256::digest(format!("{key}:{attempt}").as_bytes())
         )
     }
 }
