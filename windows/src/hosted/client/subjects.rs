@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use super::{HostedRun, WindowsHostedError, admit_file_set, verify_attestation};
-use crate::hosted::stage_layout::{SUBJECTS_PATH, StageLayout};
+use crate::hosted::stage_layout::{NativeStageContract, SUBJECTS_PATH, StageLayout};
 
 /// Every file a completed producer declared it attested beside its inventory.
 #[derive(Debug)]
@@ -75,6 +75,17 @@ impl DeclaredSubjects {
                 missing.join(", ")
             )))
         }
+    }
+
+    /// Require the target's production result, payload, object, proof, smoke,
+    /// and runner records before interpreting any producer result.
+    pub(super) fn require_contract(
+        &self,
+        contract: NativeStageContract,
+    ) -> Result<(), WindowsHostedError> {
+        contract
+            .require(&self.subjects)
+            .map_err(|error| WindowsHostedError::OutputContract(error.to_string()))
     }
 
     /// Require the declaration to be exactly `required`, then the downloaded

@@ -355,11 +355,16 @@ jobs:
           if (Test-Path -LiteralPath $stage) {
             Copy-Item -Recurse -Force -LiteralPath $stage -Destination (Join-Path $root 'stage')
           }
-          $files = [string[]]@(Get-ChildItem -LiteralPath $root -Recurse -File -Force |
-            ForEach-Object { [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') } |
-            Where-Object { $_ -cne 'subjects.json' })
-          [Array]::Sort($files, [StringComparer]::Ordinal)
-          [IO.File]::WriteAllText((Join-Path $root 'subjects.json'), (ConvertTo-Json -Compress -InputObject $files))
+          if ('${{ steps.request.outputs.release_inputs_run }}' -ne '') {
+            & $runner --declare-native-stage x86_64-pc-windows-msvc $root
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            $files = [string[]]@(Get-ChildItem -LiteralPath $root -Recurse -File -Force |
+              ForEach-Object { [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/') } |
+              Where-Object { $_ -cne 'subjects.json' })
+            [Array]::Sort($files, [StringComparer]::Ordinal)
+            [IO.File]::WriteAllText((Join-Path $root 'subjects.json'), (ConvertTo-Json -Compress -InputObject $files))
+          }
 
       - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd

@@ -18,7 +18,7 @@ const USAGE: &str = concat!(
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
     "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|vendor-set Cargo.lock|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|fetch-extract REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>|",
-    "prove-staged-target TARGET|",
+    "declare-native-stage TARGET ROOT|prove-staged-target TARGET|",
     "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
@@ -85,6 +85,9 @@ fn main() -> ExitCode {
         }
         Some(value) if value == OsStr::new("prepared-artifact") => {
             xtask::prepared_artifact(arguments.collect(), &mut output).map_err(Into::into)
+        }
+        Some(value) if value == OsStr::new("declare-native-stage") => {
+            run_declare_native_stage(arguments.collect())
         }
         #[cfg(not(target_arch = "wasm32"))]
         Some(value) if value == OsStr::new("seal-darwin") => {
@@ -1199,6 +1202,17 @@ fn run_release_inputs(
     )
     .map(|_| ())
     .map_err(Into::into)
+}
+
+fn run_declare_native_stage(arguments: Vec<OsString>) -> CommandResult {
+    let [target, root] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let target = target.to_str().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "native target is not Unicode")
+    })?;
+    windows_execution::hosted::declare_native_stage(target, Path::new(root)).map_err(Into::into)
 }
 
 fn preflight_native_release(

@@ -10,7 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hosted::stage_layout::{
-    RESULT_PATH, SMOKE_DIRECTORY, SMOKE_LOG_PATH, STAGE_DIRECTORY, STAGE_LOG_PATH, StageLayout,
+    NativeStageContract, RESULT_PATH, SMOKE_DIRECTORY, SMOKE_LOG_PATH, STAGE_DIRECTORY,
+    STAGE_LOG_PATH, StageLayout,
 };
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -27,6 +28,7 @@ pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
 const RUN_TITLE_PREFIX: &str = "Linux staging ";
 const IMAGE_OS: &str = "ubuntu24";
 const ARCHITECTURE: &str = "X64";
+const TARGET: &str = "x86_64-unknown-linux-musl";
 
 /// The signed outcome of one hosted Linux stage.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -207,7 +209,10 @@ fn complete_run(
         &format!("linux-{challenge}"),
     )?);
     let declared = DeclaredSubjects::load(run, WORKFLOW_PATH, run_id, &layout)?;
-    declared.require(&[RESULT_PATH, STAGE_LOG_PATH, SMOKE_LOG_PATH])?;
+    declared.require_contract(
+        NativeStageContract::for_target(TARGET)
+            .expect("the hosted Linux target has one stage contract"),
+    )?;
     let result_path = layout.result();
     verify_attestation(run, WORKFLOW_PATH, run_id, &result_path)?;
     let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {

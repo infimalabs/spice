@@ -7,6 +7,8 @@ fn main() -> std::process::ExitCode {
 }
 #[cfg(windows)]
 mod canvas;
+#[cfg(windows)]
+mod command;
 
 #[cfg(windows)]
 mod windows {
@@ -151,8 +153,11 @@ mod windows {
 
     fn run() -> Result<(), String> {
         let arguments = env::args_os().collect::<Vec<_>>();
+        if crate::command::declare(&arguments)? {
+            return Ok(());
+        }
         if arguments.get(1).and_then(|value| value.to_str()) == Some("--smoke-argv") {
-            return smoke_argv(&arguments[2..]);
+            return crate::command::smoke_argv(&arguments[2..]);
         }
         if arguments.get(1).and_then(|value| value.to_str()) == Some(GUEST_ARGUMENT) {
             let [
@@ -470,23 +475,6 @@ mod windows {
             .map_err(|error| format!("cannot write result: {error}"))?;
         file.sync_all()
             .map_err(|error| format!("cannot sync result: {error}"))
-    }
-
-    fn smoke_argv(arguments: &[std::ffi::OsString]) -> Result<(), String> {
-        let mut exit = 0;
-        for argument in arguments {
-            let argument = argument
-                .to_str()
-                .ok_or_else(|| "smoke argv is not Unicode".to_owned())?;
-            if let Some(code) = argument.strip_prefix("--exit=") {
-                exit = code
-                    .parse::<i32>()
-                    .map_err(|_| "invalid smoke exit".to_owned())?;
-            } else {
-                println!("{argument}");
-            }
-        }
-        std::process::exit(exit);
     }
 
     fn admit_machine(request: &Request) -> Result<String, String> {

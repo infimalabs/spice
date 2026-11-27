@@ -4,6 +4,9 @@ pub mod bundle;
 pub mod client;
 pub mod release_inputs;
 mod stage_layout;
+pub use stage_layout::{
+    NativeStageContract, StageLayoutError, declare_native_stage, preflight_native_stage_contracts,
+};
 
 use std::collections::BTreeMap;
 use std::error::Error;

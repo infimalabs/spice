@@ -365,6 +365,8 @@ pub(super) fn dispatch_or_attach(
     run_title_prefix: &str,
     attach: Option<Attach>,
 ) -> Result<(String, Option<u64>), WindowsHostedError> {
+    crate::hosted::preflight_native_stage_contracts()
+        .map_err(|error| WindowsHostedError::OutputContract(error.to_string()))?;
     let Some(attach) = attach else {
         admit_branch_workflow(root, repository, branch, workflow, workflow_blob)?;
         return Ok((challenge()?, None));

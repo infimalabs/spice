@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::hosted::PreparedBundlePin;
-use crate::hosted::stage_layout::{RESULT_PATH, STAGE_DIRECTORY, StageLayout};
+use crate::hosted::stage_layout::{NativeStageContract, RESULT_PATH, STAGE_DIRECTORY, StageLayout};
 use serde::Deserialize;
 use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
@@ -22,6 +22,7 @@ const RUN_TITLE_PREFIX: &str = "macOS staging ";
 /// The job that rebinds the signed stage and publishes its prepared bundle.
 const FINALIZE_JOB: &str = "Finalize macOS";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
+const TARGET: &str = "aarch64-apple-darwin";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
 const PAYLOAD_LIMIT: u64 = 1024 * 1024;
 
@@ -237,10 +238,10 @@ impl MacosCompletion<'_> {
             .map_err(WindowsHostedError::ProviderResponse)?;
         let layout = StageLayout::new(artifact);
         let declared = DeclaredSubjects::load(self.run, WORKFLOW_PATH, run_id, &layout)?;
-        declared.require(&[
-            PathBuf::from(RESULT_PATH),
-            PathBuf::from(STAGE_DIRECTORY).join(PAYLOAD_PATH),
-        ])?;
+        declared.require_contract(
+            NativeStageContract::for_target(TARGET)
+                .expect("the hosted macOS target has one stage contract"),
+        )?;
         let result_path = layout.result();
         verify_attestation(self.run, WORKFLOW_PATH, run_id, &result_path)?;
         let result: MacosResult =
