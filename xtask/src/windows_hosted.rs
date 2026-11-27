@@ -5,6 +5,7 @@ use std::fmt;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::SystemTime;
 
 use crate::hosted_release_session::{
     NativeTarget, ReleaseSession, SessionError, TargetWorkflow, schema_provider_failure,
@@ -158,9 +159,21 @@ pub fn hosted_release_stage_with_inputs(
         output,
         error_output,
     )
+    .map(drop)
+}
+
+/// When one native target's stage ran and which provider run it admitted.
+pub(crate) struct TargetSpan {
+    pub(crate) target: NativeTarget,
+    pub(crate) started: SystemTime,
+    pub(crate) finished: SystemTime,
+    pub(crate) run: Option<u64>,
 }
 
 /// Create or resume all native stages beneath a caller-owned stage root.
+///
+/// Each target starts as soon as the admitted inputs exist and never waits on a
+/// sibling; the answer names when each ran and its admitted provider run.
 pub(crate) fn hosted_release_stage_with_inputs_into(
     inputs_run: u64,
     inputs: &ReleaseInputs,
@@ -168,7 +181,7 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
     stage_root: &Path,
     output: &mut impl Write,
     error_output: &mut impl Write,
-) -> Result<(), HostedReleaseError> {
+) -> Result<Vec<TargetSpan>, HostedReleaseError> {
     require_prepared_read()?;
     let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
     write_session_path(output, &session)?;
@@ -185,6 +198,7 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
 
     let outcomes = std::thread::scope(|scope| {
         let linux = scope.spawn(|| {
+            let started = SystemTime::now();
             let mut output = Vec::new();
             let control = resumable_control(&linux_recorder, &linux_workflow);
             let result = linux_hosted_stage_controlled(
@@ -194,9 +208,10 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
                 control,
                 &mut output,
             );
-            PlatformOutcome::new(NativeTarget::Linux, output, Vec::new(), result)
+            PlatformOutcome::new(NativeTarget::Linux, started, output, Vec::new(), result)
         });
         let macos = scope.spawn(|| {
+            let started = SystemTime::now();
             let mut output = Vec::new();
             let control = resumable_control(&macos_recorder, &macos_workflow);
             let result = macos_hosted_stage_controlled(
@@ -206,9 +221,10 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
                 control,
                 &mut output,
             );
-            PlatformOutcome::new(NativeTarget::Macos, output, Vec::new(), result)
+            PlatformOutcome::new(NativeTarget::Macos, started, output, Vec::new(), result)
         });
         let windows = scope.spawn(|| {
+            let started = SystemTime::now();
             let mut output = Vec::new();
             let mut error = Vec::new();
             let control = resumable_control(&windows_recorder, &windows_workflow);
@@ -229,7 +245,7 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
                     ))
                 })
             });
-            PlatformOutcome::new(NativeTarget::Windows, output, error, result)
+            PlatformOutcome::new(NativeTarget::Windows, started, output, error, result)
         });
         [
             linux.join().expect("Linux hosted stage panicked"),
@@ -239,45 +255,75 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
     });
 
     let mut failures = Vec::new();
+    let mut spans = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
-        output
-            .write_all(&outcome.output)
-            .map_err(WindowsHostedError::Output)?;
-        error_output
-            .write_all(&outcome.error_output)
-            .map_err(WindowsHostedError::Output)?;
-        match outcome.result {
-            Ok(()) => {
-                if let Err(error) = session.succeeded(outcome.target) {
-                    failures.push(format!("{} session record: {error}", outcome.target.name()));
-                }
-                writeln!(output, "hosted {} stage succeeded", outcome.target.name())
-                    .map_err(WindowsHostedError::Output)?;
-            }
-            Err(error) => {
-                let detail = error.to_string();
-                if let Err(error) = session.failed(
-                    outcome.target,
-                    terminal_provider_failure(&error) || detail.contains(" staging exited "),
-                    schema_provider_failure(&error),
-                    detail.clone(),
-                ) {
-                    failures.push(format!("{} session record: {error}", outcome.target.name()));
-                }
-                writeln!(
-                    error_output,
-                    "hosted {} stage failed: {detail}",
-                    outcome.target.name()
-                )
-                .map_err(WindowsHostedError::Output)?;
-                failures.push(format!("{}: {detail}", outcome.target.name()));
-            }
-        }
+        spans.extend(settle(
+            outcome,
+            &session,
+            &mut failures,
+            output,
+            error_output,
+        )?);
     }
     if failures.is_empty() {
-        Ok(())
+        Ok(spans)
     } else {
         Err(HostedReleaseError::Platform(failures))
+    }
+}
+
+/// Record one finished target in the session, returning its span when it
+/// succeeded and appending each failure to `failures`.
+fn settle(
+    outcome: PlatformOutcome,
+    session: &ReleaseSession,
+    failures: &mut Vec<String>,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<Option<TargetSpan>, WindowsHostedError> {
+    output
+        .write_all(&outcome.output)
+        .map_err(WindowsHostedError::Output)?;
+    error_output
+        .write_all(&outcome.error_output)
+        .map_err(WindowsHostedError::Output)?;
+    match outcome.result {
+        Ok(()) => {
+            if let Err(error) = session.succeeded(outcome.target) {
+                failures.push(format!("{} session record: {error}", outcome.target.name()));
+            }
+            let run = match session.attachment(outcome.target) {
+                Ok(Some(Attach::Run(run))) => Some(run),
+                Ok(Some(Attach::Sole) | None) | Err(_) => None,
+            };
+            writeln!(output, "hosted {} stage succeeded", outcome.target.name())
+                .map_err(WindowsHostedError::Output)?;
+            Ok(Some(TargetSpan {
+                target: outcome.target,
+                started: outcome.started,
+                finished: outcome.finished,
+                run,
+            }))
+        }
+        Err(error) => {
+            let detail = error.to_string();
+            if let Err(error) = session.failed(
+                outcome.target,
+                terminal_provider_failure(&error) || detail.contains(" staging exited "),
+                schema_provider_failure(&error),
+                detail.clone(),
+            ) {
+                failures.push(format!("{} session record: {error}", outcome.target.name()));
+            }
+            writeln!(
+                error_output,
+                "hosted {} stage failed: {detail}",
+                outcome.target.name()
+            )
+            .map_err(WindowsHostedError::Output)?;
+            failures.push(format!("{}: {detail}", outcome.target.name()));
+            Ok(None)
+        }
     }
 }
 
@@ -453,6 +499,8 @@ fn windows_hosted_stage_controlled(
 
 struct PlatformOutcome {
     target: NativeTarget,
+    started: SystemTime,
+    finished: SystemTime,
     output: Vec<u8>,
     error_output: Vec<u8>,
     result: Result<(), WindowsHostedError>,
@@ -461,12 +509,15 @@ struct PlatformOutcome {
 impl PlatformOutcome {
     fn new(
         target: NativeTarget,
+        started: SystemTime,
         output: Vec<u8>,
         error_output: Vec<u8>,
         result: Result<(), WindowsHostedError>,
     ) -> Self {
         Self {
             target,
+            started,
+            finished: SystemTime::now(),
             output,
             error_output,
             result,

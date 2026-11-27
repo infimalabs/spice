@@ -3,7 +3,8 @@ use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use windows_execution::hosted::client::Attach;
+use std::time::SystemTime;
+use windows_execution::hosted::client::{Attach, ReleaseInputs};
 
 use crate::windows_hosted::{
     CrossHost, hosted_release_inputs, hosted_release_inputs_dispatch,
@@ -15,9 +16,11 @@ mod plan;
 mod proof_stage;
 mod provider;
 mod session;
+mod timeline;
 
 use plan::PublicationPlan;
 use session::{PublicationSession, Publications};
+use timeline::{Phase, Timeline};
 
 /// What one `publish-hosted-release` invocation asks of the pinned request.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,6 +80,7 @@ pub fn publish_hosted_release(
         )
         .map_err(PublishError::Output);
     }
+    let mut timeline = Timeline::begin();
     let candidate_path = request
         .notes()
         .expect("only an abandon request carries no release notes");
@@ -88,28 +92,19 @@ pub fn publish_hosted_release(
         Some(commit) => commit,
         None => landed_commit()?,
     };
-    let canonical = spice::release_history::draft(&worktree, Some(&source_commit))
-        .map_err(|error| PublishError::Refused(error.to_string()))?;
-    let notes = dist::curated_release_notes(&candidate, &canonical)
-        .map_err(|error| PublishError::Refused(error.to_string()))?;
-    let session = publications.begin(&source_commit)?;
-    PublicationPlan::admit_existing_notes(session.root(), &source_commit, &notes)?;
+    let (session, notes) = timeline.measure(Phase::Notes, || {
+        let canonical = spice::release_history::draft(&worktree, Some(&source_commit))
+            .map_err(|error| PublishError::Refused(error.to_string()))?;
+        let notes = dist::curated_release_notes(&candidate, &canonical)
+            .map_err(|error| PublishError::Refused(error.to_string()))?;
+        let session = publications.begin(&source_commit)?;
+        PublicationPlan::admit_existing_notes(session.root(), &source_commit, &notes)?;
+        Ok((session, notes))
+    })?;
     let unpublished = !session.publication_may_have_started()?;
-    let inputs = match session.inputs_run()? {
-        Some(run) => hosted_release_inputs(Attach::Run(run))?,
-        None => hosted_release_inputs_dispatch(source_commit)?,
-    };
-    if inputs.manifest().source_commit != session.source_commit() {
-        return Err(PublishError::Refused(format!(
-            "provider preflight {} names {}, not the requested {}",
-            inputs.manifest().run_id,
-            inputs.manifest().source_commit,
-            session.source_commit()
-        )));
-    }
-    session.record_inputs(inputs.manifest())?;
+    let inputs = admit_inputs(&session, source_commit, &mut timeline)?;
     let stage_root = session.stage_root();
-    hosted_release_stage_with_inputs_into(
+    let spans = hosted_release_stage_with_inputs_into(
         inputs.manifest().run_id,
         &inputs,
         host,
@@ -117,9 +112,18 @@ pub fn publish_hosted_release(
         output,
         error_output,
     )?;
-    proof_stage::materialize(&stage_root, &inputs, output)?;
-    let plan = PublicationPlan::capture(&stage_root, session.root(), &inputs, &notes)?;
-    plan.persist(session.root())?;
+    for span in spans {
+        timeline.record_target(span);
+    }
+    timeline.measure(Phase::Proofs, || {
+        proof_stage::materialize(&stage_root, &inputs, output)
+    })?;
+    let plan = timeline.measure(Phase::Plan, || {
+        let plan = PublicationPlan::capture(&stage_root, session.root(), &inputs, &notes)?;
+        plan.persist(session.root())?;
+        Ok(plan)
+    })?;
+    timeline.persist(session.root(), output)?;
     conclude(effect, &session, unpublished, || {
         provider::publish_and_verify(&worktree, session.root(), &plan)
     })?;
@@ -137,6 +141,36 @@ pub fn publish_hosted_release(
             .map_err(PublishError::Output)
         }
     }
+}
+
+/// Attach to the session's recorded provider preflight or dispatch it, admit
+/// that it names the pinned commit, and record its span.
+fn admit_inputs(
+    session: &PublicationSession,
+    source_commit: String,
+    timeline: &mut Timeline,
+) -> Result<ReleaseInputs, PublishError> {
+    let started = SystemTime::now();
+    let inputs = match session.inputs_run()? {
+        Some(run) => hosted_release_inputs(Attach::Run(run))?,
+        None => hosted_release_inputs_dispatch(source_commit)?,
+    };
+    if inputs.manifest().source_commit != session.source_commit() {
+        return Err(PublishError::Refused(format!(
+            "provider preflight {} names {}, not the requested {}",
+            inputs.manifest().run_id,
+            inputs.manifest().source_commit,
+            session.source_commit()
+        )));
+    }
+    session.record_inputs(inputs.manifest())?;
+    timeline.record(
+        Phase::Inputs,
+        started,
+        SystemTime::now(),
+        Some(inputs.manifest().run_id),
+    );
+    Ok(inputs)
 }
 
 /// The boundary between the persisted plan and every publication effect. A
