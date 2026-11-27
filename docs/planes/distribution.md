@@ -595,9 +595,10 @@ of that bootstrap and compiles only the `spice` binary unit. Binaryen's
 admitted tool closure retains `wasm-opt` with its pinned sibling dynamic
 libraries; extracting the executable alone is not an executable tool.
 
-`.github/workflows/macos-prebuild.yml` starts on every push to `main`, or on
-dispatch naming one exact landed commit, without waiting for release inputs,
-the proof image, or another platform. It runs `release-inputs` on the admitted
+`.github/workflows/macos-prebuild.yml` runs only on dispatch naming one exact
+landed commit, never on push, so it never holds the macOS runners release
+staging waits for. It does not wait for release inputs, the proof image, or
+another platform. It runs `release-inputs` on the admitted
 macOS image, then rebuilds inside the same synthetic commit of the extracted
 archive that release staging builds in. It runs the same
 `.github/actions/macos-toolchain` and `.github/actions/macos-unsigned-stage`
