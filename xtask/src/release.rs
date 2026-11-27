@@ -38,6 +38,8 @@ use source::{GuardedPublisher, SourceArchive, verify_checkout};
 
 mod windows_appliance;
 pub use windows_appliance::build_windows_appliance;
+mod windows_cross;
+pub use windows_cross::{CrossImage, cross_build_windows};
 
 #[cfg(unix)]
 mod signing;

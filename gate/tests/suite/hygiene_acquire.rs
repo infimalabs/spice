@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 
 use gate::{
     AnalysisEvidence, GateId, HYGIENE_ARMS, HYGIENE_SOURCE_FILE_BYTE_LIMIT, HygieneConfiguration,
@@ -7,7 +6,7 @@ use gate::{
     Jurisdiction, Selector, SuppressedPath, acquire_hygiene,
 };
 
-use super::support::{Tree, git_commit, git_repository, selected_contract};
+use super::support::{Tree, WORKSPACE_POLICY, git_commit, git_repository, selected_contract};
 
 #[test]
 fn one_captured_source_walks_the_same_jurisdiction_and_measures_every_arm() {
@@ -19,10 +18,7 @@ fn one_captured_source_walks_the_same_jurisdiction_and_measures_every_arm() {
     repository.write("third_party/copied.py", "def copied():\n    return 1\n");
     repository.write(
         "spice.toml",
-        &format!(
-            "{}\n[gate.walk]\nskip = [\"third_party/copied.py\"]\n",
-            workspace_document("spice.toml")
-        ),
+        &format!("{WORKSPACE_POLICY}\n[gate.walk]\nskip = [\"third_party/copied.py\"]\n",),
     );
     git_commit(
         &repository,
@@ -337,10 +333,7 @@ fn suppression_repository(label: &str, skip: &[&str]) -> Tree {
             .join(", ");
         repository.write(
             "spice.toml",
-            &format!(
-                "{}\n[gate.walk]\nskip = [{entries}]\n",
-                workspace_document("spice.toml")
-            ),
+            &format!("{WORKSPACE_POLICY}\n[gate.walk]\nskip = [{entries}]\n",),
         );
     }
     git_commit(&repository, "hygiene suppression fixture");
@@ -368,10 +361,7 @@ fn directory_skip_repository(label: &str, skip: bool) -> Tree {
     if skip {
         repository.write(
             "spice.toml",
-            &format!(
-                "{}\n[gate.walk]\nskip = [\"tests/support\"]\n",
-                workspace_document("spice.toml")
-            ),
+            &format!("{WORKSPACE_POLICY}\n[gate.walk]\nskip = [\"tests/support\"]\n",),
         );
     }
     git_commit(&repository, "hygiene subtree suppression fixture");
@@ -399,7 +389,7 @@ fn configuration() -> HygieneConfiguration {
 
 fn hygiene_repository(label: &str, excluded_broken_source: bool) -> Tree {
     let repository = git_repository(label);
-    repository.write("spice.toml", &workspace_document("spice.toml"));
+    repository.write("spice.toml", WORKSPACE_POLICY);
     repository.write("pyproject.toml", "[project]\nname = 'fixture'\n");
     repository.write("app/__init__.py", "from .main import entry\n");
     repository.write(
@@ -431,10 +421,4 @@ fn hygiene_repository(label: &str, excluded_broken_source: bool) -> Tree {
     }
     git_commit(&repository, "hygiene fixture");
     repository
-}
-
-fn workspace_document(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(name);
-    fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {} for the fixture: {error}", path.display()))
 }

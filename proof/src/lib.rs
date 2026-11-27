@@ -115,7 +115,9 @@ pub mod seal;
 mod vendor_set;
 
 pub use config::{Config, ExecutablePath};
-pub use container::{Container, ContainerError, Limits, OciRuntime, ProviderCanvas, ReleaseStage};
+pub use container::{
+    Container, ContainerError, Limits, OciRuntime, ProviderCanvas, ReleaseStage, WindowsCross,
+};
 pub use environment::{EnvironmentError, SealedEnvironment, UnsupportedHost, compiled_target};
 pub use evidence::{EvidenceError, EvidencePublishError, VerifiedEvidence, publish, verify_stored};
 pub use layout::{Input, InputError, Layout, LayoutError, ReceiptInput};

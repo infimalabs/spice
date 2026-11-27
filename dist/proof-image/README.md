@@ -40,7 +40,7 @@ read-only workspace, empty temporary caches, and no network.
 ## Container invocations
 
 Containers are a release exception, never a development prerequisite. Exactly
-four production surfaces invoke one:
+five production surfaces invoke one:
 
 - `proof-image build` builds, inspects, self-checks with networking disabled,
   and saves the Linux appliance whose architecture, filesystem, tool closure,
@@ -60,8 +60,22 @@ four production surfaces invoke one:
   writable worktree path, the Cargo home is a fresh tmpfs, the Cargo target is
   a fresh anonymous volume, and the network is disabled. A Linux host stages
   natively.
+- `windows-cross` builds the Windows cross image from
+  [`dist/windows-cross`](../windows-cross/Dockerfile) over this resolved
+  image, adding Debian's pinned LLVM 19, the Windows Rust target, and a copy
+  of the MSVC sysroot `windows-msvc` admitted under the operator's recorded
+  licence acceptance. Because it carries that sysroot, the cross image stays
+  local and is never published. It then runs the image's
+  `windows-cross-build` under the `stage-target` boundary above, with
+  `windows-cross/out` under the build root as the one writable path in place
+  of `dist/stage`. That run cross-builds the candidate, `windows-hosted`,
+  `xtask`, and every proof member's test executables for
+  `x86_64-pc-windows-msvc`. The host packs the artifact root and writes its
+  prepared manifest, which names every output's path and SHA-256 under a build
+  key over the source archive, `Cargo.lock`, compiler, target, Cargo
+  arguments, MSVC generation, and cross image.
 
-Both sealed containers also mount an empty, non-executable tmpfs at `/tmp`.
+All three sealed containers also mount an empty, non-executable tmpfs at `/tmp`.
 Nothing in the build is pointed at it (`TMPDIR` stays under the target
 directory the image fixes); it exists for Rosetta, which translates the amd64
 image on an arm64 Docker host and aborts any thread whose context it must back
