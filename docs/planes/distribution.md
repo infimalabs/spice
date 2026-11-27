@@ -613,11 +613,15 @@ credentials enter any build or proof.
 
 On a prebuild miss, the hosted bootstrap selects the exact Cargo executable
 and admits only its sibling Rustc; the proof build does not rediscover that
-toolchain through ambient `rustup`. It compiles xtask under the candidate build
-settings in `dist/release/candidate.toml`, including the target and build
-directories, rustflags, debug-artifact profile override, and environment that
-`stage-target` gives its candidate build, so the candidate reuses every unit
-of that bootstrap and compiles only the `spice` binary unit. Binaryen's
+toolchain through ambient `rustup`. The prepared client admits the selected
+canvas and writes its stable target object before Cargo links xtask. The
+bootstrap then compiles xtask with `spice/canvas` under the candidate settings
+in `dist/release/candidate.toml`, including the target and build directories,
+rustflags, debug-artifact profile override, and environment that `stage-target`
+gives its candidate build. The later candidate invocation therefore reuses the
+complete dependency and product-library graph and compiles only the `spice`
+binary unit. The stage summary records release-driver, proof-preparation,
+candidate-stage, and artifact-transition seconds separately. Binaryen's
 admitted tool closure retains `wasm-opt` with its pinned sibling dynamic
 libraries; extracting the executable alone is not an executable tool.
 

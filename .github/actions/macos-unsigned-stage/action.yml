@@ -76,9 +76,15 @@ runs:
         PY
         )
         export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
-        env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
+        driver_started=$(date +%s)
+        canvas_object="$release_target/canvas/release.macos-aarch64.o"
+        "$PREPARED_ARTIFACT_TOOL" canvas-object macos-arm64 "$RELEASE_CANVAS" "$canvas_object"
+        env "${candidate_env[@]}" "$cargo" rustc --locked --release --target aarch64-apple-darwin \
           --target-dir "$release_target" --config "$debug_config" \
-          --package xtask --bin xtask
+          --package xtask --bin xtask --features spice/canvas -- \
+          -C "link-arg=$canvas_object"
+        driver_seconds=$(($(date +%s) - driver_started))
+        proof_started=$(date +%s)
         proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
         proof_arguments=("$proof_target" --seal-only)
         case '${{ inputs.proof-dependencies-restored }}' in
@@ -88,12 +94,16 @@ runs:
         esac
         SPICE_PROOF_CARGO="$cargo" \
           dist/proof-runner/build.sh "${proof_arguments[@]}"
+        proof_seconds=$(($(date +%s) - proof_started))
+        candidate_started=$(date +%s)
         runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
         SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
           SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
           "$xtask" \
           stage-target aarch64-apple-darwin --unsigned \
           --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
+        candidate_seconds=$(($(date +%s) - candidate_started))
+        transition_started=$(date +%s)
 
         payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
         python3 - "$payload" "$EXPECTED_ARCHIVE" "$RUNNER_TEMP/unsigned-stage" <<'PY'
@@ -122,3 +132,17 @@ runs:
         cp "$xtask" "$finalizer/"
         cp -R target/proof-native-darwin "$finalizer/"
         tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .
+        transition_seconds=$(($(date +%s) - transition_started))
+        {
+          printf 'RELEASE_DRIVER_SECONDS=%s\n' "$driver_seconds"
+          printf 'PROOF_PREPARATION_SECONDS=%s\n' "$proof_seconds"
+          printf 'CANDIDATE_STAGE_SECONDS=%s\n' "$candidate_seconds"
+          printf 'ARTIFACT_TRANSITION_SECONDS=%s\n' "$transition_seconds"
+        } >> "$GITHUB_ENV"
+        {
+          printf '### macOS unsigned stage phases\n\n'
+          printf -- '- release driver: `%ss`\n' "$driver_seconds"
+          printf -- '- proof preparation: `%ss`\n' "$proof_seconds"
+          printf -- '- candidate build and stage: `%ss`\n' "$candidate_seconds"
+          printf -- '- artifact transition: `%ss`\n' "$transition_seconds"
+        } >> "$GITHUB_STEP_SUMMARY"

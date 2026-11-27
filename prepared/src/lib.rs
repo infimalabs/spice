@@ -66,6 +66,11 @@ pub fn prepared_artifact(
             let digest = build_key_digest(Path::new(build_key))?;
             writeln!(output, "build key {digest}").map_err(PreparedArtifactError::Output)
         }
+        [command, platform, archive, destination] if command == "canvas-object" => {
+            write_canvas_object(platform, Path::new(archive), Path::new(destination))?;
+            writeln!(output, "wrote {}", Path::new(destination).display())
+                .map_err(PreparedArtifactError::Output)
+        }
         [command, lock] if command == "vendor-set" => {
             let digest = vendor_set::VendorSet::read(Path::new(lock)).map_err(|error| {
                 PreparedArtifactError::Invalid(format!("cannot derive vendor set: {error}"))
@@ -129,6 +134,40 @@ pub fn prepared_artifact(
         }
         _ => Err(PreparedArtifactError::Usage),
     }
+}
+
+fn write_canvas_object(
+    platform: &OsStr,
+    archive: &Path,
+    destination: &Path,
+) -> Result<(), PreparedArtifactError> {
+    let target = match Platform::parse(platform)? {
+        Platform::LinuxAmd64 => rack::link::Target::LinuxX86_64,
+        Platform::MacosArm64 => rack::link::Target::MacAarch64,
+        Platform::WindowsAmd64 => rack::link::Target::WindowsX86_64,
+    };
+    let bytes = fs::read(archive).map_err(|source| PreparedArtifactError::Io {
+        path: archive.to_path_buf(),
+        source,
+    })?;
+    rack::Rack::admit(&bytes).map_err(|error| {
+        PreparedArtifactError::Invalid(format!(
+            "{} is not an admitted canvas rack: {error}",
+            archive.display()
+        ))
+    })?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|source| PreparedArtifactError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    fs::write(destination, rack::link::object(&bytes, target)).map_err(|source| {
+        PreparedArtifactError::Io {
+            path: destination.to_path_buf(),
+            source,
+        }
+    })
 }
 
 fn write_resolution(
@@ -1263,7 +1302,7 @@ pub enum PreparedArtifactError {
 impl fmt::Display for PreparedArtifactError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage => formatter.write_str("usage: prepared-artifact <build-key BUILD_KEY.json|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|resolve-if-present REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>"),
+            Self::Usage => formatter.write_str("usage: prepared-artifact <build-key BUILD_KEY.json|canvas-object PLATFORM CANVAS.zip OBJECT|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|resolve-if-present REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>"),
             Self::Invalid(message) => formatter.write_str(message),
             Self::Conflict { reference, expected, observed } => write!(formatter, "prepared locator {reference} conflicts: expected {expected}, observed {observed}"),
             Self::OrasMissing(command) => write!(formatter, "prepared artifact is absent: `{command}`"),
