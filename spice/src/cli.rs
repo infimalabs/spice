@@ -135,7 +135,9 @@ impl ExitOutcome {
     }
 }
 
-/// Temporary common bound for every app opening and command answer.
+/// Common bound for every app opening and command answer. A supervised tool
+/// call still unanswered at this same bound is reported as blocked, so client
+/// failure and operator status never use independent timing policy.
 pub const APP_ANSWER_BOUND: Duration = Duration::from_secs(20);
 
 /// Bound for an answer the resident composes from state it already holds.
