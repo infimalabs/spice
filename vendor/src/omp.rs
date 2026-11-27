@@ -780,6 +780,10 @@ pub fn refuses_fast_mode(failure: &str) -> bool {
     words.contains("servicetier") && words.contains("priority")
 }
 
+/// Prefix of every background-notice request id, which its prompt result
+/// echoes; such a result never stands for the agent's own turn.
+pub const ASIDE_ID_PREFIX: &str = "spice-aside-";
+
 /// Replace or cancel a background notice through the extension's SDK bridge.
 /// RPC has no aside command; the extension coalesces by purpose and calls
 /// `sendUserMessage(..., { deliverAs: "aside" })` at the next step boundary.
@@ -793,7 +797,7 @@ pub fn aside_request(sequence: u64, purpose: &str, message: &str) -> Vec<u8> {
     let notice = serde_json::to_string(&Notice { purpose, message })
         .expect("a background notice serializes");
     request_line(&Request {
-        id: format!("spice-aside-{sequence}"),
+        id: format!("{ASIDE_ID_PREFIX}{sequence}"),
         kind: "prompt",
         message: Some(format!("/spice-aside {notice}")),
         streaming_behavior: None,
