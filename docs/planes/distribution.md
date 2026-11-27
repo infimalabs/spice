@@ -473,8 +473,22 @@ target, a target whose provider run ended in failure, or a target whose
 attested result does not decode under the current client's schema. It reports
 all three outcomes before failing, so one failed platform never hides or
 redispatches successful siblings. Either form accepts a trailing
-`--stage-only`: it runs the same pin, preflight, and native staging. Each
-platform executes the complete proof battery in its provider-specific sealed
+`--stage-only`: it runs the same pin, preflight, and native staging.
+
+`.github/workflows/release.yml` is the one provider-side coordinator for that
+command. It runs only by manual dispatch from an exact landed `main` revision;
+ordinary pushes cannot start it. One repository-wide concurrency group
+serializes public release effects. The workflow preserves the Git-common
+publication authority after every attempt under a run- and attempt-scoped
+artifact, validates and restores only regular files beneath `releases/`, and
+resumes the pinned commit on a rerun. A completed attempt records the authored
+notes and publication-plan digests; later attempts re-admit those bytes and
+freshly read the public release instead of publishing again. The final
+readback is the workflow's one result artifact. Inside the coordinator,
+notes admission and input production overlap, then Linux, Darwin, and Windows
+stage concurrently; each platform's tool and dependency preparation waits
+only for the immutable input record it consumes, never for a sibling.
+Each platform executes the complete proof battery in its provider-specific sealed
 environment and returns its detached receipt with the staged bytes. When a
 battery refuses, its displayed error names every non-clean member, its
 standing, and a bounded tail of each captured output stream, so the provider

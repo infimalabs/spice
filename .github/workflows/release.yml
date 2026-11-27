@@ -1,0 +1,241 @@
+name: Complete release
+run-name: Complete release from ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Authored Markdown release notes, including Highlights
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: complete-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Prepare, prove, sign, and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: write
+      attestations: read
+      contents: write
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the coordinator revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Admit the explicit landed request
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+
+      - name: Restore prior attempt authority
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          authority="$(git rev-parse --git-common-dir)/.spice/authority"
+          test ! -e "$authority/releases"
+          restored=0
+          if ((GITHUB_RUN_ATTEMPT > 1)); then
+            best_attempt=0
+            best_name=
+            while IFS= read -r name; do
+              case "$name" in
+                "release-state-$GITHUB_RUN_ID-"*)
+                  attempt=${name##*-}
+                  if [[ "$attempt" =~ ^[0-9]+$ ]] \
+                    && ((attempt < GITHUB_RUN_ATTEMPT && attempt > best_attempt)); then
+                    best_attempt=$attempt
+                    best_name=$name
+                  fi
+                  ;;
+              esac
+            done < <(gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.expired == false) | .name')
+            if test -z "$best_name"; then
+              echo "rerun has no admitted prior-attempt release authority" >&2
+              exit 65
+            fi
+            download="$RUNNER_TEMP/release-state-download"
+            mkdir -p "$download" "$authority"
+            gh run download "$GITHUB_RUN_ID" --name "$best_name" --dir "$download"
+            python3 - "$download/release-state.tar.gz" "$authority" <<'PY'
+          import pathlib, sys, tarfile
+          archive, destination = sys.argv[1:]
+          with tarfile.open(archive, "r:gz") as source:
+              members = source.getmembers()
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or not path.parts or path.parts[0] != "releases":
+                      raise SystemExit(f"release state escaped its root: {member.name}")
+                  if any(part in ("", ".", "..") for part in path.parts):
+                      raise SystemExit(f"release state used a non-canonical path: {member.name}")
+                  if not (member.isfile() or member.isdir()):
+                      raise SystemExit(f"release state carried a non-file entry: {member.name}")
+              source.extractall(destination, members=members)
+          PY
+            restored=1
+          fi
+          printf 'restored=%s\n' "$restored" >> "$GITHUB_OUTPUT"
+
+      - name: Restore derivable coordinator environment
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/coordinator-cargo
+            ${{ runner.temp }}/coordinator-target
+          key: release-coordinator-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+
+      - name: Install exact Rust and ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Build the repository-owned coordinator
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
+        run: |
+          set -euo pipefail
+          rustup toolchain install --no-self-update
+          cargo build --locked --package xtask
+
+      - name: Prepare authored release notes
+        shell: bash
+        env:
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_NOTES"
+          printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Resume or run the complete release
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
+        run: |
+          set -euo pipefail
+          xtask="$CARGO_TARGET_DIR/debug/xtask"
+          notes="$RUNNER_TEMP/release-notes.md"
+          publications="$(git rev-parse --git-common-dir)/.spice/authority/releases/publication"
+          complete="$publications/coordinator-complete.json"
+          pending="$publications/pending.json"
+          mkdir -p "$publications"
+          plans=()
+          while IFS= read -r plan; do plans+=("$plan"); done \
+            < <(find "$publications" -mindepth 2 -maxdepth 2 -name plan.json -type f -print)
+          if test -f "$complete"; then
+            test "$(jq -r .schema "$complete")" = 1
+            source_commit=$(jq -r .source_commit "$complete")
+            tag=$(jq -r .tag "$complete")
+            plan="$publications/$source_commit/plan.json"
+          else
+            if test -f "$pending"; then
+              source_commit=$(jq -r .source_commit "$pending")
+              [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+              "$xtask" publish-hosted-release "$source_commit" --notes "$notes"
+            elif test "${#plans[@]}" = 0; then
+              "$xtask" publish-hosted-release --notes "$notes"
+            elif test "${#plans[@]}" = 1 \
+              && test ! -e "$(dirname "${plans[0]}")/unpublished"; then
+              # The publisher removes pending.json only after fresh public
+              # readback. Recover a run interrupted before this workflow wrote
+              # its own completion marker without publishing again.
+              :
+            else
+              echo "release authority has neither a resumable pin nor one completed plan" >&2
+              exit 65
+            fi
+            test ! -e "$pending"
+            plans=()
+            while IFS= read -r plan_path; do plans+=("$plan_path"); done \
+              < <(find "$publications" -mindepth 2 -maxdepth 2 -name plan.json -type f -print)
+            test "${#plans[@]}" = 1
+            plan="${plans[0]}"
+            source_commit=$(jq -r .source_commit "$plan")
+            tag=$(jq -r .tag "$plan")
+          fi
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          test -n "$tag"
+          test "$(jq -r .source_commit "$plan")" = "$source_commit"
+          test "$(jq -r .tag "$plan")" = "$tag"
+          notes_sha256=$(sha256sum "$notes" | cut -d' ' -f1)
+          plan_sha256=$(sha256sum "$plan" | cut -d' ' -f1)
+          if test -f "$complete"; then
+            test "$(jq -r .notes_sha256 "$complete")" = "$notes_sha256"
+            test "$(jq -r .plan_sha256 "$complete")" = "$plan_sha256"
+          fi
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,url,isDraft,isPrerelease,publishedAt,targetCommitish \
+            > "$RUNNER_TEMP/release-readback.json"
+          test "$(jq -r .tagName "$RUNNER_TEMP/release-readback.json")" = "$tag"
+          test "$(jq -r .isDraft "$RUNNER_TEMP/release-readback.json")" = false
+          if test ! -f "$complete"; then
+            jq -n --sort-keys --arg source_commit "$source_commit" --arg tag "$tag" \
+              --arg notes_sha256 "$notes_sha256" --arg plan_sha256 "$plan_sha256" \
+              --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+              '{schema:1,source_commit:$source_commit,tag:$tag,notes_sha256:$notes_sha256,plan_sha256:$plan_sha256,run_id:$run_id,run_attempt:$run_attempt}' \
+              > "$complete.tmp"
+            mv "$complete.tmp" "$complete"
+          fi
+          jq -n --sort-keys --arg source_commit "$source_commit" --arg tag "$tag" \
+            --arg plan_sha256 "$plan_sha256" \
+            --slurpfile release "$RUNNER_TEMP/release-readback.json" \
+            '{schema:1,source_commit:$source_commit,tag:$tag,plan_sha256:$plan_sha256,release:$release[0]}' \
+            > "$RUNNER_TEMP/final-release.json"
+          {
+            printf '### Complete release\n\n'
+            printf -- '- source commit: `%s`\n' "$source_commit"
+            printf -- '- tag: `%s`\n' "$tag"
+            printf -- '- release: %s\n' "$(jq -r .url "$RUNNER_TEMP/release-readback.json")"
+            printf -- '- restored coordinator authority: `%s`\n' '${{ steps.state.outputs.restored }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pack attempt-scoped coordinator authority
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          authority="$(git rev-parse --git-common-dir)/.spice/authority"
+          mkdir -p "$authority/releases"
+          tar -czf "$RUNNER_TEMP/release-state.tar.gz" -C "$authority" releases
+
+      - name: Preserve attempt-scoped coordinator authority
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-state.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish the final release result
+        if: ${{ success() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-result-${{ github.run_id }}
+          path: ${{ runner.temp }}/final-release.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
