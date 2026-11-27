@@ -15,6 +15,7 @@ pub(in crate::resident) fn command_result<B: serde::Serialize, A: serde::Seriali
 }
 
 const QUIET_HORIZON: Duration = Duration::from_millis(wire::intent::LANE_QUIET_HORIZON_MILLIS);
+const TOOL_BLOCK_HORIZON: Duration = Duration::from_secs(20);
 
 /// One lane answer over `head`; each row shows the code `codes` reports for
 /// its lane.
@@ -25,9 +26,18 @@ pub(super) fn answer(
     paths: &RuntimePaths,
     codes: &bus::TaskFacts,
 ) -> CommandResult<LaneAnswer> {
-    let mut answer = answer_at(head, selected, Monotonic::now(), |lane| {
-        seats.activity(lane)
-    })?;
+    let now = Monotonic::now();
+    let mut answer = answer_at(
+        head,
+        selected,
+        now,
+        |lane| seats.activity(lane),
+        |lane| {
+            seats
+                .blocked_tool_call(lane, now, TOOL_BLOCK_HORIZON)
+                .map(|call| call.command().to_owned())
+        },
+    )?;
     for row in &mut answer.lanes {
         row.speech = worktree_speech(paths, &row.worktree);
         row.jobs = terminal::unheard(&terminal::Jobs::for_lane(paths, row.lane));
@@ -41,6 +51,7 @@ fn answer_at(
     selected: Option<CanonicalUuid>,
     now: Monotonic,
     activity: impl Fn(CanonicalUuid) -> Option<lane::occupant::Activity>,
+    blocked: impl Fn(CanonicalUuid) -> Option<String>,
 ) -> CommandResult<LaneAnswer> {
     let mut refresh_after_millis: Option<u32> = None;
     let lanes = head
@@ -49,7 +60,11 @@ fn answer_at(
         .filter(|row| selected.is_none_or(|lane| row.lane == lane))
         .map(|row| {
             let observed = activity(row.lane);
-            let liveness = liveness(row, observed, now)?;
+            let mut liveness = liveness(row, observed, now)?;
+            let blocked_on = blocked(row.lane);
+            if blocked_on.is_some() {
+                liveness = wire::intent::LaneLiveness::Blocked;
+            }
             if liveness == wire::intent::LaneLiveness::Working
                 && let Some(observed) = observed
             {
@@ -105,6 +120,7 @@ fn answer_at(
                 bound: row.session.is_some(),
                 disposition: row.disposition.clone(),
                 liveness,
+                blocked_on,
                 hold: None,
                 parked: None,
                 jobs: Vec::new(),
@@ -702,11 +718,16 @@ mod tests {
             None,
             observed + Duration::from_millis(59_999),
             |_| Some(activity),
+            |_| None,
         )
         .expect("recent activity projects");
-        let quiet = answer_at(&head, None, observed + Duration::from_secs(60), |_| {
-            Some(activity)
-        })
+        let quiet = answer_at(
+            &head,
+            None,
+            observed + Duration::from_secs(60),
+            |_| Some(activity),
+            |_| None,
+        )
         .expect("boundary activity projects");
 
         assert_eq!(
@@ -724,6 +745,36 @@ mod tests {
     }
 
     #[test]
+    fn a_long_tool_call_is_blocked_and_names_the_command() {
+        let head = wire::ResidencyHead {
+            epoch: uuid(4),
+            state: ResidentState::Seated,
+            topology_revision: 7,
+            lanes: vec![occupied()],
+            subscriptions: subscriptions(),
+            renewals: Vec::new(),
+        };
+        let now = Monotonic::now();
+        let answer = answer_at(
+            &head,
+            None,
+            now,
+            |_| Some(lane::occupant::Activity::new(uuid(2), now)),
+            |_| Some("spice room contribute DIRECTI-example".to_owned()),
+        )
+        .expect("blocked supervision projects");
+
+        assert_eq!(
+            answer.lanes[0].liveness,
+            wire::intent::LaneLiveness::Blocked
+        );
+        assert_eq!(
+            answer.lanes[0].blocked_on.as_deref(),
+            Some("spice room contribute DIRECTI-example")
+        );
+    }
+
+    #[test]
     fn lane_reads_expose_display_identity_without_capabilities() {
         let row = occupied();
         let capability = row.capabilities[0].to_string();
@@ -737,9 +788,13 @@ mod tests {
             renewals: vec![renewal.clone()],
         };
         let observed = Monotonic::now();
-        let answer = answer_at(&head, None, observed, |_| {
-            Some(lane::occupant::Activity::new(uuid(2), observed))
-        })
+        let answer = answer_at(
+            &head,
+            None,
+            observed,
+            |_| Some(lane::occupant::Activity::new(uuid(2), observed)),
+            |_| None,
+        )
         .expect("supervised lane projects");
         let encoded = String::from_utf8(wire::encode(&answer).expect("answer encodes"))
             .expect("wire encoding is UTF-8");
@@ -774,7 +829,7 @@ mod tests {
             subscriptions: subscriptions(),
             renewals: Vec::new(),
         };
-        let error = answer_at(&head, None, Monotonic::now(), |_| None)
+        let error = answer_at(&head, None, Monotonic::now(), |_| None, |_| None)
             .expect_err("unobserved occupancy must fail loudly");
         let Outcome::Fault(fault) = error else {
             panic!("unobserved occupancy must be a fault")
@@ -793,7 +848,7 @@ mod tests {
             renewals: Vec::new(),
         };
 
-        let answer = answer_at(&head, None, Monotonic::now(), |_| None)
+        let answer = answer_at(&head, None, Monotonic::now(), |_| None, |_| None)
             .expect("simulated occupancy projects without a process");
 
         assert_eq!(
@@ -823,9 +878,13 @@ mod tests {
             subscriptions: subscriptions(),
             renewals: Vec::new(),
         };
-        let error = answer_at(&head, None, Monotonic::now(), |_| {
-            Some(lane::occupant::Activity::new(occupant, Monotonic::now()))
-        })
+        let error = answer_at(
+            &head,
+            None,
+            Monotonic::now(),
+            |_| Some(lane::occupant::Activity::new(occupant, Monotonic::now())),
+            |_| None,
+        )
         .expect_err("simulated occupancy must never acquire real supervision");
         let Outcome::Fault(fault) = error else {
             panic!("simulated supervision must be a fault")

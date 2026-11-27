@@ -54,11 +54,17 @@ pub(super) fn delivered_unanswered(
 ) -> Outcome<CommandAnswer> {
     if let Outcome::Fault(fault) = &mut outcome
         && fault.reason == "serve::deadline-elapsed"
-        && !contract.facts.is_empty()
     {
-        fault.detail.push_str(
-            "; the command was delivered and the resident may still record it, so check its effect before running it again",
+        let command = contract.path.join(" ");
+        fault.detail = format!(
+            "`spice {command}` waited for resident authority and its result: {}",
+            fault.detail
         );
+        if !contract.facts.is_empty() {
+            fault.detail.push_str(
+                "; the command was delivered and the resident may still record it, so check its effect before running it again",
+            );
+        }
     }
     outcome
 }

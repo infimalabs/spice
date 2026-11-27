@@ -587,6 +587,7 @@ fn seated_member() -> app::LaneMember {
         session: None,
         disposition: "seated".to_owned(),
         liveness: wire::intent::LaneLiveness::Working,
+        blocked_on: None,
         bound: true,
         wakeable: true,
         jobs: Vec::new(),

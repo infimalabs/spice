@@ -951,6 +951,8 @@ pub const LANE_QUIET_HORIZON_MILLIS: u64 = 60_000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LaneLiveness {
+    /// The occupant is waiting inside one tool call beyond the resident bound.
+    Blocked,
     /// The occupant emitted selected-record activity inside the quiet horizon,
     /// so what it is up to right now is known in detail.
     Working,
@@ -965,6 +967,7 @@ impl LaneLiveness {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Blocked => "blocked",
             Self::Working => "working",
             Self::Running => "running",
             Self::Vacant => "vacant",
@@ -1102,6 +1105,13 @@ pub struct LaneAnswerRow {
     pub disposition: String,
     /// Dynamic supervised live/quiet fold at this read barrier.
     pub liveness: LaneLiveness,
+    /// Exact command holding a lane reported as blocked.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub blocked_on: Option<String>,
     /// Current durable seating hold, absent after its resume transition.
     #[serde(
         default,

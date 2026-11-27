@@ -117,6 +117,8 @@ pub struct LaneMember {
     pub disposition: String,
     /// Dynamic supervised live/quiet fold supplied by the resident.
     pub liveness: LaneLiveness,
+    /// Exact command holding this lane when liveness is blocked.
+    pub blocked_on: Option<String>,
     /// Whether a resumable session was ever declared for this seat.
     pub bound: bool,
     /// Whether the resident can seat an occupant here on an operator wake:
@@ -132,11 +134,12 @@ pub struct LaneMember {
 
 /// What a lane tile says about its agent, ranked the way the operator scans.
 ///
-/// The resident reports five states. Recently heard and quiet supervised
-/// occupants project as `working` and `running`; vendor-specific phases do not
-/// cross this wire. The ladder names only states the resident reports.
+/// The resident reports blocked, recently heard, quiet, and vacant seats;
+/// vendor-specific phases do not cross this wire.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum LaneStatus {
+    /// One tool call crossed the resident bound without answering.
+    Blocked,
     /// Direction is queued for this lane; the operator is being waited on.
     Queued,
     /// An occupant was heard from inside the quiet horizon, so what it is up
@@ -155,6 +158,7 @@ impl LaneStatus {
     #[must_use]
     pub const fn key(self) -> &'static str {
         match self {
+            Self::Blocked => "blocked",
             Self::Queued => "queued",
             Self::Working => "working",
             Self::Running => "running",
@@ -167,6 +171,7 @@ impl LaneStatus {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Blocked => "agent blocked",
             Self::Queued => "steering queued",
             Self::Working => "agent working",
             Self::Running => "agent running",
@@ -187,15 +192,13 @@ impl LaneMember {
     /// parked is a separate channel, [`LaneMember::parked`].
     #[must_use]
     pub const fn status(&self, pending: usize) -> LaneStatus {
-        if pending > 0 {
-            LaneStatus::Queued
-        } else {
-            match self.liveness {
-                LaneLiveness::Working => LaneStatus::Working,
-                LaneLiveness::Running => LaneStatus::Running,
-                LaneLiveness::Vacant if self.bound => LaneStatus::Bound,
-                LaneLiveness::Vacant => LaneStatus::Unbound,
-            }
+        match self.liveness {
+            LaneLiveness::Blocked => LaneStatus::Blocked,
+            _ if pending > 0 => LaneStatus::Queued,
+            LaneLiveness::Working => LaneStatus::Working,
+            LaneLiveness::Running => LaneStatus::Running,
+            LaneLiveness::Vacant if self.bound => LaneStatus::Bound,
+            LaneLiveness::Vacant => LaneStatus::Unbound,
         }
     }
 
@@ -203,6 +206,12 @@ impl LaneMember {
     /// parked when its pip is hollow.
     #[must_use]
     pub fn presence_label(&self, status: LaneStatus) -> String {
+        if status == LaneStatus::Blocked {
+            return match self.blocked_on.as_deref() {
+                Some(command) => format!("agent blocked on `{command}`"),
+                None => status.label().to_owned(),
+            };
+        }
         let park = match self.parked {
             None => return status.label().to_owned(),
             Some(wire::body::LanePark::Job { .. }) => "parked behind its running job",
@@ -303,6 +312,7 @@ impl From<&LaneAnswer> for LaneView {
                 session: lane.session.clone(),
                 disposition: lane.disposition.clone(),
                 liveness: lane.liveness,
+                blocked_on: lane.blocked_on.clone(),
                 bound: lane.bound,
                 wakeable: lane.bound || lane.lineage.is_empty(),
                 jobs: lane.jobs.clone(),
@@ -345,6 +355,20 @@ impl From<&LaneAnswer> for LaneView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blocked_call_outranks_queued_steering_and_names_the_command() {
+        let mut lane = member(uuid(1));
+        lane.liveness = LaneLiveness::Blocked;
+        lane.blocked_on = Some("spice room contribute DIRECTI-example".to_owned());
+
+        let status = lane.status(7);
+        assert_eq!(status, LaneStatus::Blocked);
+        assert_eq!(
+            lane.presence_label(status),
+            "agent blocked on `spice room contribute DIRECTI-example`"
+        );
+    }
 
     #[test]
     fn chat_targets_resolve_every_current_team_and_member() {
@@ -507,6 +531,7 @@ mod tests {
             session: None,
             disposition: "ready".to_owned(),
             liveness: LaneLiveness::Running,
+            blocked_on: None,
             bound: true,
             wakeable: true,
             jobs: Vec::new(),

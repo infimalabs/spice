@@ -645,6 +645,7 @@ fn owners_read_as_agent_names_and_unknown_lanes_stay_distinguishable() {
         session: None,
         disposition: "seated".to_owned(),
         liveness: wire::intent::LaneLiveness::Working,
+        blocked_on: None,
         bound: true,
         wakeable: true,
         jobs: Vec::new(),
