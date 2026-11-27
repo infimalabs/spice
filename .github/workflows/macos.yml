@@ -650,9 +650,11 @@ jobs:
             "$prepared/macos-stage.tar.gz" "$RUNNER_TEMP/result" - "$prepared/prepared.json"
           tag="${PREPARED_BUILD_KEY#sha256:}"
           test "${#tag}" -eq 64
+          repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          repository="ghcr.io/$repository/prepared"
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           "$xtask" prepared-artifact publish \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared" "$tag" \
+            "$repository" "$tag" \
             "$prepared/prepared.json" "$prepared/macos-stage.tar.gz"
           oras logout ghcr.io
 
@@ -693,7 +695,8 @@ jobs:
           xtask="$tools/xtask"
           printf '%s' "$PREPARED_INPUTS" > "$prepared/build-key.json"
           tag="${PREPARED_BUILD_KEY#sha256:}"
-          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          repository=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          repository="ghcr.io/$repository/prepared"
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           read -r label manifest _ < <(
             "$xtask" prepared-artifact resolve "$repository:$tag" "$PREPARED_BUILD_KEY"
