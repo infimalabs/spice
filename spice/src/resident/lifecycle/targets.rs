@@ -243,22 +243,22 @@ pub(super) fn await_armed_lines(
     snapshot: &bus::TaskSnapshot,
     targets: &mut [Target<'_>],
 ) -> CommandResult<ArmedLines> {
-    let invalid = targets
-        .iter()
-        .filter_map(|target| {
-            let (position, armed) = snapshot.facts().latest_line_arm(target.lane)?;
-            armed.is_none().then_some((target.lane, position))
-        })
-        .collect::<Vec<_>>();
-    let candidates = targets
-        .iter()
-        .filter_map(|target| {
-            let (position, armed) = snapshot.facts().latest_line_arm(target.lane)?;
-            let armed =
-                armed.filter(|armed| arm_matches_claim(snapshot, target.lane, position, armed))?;
-            (!armed.roots.is_empty()).then_some((target.lane, position, armed.clone()))
-        })
-        .collect::<Vec<_>>();
+    let mut invalid = Vec::new();
+    let mut candidates = Vec::new();
+    if let Some(residency) = snapshot.residency() {
+        for row in &residency.body().lanes {
+            let Some((position, armed)) = snapshot.facts().latest_line_arm(row.lane) else {
+                continue;
+            };
+            let Some(armed) = armed else {
+                invalid.push((row.lane, position));
+                continue;
+            };
+            if !armed.roots.is_empty() && arm_matches_claim(snapshot, row.lane, position, armed) {
+                candidates.push((row.lane, position, armed.clone()));
+            }
+        }
+    }
     let candidates = bus
         .read(move |read| {
             candidates

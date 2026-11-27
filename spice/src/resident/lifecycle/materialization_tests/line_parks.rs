@@ -232,6 +232,53 @@ fn a_phase_or_round_change_lifts_the_bound_arm() {
     bus.shutdown().expect("line park fixture stops");
 }
 
+#[test]
+fn an_occupied_armed_lane_derives_notices_without_a_wake_target() {
+    let (bus, _) = caught_up_fixture(0);
+    committed(
+        bus.commit(held_claim_write(&bus, instant(2), |_, _| {}))
+            .expect("caller claim commits"),
+    );
+    committed(
+        bus.commit(partner_claim_write(&bus))
+            .expect("partner claim commits"),
+    );
+    let claimed = bus.task_snapshot().expect("claimed snapshot reads");
+    let root = lane_at(OPENING);
+    committed(
+        bus.commit(open_and_arm_write(&claimed, root))
+            .expect("open line and arm commit"),
+    );
+    let armed = bus.task_snapshot().expect("armed snapshot reads");
+    committed(
+        bus.commit(occupy_write(&armed))
+            .expect("occupied residency commits"),
+    );
+    let occupied = bus.task_snapshot().expect("occupied snapshot reads");
+    let derived = await_armed_lines(&bus, &occupied, &mut []).expect("occupied arm derives");
+    assert_eq!(
+        derived.open.get(&lane()).map(|(_, roots)| roots.as_slice()),
+        Some([root].as_slice()),
+        "notice roots derive without a vacant wake target"
+    );
+
+    committed(
+        bus.commit(mismatched_arm_write(&occupied))
+            .expect("inert occupied arm commits"),
+    );
+    let inert = bus.task_snapshot().expect("inert occupied snapshot reads");
+    let derived = await_armed_lines(&bus, &inert, &mut []).expect("occupied inert arm derives");
+    assert_eq!(
+        derived.invalid,
+        [(
+            lane(),
+            inert.facts().latest_line_arm(lane()).expect("arm fact").0
+        )],
+        "fault delivery derives without a vacant wake target"
+    );
+    bus.shutdown().expect("line park fixture stops");
+}
+
 fn partner_claim_write(bus: &Bus) -> JournalWrite {
     let snapshot = bus.task_snapshot().expect("caller claim snapshot reads");
     let heads = &snapshot.tasks()[0];
@@ -395,6 +442,37 @@ fn arm_write(snapshot: &bus::TaskSnapshot, root: CanonicalUuid, at: Instant) -> 
             FactCause::Root,
         )
         .expect("replacement arm fact builds");
+    write
+}
+
+fn occupy_write(snapshot: &bus::TaskSnapshot) -> JournalWrite {
+    let mut residency = snapshot
+        .residency()
+        .expect("fixture residency")
+        .body()
+        .clone();
+    let row = residency
+        .lanes
+        .iter_mut()
+        .find(|row| row.lane == lane())
+        .expect("fixture lane");
+    let occupant = lane_at(9);
+    row.occupant = Some(occupant);
+    row.lineage = vec![occupant];
+    row.disposition = "occupied".to_owned();
+    let epoch = residency.epoch;
+    let mut write = JournalWrite::new(
+        Actor::Spice,
+        format!("resident:{epoch}")
+            .parse()
+            .expect("fixture resident origin"),
+        instant(5),
+        Producer::CommandDoor,
+    );
+    let seated = write
+        .fact(body::UpSeated { epoch }, FactCause::Root)
+        .expect("occupied resident fact builds");
+    write.residency_head(seated, move |_| residency);
     write
 }
 
