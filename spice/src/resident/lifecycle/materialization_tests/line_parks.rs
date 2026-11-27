@@ -30,6 +30,7 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     assert!(
         await_armed_lines(&bus, &snapshot, &mut reminder)
             .expect("line park projects")
+            .invalid
             .is_empty()
     );
     assert!(!reminder[0].pending_inbox, "repeat-only presentation waits");
@@ -65,6 +66,14 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
             lane: lane(),
         }
     );
+    let mut after_peer_turn = [target(true)];
+    await_armed_lines(&bus, &snapshot, &mut after_peer_turn)
+        .expect("line park returns after peer-woken turn");
+    assert_eq!(
+        after_peer_turn[0].park,
+        Some(body::LanePark::Line),
+        "held-claim continuation parks again after fresh peer input is handled"
+    );
 
     committed(
         bus.commit(close_write(&bus, opening))
@@ -86,8 +95,10 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     await_armed_lines(&bus, &reopened, &mut parked_again).expect("second line parks");
     assert_eq!(parked_again[0].park, Some(body::LanePark::Line));
 
+    let rearmed = empty_arm_lifts_and_rearms(&bus, &reopened, second);
+
     committed(
-        bus.commit(free_claim_write(&reopened, lane_at(PARTNER), instant(10)))
+        bus.commit(free_claim_write(&rearmed, lane_at(PARTNER), instant(10)))
             .expect("partner departure commits"),
     );
     let departed = bus.task_snapshot().expect("departed snapshot reads");
@@ -102,8 +113,9 @@ fn an_open_armed_line_parks_only_continuation_and_reminders() {
     );
     let malformed = bus.task_snapshot().expect("mismatched arm snapshot reads");
     let mut no_park = [target(true)];
-    let invalid =
-        await_armed_lines(&bus, &malformed, &mut no_park).expect("mismatched arm projects");
+    let invalid = await_armed_lines(&bus, &malformed, &mut no_park)
+        .expect("mismatched arm projects")
+        .invalid;
     assert_eq!(invalid.len(), 1);
     assert_eq!(invalid[0].0, lane());
     assert_eq!(no_park[0].park, None);
@@ -153,6 +165,70 @@ fn reclaiming_in_the_same_round_lifts_the_old_arm_until_rearmed() {
     let mut bound = [target(true)];
     await_armed_lines(&bus, &rearmed, &mut bound).expect("replacement arm projects");
     assert_eq!(bound[0].park, Some(body::LanePark::Line));
+    bus.shutdown().expect("line park fixture stops");
+}
+
+#[test]
+fn a_phase_or_round_change_lifts_the_bound_arm() {
+    let (bus, _) = caught_up_fixture(0);
+    committed(
+        bus.commit(held_claim_write(&bus, instant(2), |_, _| {}))
+            .expect("caller claim commits"),
+    );
+    committed(
+        bus.commit(partner_claim_write(&bus))
+            .expect("partner claim commits"),
+    );
+    let claimed = bus.task_snapshot().expect("claimed snapshot reads");
+    let root = lane_at(OPENING);
+    committed(
+        bus.commit(open_and_arm_write(&claimed, root))
+            .expect("open line and arm commit"),
+    );
+    let armed = bus.task_snapshot().expect("armed snapshot reads");
+    let heads = &armed.tasks()[0];
+    let current_phase = heads.workflow().body().phase;
+    let other_phase = heads
+        .workflow()
+        .body()
+        .flow
+        .iter()
+        .copied()
+        .find(|phase| *phase != current_phase)
+        .expect("fixture workflow has another phase");
+    let round = heads.completion().body().round;
+    committed(
+        bus.commit(arm_context_write(
+            &armed,
+            root,
+            other_phase,
+            round,
+            instant(5),
+        ))
+        .expect("later-phase arm commits"),
+    );
+    let later_phase = bus.task_snapshot().expect("later-phase snapshot reads");
+    let mut after_phase = [target(true)];
+    await_armed_lines(&bus, &later_phase, &mut after_phase).expect("phase change projects");
+    assert_eq!(after_phase[0].park, None);
+    assert_eq!(after_phase[0].held_claim, Available::Ready);
+
+    let later_round = wire::Seq::new(round.get() + 1).expect("later round");
+    committed(
+        bus.commit(arm_context_write(
+            &later_phase,
+            root,
+            current_phase,
+            later_round,
+            instant(6),
+        ))
+        .expect("later-round arm commits"),
+    );
+    let later_round = bus.task_snapshot().expect("later-round snapshot reads");
+    let mut after_round = [target(true)];
+    await_armed_lines(&bus, &later_round, &mut after_round).expect("round change projects");
+    assert_eq!(after_round[0].park, None);
+    assert_eq!(after_round[0].held_claim, Available::Ready);
     bus.shutdown().expect("line park fixture stops");
 }
 
@@ -319,6 +395,79 @@ fn arm_write(snapshot: &bus::TaskSnapshot, root: CanonicalUuid, at: Instant) -> 
             FactCause::Root,
         )
         .expect("replacement arm fact builds");
+    write
+}
+
+fn empty_arm_lifts_and_rearms(
+    bus: &Bus,
+    armed: &bus::TaskSnapshot,
+    root: CanonicalUuid,
+) -> bus::TaskSnapshot {
+    committed(
+        bus.commit(empty_arm_write(armed))
+            .expect("empty arm commits"),
+    );
+    let cleared = bus.task_snapshot().expect("empty-arm snapshot reads");
+    let mut after_empty = [target(true)];
+    await_armed_lines(bus, &cleared, &mut after_empty).expect("empty arm projects");
+    assert_eq!(after_empty[0].park, None);
+    assert_eq!(after_empty[0].held_claim, Available::Ready);
+    committed(
+        bus.commit(arm_write(&cleared, root, instant(9)))
+            .expect("line rearms"),
+    );
+    bus.task_snapshot().expect("rearmed snapshot reads")
+}
+
+fn empty_arm_write(snapshot: &bus::TaskSnapshot) -> JournalWrite {
+    let heads = &snapshot.tasks()[0];
+    let mut write = JournalWrite::new(
+        Actor::Lane(lane()),
+        "steer:fixture".parse().expect("fixture steer origin"),
+        instant(8),
+        Producer::CommandDoor,
+    );
+    write
+        .fact(
+            body::LineArmed {
+                lane: lane(),
+                task: heads.statement().body().born.clone(),
+                phase: heads.workflow().body().phase,
+                round: heads.completion().body().round,
+                roots: Vec::new(),
+            },
+            FactCause::Root,
+        )
+        .expect("empty arm fact builds");
+    write
+}
+
+fn arm_context_write(
+    snapshot: &bus::TaskSnapshot,
+    root: CanonicalUuid,
+    phase: wire::Phase,
+    round: wire::Seq,
+    at: Instant,
+) -> JournalWrite {
+    let heads = &snapshot.tasks()[0];
+    let mut write = JournalWrite::new(
+        Actor::Lane(lane()),
+        "steer:fixture".parse().expect("fixture steer origin"),
+        at,
+        Producer::CommandDoor,
+    );
+    write
+        .fact(
+            body::LineArmed {
+                lane: lane(),
+                task: heads.statement().body().born.clone(),
+                phase,
+                round,
+                roots: vec![root],
+            },
+            FactCause::Root,
+        )
+        .expect("context arm fact builds");
     write
 }
 

@@ -229,6 +229,12 @@ fn held_claim(
     Ok((available, parked))
 }
 
+/// Current line-arm derivation used by parking and private seating notices.
+pub(super) struct ArmedLines {
+    pub(super) invalid: Vec<(CanonicalUuid, Seq)>,
+    pub(super) open: BTreeMap<CanonicalUuid, (Seq, Vec<CanonicalUuid>)>,
+}
+
 /// Park held-claim continuation and repeat-only peer presentation while one
 /// armed same-round peer line remains open. Fresh peer and operator input stays
 /// pending and therefore keeps its ordinary higher-priority wake.
@@ -236,7 +242,7 @@ pub(super) fn await_armed_lines(
     bus: &Bus,
     snapshot: &bus::TaskSnapshot,
     targets: &mut [Target<'_>],
-) -> CommandResult<Vec<(CanonicalUuid, Seq)>> {
+) -> CommandResult<ArmedLines> {
     let invalid = targets
         .iter()
         .filter_map(|target| {
@@ -250,36 +256,42 @@ pub(super) fn await_armed_lines(
             let (position, armed) = snapshot.facts().latest_line_arm(target.lane)?;
             let armed =
                 armed.filter(|armed| arm_matches_claim(snapshot, target.lane, position, armed))?;
-            (!armed.roots.is_empty()).then_some((target.lane, armed.clone()))
+            (!armed.roots.is_empty()).then_some((target.lane, position, armed.clone()))
         })
         .collect::<Vec<_>>();
-    let open = bus
+    let candidates = bus
         .read(move |read| {
             candidates
                 .iter()
-                .map(|(lane, armed)| {
-                    let mut partners = Vec::new();
+                .map(|(lane, position, armed)| {
+                    let mut roots = Vec::new();
                     for root in &armed.roots {
                         if let Some(partner) = armed_root_counterpart(read, *lane, *root)? {
-                            partners.push(partner);
+                            roots.push((*root, partner));
                         }
                     }
-                    Ok((*lane, (armed.task.clone(), partners)))
+                    Ok((*lane, (*position, armed.task.clone(), roots)))
                 })
                 .collect::<Result<BTreeMap<_, _>, journal::GuardError>>()
         })
         .map_err(|error| store_fault("lifecycle::line-park-unreadable", &error.to_string()))?;
-    let standing = open
+    let open = candidates
         .into_iter()
-        .map(|(lane, (task, partners))| {
-            let stands = partners
+        .map(|(lane, (position, task, roots))| {
+            let roots: Vec<CanonicalUuid> = roots
                 .into_iter()
-                .any(|partner| counterpart_holds_round(snapshot, &task, partner));
-            (lane, stands)
+                .filter_map(|(root, partner)| {
+                    counterpart_holds_round(snapshot, &task, partner).then_some(root)
+                })
+                .collect();
+            (lane, (position, roots))
         })
         .collect::<BTreeMap<_, _>>();
     for target in targets {
-        if !standing.get(&target.lane).copied().unwrap_or(false) {
+        if !open
+            .get(&target.lane)
+            .is_some_and(|(_, roots)| !roots.is_empty())
+        {
             continue;
         }
         if target.pending_inbox && target.inbox_reminder_only {
@@ -294,7 +306,7 @@ pub(super) fn await_armed_lines(
         target.drain_queue = Available::None;
         target.park = Some(wire::body::LanePark::Line);
     }
-    Ok(invalid)
+    Ok(ArmedLines { invalid, open })
 }
 
 /// Whether `armed` binds `lane`'s one current active claim exactly.
