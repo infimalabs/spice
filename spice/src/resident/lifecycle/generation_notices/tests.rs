@@ -297,6 +297,69 @@ fn an_addressed_arrival_projects_one_distinct_update_to_each_active_partner() {
     assert_new_shared_round_updates(true, true);
 }
 
+#[test]
+fn an_addressed_free_reaches_only_partners_already_in_the_round() {
+    assert_addressed_departure(false);
+}
+
+#[test]
+fn an_addressed_lapse_reaches_only_partners_already_in_the_round() {
+    assert_addressed_departure(true);
+}
+
+fn assert_addressed_departure(lapsed: bool) {
+    let fixture = LaunchFixture::new();
+    let (bus, task) = automatic_claimed_fixture(&fixture);
+    target_shared_todo(&bus, &task);
+
+    let lane = uuid(30);
+    let occupant = uuid(31);
+    let left_address = add_participant_lane(&bus, &fixture, lane, Some(occupant), "leaver")
+        .expect("seated participant has an address");
+    let _partner_address = seed_birth(&bus, fixture.lane, fixture.occupant, fixture.epoch);
+    join_participant(&bus, &task, lane, occupant, fixture.epoch);
+    let observed = bus.cursor().expect("pre-release cursor reads");
+    if lapsed {
+        lapse_claim(&bus, &task);
+    } else {
+        end_claim(&bus, &task);
+    }
+
+    let snapshot = bus.task_snapshot().expect("released snapshot reads");
+    let heads = &snapshot.tasks()[0];
+    let left_event = heads
+        .claims()
+        .iter()
+        .map(|held| held.claim().body())
+        .find(|claim| claim.lane == lane)
+        .expect("released participant remains in the ending snapshot")
+        .fact
+        .get();
+    let notices = round_update_notices(&snapshot, observed);
+    let update = notices
+        .iter()
+        .find(|(recipient, notice)| *recipient == fixture.lane && notice.event == left_event)
+        .map(|(_, notice)| notice)
+        .expect("the departure reaches the remaining partner");
+    assert_eq!(update.action, TaskRoundUpdateKind::Left);
+    assert_eq!(update.participant, format!("leaver {left_address}"));
+
+    let later_lane = uuid(32);
+    let later_occupant = uuid(33);
+    add_participant_lane(&bus, &fixture, later_lane, Some(later_occupant), "later")
+        .expect("later participant has an address");
+    join_participant(&bus, &task, later_lane, later_occupant, fixture.epoch);
+    let later_snapshot = bus.task_snapshot().expect("later snapshot reads");
+    assert!(
+        round_update_notices(&later_snapshot, observed)
+            .iter()
+            .all(|(recipient, notice)| { *recipient != later_lane || notice.event != left_event }),
+        "a claim that joins later does not receive a historical departure"
+    );
+
+    finish(bus);
+}
+
 fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
     let fixture = LaunchFixture::new();
     let (bus, task) = automatic_claimed_fixture(&fixture);
@@ -320,7 +383,7 @@ fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
         .map(|held| held.claim().body())
         .find(|claim| claim.lane == lane)
         .expect("joining claim remains active");
-    let notices = round_update_notices(&snapshot);
+    let notices = round_update_notices(&snapshot, None);
     let joined_update = notices
         .iter()
         .find(|(recipient, notice)| {
@@ -337,7 +400,7 @@ fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
         assert_eq!(notice.action, TaskRoundUpdateKind::Joined);
         assert_eq!(notice.participant, format!("joiner {joined_address}"));
         assert_eq!(
-            round_update_notices(&snapshot),
+            round_update_notices(&snapshot, None),
             notices,
             "the driver receives the same durable events until it deduplicates them",
         );
@@ -366,6 +429,16 @@ fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
         assert_eq!(
             arrival_update.participant,
             format!("joiner {}", joined_address.unwrap())
+        );
+        assert_eq!(
+            notices
+                .iter()
+                .filter(|(recipient, notice)| {
+                    *recipient == fixture.lane && notice.event == arrival.fact.get()
+                })
+                .count(),
+            1,
+            "one completion produces an arrival update without a departure duplicate"
         );
     }
 
@@ -801,6 +874,39 @@ fn acknowledge(bus: &Bus, task: &TaskStamp) {
         ..claim
     });
     committed(bus.commit(write).expect("acknowledgement commits"));
+}
+
+fn lapse_claim(bus: &Bus, task: &TaskStamp) {
+    let snapshot = bus.task_snapshot().expect("pre-lapse snapshot reads");
+    let claim = snapshot.tasks()[0]
+        .latest_claim()
+        .map(|held| held.claim())
+        .expect("claim head")
+        .body()
+        .clone();
+    let at = now();
+    let mut write = JournalWrite::new(
+        claim.actor.clone(),
+        task_origin(task),
+        at,
+        Producer::BusTimer,
+    );
+    let lapsed = write
+        .fact(
+            wire::body::ClaimLapsed {
+                task: task.clone(),
+                occupant: claim.occupant,
+                expiry: at,
+            },
+            FactCause::Root,
+        )
+        .expect("claim lapse fact builds");
+    write.claim_head(task.clone(), lapsed, move |position| wire::ClaimHead {
+        fact: position,
+        disposition: ClaimDisposition::Lapsed,
+        ..claim
+    });
+    committed(bus.commit(write).expect("claim lapse commits"));
 }
 
 fn end_claim(bus: &Bus, task: &TaskStamp) {

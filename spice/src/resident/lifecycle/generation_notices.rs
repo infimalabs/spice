@@ -50,7 +50,7 @@ pub(super) fn reconcile(
             },
         );
     }
-    for (lane, notice) in round_update_notices(snapshot) {
+    for (lane, notice) in round_update_notices(snapshot, findings.cursor) {
         super::super::supervisor::command::task_round_update(paths, lane, notice);
     }
     for (lane, notice) in taste_holds(bus, snapshot, findings.cursor)? {
@@ -196,10 +196,11 @@ fn assignment_notices(snapshot: &bus::TaskSnapshot) -> Vec<(CanonicalUuid, TaskA
         .collect()
 }
 
-/// One participant label only after its current occupant address is proved.
+/// One participant label only after its claim occupant's address is proved.
 fn addressed_participant_label(
     snapshot: &bus::TaskSnapshot,
     lane: CanonicalUuid,
+    occupant: CanonicalUuid,
 ) -> Option<String> {
     let row = snapshot
         .residency()?
@@ -207,7 +208,6 @@ fn addressed_participant_label(
         .lanes
         .iter()
         .find(|row| row.lane == lane)?;
-    let occupant = row.occupant?;
     let address = snapshot.facts().occupant_address(lane, occupant).ok()?;
     let name = row
         .name
@@ -216,22 +216,58 @@ fn addressed_participant_label(
     Some(format!("{name} {address}"))
 }
 
-/// Every current-round join and arrival projected to each active partner once
-/// its participant has a proved address.
+/// Claim endings since the previous lifecycle observation, with their winning
+/// claim authority restored even after a later join replaced the ended head.
+fn round_departures(
+    snapshot: &bus::TaskSnapshot,
+    cursor: Option<Seq>,
+) -> Vec<(Seq, Seq, wire::body::ClaimWon)> {
+    let Some(cursor) = cursor else {
+        return Vec::new();
+    };
+    let facts = snapshot.facts();
+    facts
+        .after(Some(cursor))
+        .filter_map(|envelope| {
+            let (claimed, won) = match envelope.fact.kind() {
+                wire::FactKind::ClaimFreed => {
+                    let claimed = envelope.cause?;
+                    let won = facts.at(claimed)?.fact.read::<wire::body::ClaimWon>()?;
+                    (claimed, won)
+                }
+                wire::FactKind::ClaimLapsed => {
+                    let lapsed = envelope.fact.read::<wire::body::ClaimLapsed>()?;
+                    facts.iter().rev().find_map(|candidate| {
+                        if candidate.seq >= envelope.seq {
+                            return None;
+                        }
+                        let won = candidate.fact.read::<wire::body::ClaimWon>()?;
+                        (won.task == lapsed.task && won.occupant == lapsed.occupant)
+                            .then_some((candidate.seq, won))
+                    })?
+                }
+                _ => return None,
+            };
+            Some((envelope.seq, claimed, won))
+        })
+        .collect()
+}
+
+/// Every current-round join, arrival, and departure projected to each active
+/// partner once its participant has a proved address.
 ///
-/// These projections intentionally ignore the lifecycle cursor. A claim can
-/// precede its occupant birth, so the occupant driver deduplicates the durable
-/// event identity after its own claim disclosure instead.
+/// Joins and arrivals remain in the current heads and reproject until the
+/// occupant driver deduplicates them. Departures consume immutable ending facts
+/// after the lifecycle cursor because a later join replaces an ended claim head.
 fn round_update_notices(
     snapshot: &bus::TaskSnapshot,
+    cursor: Option<Seq>,
 ) -> Vec<(CanonicalUuid, TaskRoundUpdateNotice)> {
+    let departures = round_departures(snapshot, cursor);
     let mut notices = Vec::new();
     for heads in snapshot.tasks() {
         let completion = heads.completion().body();
         let phase = &heads.workflow().body().phase;
-        if completion.target(phase).get() == 1 {
-            continue;
-        }
         let statement = heads.statement().body();
         let task = statement.handle(*phase).to_string();
         let active = heads
@@ -242,13 +278,15 @@ fn round_update_notices(
             .collect::<Vec<_>>();
 
         for joined in heads.claims().iter().map(|held| held.claim().body()) {
-            let Some(participant) = addressed_participant_label(snapshot, joined.lane) else {
+            let Some(participant) =
+                addressed_participant_label(snapshot, joined.lane, joined.occupant)
+            else {
                 continue;
             };
             for holder in active
                 .iter()
                 .copied()
-                .filter(|holder| holder.claimed != joined.claimed)
+                .filter(|holder| holder.claimed < joined.claimed)
             {
                 notices.push((
                     holder.lane,
@@ -265,13 +303,23 @@ fn round_update_notices(
             }
         }
         for arrival in &completion.arrivals {
-            let Some(participant) = addressed_participant_label(snapshot, arrival.lane) else {
+            let Some(claim) = heads
+                .claims()
+                .iter()
+                .map(|held| held.claim().body())
+                .find(|claim| claim.claimed == arrival.claimed)
+            else {
+                continue;
+            };
+            let Some(participant) =
+                addressed_participant_label(snapshot, arrival.lane, claim.occupant)
+            else {
                 continue;
             };
             for holder in active
                 .iter()
                 .copied()
-                .filter(|holder| holder.lane != arrival.lane)
+                .filter(|holder| holder.lane != arrival.lane && holder.claimed < arrival.fact)
             {
                 notices.push((
                     holder.lane,
@@ -283,6 +331,40 @@ fn round_update_notices(
                         phase: phase.to_string(),
                         participant: participant.clone(),
                         action: TaskRoundUpdateKind::Arrived,
+                    },
+                ));
+            }
+        }
+        for (event, claimed, left) in &departures {
+            if left.task != statement.born
+                || left.cell.phase != *phase
+                || *claimed < completion.round
+                || completion
+                    .arrivals
+                    .iter()
+                    .any(|arrival| arrival.claimed == *claimed)
+            {
+                continue;
+            }
+            let Some(participant) = addressed_participant_label(snapshot, left.lane, left.occupant)
+            else {
+                continue;
+            };
+            for holder in active
+                .iter()
+                .copied()
+                .filter(|holder| holder.lane != left.lane && holder.claimed < *event)
+            {
+                notices.push((
+                    holder.lane,
+                    TaskRoundUpdateNotice {
+                        occupant: holder.occupant,
+                        task: task.clone(),
+                        holder_claim: holder.claimed.get(),
+                        event: event.get(),
+                        phase: phase.to_string(),
+                        participant: participant.clone(),
+                        action: TaskRoundUpdateKind::Left,
                     },
                 ));
             }
