@@ -222,16 +222,17 @@ jobs:
           printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
 
       # Derivable release state only: registry sources and the one release
-      # target shared by xtask and the candidate. The sealed proof runner keeps
-      # its own target below this root because its profile is intentionally
-      # different.
+      # target shared by xtask and the candidate. The bootstrap below compiles
+      # under the candidate settings in dist/release/candidate.toml, so the
+      # candidate build reuses its units. The sealed proof runner keeps its own
+      # target below this root because its profile is intentionally different.
       - name: Restore derivable release environment
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: |
             ${{ runner.temp }}/release-cargo
             ${{ runner.temp }}/release-target
-          key: macos-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml') }}
+          key: macos-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml', 'dist/release/candidate.toml') }}
 
       - name: Build and execute the sealed unsigned stage
         shell: bash
@@ -247,11 +248,34 @@ jobs:
           set -euo pipefail
           export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
-          release_target="$CARGO_TARGET_DIR/release-appliance"
+          candidate() {
+            python3 - "$1" <<'PY'
+          import sys, tomllib
+          with open("dist/release/candidate.toml", "rb") as source:
+              print(tomllib.load(source)[sys.argv[1]])
+          PY
+          }
+          release_target="$CARGO_TARGET_DIR/$(candidate target_dir)"
           target_output="$release_target/aarch64-apple-darwin"
           xtask="$target_output/release/xtask"
-          "$cargo" build --locked --release --target aarch64-apple-darwin \
-            --target-dir "$release_target" --config 'profile.release.debug="line-tables-only"' \
+          # The candidate build's unit-affecting environment, one NAME=VALUE
+          # per line, as xtask's release executor sets it.
+          candidate_env=()
+          while IFS= read -r assignment; do
+            candidate_env+=("$assignment")
+          done < <(python3 - "$(pwd -P)" "$CARGO_TARGET_DIR" <<'PY'
+          import os, sys, tomllib
+          workspace, build_root = sys.argv[1:]
+          with open("dist/release/candidate.toml", "rb") as source:
+              candidate = tomllib.load(source)
+          for name, value in candidate["environment"].items():
+              print(f"{name}={value}")
+          print("CARGO_BUILD_BUILD_DIR=" + os.path.join(build_root, candidate["build_dir"]))
+          print("CARGO_ENCODED_RUSTFLAGS=" + candidate["rustflags"].replace("{workspace}", workspace))
+          PY
+          )
+          env "${candidate_env[@]}" "$cargo" build --locked --release --target aarch64-apple-darwin \
+            --target-dir "$release_target" --config "$(candidate debug_config)" \
             --package xtask --bin xtask
           SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh "$CARGO_TARGET_DIR"
           SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \

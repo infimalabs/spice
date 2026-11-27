@@ -336,7 +336,8 @@ proof-image archive, never release outputs or result evidence. Each workflow
 keeps its own `actions/cache` entry for the bootstrap `CARGO_HOME` and target,
 keyed by provider OS and architecture, plus `rust-toolchain.toml`,
 `Cargo.lock`, `.cargo/config.toml`, and that platform's tool pins (the
-preflight's trunk version, `dist/darwin/hosted.toml`, or
+preflight's trunk version, `dist/darwin/hosted.toml` with
+`dist/release/candidate.toml`, or
 `dist/windows/hosted.toml`). Native jobs extract `source.tar` with fresh
 modification times, so Cargo rebuilds every workspace crate on a restored
 target and reuses only registry dependencies. The preflight keys the
@@ -509,6 +510,11 @@ credentials enter any job.
 The hosted bootstrap selects the exact Cargo executable and admits only its
 sibling Rustc; the proof build does not rediscover that toolchain through
 ambient `rustup`.
+It compiles xtask under the candidate build settings in
+`dist/release/candidate.toml`, the target and build directories, rustflags,
+debug-artifact profile override, and environment that `stage-target` gives
+its candidate build, so the candidate reuses every unit of that bootstrap and
+compiles only the `spice` binary unit.
 Binaryen's admitted tool closure retains `wasm-opt` with its pinned sibling
 dynamic libraries; extracting the executable alone is not an executable tool.
 

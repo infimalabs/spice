@@ -150,7 +150,7 @@ fn select_windows_source(
         .map_err(TargetBuildError::SourceVersion)?;
     Ok(WindowsSource {
         root,
-        target_dir: release.build_root(workspace).join("release-appliance"),
+        target_dir: super::candidate().target_dir(&release.build_root(workspace)),
         build_info,
         archive: Some(archive),
     })
