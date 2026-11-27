@@ -4,15 +4,15 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::hosted::stage_layout::{RESULT_PATH, StageLayout};
+use crate::hosted::stage_layout::{RESULT_PATH, STAGE_DIRECTORY, StageLayout};
 use serde::Deserialize;
 use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use super::{
-    Attach, Cancellation, HostedRun, HostedSource, ReleaseInputs, Scratch, WindowsHostedError,
-    download_artifact, drive, publish_artifacts, require_public_attestation_repository, source,
-    verify_attestation, watch_run, workspace_root,
+    Attach, Cancellation, DeclaredSubjects, HostedRun, HostedSource, ReleaseInputs, Scratch,
+    WindowsHostedError, download_artifact, drive, publish_artifacts,
+    require_public_attestation_repository, source, verify_attestation, watch_run, workspace_root,
 };
 
 const POLICY: &str = ::std::include_str!("../../../../dist/darwin/hosted.toml");
@@ -187,33 +187,34 @@ pub fn macos_hosted_stage_controlled(
                 run_id,
                 &format!("macos-{challenge}"),
             )?);
+            let declared = DeclaredSubjects::load(&run, WORKFLOW_PATH, run_id, &layout)?;
+            declared.require(&[
+                PathBuf::from(RESULT_PATH),
+                PathBuf::from(STAGE_DIRECTORY).join(PAYLOAD_PATH),
+            ])?;
             let result_path = layout.result();
             verify_attestation(&run, WORKFLOW_PATH, run_id, &result_path)?;
             let result: MacosResult =
                 serde_json::from_slice(&read_limited(&result_path, PAYLOAD_LIMIT)?)
                     .map_err(WindowsHostedError::ResultSchema)?;
-            admit_result(
-                &result,
-                &ExpectedResult {
-                    challenge: &challenge,
-                    source: &source,
-                    inputs: manifest,
-                    run_id,
-                    image: &policy.image,
-                },
-            )?;
+            let expected = ExpectedResult {
+                challenge: &challenge,
+                source: &source,
+                inputs: manifest,
+                run_id,
+                image: &policy.image,
+            };
+            admit_result(&result, &expected)?;
             let stage = layout.stage();
-            let artifacts = admit_stage(
-                &stage,
-                &source.canonical_commit,
-                &source_archive,
-                &manifest.proof_identity,
-                &manifest.canvas,
-                &manifest.app,
-                &policy.toolchain,
-            )?;
+            let artifacts = admit_stage(&stage, &declared, &expected, &policy.toolchain)?;
+            let mut files = vec![PathBuf::from(RESULT_PATH)];
+            files.extend(
+                artifacts
+                    .iter()
+                    .map(|artifact| PathBuf::from(STAGE_DIRECTORY).join(&artifact.path)),
+            );
+            declared.admit_exact(&files)?;
             verify_stage_attestations(&run, run_id, &stage, &artifacts)?;
-            admit_hosted_file_set(layout.root(), &artifacts)?;
             publish_artifacts(
                 &stage,
                 &artifacts,
@@ -244,19 +245,6 @@ fn verify_stage_attestations(
     Ok(())
 }
 
-fn admit_hosted_file_set(
-    root: &Path,
-    artifacts: &[crate::hosted::Artifact],
-) -> Result<(), WindowsHostedError> {
-    let mut files = vec![PathBuf::from(RESULT_PATH)];
-    files.extend(
-        artifacts
-            .iter()
-            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
-    );
-    super::admit_file_set(root, files)
-}
-
 fn admit_result(
     result: &MacosResult,
     expected: &ExpectedResult<'_>,
@@ -283,13 +271,13 @@ fn admit_result(
     Ok(())
 }
 
+/// Admit the finalized stage the payload names. Every record the payload
+/// requires must be declared before any of them is read, so an omitted record
+/// is an output-contract failure rather than an unreadable file.
 fn admit_stage(
     stage: &Path,
-    source_commit: &str,
-    source_archive: &str,
-    proof_container: &str,
-    canvas: &Digest,
-    app: &Digest,
+    declared: &DeclaredSubjects,
+    expected: &ExpectedResult<'_>,
     toolchain: &Toolchain,
 ) -> Result<Vec<crate::hosted::Artifact>, WindowsHostedError> {
     let payload_path = stage.join(PAYLOAD_PATH);
@@ -299,13 +287,18 @@ fn admit_stage(
     if payload.target != ReleaseTarget::Aarch64AppleDarwin {
         return Err(differs("target"));
     }
-    if payload.source != Digest::compute(Domain::DistSourceCommit, source_commit.as_bytes()) {
+    if payload.source
+        != Digest::compute(
+            Domain::DistSourceCommit,
+            expected.source.canonical_commit.as_bytes(),
+        )
+    {
         return Err(differs("source identity"));
     }
-    if payload.archive.to_string() != source_archive {
+    if payload.archive.to_string() != expected.source.archive.to_string() {
         return Err(differs("source archive"));
     }
-    if &payload.canvas != canvas || &payload.app != app {
+    if payload.canvas != expected.inputs.canvas || payload.app != expected.inputs.app {
         return Err(differs("provider canvas"));
     }
     let rust_pin = rust_release_pin(&toolchain.rust).ok_or(WindowsHostedError::PolicyIdentity)?;
@@ -318,7 +311,7 @@ fn admit_stage(
     if payload.pins.trunk != toolchain.trunk {
         return Err(differs("Trunk pin"));
     }
-    if payload.pins.proof_container != proof_container {
+    if payload.pins.proof_container != expected.inputs.proof_identity {
         return Err(differs("proof-container pin"));
     }
     if payload.inventory.len() != 2 {
@@ -341,6 +334,13 @@ fn admit_stage(
         payload.source, payload.target
     ));
     let receipt_path = stage.join(&receipt_relative);
+    let staged =
+        |path: &Path| relative(stage, path).map(|path| Path::new(STAGE_DIRECTORY).join(path));
+    declared.require(&[
+        staged(&native_path)?,
+        staged(&symbol_path)?,
+        Path::new(STAGE_DIRECTORY).join(&receipt_relative),
+    ])?;
     let native_bytes = read_exact(&native_path, native.bytes)?;
     let symbol_bytes = read_exact(&symbol_path, symbols.bytes)?;
     let receipt_bytes = read_limited(&receipt_path, PAYLOAD_LIMIT)?;

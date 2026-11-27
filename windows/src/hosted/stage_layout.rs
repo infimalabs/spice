@@ -6,6 +6,9 @@ pub(super) const STAGE_LOG_PATH: &str = "stage.log";
 pub(super) const SMOKE_LOG_PATH: &str = "smoke.log";
 pub(super) const SMOKE_DIRECTORY: &str = "smoke";
 pub(super) const RUNNER_PATH: &str = "runner/windows-hosted.exe";
+/// The attested inventory of every other file a native workflow submitted to
+/// provider attestation from this root.
+pub(super) const SUBJECTS_PATH: &str = "subjects.json";
 
 /// The one relative layout published by every native hosted stage.
 pub(super) struct StageLayout {
@@ -43,6 +46,10 @@ impl StageLayout {
 
     pub(super) fn runner(&self) -> PathBuf {
         self.root.join(RUNNER_PATH)
+    }
+
+    pub(super) fn subjects(&self) -> PathBuf {
+        self.root.join(SUBJECTS_PATH)
     }
 }
 

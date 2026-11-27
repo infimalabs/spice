@@ -173,9 +173,11 @@ fn settle<T>(
     match complete(authority) {
         Err(error) if retains_provider_state(&error) => Err(error),
         Err(error @ WindowsHostedError::Cancelled { .. }) => Err(error),
-        // An undecodable attested result comes from a finished, authentic run;
-        // nothing remains to cancel or observe.
-        Err(error @ WindowsHostedError::ResultSchema(_)) => Err(error),
+        // An undecodable or out-of-contract attested result comes from a
+        // finished, authentic run; nothing remains to cancel or observe.
+        Err(
+            error @ (WindowsHostedError::ResultSchema(_) | WindowsHostedError::OutputContract(_)),
+        ) => Err(error),
         // A spent quota fails every provider read without saying anything
         // about the run; keep it whole for a later attachment.
         Err(error) if quota::spent_until(run.root).is_some() => Err(WindowsHostedError::Detached {
