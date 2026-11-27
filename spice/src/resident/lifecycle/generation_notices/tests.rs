@@ -318,7 +318,6 @@ fn assert_addressed_departure(lapsed: bool) {
         .expect("seated participant has an address");
     let _partner_address = seed_birth(&bus, fixture.lane, fixture.occupant, fixture.epoch);
     join_participant(&bus, &task, lane, occupant, fixture.epoch);
-    let observed = bus.cursor().expect("pre-release cursor reads");
     if lapsed {
         lapse_claim(&bus, &task);
     } else {
@@ -335,7 +334,7 @@ fn assert_addressed_departure(lapsed: bool) {
         .expect("released participant remains in the ending snapshot")
         .fact
         .get();
-    let notices = round_update_notices(&snapshot, observed);
+    let notices = round_update_notices(&snapshot);
     let update = notices
         .iter()
         .find(|(recipient, notice)| *recipient == fixture.lane && notice.event == left_event)
@@ -351,10 +350,58 @@ fn assert_addressed_departure(lapsed: bool) {
     join_participant(&bus, &task, later_lane, later_occupant, fixture.epoch);
     let later_snapshot = bus.task_snapshot().expect("later snapshot reads");
     assert!(
-        round_update_notices(&later_snapshot, observed)
+        round_update_notices(&later_snapshot)
             .iter()
             .all(|(recipient, notice)| { *recipient != later_lane || notice.event != left_event }),
         "a claim that joins later does not receive a historical departure"
+    );
+
+    finish(bus);
+}
+
+#[test]
+fn an_addressless_departure_reprojects_after_its_address_is_proved() {
+    let fixture = LaunchFixture::new();
+    let (bus, task) = automatic_claimed_fixture(&fixture);
+    target_shared_todo(&bus, &task);
+
+    let lane = uuid(30);
+    let occupant = uuid(31);
+    assert!(
+        add_participant_lane(&bus, &fixture, lane, None, "leaver").is_none(),
+        "the participant begins without an occupant address"
+    );
+    let _partner_address = seed_birth(&bus, fixture.lane, fixture.occupant, fixture.epoch);
+    join_participant(&bus, &task, lane, occupant, fixture.epoch);
+    end_claim(&bus, &task);
+
+    let unproved = bus
+        .task_snapshot()
+        .expect("unproved departure snapshot reads");
+    assert!(
+        round_update_notices(&unproved)
+            .iter()
+            .all(|(_, notice)| notice.action != TaskRoundUpdateKind::Left),
+        "an addressless participant is not announced"
+    );
+
+    let address = seed_birth(&bus, lane, occupant, fixture.epoch);
+    let proved = bus
+        .task_snapshot()
+        .expect("proved departure snapshot reads");
+    let notices = round_update_notices(&proved);
+    let departure = notices
+        .iter()
+        .find(|(recipient, notice)| {
+            *recipient == fixture.lane && notice.action == TaskRoundUpdateKind::Left
+        })
+        .map(|(_, notice)| notice)
+        .expect("the durable departure reprojects after address proof");
+    assert_eq!(departure.participant, format!("leaver {address}"));
+    assert_eq!(
+        round_update_notices(&proved),
+        notices,
+        "resident restart can rehydrate the same durable current-round event"
     );
 
     finish(bus);
@@ -383,7 +430,7 @@ fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
         .map(|held| held.claim().body())
         .find(|claim| claim.lane == lane)
         .expect("joining claim remains active");
-    let notices = round_update_notices(&snapshot, None);
+    let notices = round_update_notices(&snapshot);
     let joined_update = notices
         .iter()
         .find(|(recipient, notice)| {
@@ -400,7 +447,7 @@ fn assert_new_shared_round_updates(seated: bool, arrived: bool) {
         assert_eq!(notice.action, TaskRoundUpdateKind::Joined);
         assert_eq!(notice.participant, format!("joiner {joined_address}"));
         assert_eq!(
-            round_update_notices(&snapshot, None),
+            round_update_notices(&snapshot),
             notices,
             "the driver receives the same durable events until it deduplicates them",
         );
