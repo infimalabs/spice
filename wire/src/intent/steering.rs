@@ -1,4 +1,4 @@
-//! Principal line-control command and answer DTOs.
+//! Principal line-control and lane line-arm command and answer DTOs.
 
 use serde::{Deserialize, Serialize};
 
@@ -44,4 +44,23 @@ pub struct SteerLineAnswer {
     /// Fate of body text outside a line transition, when applicable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<crate::outbox::BodyFate>,
+}
+
+/// Replace the calling lane's armed set with the open peer lines `roots`
+/// names; an empty set clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineArm {
+    /// Key of each line's opening SYN.
+    #[serde(default)]
+    pub roots: Vec<String>,
+}
+
+/// The calling lane's armed set as committed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LineArmAnswer {
+    /// Key of each armed line's opening SYN, in ascending order.
+    #[serde(default)]
+    pub roots: Vec<String>,
 }

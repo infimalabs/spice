@@ -23,9 +23,9 @@ use super::{
     DirectiveAnswer, DirectiveRef, DocLedger, GlobalSettingsAnswer, GlobalSettingsRead,
     GlobalSettingsSet, InboxAnswer, LaneAnswer, LaneChangeAnswer, LaneEffortRetune, LaneFastRetune,
     LaneJobAnswer, LaneJobRef, LaneJobsAnswer, LaneJobsRead, LaneRead, LaneRecall, LaneRenewal,
-    LaneRenewalAnswer, LaneRetune, LaneSeat, LaneState, QuoteRead, RackAnswer, RackRead,
-    RecallAnswer, RecognitionAnswer, Recognize, RoomContribute, RoomContributeAnswer,
-    RoomContributionRead, RoomContributionReadAnswer, RoomConversationText,
+    LaneRenewalAnswer, LaneRetune, LaneSeat, LaneState, LineArm, LineArmAnswer, QuoteRead,
+    RackAnswer, RackRead, RecallAnswer, RecognitionAnswer, Recognize, RoomContribute,
+    RoomContributeAnswer, RoomContributionRead, RoomContributionReadAnswer, RoomConversationText,
     RoomConversationTextAnswer, RoomLeave, RoomLeaveAnswer, RoomScore, RoomScoreAnswer,
     StateAnswer, SteerInbox, SteerLineAnswer, SteerLineControl, SteerSend, TaskAdd, TaskAnswer,
     TaskClose, TaskConclude, TaskDefer, TaskDelete, TaskDepends, TaskDetail, TaskDetailAnswer,
@@ -130,6 +130,8 @@ pub enum BodyShape {
     SteerInbox,
     /// [`SteerLineControl`]
     SteerLineControl,
+    /// [`LineArm`]
+    LineArm,
     /// [`DirectiveRef`]
     DirectiveRef,
     /// [`QuoteRead`]
@@ -235,6 +237,8 @@ pub enum AnswerShape {
     Inbox,
     /// [`SteerLineAnswer`]
     SteerLine,
+    /// [`LineArmAnswer`]
+    LineArm,
     /// [`ConsentAnswer`]
     Consent,
     /// [`ConsentQueueAnswer`]
@@ -329,6 +333,8 @@ pub enum CommandAnswer {
     Inbox(InboxAnswer),
     /// [`AnswerShape::SteerLine`]
     SteerLine(Box<SteerLineAnswer>),
+    /// [`AnswerShape::LineArm`]
+    LineArm(LineArmAnswer),
     /// [`AnswerShape::Consent`]
     Consent(ConsentAnswer),
     /// [`AnswerShape::ConsentQueue`]
@@ -404,6 +410,7 @@ impl CommandAnswer {
             Self::Inbox(_) => AnswerShape::Inbox,
             Self::Consent(_) => AnswerShape::Consent,
             Self::SteerLine(_) => AnswerShape::SteerLine,
+            Self::LineArm(_) => AnswerShape::LineArm,
             Self::ConsentQueue(_) => AnswerShape::ConsentQueue,
             Self::ConsentPolicy(_) => AnswerShape::ConsentPolicy,
             Self::Rack(_) => AnswerShape::Rack,
@@ -546,6 +553,7 @@ impl CommandKind {
             Self::SteerSend
             | Self::SteerInbox
             | Self::SteerLineControl
+            | Self::LineArm
             | Self::SteerResend
             | Self::SteerRecover
             | Self::SteerCancel
@@ -676,6 +684,7 @@ impl CommandKind {
             Self::SteerSend => Binding::of(B::SteerSend, A::Directive),
             Self::SteerInbox => Binding::of(B::SteerInbox, A::Inbox),
             Self::SteerLineControl => Binding::of(B::SteerLineControl, A::SteerLine),
+            Self::LineArm => Binding::of(B::LineArm, A::LineArm),
             Self::SteerResend | Self::SteerRecover | Self::SteerCancel => {
                 Binding::of(B::DirectiveRef, A::Directive)
             }
@@ -805,6 +814,8 @@ pub enum Intent {
     SteerInbox(SteerInbox),
     /// [`BodyShape::SteerLineControl`]
     SteerLineControl(SteerLineControl),
+    /// [`BodyShape::LineArm`]
+    LineArm(LineArm),
     /// [`BodyShape::DirectiveRef`]
     DirectiveRef(DirectiveRef),
     /// [`BodyShape::QuoteRead`]
@@ -921,6 +932,7 @@ impl Intent {
             Self::SteerSend(_)
             | Self::SteerInbox(_)
             | Self::SteerLineControl(_)
+            | Self::LineArm(_)
             | Self::DirectiveRef(_)
             | Self::QuoteRead(_)
             | Self::ConsentDecide(_)
@@ -1016,6 +1028,7 @@ impl Intent {
             Self::SteerSend(_) => BodyShape::SteerSend,
             Self::SteerInbox(_) => BodyShape::SteerInbox,
             Self::SteerLineControl(_) => BodyShape::SteerLineControl,
+            Self::LineArm(_) => BodyShape::LineArm,
             Self::DirectiveRef(_) => BodyShape::DirectiveRef,
             Self::QuoteRead(_) => BodyShape::QuoteRead,
             Self::ConsentDecide(_) => BodyShape::ConsentDecide,
@@ -1215,6 +1228,7 @@ impl BodyShape {
             Self::SteerSend
                 | Self::SteerInbox
                 | Self::SteerLineControl
+                | Self::LineArm
                 | Self::DirectiveRef
                 | Self::QuoteRead
                 | Self::ConsentDecide
@@ -1250,11 +1264,12 @@ impl BodyShape {
 
     fn decode_coordination_body(self, bytes: &[u8]) -> Result<Intent, serde_json::Error> {
         Ok(match self {
-            Self::SteerSend => Intent::SteerSend(crate::decode(bytes)?),
-            Self::SteerInbox => Intent::SteerInbox(crate::decode(bytes)?),
-            Self::SteerLineControl => Intent::SteerLineControl(crate::decode(bytes)?),
-            Self::DirectiveRef => Intent::DirectiveRef(crate::decode(bytes)?),
-            Self::QuoteRead => Intent::QuoteRead(crate::decode(bytes)?),
+            Self::SteerSend
+            | Self::SteerInbox
+            | Self::SteerLineControl
+            | Self::LineArm
+            | Self::DirectiveRef
+            | Self::QuoteRead => return self.decode_steering_body(bytes),
             Self::ConsentDecide => Intent::ConsentDecide(crate::decode(bytes)?),
             Self::ConsentRead => Intent::ConsentRead(crate::decode(bytes)?),
             Self::ConsentPolicy => Intent::ConsentPolicy(crate::decode(bytes)?),
@@ -1265,6 +1280,18 @@ impl BodyShape {
             Self::TrustReportRead => Intent::TrustReportRead(crate::decode(bytes)?),
             Self::TrustRef => Intent::TrustRef(crate::decode(bytes)?),
             _ => unreachable!("runtime body partition is closed"),
+        })
+    }
+
+    fn decode_steering_body(self, bytes: &[u8]) -> Result<Intent, serde_json::Error> {
+        Ok(match self {
+            Self::SteerSend => Intent::SteerSend(crate::decode(bytes)?),
+            Self::SteerInbox => Intent::SteerInbox(crate::decode(bytes)?),
+            Self::SteerLineControl => Intent::SteerLineControl(crate::decode(bytes)?),
+            Self::LineArm => Intent::LineArm(crate::decode(bytes)?),
+            Self::DirectiveRef => Intent::DirectiveRef(crate::decode(bytes)?),
+            Self::QuoteRead => Intent::QuoteRead(crate::decode(bytes)?),
+            _ => unreachable!("steering body partition is closed"),
         })
     }
 

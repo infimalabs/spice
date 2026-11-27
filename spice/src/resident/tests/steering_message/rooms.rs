@@ -36,6 +36,28 @@ impl Lanes {
         holder: Option<CanonicalUuid>,
         term: &[&str],
     ) -> wire::TaskHandle {
+        self.seed_held_task(stamp, title, description, intent, holder.as_slice(), term)
+    }
+
+    /// Seed one pending todo task whose current round every lane in
+    /// `holders` actively claims.
+    pub(super) fn seed_round(&self, stamp: &str, holders: &[u8]) -> wire::TaskHandle {
+        let holders = holders
+            .iter()
+            .map(|lane| test_uuid(*lane))
+            .collect::<Vec<_>>();
+        self.seed_held_task(stamp, "Round", None, None, &holders, &[])
+    }
+
+    fn seed_held_task(
+        &self,
+        stamp: &str,
+        title: &str,
+        description: Option<&str>,
+        intent: Option<wire::TaskIntent>,
+        holders: &[CanonicalUuid],
+        term: &[&str],
+    ) -> wire::TaskHandle {
         let task: wire::TaskStamp = stamp.parse().expect("fixture stamp");
         let phase: wire::Phase = if intent.is_some_and(wire::TaskIntent::is_design) {
             "design"
@@ -108,8 +130,8 @@ impl Lanes {
             submitted: false,
             generation: 0,
         });
-        if let Some(lane) = holder {
-            self.claim(&mut seed, &task, added, lane);
+        for lane in holders {
+            self.claim(&mut seed, &task, added, *lane);
         }
         commit(&self.bus, seed).expect("task commits");
         format!("ROOMS-{task}").parse().expect("fixture handle")

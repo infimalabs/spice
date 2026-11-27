@@ -174,6 +174,11 @@ const SUMMARIES: &[(&str, &str)] = &[
     ),
     ("lane remove", "Remove one vacant, claim-free lane"),
     ("lane wake", "Launch a new occupant into a vacant lane seat"),
+    ("line", "Name the peer lines a lane waits on"),
+    (
+        "line arm",
+        "Replace this lane's armed set of open same-round peer lines; no ROOT clears it",
+    ),
     ("lock", "Report resource locks, or run a command under one"),
     ("lock run", "Run a command while holding a named lock"),
     (

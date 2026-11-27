@@ -46,6 +46,9 @@ mod budget;
 #[path = "steering_message/lines.rs"]
 mod lines;
 
+#[path = "steering_message/line_arm.rs"]
+mod line_arm;
+
 #[path = "steering_message/outcomes.rs"]
 mod outcomes;
 

@@ -58,6 +58,7 @@ impl AnswerShape {
             Self::Directive
             | Self::Inbox
             | Self::SteerLine
+            | Self::LineArm
             | Self::Consent
             | Self::ConsentQueue => self.decode_coordination(source),
             Self::Trust | Self::TrustReport | Self::TrustShow => self.decode_trust(source),
@@ -100,6 +101,7 @@ impl AnswerShape {
             Self::Directive => CommandAnswer::Directive(body.read()?),
             Self::Inbox => CommandAnswer::Inbox(body.read()?),
             Self::SteerLine => CommandAnswer::SteerLine(Box::new(body.read()?)),
+            Self::LineArm => CommandAnswer::LineArm(body.read()?),
             Self::Consent => CommandAnswer::Consent(body.read()?),
             Self::ConsentQueue => CommandAnswer::ConsentQueue(body.read()?),
             _ => unreachable!("coordination answer-shape partition is closed"),

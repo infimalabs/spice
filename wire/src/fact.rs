@@ -455,6 +455,8 @@ vocabulary! {
     SteerDeadLettered = "steer::deadlettered" by ResidentRecognition;
     /// The operator, or with RST the directive's own sender, canceled it.
     SteerCanceled = "steer::canceled" by CommandDoor;
+    /// A lane replaced its armed set of open same-round peer lines.
+    LineArmed = "line::armed" by CommandDoor;
 
     /// An ACP permission request arrived, bound to its cause.
     ConsentAsked = "consent::asked" by CommandDoor;

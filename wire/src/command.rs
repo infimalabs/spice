@@ -131,6 +131,8 @@ pub enum CommandKind {
     SteerCancel,
     /// Settle one exact principal input and control its conversation line.
     SteerLineControl,
+    /// Replace the calling lane's armed set of open same-round peer lines.
+    LineArm,
     /// Resolve one quote target against durable tape and journal authority.
     QuoteRead,
     /// Inspect a topic node and its durable routing history.

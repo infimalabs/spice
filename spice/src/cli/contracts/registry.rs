@@ -462,6 +462,16 @@ pub(super) const CONTRACTS: &[Contract] = &[
         "steer::line-control"
     ),
     row!(
+        ["line", "arm"],
+        "line arm [ROOT...]",
+        Lane,
+        Command => SnapshotOrCommitted,
+        [LineArmed],
+        [Resident, LaneCapability],
+        Reply,
+        "line::arm"
+    ),
+    row!(
         ["room", "awareness"],
         "room awareness HANDLE [--limit N] [--max-bytes N] [--after POSITION]",
         PrincipalOrLane,

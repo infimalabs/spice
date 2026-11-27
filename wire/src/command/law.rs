@@ -414,6 +414,14 @@ impl Law {
         optional: &[],
         authority: Authority::Connected,
     };
+    /// A lane replaces its own armed peer-line set; the resident derives the
+    /// lane from the capability and guards every line, task and round head
+    /// the admission read.
+    pub const LINE_ARM: Self = Self {
+        required: &[],
+        optional: &[],
+        authority: Authority::Connected,
+    };
 
     /// Exact live directive disposition for a time-derived re-presentation.
     pub const RESEND: Self = Self {
@@ -860,6 +868,7 @@ impl CommandKind {
             Self::SteerRecover => Law::RECOVER,
             Self::SteerCancel => Law::CANCEL,
             Self::SteerLineControl => Law::LINE_CONTROL,
+            Self::LineArm => Law::LINE_ARM,
             Self::LaneRead => Law::LANE_READ,
             Self::LaneJobsRead | Self::LaneJobRead => Law::OPERATOR_READ,
             Self::LaneJobStop => Law::JOB_STOP,
