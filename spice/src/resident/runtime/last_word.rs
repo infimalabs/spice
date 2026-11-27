@@ -116,16 +116,23 @@ pub(super) fn closing_word(
                 continue;
             };
             settled |= context.session_settled;
-            let Some(outcome) = context
-                .prompt_outcome
-                .as_ref()
-                .filter(|outcome| outcome.agent_invoked)
-            else {
+            let Some(outcome) = context.prompt_outcome.as_ref() else {
                 if context.turn == Some(listen::TurnMoment::Started) {
                     return Ok(LastWord::Silent);
                 }
                 continue;
             };
+            if !outcome.agent_invoked
+                && context
+                    .turn_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("spice-aside-"))
+            {
+                continue;
+            }
+            if !outcome.agent_invoked && outcome.status == listen::PromptStatus::Completed {
+                return Ok(LastWord::Silent);
+            }
             return Ok(match outcome.status {
                 listen::PromptStatus::Completed if outcome.session_settled || settled => {
                     LastWord::Answered
@@ -298,6 +305,32 @@ mod tests {
             LastWord::Answered,
             "an aside does not replace the authoritative agent result"
         );
+    }
+
+    #[test]
+    fn non_agent_prompt_boundaries_do_not_reuse_a_preceding_settled_result() {
+        for status in ["aborted", "error"] {
+            let scratch = Scratch::new();
+            let tape = tape::Tape::open(&scratch.0).expect("fixture tape opens");
+            let declared = write(
+                &tape,
+                &omp_declaration("018f82d4-6f59-7d06-92e3-bce9131163c2"),
+            );
+            write(&tape, &omp_prompt_result("completed", true, None));
+            write(
+                &tape,
+                &format!(
+                    r#"{{"type":"prompt_result","id":"prompt-9","agentInvoked":false,"status":"{status}","sessionSettled":true}}"#
+                ),
+            );
+
+            assert_eq!(
+                closing_word(&scratch.0, &spice::extension::OMP, &declared)
+                    .expect("the retained tape reads"),
+                LastWord::Silent,
+                "a newer {status} prompt is the exit boundary"
+            );
+        }
     }
 
     #[test]
