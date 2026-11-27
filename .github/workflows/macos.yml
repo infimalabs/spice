@@ -221,22 +221,23 @@ jobs:
           printf '%s\n' "$tools" "$rust_bin" >> "$GITHUB_PATH"
           printf 'RUST_BIN=%s\nTOOLS_BIN=%s\n' "$rust_bin" "$tools" >> "$GITHUB_ENV"
 
-      # Derivable bootstrap state only: registry sources and the release
-      # xtask/spice target. Cargo rebuilds every workspace crate from the
-      # freshly stamped canonical source; the sealed stage never reads it.
-      - name: Restore derivable bootstrap environment
+      # Derivable release state only: registry sources and the one release
+      # target shared by xtask and the candidate. The sealed proof runner keeps
+      # its own target below this root because its profile is intentionally
+      # different.
+      - name: Restore derivable release environment
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: |
-            ${{ runner.temp }}/bootstrap-cargo
-            ${{ runner.temp }}/bootstrap-target
-          key: macos-bootstrap-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml') }}
+            ${{ runner.temp }}/release-cargo
+            ${{ runner.temp }}/release-target
+          key: macos-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', 'dist/darwin/hosted.toml') }}
 
       - name: Build and execute the sealed unsigned stage
         shell: bash
         env:
-          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
-          CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
+          CARGO_HOME: ${{ runner.temp }}/release-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/release-target
           RUSTUP_TOOLCHAIN: 1.97.1-aarch64-apple-darwin
           EXPECTED_ARCHIVE: ${{ inputs.source }}
           PROOF_CONTAINER: ${{ inputs.proof_container }}
@@ -244,13 +245,18 @@ jobs:
           RELEASE_APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
-          export PATH="$RUNNER_TEMP/bootstrap-target/release:$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
+          export PATH="$TOOLS_BIN:$RUST_BIN:/usr/bin:/bin"
           cargo="$RUST_BIN/cargo"
-          "$cargo" build --locked --release --package xtask --package spice --bin xtask --bin spice
+          release_target="$CARGO_TARGET_DIR/release-appliance"
+          target_output="$release_target/aarch64-apple-darwin"
+          xtask="$target_output/release/xtask"
+          "$cargo" build --locked --release --target aarch64-apple-darwin \
+            --target-dir "$release_target" --config 'profile.release.debug="line-tables-only"' \
+            --package xtask --bin xtask
           SPICE_PROOF_CARGO="$cargo" dist/proof-runner/build.sh "$CARGO_TARGET_DIR"
           SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
             SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
-            "$RUNNER_TEMP/bootstrap-target/release/xtask" \
+            "$xtask" \
             stage-target aarch64-apple-darwin --unsigned --proof-container "$PROOF_CONTAINER"
 
           payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
@@ -272,13 +278,12 @@ jobs:
               name = f"{entry['digest']}-{entry['mode']:04o}"
               shutil.copyfile(os.path.join("dist/stage/objects", name), os.path.join(objects, name))
           PY
-          "$RUNNER_TEMP/bootstrap-target/release/xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
+          "$xtask" verify-staged-darwin "$RUNNER_TEMP/unsigned-stage"
           tar -czf "$RUNNER_TEMP/unsigned-stage.tar.gz" -C "$RUNNER_TEMP" unsigned-stage
           cp dist/darwin/hosted.toml "$RUNNER_TEMP/hosted.toml"
           finalizer="$RUNNER_TEMP/finalizer"
           mkdir -p "$finalizer"
-          cp "$RUNNER_TEMP/bootstrap-target/release/xtask" "$finalizer/"
-          cp "$RUNNER_TEMP/bootstrap-target/release/spice" "$finalizer/"
+          cp "$xtask" "$finalizer/"
           cp -R target/proof-native-darwin "$finalizer/"
           tar -czf "$RUNNER_TEMP/finalizer.tar.gz" -C "$finalizer" .
 
@@ -507,8 +512,8 @@ jobs:
           mkdir -p "$work" "$finalizer"
           tar -xzf "$RUNNER_TEMP/transport/unsigned-stage.tar.gz" -C "$work"
           tar -xzf "$RUNNER_TEMP/transport/finalizer.tar.gz" -C "$finalizer"
-          chmod 0555 "$finalizer/xtask" "$finalizer/spice"
           native="$RUNNER_TEMP/transport/native/native"
+          chmod 0555 "$finalizer/xtask" "$native"
           "$finalizer/xtask" verify-staged-darwin "$work/unsigned-stage"
           "$finalizer/xtask" finalize-staged-darwin "$work/unsigned-stage" "$native" "$stage"
           "$finalizer/xtask" verify-staged-darwin "$stage"
@@ -516,13 +521,13 @@ jobs:
           # stage job: the exact toolchain path, the Cargo home directory, and the
           # vendor closure below this workspace's ignored target directory.
           rustup toolchain install 1.97.1-aarch64-apple-darwin --profile minimal --no-self-update
-          mkdir -p "$RUNNER_TEMP/bootstrap-cargo" "$GITHUB_WORKSPACE/target"
+          mkdir -p "$RUNNER_TEMP/release-cargo" "$GITHUB_WORKSPACE/target"
           mv "$finalizer/proof-native-darwin" "$GITHUB_WORKSPACE/target/proof-native-darwin"
           runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
-          plan=$("$finalizer/spice" config proof.runner "$runner" \
+          plan=$("$native" config proof.runner "$runner" \
             | sed -n 's/^digest = "\([0-9a-f]*\)"$/\1/p')
           test -n "$plan"
-          "$finalizer/spice" config proof.runner "$runner" --apply="$plan" >/dev/null
+          "$native" config proof.runner "$runner" --apply="$plan" >/dev/null
           "$finalizer/xtask" prove-staged-target aarch64-apple-darwin
           codesign --verify --deep --strict --verbose=2 "$native"
           notarization_attempts=30
