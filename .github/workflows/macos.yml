@@ -899,8 +899,10 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/result"
+          # Both sides sort under jq's one collation: subjects.json keeps the
+          # Rust path order, which places stage/ before stage.log.
           test "$(cd "$root" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
-            | LC_ALL=C sort | jq -R . | jq -cs .)" = "$(jq -c . "$root/subjects.json")"
+            | jq -R . | jq -cs sort)" = "$(jq -c sort "$root/subjects.json")"
 
       - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
