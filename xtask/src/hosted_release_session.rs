@@ -529,12 +529,18 @@ pub(crate) fn terminal_provider_failure(error: &WindowsHostedError) -> bool {
                 ..
             } | WindowsHostedError::Cancelled { run_id: Some(_) }
                 | WindowsHostedError::ResultSchema(_)
+                | WindowsHostedError::OutputContract(_)
         ),
     }
 }
 
+/// Whether a finished, authentic run's output can never be admitted by this
+/// client, so only a fresh dispatch of the current workflow can supply it.
 pub(crate) fn schema_provider_failure(error: &WindowsHostedError) -> bool {
-    matches!(error, WindowsHostedError::ResultSchema(_))
+    matches!(
+        error,
+        WindowsHostedError::ResultSchema(_) | WindowsHostedError::OutputContract(_)
+    )
 }
 
 #[derive(Debug)]
@@ -771,6 +777,76 @@ mod tests {
         session
             .record(NativeTarget::Linux, &binding(105, "linux-c", false))
             .unwrap();
+    }
+
+    /// A completed producer that omitted a required record retires only its
+    /// own attempt for the current workflow; a declared record not yet
+    /// verifiable keeps its run attached, and siblings stay attached.
+    #[test]
+    fn an_omitted_required_subject_redispatches_only_its_target_on_the_current_workflow() {
+        let workflows = workflows("a");
+        let mut session = SessionFile::new(41, workflows.clone(), identity("inputs"));
+        session
+            .record(NativeTarget::Linux, &binding(101, &workflows.linux, false))
+            .unwrap();
+        session
+            .record(NativeTarget::Macos, &binding(102, &workflows.macos, false))
+            .unwrap();
+        session
+            .record(
+                NativeTarget::Windows,
+                &binding(103, &workflows.windows, false),
+            )
+            .unwrap();
+        session.targets.linux.succeeded().unwrap();
+        session.targets.windows.succeeded().unwrap();
+
+        let pending = WindowsHostedError::Command {
+            operation: "artifact attestation",
+            code: Some(1),
+            stdout: String::new(),
+            stderr: "no attestations found".to_owned(),
+        };
+        session
+            .targets
+            .macos
+            .failed(
+                terminal_provider_failure(&pending),
+                schema_provider_failure(&pending),
+                pending.to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Macos).attachment(),
+            Some(Attach::Run(102)),
+            "a declared subject not yet verifiable stays attached"
+        );
+
+        let omitted = WindowsHostedError::OutputContract(
+            "completed producer omitted required attestation subjects: stage.log".to_owned(),
+        );
+        session
+            .targets
+            .macos
+            .failed(
+                terminal_provider_failure(&omitted),
+                schema_provider_failure(&omitted),
+                omitted.to_string(),
+            )
+            .unwrap();
+        assert_eq!(session.target(NativeTarget::Macos).attachment(), None);
+        assert_eq!(
+            session.target(NativeTarget::Macos).workflow(),
+            TargetWorkflow::Current
+        );
+        assert_eq!(
+            session.target(NativeTarget::Linux).attachment(),
+            Some(Attach::Run(101))
+        );
+        assert_eq!(
+            session.target(NativeTarget::Windows).attachment(),
+            Some(Attach::Run(103))
+        );
     }
 
     #[test]

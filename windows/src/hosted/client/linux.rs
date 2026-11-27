@@ -9,15 +9,18 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::hosted::stage_layout::StageLayout;
+use crate::hosted::stage_layout::{
+    RESULT_PATH, SMOKE_DIRECTORY, SMOKE_LOG_PATH, STAGE_DIRECTORY, STAGE_LOG_PATH, StageLayout,
+};
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use wire::Domain;
 
 use super::{
-    Attach, Cancellation, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs, RunAuthority,
-    Scratch, WindowsHostedError, digest_file, download_artifact, drive, publish_artifacts,
-    require_public_attestation_repository, source, verify_attestation, watch_run, workspace_root,
+    Attach, Cancellation, DeclaredSubjects, HostedRun, HostedSource, POLICY, Policy, ReleaseInputs,
+    RunAuthority, Scratch, WindowsHostedError, digest_file, download_artifact, drive,
+    publish_artifacts, require_public_attestation_repository, source, verify_attestation,
+    watch_run, workspace_root,
 };
 
 pub(super) const WORKFLOW_PATH: &str = ".github/workflows/linux.yml";
@@ -199,6 +202,8 @@ fn complete_run(
         run_id,
         &format!("linux-{challenge}"),
     )?);
+    let declared = DeclaredSubjects::load(run, WORKFLOW_PATH, run_id, &layout)?;
+    declared.require(&[RESULT_PATH, STAGE_LOG_PATH, SMOKE_LOG_PATH])?;
     let result_path = layout.result();
     verify_attestation(run, WORKFLOW_PATH, run_id, &result_path)?;
     let bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
@@ -208,6 +213,24 @@ fn complete_run(
     let result: LinuxResult =
         serde_json::from_slice(&bytes).map_err(WindowsHostedError::ResultSchema)?;
     admit_result(&result, challenge, source, manifest, run_id)?;
+    let mut files = vec![
+        PathBuf::from(RESULT_PATH),
+        PathBuf::from(STAGE_LOG_PATH),
+        PathBuf::from(SMOKE_LOG_PATH),
+    ];
+    files.extend(
+        result
+            .artifacts
+            .iter()
+            .map(|artifact| PathBuf::from(STAGE_DIRECTORY).join(&artifact.path)),
+    );
+    files.extend(
+        result
+            .smoke_artifacts
+            .iter()
+            .map(|artifact| PathBuf::from(SMOKE_DIRECTORY).join(&artifact.path)),
+    );
+    declared.admit_exact(&files)?;
     let log_path = layout.stage_log();
     verify_attestation(run, WORKFLOW_PATH, run_id, &log_path)?;
     let log = fs::read(&log_path).map_err(|source| WindowsHostedError::Io {
@@ -236,22 +259,6 @@ fn complete_run(
     for artifact in &smoke_artifacts {
         verify_attestation(run, WORKFLOW_PATH, run_id, &smoke.join(&artifact.path))?;
     }
-    let mut files = vec![
-        PathBuf::from("result.json"),
-        PathBuf::from("stage.log"),
-        PathBuf::from("smoke.log"),
-    ];
-    files.extend(
-        artifacts
-            .iter()
-            .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
-    );
-    files.extend(
-        smoke_artifacts
-            .iter()
-            .map(|artifact| PathBuf::from("smoke").join(&artifact.path)),
-    );
-    super::admit_file_set(layout.root(), files)?;
     admit_smoke_result(result.exit_code, result.smoke_exit_code, &smoke_artifacts)?;
     if result.exit_code == 0 {
         publish_artifacts(

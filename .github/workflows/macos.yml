@@ -573,7 +573,8 @@ jobs:
           mkdir -p "$result/stage"
           mv "$stage/result.json" "$result/result.json"
           cp -R "$stage/." "$result/stage/"
-
+          (cd "$result" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
+            | LC_ALL=C sort | jq -R . | jq -cs .) > "$result/subjects.json"
 
       - name: Upload complete hosted artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -598,6 +599,14 @@ jobs:
         with:
           name: macos-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
+
+      - name: Require the declared attestation subjects
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/result"
+          test "$(cd "$root" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
+            | LC_ALL=C sort | jq -R . | jq -cs .)" = "$(jq -c . "$root/subjects.json")"
 
       - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a

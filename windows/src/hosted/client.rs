@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::{
     AdmissionError, GITHUB_PROVIDER, ImagePin, Request, ResultDocument, ToolchainPins, WORKFLOW,
     admit_result,
-    stage_layout::{RUNNER_PATH, StageLayout},
+    stage_layout::{RESULT_PATH, RUNNER_PATH, StageLayout},
 };
 use crate::protocol::{
     Command as HostedCommand, Completion, Limits, MAX_OUTPUT_BYTES, MAX_RUNTIME_SECONDS,
@@ -39,6 +39,7 @@ mod ownership;
 mod quota;
 mod release_stage;
 mod source;
+mod subjects;
 mod transport;
 pub use attach::Attach;
 pub use control::{
@@ -54,6 +55,7 @@ use observation::{Resume, WATCH_INTERVAL_SECONDS, WATCH_RESUMES, resume_action};
 use ownership::RunAuthority;
 pub use release_stage::{windows_release_commands_into, windows_release_commands_into_controlled};
 use source::PreparedSource;
+use subjects::DeclaredSubjects;
 
 const POLICY: &str = ::std::include_str!("../../../dist/windows/hosted.toml");
 const WORKFLOW_PATH: &str = ".github/workflows/windows.yml";
@@ -380,7 +382,7 @@ fn complete_dispatched_run(
 ) -> Result<HostedExecution, WindowsHostedError> {
     watch_run(run.root, run.repository, authority, cancellation)?;
     let run_id = authority.run_id();
-    let (layout, runner_path, result_path) =
+    let (layout, declared, runner_path, result_path) =
         download_attested_artifact(run, &request.challenge, run_id)?;
     let runner = digest_file(Domain::ProofNativeRunner, &runner_path)?;
     let result_bytes = fs::read(&result_path).map_err(|source| WindowsHostedError::Io {
@@ -398,17 +400,17 @@ fn complete_dispatched_run(
         });
     }
     let stage = layout.stage();
-    for artifact in &result.artifacts {
-        verify_attestation(run, WORKFLOW, run_id, &stage.join(&artifact.path))?;
-    }
-    let mut files = vec![PathBuf::from("result.json"), PathBuf::from(RUNNER_PATH)];
+    let mut files = vec![PathBuf::from(RESULT_PATH), PathBuf::from(RUNNER_PATH)];
     files.extend(
         result
             .artifacts
             .iter()
             .map(|artifact| PathBuf::from("stage").join(&artifact.path)),
     );
-    admit_file_set(layout.root(), files)?;
+    declared.admit_exact(&files)?;
+    for artifact in &result.artifacts {
+        verify_attestation(run, WORKFLOW, run_id, &stage.join(&artifact.path))?;
+    }
     let outputs = result
         .outputs
         .iter()
@@ -467,18 +469,20 @@ fn download_attested_artifact(
     run: &HostedRun<'_>,
     challenge: &str,
     run_id: u64,
-) -> Result<(StageLayout, PathBuf, PathBuf), WindowsHostedError> {
+) -> Result<(StageLayout, DeclaredSubjects, PathBuf, PathBuf), WindowsHostedError> {
     let layout = StageLayout::new(download_artifact(
         run,
         run_id,
         &format!("windows-{challenge}"),
     )?);
+    let declared = DeclaredSubjects::load(run, WORKFLOW, run_id, &layout)?;
+    declared.require(&[RESULT_PATH, RUNNER_PATH])?;
     let result_path = layout.result();
     let runner_path = layout.runner();
     for path in [&runner_path, &result_path] {
         verify_attestation(run, WORKFLOW, run_id, path)?;
     }
-    Ok((layout, runner_path, result_path))
+    Ok((layout, declared, runner_path, result_path))
 }
 
 /// Download the run's one artifact `name` into a fresh scratch directory.
@@ -1267,6 +1271,10 @@ pub enum WindowsHostedError {
     /// schema: the run is authentic but was built by a different workflow
     /// revision, so only a fresh dispatch can supply an admissible result.
     ResultSchema(serde_json::Error),
+    /// A completed run's attested output omits, adds, or malforms a record
+    /// this client requires: the producer is authentic but out of contract,
+    /// so only a fresh dispatch of the current workflow can supply it.
+    OutputContract(String),
     Random(String),
     Clock(String),
     Io {
@@ -1350,6 +1358,10 @@ impl fmt::Display for WindowsHostedError {
             Self::ResultSchema(source) => write!(
                 formatter,
                 "attested hosted result does not decode under this client's schema: {source}"
+            ),
+            Self::OutputContract(detail) => write!(
+                formatter,
+                "completed hosted workflow violated its output contract: {detail}"
             ),
             Self::Random(detail) => {
                 write!(formatter, "fresh hosted challenge is unavailable: {detail}")

@@ -268,6 +268,8 @@ jobs:
               proof_image: $proof_image, exit_code: $exit_code, log_sha256: $log_sha256,
               smoke_exit_code: $smoke_exit_code, smoke_log_sha256: $smoke_log_sha256,
               artifacts: $artifacts[0], smoke_artifacts: $smoke_artifacts[0]}' > "$out/result.json"
+          (cd "$out" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
+            | LC_ALL=C sort | jq -R . | jq -cs .) > "$out/subjects.json"
 
       - name: Publish result, log, and staged output
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -293,6 +295,14 @@ jobs:
         with:
           name: linux-${{ inputs.challenge }}
           path: ${{ runner.temp }}/result
+
+      - name: Require the declared attestation subjects
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/result"
+          test "$(cd "$root" && find . -type f ! -path ./subjects.json | sed 's|^\./||' \
+            | LC_ALL=C sort | jq -R . | jq -cs .)" = "$(jq -c . "$root/subjects.json")"
 
       - name: Attest complete hosted artifact
         uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
