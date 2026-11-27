@@ -16,6 +16,7 @@ wire = { path = "../wire" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+test-support = { path = "../test-support" }
 tokio = { version = "1.53.1", features = ["time"] }
 tokio-tungstenite = "0.29.0"
 toml = "1.1.4"

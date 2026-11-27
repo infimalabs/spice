@@ -159,9 +159,6 @@ mod tests {
 
     use super::*;
 
-    /// A connecting fixture thread always arrives, so its offer never expires.
-    const BOUND: Duration = Duration::MAX;
-
     #[test]
     fn the_exact_child_gets_a_two_way_channel() {
         let offer = Offer::open().expect("channel opens");
@@ -175,7 +172,7 @@ mod tests {
         });
 
         let mut channel = offer
-            .accept(std::process::id(), BOUND)
+            .accept(std::process::id(), test_support::DEADLOCK_GUARD)
             .expect("the expected process is accepted");
         let mut status = [0_u8; 5];
         channel.read_exact(&mut status).expect("parent reads");

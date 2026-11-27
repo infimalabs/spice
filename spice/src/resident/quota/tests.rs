@@ -459,12 +459,15 @@ fn shutdown_cancels_the_running_sample_and_waits_for_it() {
         let _registration = cancellation.register_waker(Arc::new(move || {
             let _ = woken.send(());
         }));
-        let _ = wake.recv();
+        wake.recv_timeout(test_support::DEADLOCK_GUARD)
+            .expect("cancellation wakes the running sampler");
         observed.store(cancellation.is_cancelled(), Ordering::SeqCst);
         Err(SampleFailure::new(FailureKind::Supervisor))
     }));
     runtime.request();
-    running.recv().expect("the sample starts");
+    running
+        .recv_timeout(test_support::DEADLOCK_GUARD)
+        .expect("the sample starts");
 
     drop(runtime);
 

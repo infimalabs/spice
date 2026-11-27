@@ -272,8 +272,8 @@ fn a_blocked_wait_is_restated_after_another_call_settles_until_its_own_answer() 
         let call = Work::Job(JobCall {
             op: JobOp::Wait,
             id: Some(job.id().to_owned()),
-            // Only the job's ending answers this wait, whatever the host's speed.
-            timeout: Duration::from_secs(365 * 24 * 60 * 60),
+            // The fixture guard catches a waiter that misses the job ending.
+            timeout: test_support::DEADLOCK_GUARD,
             until: None,
         });
         std::thread::spawn(move || {

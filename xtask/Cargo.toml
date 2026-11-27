@@ -35,5 +35,8 @@ libc = "0.2.189"
 [target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]
 sha2 = { version = "0.10.9", features = ["asm"] }
 
+
+[dev-dependencies]
+test-support = { path = "../test-support" }
 [lints]
 workspace = true

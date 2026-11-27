@@ -165,7 +165,7 @@ mod tests {
             (first, second, receiver.next())
         });
         sender
-            .send_by(2, Instant::now(), Duration::MAX)
+            .send_by(2, Instant::now(), test_support::DEADLOCK_GUARD)
             .expect("the second frame lands once the consumer takes the first");
         drop(sender);
         assert_eq!(
@@ -192,8 +192,8 @@ mod tests {
     fn a_departed_consumer_refuses_without_waiting() {
         let (sender, receiver) = bounded(1);
         drop(receiver);
-        // An unbounded deadline: a producer that waited would never return.
-        match sender.send_by(1, Instant::now(), Duration::MAX) {
+        // The fixture guard catches a disconnected producer that waits.
+        match sender.send_by(1, Instant::now(), test_support::DEADLOCK_GUARD) {
             Err(SendError::Disconnected(1)) => {}
             other => panic!("expected the disconnected refusal, got {other:?}"),
         }

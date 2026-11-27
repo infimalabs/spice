@@ -717,16 +717,11 @@ mod tests {
     ///
     /// The timeout helper builds its own channel and waits directly, so this is
     /// the only test that drives the spawn, the sender handed to the worker, and
-    /// the completion branch that returns the value the worker sent. Its budget
-    /// is a year against a worker whose whole body is one send, so reaching the
-    /// completion branch never turns on scheduling latency.
+    /// the completion branch that returns the value the worker sent. The shared
+    /// guard detects only deadlocked fixture plumbing.
     #[test]
     fn a_worker_completing_inside_its_budget_returns_the_report_it_built() {
-        let context = context(
-            "sweep",
-            &["thread-identity"],
-            std::time::Duration::from_secs(365 * 24 * 60 * 60),
-        );
+        let context = context("sweep", &["thread-identity"], test_support::DEADLOCK_GUARD);
         let built = Report::Sweep {
             sources: Vec::new(),
             page: wire::output::Bounded {

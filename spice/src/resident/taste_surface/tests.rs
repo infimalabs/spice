@@ -841,7 +841,7 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
             .recognize(&fixture.bus, fixture.epoch, &bag, &record)
             .expect("candidate submits without waiting for judge");
         entered_receiver
-            .recv()
+            .recv_timeout(test_support::DEADLOCK_GUARD)
             .expect("worker holds the judge open");
 
         let (progressed, observed_progress) = tokio::sync::oneshot::channel();
@@ -849,9 +849,10 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
             tokio::task::yield_now().await;
             let _ = progressed.send(());
         });
-        observed_progress
+        tokio::time::timeout(test_support::DEADLOCK_GUARD, observed_progress)
             .await
-            .expect("the resident executor runs the progress task");
+            .expect("resident executor remains live")
+            .expect("progress task reports");
         assert!(
             fixture.judgments().is_empty(),
             "held external authority committed prematurely"
@@ -860,9 +861,9 @@ fn current_thread_progresses_while_bounded_adjudication_is_held_open() {
         let (lock, changed) = &*release;
         *lock.lock().expect("release lock") = true;
         changed.notify_all();
-        let completed = completions
-            .recv()
+        let completed = tokio::time::timeout(test_support::DEADLOCK_GUARD, completions.recv())
             .await
+            .expect("worker completes after release")
             .expect("completion authority stays live");
         submitter.finished(&completed);
         complete_judgment(

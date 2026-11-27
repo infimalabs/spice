@@ -24,6 +24,7 @@ members = [
     "taste",
     "topic",
     "vendor",
+    "test-support",
     "wire",
     "windows",
     "xtask",

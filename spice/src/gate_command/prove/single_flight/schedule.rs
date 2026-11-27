@@ -210,8 +210,12 @@ mod tests {
             )
         });
 
-        let first = starts.recv().expect("first action starts");
-        let second = starts.recv().expect("second independent action overlaps");
+        let first = starts
+            .recv_timeout(test_support::DEADLOCK_GUARD)
+            .expect("first action starts");
+        let second = starts
+            .recv_timeout(test_support::DEADLOCK_GUARD)
+            .expect("second independent action overlaps");
         assert_ne!(first, second);
         let (lock, ready) = &*released;
         *lock.lock().expect("release lock") = true;

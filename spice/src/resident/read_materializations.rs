@@ -75,12 +75,10 @@ struct Publication {
     value: Published,
 }
 
-/// How long `current` joins a stale materializer before refusing. Test builds
-/// never reach it, so a starved fixture host waits rather than refusing.
 #[cfg(not(test))]
 const CURRENT_WAIT: Duration = Duration::from_secs(10);
 #[cfg(test)]
-const CURRENT_WAIT: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+const CURRENT_WAIT: Duration = test_support::DEADLOCK_GUARD;
 const STOP_WAIT: Duration = Duration::from_millis(250);
 
 /// One coalescing background publisher and its latest immutable generation.

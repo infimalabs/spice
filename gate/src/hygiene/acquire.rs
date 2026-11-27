@@ -26,12 +26,10 @@ const SOURCE_PATH_BYTES_LIMIT: usize = 1024 * 1024;
 const SOURCE_BYTES_LIMIT: u64 = 64 * 1024 * 1024;
 const SOURCE_ISSUE_LIMIT: usize = 1;
 const SOURCE_DIAGNOSTIC_BYTES_LIMIT: usize = 4 * 1024;
-/// Test builds never reach the capture deadline, so a starved fixture host
-/// cannot turn a fixture's capture into a timeout.
 #[cfg(not(test))]
 const SOURCE_CAPTURE_DURATION: Duration = Duration::from_secs(30);
 #[cfg(test)]
-const SOURCE_CAPTURE_DURATION: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+const SOURCE_CAPTURE_DURATION: Duration = test_support::DEADLOCK_GUARD;
 const _: () = assert!(SOURCE_ISSUE_LIMIT == 1 && SOURCE_DIAGNOSTIC_BYTES_LIMIT > 0);
 /// Maximum bytes admitted from one selected Python source.
 pub const HYGIENE_SOURCE_FILE_BYTE_LIMIT: u64 = 2 * 1024 * 1024;

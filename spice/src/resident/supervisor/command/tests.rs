@@ -15,12 +15,13 @@ impl Sink {
     /// message.
     fn answered(&self, frames: usize) -> Vec<serde_json::Value> {
         let written = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let written = self
+        let (written, wait) = self
             .1
-            .wait_while(written, |written| {
+            .wait_timeout_while(written, test_support::DEADLOCK_GUARD, |written| {
                 written.iter().filter(|byte| **byte == b'\n').count() < frames
             })
             .unwrap_or_else(PoisonError::into_inner);
+        assert!(!wait.timed_out(), "driver answers before the shared guard");
         written
             .split(|byte| *byte == b'\n')
             .filter(|line| !line.is_empty())

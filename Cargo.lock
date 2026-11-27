@@ -353,6 +353,7 @@ dependencies = [
  "imbl",
  "jiff",
  "journal",
+ "test-support",
  "tokio",
 ]
 
@@ -841,6 +842,7 @@ name = "door"
 version = "0.0.0"
 dependencies = [
  "socket2",
+ "test-support",
  "windows-sys 0.61.2",
 ]
 
@@ -1150,6 +1152,7 @@ dependencies = [
  "serde_json",
  "sill",
  "syn 3.0.3",
+ "test-support",
  "toml 1.1.4+spec-1.1.0",
  "tree-sitter",
  "tree-sitter-c-sharp",
@@ -4463,6 +4466,7 @@ dependencies = [
  "sha2",
  "sill",
  "tempfile",
+ "test-support",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -4563,6 +4567,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "test-support",
  "toml 1.1.4+spec-1.1.0",
  "windows-sys 0.61.2",
 ]
@@ -4651,6 +4656,7 @@ dependencies = [
  "steer",
  "tape",
  "taste",
+ "test-support",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "topic",
@@ -4883,6 +4889,10 @@ dependencies = [
  "mac",
  "utf-8",
 ]
+
+[[package]]
+name = "test-support"
+version = "0.0.0"
 
 [[package]]
 name = "thiserror"
@@ -6052,6 +6062,7 @@ dependencies = [
  "signal-hook",
  "sill",
  "spice",
+ "test-support",
  "toml 1.1.4+spec-1.1.0",
  "windows-execution",
  "wire",

@@ -125,7 +125,7 @@ async fn authenticated_socket_pages_member_history_before_the_initial_window() {
         wire::StreamFrame::Closing { .. }
     ));
     assert_socket_terminated(&mut socket).await;
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -331,7 +331,9 @@ async fn held_history_read_leaves_the_runtime_serving_other_sockets() {
     assert_eq!(cursor.lane, identity(0xe5));
     assert_eq!(cursor.before, None);
     request_history(&mut reader, identity(0xd1), cursor).await;
-    entered.recv().await.expect("provider reports its entry");
+    fixture_completion(entered.recv())
+        .await
+        .expect("provider reports its entry");
 
     // A second socket is served in full while the first read is still held.
     let (mut watcher, _) = subscribe_messages(address, identity(0xd2)).await;
@@ -350,7 +352,7 @@ async fn held_history_read_leaves_the_runtime_serving_other_sockets() {
         ));
         assert_socket_terminated(socket).await;
     }
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -394,12 +396,10 @@ async fn one_socket_starts_lane_history_reads_concurrently() {
     request_history(&mut socket, identity(0xd2), cursors[1]).await;
 
     let mut entered_lanes = [
-        entered
-            .recv()
+        fixture_completion(entered.recv())
             .await
             .expect("first provider call reports its lane"),
-        entered
-            .recv()
+        fixture_completion(entered.recv())
             .await
             .expect("second provider call enters while the first is held"),
     ];
@@ -415,7 +415,7 @@ async fn one_socket_starts_lane_history_reads_concurrently() {
         },
     )
     .await;
-    let pong = stream_frame(&mut socket).await;
+    let pong = fixture_completion(stream_frame(&mut socket)).await;
     provider.release();
     assert!(matches!(
         pong,
@@ -439,7 +439,7 @@ async fn one_socket_starts_lane_history_reads_concurrently() {
         wire::StreamFrame::Closing { .. }
     ));
     assert_socket_terminated(&mut socket).await;
-    server_task
+    fixture_completion(server_task)
         .await
         .expect("server task joins")
         .expect("server stops");
@@ -463,7 +463,11 @@ async fn history_reads_hold_their_slot_until_the_scan_returns() {
         first_entered.send(1).expect("entry reports");
         released.recv().expect("release arrives");
     }));
-    let mut entry = async || observed.recv().await.expect("a scan reports its entry");
+    let mut entry = async || {
+        fixture_completion(observed.recv())
+            .await
+            .expect("a scan reports its entry")
+    };
     assert_eq!(entry().await, 1, "the first scan starts");
 
     // The closing socket drops its future, but the scan it started runs on
