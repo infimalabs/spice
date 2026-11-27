@@ -1,0 +1,47 @@
+name: Prepared package retention
+
+on:
+  schedule:
+    - cron: '17 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: Delete versions classified as deletable after the dry-run inventory
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: prepared-package-retention
+  cancel-in-progress: false
+
+jobs:
+  retain:
+    name: Inventory and retain prepared versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact cleanup policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Inventory, classify, and optionally delete
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY_OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          PREPARED_DELETE: ${{ github.event_name == 'schedule' || inputs.delete }}
+          PREPARED_KEEP_COUNT: '50'
+          PREPARED_KEEP_DAYS: '30'
+        run: .github/scripts/prepared-retention.sh
+
+      - name: Preserve exact retention plan
+        if: ${{ always() && hashFiles('prepared-retention-plan.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: prepared-retention-${{ github.run_id }}
+          path: prepared-retention-plan.json
+          if-no-files-found: error
+          retention-days: 30

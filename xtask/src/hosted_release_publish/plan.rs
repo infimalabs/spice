@@ -13,9 +13,12 @@ use super::PublishError;
 use super::package;
 
 pub(super) const CHECKSUMS: &str = "SHA256SUMS";
+/// Release asset carrying every prepared OCI manifest the published release retains.
+const PREPARED_REFERENCES: &str = "spice-prepared-references.json";
 /// The admitted plan a request persists before any tag or release mutation.
 pub(super) const PLAN_FILE: &str = "plan.json";
-const SCHEMA: u16 = 1;
+const SCHEMA: u16 = 2;
+const PREPARED_REFERENCES_SCHEMA: u16 = 1;
 const EXECUTABLE_MODE: u32 = 0o755;
 const SHA256_HEX_LENGTH: usize = 64;
 pub(super) const TARGETS: [ReleaseTarget; 3] = [
@@ -41,6 +44,12 @@ pub(super) struct PublicationAsset {
     pub(super) name: String,
     pub(super) bytes: u64,
     pub(super) sha256: String,
+}
+
+#[derive(Serialize)]
+struct PreparedReferences<'a> {
+    schema: u16,
+    manifests: [&'a str; 1],
 }
 
 impl PublicationPlan {
@@ -100,7 +109,7 @@ impl PublicationPlan {
             path: assets_root.clone(),
             source,
         })?;
-        let mut assets = Vec::with_capacity(TARGETS.len() + 2);
+        let mut assets = Vec::with_capacity(TARGETS.len() + 3);
         for target in TARGETS {
             assets.push(capture_target(stage_root, &assets_root, inputs, target)?);
         }
@@ -110,6 +119,7 @@ impl PublicationPlan {
             bytes: package.bytes,
             sha256: package.sha256,
         });
+        assets.push(capture_prepared_references(&assets_root, inputs)?);
         let checksums = checksum_document(&assets);
         publish(&assets_root.join(CHECKSUMS), checksums.as_bytes())?;
         assets.push(PublicationAsset {
@@ -134,7 +144,7 @@ impl PublicationPlan {
                 "publication plan schema or tag moved".into(),
             ));
         }
-        if self.assets.len() != TARGETS.len() + 2
+        if self.assets.len() != TARGETS.len() + 3
             || TARGETS
                 .iter()
                 .zip(&self.assets)
@@ -143,6 +153,10 @@ impl PublicationPlan {
                 .assets
                 .get(TARGETS.len())
                 .is_none_or(|asset| asset.name != package::ASSET_NAME)
+            || self
+                .assets
+                .get(TARGETS.len() + 1)
+                .is_none_or(|asset| asset.name != PREPARED_REFERENCES)
             || self
                 .assets
                 .last()
@@ -213,6 +227,36 @@ pub(super) fn admit_target_payload(
         )));
     }
     Ok((payload_bytes, payload))
+}
+
+fn capture_prepared_references(
+    assets_root: &Path,
+    inputs: &ResultManifest,
+) -> Result<PublicationAsset, PublishError> {
+    let bytes = prepared_reference_document(inputs.proof_manifest.as_str())?;
+    let path = assets_root.join(PREPARED_REFERENCES);
+    publish(&path, &bytes)?;
+    Ok(PublicationAsset {
+        name: PREPARED_REFERENCES.to_owned(),
+        bytes: bytes.len() as u64,
+        sha256: sha256(&bytes),
+    })
+}
+
+fn prepared_reference_document(manifest: &str) -> Result<Vec<u8>, PublishError> {
+    manifest
+        .strip_prefix("sha256:")
+        .filter(|digest| canonical_sha256(digest))
+        .ok_or_else(|| {
+            PublishError::Refused(
+                "release inputs name no canonical prepared proof manifest".to_owned(),
+            )
+        })?;
+    serde_json::to_vec(&PreparedReferences {
+        schema: PREPARED_REFERENCES_SCHEMA,
+        manifests: [manifest],
+    })
+    .map_err(PublishError::Encode)
 }
 
 fn capture_target(
@@ -359,6 +403,11 @@ mod tests {
                     sha256: "4".repeat(64),
                 },
                 PublicationAsset {
+                    name: PREPARED_REFERENCES.to_owned(),
+                    bytes: 7,
+                    sha256: "5".repeat(64),
+                },
+                PublicationAsset {
                     name: CHECKSUMS.to_owned(),
                     bytes: 9,
                     sha256: "7".repeat(64),
@@ -407,6 +456,20 @@ mod tests {
     }
 
     #[test]
+    fn release_reference_asset_carries_the_exact_prepared_manifest() {
+        let manifest = format!("sha256:{}", "a".repeat(SHA256_HEX_LENGTH));
+        let bytes = prepared_reference_document(&manifest).expect("reference document");
+        let document: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("reference document decodes");
+        assert_eq!(document["schema"], PREPARED_REFERENCES_SCHEMA);
+        assert_eq!(document["manifests"], serde_json::json!([manifest]));
+        assert!(matches!(
+            prepared_reference_document("sha256:short"),
+            Err(PublishError::Refused(_))
+        ));
+    }
+
+    #[test]
     fn publication_plan_requires_the_complete_sealed_package() {
         let mut missing = plan();
         missing.assets.remove(TARGETS.len());
@@ -415,6 +478,13 @@ mod tests {
         let mut renamed = plan();
         renamed.assets[TARGETS.len()].name = "another-package.zip".to_owned();
         assert!(matches!(renamed.admit(), Err(PublishError::Refused(_))));
+
+        let mut missing_references = plan();
+        missing_references.assets.remove(TARGETS.len() + 1);
+        assert!(matches!(
+            missing_references.admit(),
+            Err(PublishError::Refused(_))
+        ));
     }
 
     #[test]

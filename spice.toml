@@ -56,10 +56,21 @@ generated_paths = [
 # their upstream spellings.
 # Keep the environment ledger ordered by serialized name for reviewable diffs.
 env_names = [
+    "GH_TOKEN",
+    "GITHUB_REPOSITORY",
+    "GITHUB_REPOSITORY_OWNER_TYPE",
+    "GITHUB_STEP_SUMMARY",
     "GIT_CONFIG_COUNT",
     "GIT_CONFIG_SYSTEM",
     "GIT_EDITOR",
+    "PREPARED_DELETE",
+    "PREPARED_KEEP_COUNT",
+    "PREPARED_KEEP_DAYS",
+    "PREPARED_LOCATORS",
+    "PREPARED_OBSERVED_AT",
+    "PREPARED_RETENTION_PLAN",
     "RTK_DB_PATH",
+    "RUNNER_TEMP",
     "SPICE_AGENT_VENDOR",
     "SPICE_APP_SOURCE_IDENTITY",
     "SPICE_BOOTSTRAP_CARGO_HOME",
@@ -96,8 +107,8 @@ env_names = [
 [policy.file_shape]
 source_suffixes = [
     ".astro", ".bash", ".c", ".cc", ".cjs", ".cpp", ".cs", ".css", ".cts",
-    ".go", ".h", ".hpp", ".html", ".java", ".js", ".json", ".jsx", ".kt",
-    ".less", ".lua", ".m", ".md", ".mjs", ".mm", ".mts", ".php", ".ps1",
+    ".go", ".h", ".hpp", ".html", ".java", ".js", ".json", ".jq", ".jsx",
+    ".kt", ".less", ".lua", ".m", ".md", ".mjs", ".mm", ".mts", ".php", ".ps1",
     ".py", ".pyi", ".rb", ".rs", ".rst", ".sass", ".scala", ".scss", ".sh",
     ".sql", ".svelte", ".swift", ".toml", ".ts", ".tsx", ".txt", ".vue",
     ".xml", ".yaml", ".yml", ".zsh",
