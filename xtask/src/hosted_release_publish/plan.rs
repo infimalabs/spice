@@ -67,10 +67,10 @@ impl PublicationPlan {
     }
 
     /// Capture the plan for the commit `inputs` signed: its version comes from
-    /// the admitted source archive's build record, its bytes from the stage
-    /// under `worktree`, never from the checkout's own commit.
+    /// the admitted source archive's build record and its bytes from
+    /// `stage_root`, never from the checkout's own commit or worktree stage.
     pub(super) fn capture(
-        worktree: &Path,
+        stage_root: &Path,
         operation: &Path,
         release_inputs: &ReleaseInputs,
         notes: &wire::ReleaseNotes,
@@ -102,9 +102,9 @@ impl PublicationPlan {
         })?;
         let mut assets = Vec::with_capacity(TARGETS.len() + 2);
         for target in TARGETS {
-            assets.push(capture_target(worktree, &assets_root, inputs, target)?);
+            assets.push(capture_target(stage_root, &assets_root, inputs, target)?);
         }
-        let package = package::capture(worktree, &assets_root, &version, notes)?;
+        let package = package::capture(stage_root, &assets_root, &version, notes)?;
         assets.push(PublicationAsset {
             name: package::ASSET_NAME.to_owned(),
             bytes: package.bytes,
@@ -189,11 +189,11 @@ fn source_identities_match(
 }
 
 pub(super) fn admit_target_payload(
-    worktree: &Path,
+    stage_root: &Path,
     inputs: &ResultManifest,
     target: ReleaseTarget,
 ) -> Result<(Vec<u8>, TargetPayload), PublishError> {
-    let payload_path = worktree.join(format!("dist/stage/targets/{target}/payload.json"));
+    let payload_path = stage_root.join(format!("targets/{target}/payload.json"));
     let payload_bytes = read(&payload_path)?;
     let payload: TargetPayload = wire::decode(&payload_bytes).map_err(PublishError::Decode)?;
     if wire::encode(&payload).map_err(PublishError::Encode)? != payload_bytes
@@ -216,19 +216,18 @@ pub(super) fn admit_target_payload(
 }
 
 fn capture_target(
-    worktree: &Path,
+    stage_root: &Path,
     assets_root: &Path,
     inputs: &ResultManifest,
     target: ReleaseTarget,
 ) -> Result<PublicationAsset, PublishError> {
-    let (_payload_bytes, payload) = admit_target_payload(worktree, inputs, target)?;
+    let (_payload_bytes, payload) = admit_target_payload(stage_root, inputs, target)?;
     let executable = payload
         .inventory
         .iter()
         .find(|entry| entry.path == target.executable_path())
         .ok_or_else(|| PublishError::Refused(format!("staged {target} has no executable")))?;
-    let stage = worktree.join("dist/stage");
-    let object = stage.join(format!(
+    let object = stage_root.join(format!(
         "objects/{}-{:04o}",
         executable.digest, executable.mode
     ));

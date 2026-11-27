@@ -30,10 +30,22 @@ impl Layout {
         proof_root: impl Into<PathBuf>,
         target: ReleaseTarget,
     ) -> Self {
-        let payload = worktree_root
+        Self::at_stage(
+            worktree_root.into().join("dist").join("stage"),
+            proof_root,
+            target,
+        )
+    }
+
+    /// Derives one layout from an explicit caller-owned stage root.
+    #[must_use]
+    pub fn at_stage(
+        stage_root: impl Into<PathBuf>,
+        proof_root: impl Into<PathBuf>,
+        target: ReleaseTarget,
+    ) -> Self {
+        let payload = stage_root
             .into()
-            .join("dist")
-            .join("stage")
             .join("targets")
             .join(target.as_str())
             .join("payload.json");
@@ -296,6 +308,30 @@ mod tests {
                     .join("receipt.json")
             );
         }
+    }
+
+    #[test]
+    fn an_explicit_stage_root_never_implies_a_worktree_path() {
+        let scratch = Scratch::new();
+        let stage = scratch.join("git-common/release/publication/source/stage");
+        let proofs = stage.join("proofs");
+        let target = ReleaseTarget::Aarch64AppleDarwin;
+        let layout = Layout::at_stage(&stage, &proofs, target);
+        let payload = payload(target, "source");
+
+        assert_eq!(
+            layout.payload_path(),
+            stage.join("targets/aarch64-apple-darwin/payload.json")
+        );
+        assert_eq!(
+            layout
+                .receipt_for(&payload)
+                .expect("matching payload")
+                .path(),
+            proofs
+                .join(payload.source.as_str())
+                .join("aarch64-apple-darwin/receipt.json")
+        );
     }
 
     #[test]

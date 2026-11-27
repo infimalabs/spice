@@ -52,13 +52,25 @@ pub fn hosted_release_stage_with_inputs(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), HostedReleaseError> {
-    let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
-    writeln!(
+    hosted_release_stage_with_inputs_into(
+        inputs_run,
+        inputs,
+        Path::new("dist/stage"),
         output,
-        "hosted release session {}",
-        session.path().display()
+        error_output,
     )
-    .map_err(WindowsHostedError::Output)?;
+}
+
+/// Create or resume all native stages beneath a caller-owned stage root.
+pub(crate) fn hosted_release_stage_with_inputs_into(
+    inputs_run: u64,
+    inputs: &ReleaseInputs,
+    stage_root: &Path,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), HostedReleaseError> {
+    let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
+    write_session_path(output, &session)?;
 
     let linux_attach = session.attachment(NativeTarget::Linux)?;
     let macos_attach = session.attachment(NativeTarget::Macos)?;
@@ -74,13 +86,25 @@ pub fn hosted_release_stage_with_inputs(
         let linux = scope.spawn(|| {
             let mut output = Vec::new();
             let control = resumable_control(&linux_recorder, &linux_workflow);
-            let result = linux_hosted_stage_controlled(inputs, linux_attach, control, &mut output);
+            let result = linux_hosted_stage_controlled(
+                inputs,
+                linux_attach,
+                stage_root,
+                control,
+                &mut output,
+            );
             PlatformOutcome::new(NativeTarget::Linux, output, Vec::new(), result)
         });
         let macos = scope.spawn(|| {
             let mut output = Vec::new();
             let control = resumable_control(&macos_recorder, &macos_workflow);
-            let result = macos_hosted_stage_controlled(inputs, macos_attach, control, &mut output);
+            let result = macos_hosted_stage_controlled(
+                inputs,
+                macos_attach,
+                stage_root,
+                control,
+                &mut output,
+            );
             PlatformOutcome::new(NativeTarget::Macos, output, Vec::new(), result)
         });
         let windows = scope.spawn(|| {
@@ -90,6 +114,7 @@ pub fn hosted_release_stage_with_inputs(
             let result = windows_hosted_stage_controlled(
                 inputs,
                 windows_attach,
+                stage_root,
                 control,
                 &mut output,
                 &mut error,
@@ -154,6 +179,18 @@ pub fn hosted_release_stage_with_inputs(
     }
 }
 
+fn write_session_path(
+    output: &mut impl Write,
+    session: &ReleaseSession,
+) -> Result<(), WindowsHostedError> {
+    writeln!(
+        output,
+        "hosted release session {}",
+        session.path().display()
+    )
+    .map_err(WindowsHostedError::Output)
+}
+
 fn resumable_control<'a>(
     observer: &'a dyn HostedRunObserver,
     workflow: &'a TargetWorkflow,
@@ -174,20 +211,24 @@ pub fn macos_hosted_stage(
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    macos_hosted_stage_controlled(inputs, attach, HostedRunControl::default(), output)
+    macos_hosted_stage_controlled(
+        inputs,
+        attach,
+        Path::new("dist/stage"),
+        HostedRunControl::default(),
+        output,
+    )
 }
 
 fn macos_hosted_stage_controlled(
     inputs: &ReleaseInputs,
     attach: Option<Attach>,
+    stage_root: &Path,
     control: HostedRunControl<'_>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let stage = windows_execution::hosted::client::macos_hosted_stage_controlled(
-        inputs,
-        attach,
-        Path::new("dist/stage"),
-        control,
+        inputs, attach, stage_root, control,
     )?;
     writeln!(
         output,
@@ -206,20 +247,24 @@ pub fn linux_hosted_stage(
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    linux_hosted_stage_controlled(inputs, attach, HostedRunControl::default(), output)
+    linux_hosted_stage_controlled(
+        inputs,
+        attach,
+        Path::new("dist/stage"),
+        HostedRunControl::default(),
+        output,
+    )
 }
 
 fn linux_hosted_stage_controlled(
     inputs: &ReleaseInputs,
     attach: Option<Attach>,
+    stage_root: &Path,
     control: HostedRunControl<'_>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let stage = windows_execution::hosted::client::linux_hosted_stage_controlled(
-        inputs,
-        attach,
-        Path::new("dist/stage"),
-        control,
+        inputs, attach, stage_root, control,
     )?;
     output
         .write_all(&stage.log)
@@ -254,6 +299,7 @@ pub fn windows_hosted_stage(
     windows_hosted_stage_controlled(
         inputs,
         attach,
+        Path::new("dist/stage"),
         HostedRunControl::default(),
         output,
         error_output,
@@ -263,6 +309,7 @@ pub fn windows_hosted_stage(
 fn windows_hosted_stage_controlled(
     inputs: &ReleaseInputs,
     attach: Option<Attach>,
+    stage_root: &Path,
     control: HostedRunControl<'_>,
     output: &mut impl Write,
     error_output: &mut impl Write,
@@ -287,11 +334,7 @@ fn windows_hosted_stage_controlled(
     let mut commands = vec![command];
     commands.extend(proof::Battery::current().hosted_commands());
     let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
-        commands,
-        Path::new("dist/stage"),
-        inputs,
-        attach,
-        control,
+        commands, stage_root, inputs, attach, control,
     )?;
     let first = &execution.outputs[0];
     output
@@ -301,11 +344,9 @@ fn windows_hosted_stage_controlled(
         .write_all(&first.stderr)
         .map_err(WindowsHostedError::Output)?;
     if execution.exit_code() == 0 {
-        let repository = spice::repository::Repository::discover(Path::new("."))
-            .map_err(|error| WindowsHostedError::ProviderResponse(error.to_string()))?;
-        let layout = proof::Layout::new(
-            repository.worktree_root(),
-            repository.worktree_root().join("dist/stage/proofs"),
+        let layout = proof::Layout::at_stage(
+            stage_root,
+            stage_root.join("proofs"),
             wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc,
         );
         proof::seal_hosted_windows(&layout, &execution, 1).map_err(|error| {

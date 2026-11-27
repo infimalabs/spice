@@ -23,12 +23,12 @@ pub(super) struct CapturedPackage {
 /// Admit the complete sealed stage once, then publish its small deterministic
 /// evidence projection without duplicating native executables or symbols.
 pub(super) fn capture(
-    worktree: &Path,
+    stage_root: &Path,
     assets_root: &Path,
     version: &ProductVersion,
     notes: &ReleaseNotes,
 ) -> Result<CapturedPackage, PublishError> {
-    let tree = package_tree(&worktree.join("dist/stage"), version, notes)?;
+    let tree = package_tree(stage_root, version, notes)?;
     let path = assets_root.join(ASSET_NAME);
     let members = evidence_members(tree.members())?;
     publish_archive(&path, &members)?;
