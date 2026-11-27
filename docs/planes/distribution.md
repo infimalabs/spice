@@ -469,7 +469,11 @@ or release mutation. Every invocation that reaches plan capture also writes
 - the provider run it admitted.
 
 The phases are notes admission, the input preflight, each native stage,
-receipt composition, and plan capture. The summary names the critical path, the
+receipt composition, and plan capture.
+Notes admission and the input preflight share only the pinned commit, so they
+start independently. Both must admit their result before any native stage
+starts.
+The summary names the critical path, the
 chain of latest-finishing dependencies, and its duration, so an avoidable
 serialization or idle handoff is directly inspectable. Native stages wait only
 on the admitted inputs, never on a sibling; only receipt composition and plan

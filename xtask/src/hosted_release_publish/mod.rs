@@ -92,17 +92,31 @@ pub fn publish_hosted_release(
         Some(commit) => commit,
         None => landed_commit()?,
     };
-    let (session, notes) = timeline.measure(Phase::Notes, || {
-        let canonical = spice::release_history::draft(&worktree, Some(&source_commit))
-            .map_err(|error| PublishError::Refused(error.to_string()))?;
-        let notes = dist::curated_release_notes(&candidate, &canonical)
-            .map_err(|error| PublishError::Refused(error.to_string()))?;
-        let session = publications.begin(&source_commit)?;
-        PublicationPlan::admit_existing_notes(session.root(), &source_commit, &notes)?;
-        Ok((session, notes))
-    })?;
+    let session = publications.begin(&source_commit)?;
     let unpublished = !session.publication_may_have_started()?;
-    let inputs = admit_inputs(&session, source_commit, &mut timeline)?;
+    let input_commit = source_commit.clone();
+    let (notes, inputs) = std::thread::scope(|scope| {
+        let notes =
+            scope.spawn(|| timed(|| admit_notes(&worktree, &candidate, &source_commit, &session)));
+        let inputs = scope.spawn(|| timed(|| admit_inputs(&session, input_commit)));
+        (
+            notes.join().expect("release notes admission panicked"),
+            inputs.join().expect("release input staging panicked"),
+        )
+    });
+    timeline.record(Phase::Notes, notes.started, notes.finished, None);
+    timeline.record(
+        Phase::Inputs,
+        inputs.started,
+        inputs.finished,
+        inputs
+            .result
+            .as_ref()
+            .ok()
+            .map(|inputs| inputs.manifest().run_id),
+    );
+    let notes = notes.result?;
+    let inputs = inputs.result?;
     let stage_root = session.stage_root();
     let spans = hosted_release_stage_with_inputs_into(
         inputs.manifest().run_id,
@@ -143,14 +157,42 @@ pub fn publish_hosted_release(
     }
 }
 
-/// Attach to the session's recorded provider preflight or dispatch it, admit
-/// that it names the pinned commit, and record its span.
+struct Timed<T> {
+    started: SystemTime,
+    finished: SystemTime,
+    result: Result<T, PublishError>,
+}
+
+fn timed<T>(operation: impl FnOnce() -> Result<T, PublishError>) -> Timed<T> {
+    let started = SystemTime::now();
+    let result = operation();
+    Timed {
+        started,
+        finished: SystemTime::now(),
+        result,
+    }
+}
+
+fn admit_notes(
+    worktree: &Path,
+    candidate: &str,
+    source_commit: &str,
+    session: &PublicationSession,
+) -> Result<wire::ReleaseNotes, PublishError> {
+    let canonical = spice::release_history::draft(worktree, Some(source_commit))
+        .map_err(|error| PublishError::Refused(error.to_string()))?;
+    let notes = dist::curated_release_notes(candidate, &canonical)
+        .map_err(|error| PublishError::Refused(error.to_string()))?;
+    PublicationPlan::admit_existing_notes(session.root(), source_commit, &notes)?;
+    Ok(notes)
+}
+
+/// Attach to the session's recorded provider preflight or dispatch it and
+/// admit that it names the pinned commit.
 fn admit_inputs(
     session: &PublicationSession,
     source_commit: String,
-    timeline: &mut Timeline,
 ) -> Result<ReleaseInputs, PublishError> {
-    let started = SystemTime::now();
     let inputs = match session.inputs_run()? {
         Some(run) => hosted_release_inputs(Attach::Run(run))?,
         None => hosted_release_inputs_dispatch(source_commit)?,
@@ -164,12 +206,6 @@ fn admit_inputs(
         )));
     }
     session.record_inputs(inputs.manifest())?;
-    timeline.record(
-        Phase::Inputs,
-        started,
-        SystemTime::now(),
-        Some(inputs.manifest().run_id),
-    );
     Ok(inputs)
 }
 
