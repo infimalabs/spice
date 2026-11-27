@@ -71,9 +71,12 @@ impl Container {
     /// config pins and the version report executes the Linux executable on
     /// Linux. The workspace and its Git common directory are mounted
     /// read-only at the paths Git records for them, with `dist/stage` the one
-    /// writable workspace path. The Cargo home and target are fresh scratch
-    /// owned by this run, and the network is disabled, so neither the host's
-    /// Cargo configuration nor its tools reach the build.
+    /// writable workspace path. The Cargo home is fresh scratch owned by this
+    /// run and the network is disabled, so neither the host's Cargo
+    /// configuration nor its tools reach the build. The Cargo target is fresh
+    /// scratch too unless `target` names a host directory, which the run
+    /// mounts writable as its target and leaves behind: a caller restores a
+    /// prepared third-party layer into it beforehand and may publish it after.
     ///
     /// Without `delivered`, the app generation is read from the workspace as
     /// already staged, never compiled here. With `delivered`, the workspace is
@@ -84,14 +87,16 @@ impl Container {
     ///
     /// # Errors
     ///
-    /// Refuses a Git common directory, stage directory, or canvas path the OCI
-    /// mount grammar cannot represent, and returns runtime launch, wait, and
-    /// capture failures or a run the deadline or a cancellation ended.
+    /// Refuses a Git common directory, stage directory, canvas path, or target
+    /// directory the OCI mount grammar cannot represent, and returns runtime
+    /// launch, wait, and capture failures or a run the deadline or a
+    /// cancellation ended.
     pub fn stage_release(
         &self,
         git_common: &Path,
         delivered: Option<&str>,
         canvas: Option<ProviderCanvas<'_>>,
+        target: Option<&Path>,
     ) -> Result<ReleaseStage, ContainerError> {
         let stage = self.workspace.join(STAGE);
         fs::create_dir_all(&stage).map_err(|source| ContainerError::InspectWorkspace {
@@ -104,6 +109,7 @@ impl Container {
             &format!("{WORKSPACE_MOUNT}/{STAGE}"),
             delivered,
             canvas,
+            target,
         )?;
         runtime_arguments.extend([
             self.image.to_string(),
@@ -160,7 +166,7 @@ impl Container {
         })?;
         let out = representable(out)?;
         let mut runtime_arguments =
-            self.sealed_release_arguments(git_common, &out, CROSS_OUT, delivered, canvas)?;
+            self.sealed_release_arguments(git_common, &out, CROSS_OUT, delivered, canvas, None)?;
         runtime_arguments.extend([
             cross_image.to_owned(),
             "cargo".to_owned(),
@@ -190,8 +196,8 @@ impl Container {
     ///
     /// The workspace and its Git common directory are read-only, `writable`
     /// is the one host path mounted writable at `destination`, the Cargo home
-    /// and target are fresh scratch owned by this run, and the network is
-    /// disabled.
+    /// is fresh scratch owned by this run, the Cargo target is `target` or
+    /// fresh scratch, and the network is disabled.
     fn sealed_release_arguments(
         &self,
         git_common: &Path,
@@ -199,8 +205,10 @@ impl Container {
         destination: &str,
         delivered: Option<&str>,
         canvas: Option<ProviderCanvas<'_>>,
+        target: Option<&Path>,
     ) -> Result<Vec<String>, ContainerError> {
         let git_common = representable(git_common)?;
+        let target = target.map(representable).transpose()?;
         let mut runtime_arguments = vec![
             "run".to_owned(),
             "--rm".to_owned(),
@@ -237,11 +245,20 @@ impl Container {
             ),
             "--tmpfs".to_owned(),
             format!("{CARGO_HOME}:rw,noexec,mode=0700"),
-            // An anonymous volume rather than tmpfs: a release link and the
-            // `xtask` it runs outgrow a default Docker VM's memory, and `--rm`
-            // destroys the volume with this exact container.
             "--mount".to_owned(),
-            format!("type=volume,destination={CARGO_TARGET}"),
+            // Without a named host target, an anonymous volume rather than
+            // tmpfs: a release link and the `xtask` it runs outgrow a default
+            // Docker VM's memory, and `--rm` destroys the volume with this
+            // exact container.
+            target.map_or_else(
+                || format!("type=volume,destination={CARGO_TARGET}"),
+                |target| {
+                    format!(
+                        "type=bind,source={},destination={CARGO_TARGET}",
+                        target.display()
+                    )
+                },
+            ),
             // Rosetta's thread-context temporary file; see `battery_spec`.
             "--tmpfs".to_owned(),
             format!("{TEMPORARY}:rw,nosuid,nodev,noexec,mode=1777"),

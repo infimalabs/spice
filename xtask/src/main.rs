@@ -1302,6 +1302,7 @@ fn release_environment(ambient: &Ambient) -> xtask::ReleaseEnvironment {
         linux_stage: read("SPICE_LINUX_STAGE"), // env-policy: allow
         release_canvas: read("SPICE_RELEASE_CANVAS"), // env-policy: allow
         release_app: read("SPICE_RELEASE_APP"), // env-policy: allow
+        sealed_target: read("SPICE_SEALED_TARGET"), // env-policy: allow
     }
 }
 

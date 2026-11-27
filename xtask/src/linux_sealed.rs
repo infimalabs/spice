@@ -150,8 +150,9 @@ pub fn linux_sealed_stage(
         }
     };
     let canvas = provider_canvas(environment, delivered.is_some())?;
+    let target = environment.sealed_target.as_deref().map(Path::new);
     let stage = container
-        .stage_release(repository.common_dir(), delivered, canvas)
+        .stage_release(repository.common_dir(), delivered, canvas, target)
         .map_err(LinuxSealedError::Run)?;
     output
         .write_all(&stage.stdout)
