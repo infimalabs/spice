@@ -14,6 +14,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 sha2 = "0.10.9"
 toml = { version = "1.1.4", default-features = false, features = ["parse", "serde", "std"] }
 sill = { path = "../sill" }
+vendor-set = { path = "../vendor-set" }
 wire = { path = "../wire" }
 
 # Hardware SHA-256 on aarch64; see wire/Cargo.toml.
