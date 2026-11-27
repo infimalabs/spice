@@ -28,11 +28,14 @@ RUN rustup target add x86_64-pc-windows-msvc
 # carries exactly the admitted generation and is never published.
 COPY sysroot /opt/spice/msvc/sysroot
 COPY cargo-config.toml /tmp/windows-cross-cargo-config.toml
+COPY case-overlay.sh /tmp/windows-cross-case-overlay.sh
 
 RUN mkdir /opt/spice/msvc/bin && \
-    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/clang --driver-mode=cl --target=x86_64-pc-windows-msvc /winsysroot /opt/spice/msvc/sysroot "$@"\n' \
+    sh /tmp/windows-cross-case-overlay.sh /opt/spice/msvc/sysroot > /opt/spice/msvc/overlay.json && \
+    rm /tmp/windows-cross-case-overlay.sh && \
+    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/clang --driver-mode=cl --target=x86_64-pc-windows-msvc /winsysroot /opt/spice/msvc/sysroot -vfsoverlay /opt/spice/msvc/overlay.json "$@"\n' \
         > /opt/spice/msvc/bin/cl.exe && \
-    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/lld-link /winsysroot:/opt/spice/msvc/sysroot "$@"\n' \
+    printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/lld-link /winsysroot:/opt/spice/msvc/sysroot /vfsoverlay:/opt/spice/msvc/overlay.json "$@"\n' \
         > /opt/spice/msvc/bin/link.exe && \
     printf '#!/bin/sh\nexec /usr/lib/llvm-19/bin/llvm-lib "$@"\n' \
         > /opt/spice/msvc/bin/lib.exe && \

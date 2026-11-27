@@ -25,7 +25,7 @@ const OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 
 /// The tracked cross-image definition, relative to the worktree.
 const DEFINITION: &str = "dist/windows-cross";
-const DEFINITION_FILES: [&str; 2] = ["Dockerfile", "cargo-config.toml"];
+const DEFINITION_FILES: [&str; 3] = ["Dockerfile", "cargo-config.toml", "case-overlay.sh"];
 const IMAGE_REPOSITORY: &str = "spice-windows-cross";
 const IMAGE_PLATFORM: &str = "linux/amd64";
 /// Marks a build context whose admitted sysroot copy finished.

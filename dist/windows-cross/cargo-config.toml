@@ -3,7 +3,11 @@
 [target.x86_64-pc-windows-msvc]
 linker = "/opt/spice/msvc/bin/link.exe"
 
+# Bare MSVC names resolved through the image's PATH: build scripts such as
+# blake3's choose their MSVC sources only for a compiler named exactly `cl.exe`,
+# and clang in cl mode cannot preprocess the GNU `.S` alternatives without
+# writing into the read-only source tree.
 [env]
-CC_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/cl.exe"
-CXX_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/cl.exe"
-AR_x86_64_pc_windows_msvc = "/opt/spice/msvc/bin/lib.exe"
+CC_x86_64_pc_windows_msvc = "cl.exe"
+CXX_x86_64_pc_windows_msvc = "cl.exe"
+AR_x86_64_pc_windows_msvc = "lib.exe"
