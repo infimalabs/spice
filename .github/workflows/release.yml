@@ -137,6 +137,19 @@ jobs:
           rustup toolchain install --no-self-update
           cargo build --locked --package xtask
 
+      - name: Admit the dispatched release notes record
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
+          RELEASE_NOTES_RECORD: ${{ inputs.notes }}
+          RELEASE_NOTES_IDENTITY: ${{ inputs.notes_identity }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.json"
+          printf '%s' "$RELEASE_NOTES_RECORD" > "$notes"
+          "$CARGO_TARGET_DIR/debug/xtask" admit-hosted-release-notes \
+            "$notes" "$GITHUB_SHA" "$RELEASE_NOTES_IDENTITY"
+
       - name: Install the pinned Linux xwin
         shell: bash
         run: |
@@ -197,19 +210,6 @@ jobs:
           mkdir -p "$common/.spice"
           printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
 
-      - name: Admit the dispatched release notes record
-        shell: bash
-        env:
-          RELEASE_NOTES_RECORD: ${{ inputs.notes }}
-          RELEASE_NOTES_IDENTITY: ${{ inputs.notes_identity }}
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_NOTES_IDENTITY" =~ ^[0-9a-f]{64}$ ]]
-          test -n "$RELEASE_NOTES_RECORD"
-          notes="$RUNNER_TEMP/release-notes.json"
-          printf '%s' "$RELEASE_NOTES_RECORD" > "$notes"
-          test "$(jq -r .identity "$notes")" = "$RELEASE_NOTES_IDENTITY"
-          test "$(jq -r .release_commit "$notes")" = "$GITHUB_SHA"
 
       - name: Resume or run the complete release
         shell: bash

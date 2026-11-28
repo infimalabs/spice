@@ -196,7 +196,7 @@ fn admit_notes(
     admitted: bool,
 ) -> Result<wire::ReleaseNotes, PublishError> {
     let notes = if admitted {
-        decode_admitted_notes(candidate, source_commit)?
+        decode_admitted_notes(candidate, source_commit, None)?
     } else {
         let canonical = spice::release_history::draft(worktree, Some(source_commit))
             .map_err(|error| PublishError::Refused(error.to_string()))?;
@@ -207,9 +207,24 @@ fn admit_notes(
     Ok(notes)
 }
 
+/// Admit one complete journal-derived notes record before any hosted release
+/// setup or provider dispatch.
+pub fn admit_hosted_release_notes(
+    path: &Path,
+    source_commit: &str,
+    identity: &str,
+) -> Result<wire::ReleaseNotes, PublishError> {
+    let candidate = fs::read_to_string(path).map_err(|source| PublishError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    decode_admitted_notes(&candidate, source_commit, Some(identity))
+}
+
 fn decode_admitted_notes(
     candidate: &str,
     source_commit: &str,
+    expected_identity: Option<&str>,
 ) -> Result<wire::ReleaseNotes, PublishError> {
     let notes: wire::ReleaseNotes =
         serde_json::from_str(candidate).map_err(PublishError::Decode)?;
@@ -220,6 +235,11 @@ fn decode_admitted_notes(
             "release notes name {}, not the requested {source_commit}",
             notes.release_commit
         )));
+    }
+    if expected_identity.is_some_and(|identity| identity != notes.identity.to_string()) {
+        return Err(PublishError::Refused(
+            "dispatched release-note identity does not match the admitted document".to_owned(),
+        ));
     }
     Ok(notes)
 }
@@ -414,8 +434,12 @@ mod tests {
         };
         let encoded = serde_json::to_string(&notes).expect("record encodes");
 
-        let error =
-            decode_admitted_notes(&encoded, &"b".repeat(40)).expect_err("another commit refuses");
+        let error = decode_admitted_notes(&encoded, &"b".repeat(40), None)
+            .expect_err("another commit refuses");
         assert!(error.to_string().contains("not the requested"));
+
+        let error = decode_admitted_notes(&encoded, &"a".repeat(40), Some(&"c".repeat(64)))
+            .expect_err("another identity refuses");
+        assert!(error.to_string().contains("identity"));
     }
 }

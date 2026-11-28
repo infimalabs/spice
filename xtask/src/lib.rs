@@ -59,7 +59,7 @@ pub use develop::refresh_install;
 #[cfg(not(target_arch = "wasm32"))]
 pub use hosted_release_dispatch::{DispatchHostedReleaseError, dispatch_hosted_release};
 pub use hosted_release_publish::{
-    PublishEffect, PublishError, PublishRequest, publish_hosted_release,
+    PublishEffect, PublishError, PublishRequest, admit_hosted_release_notes, publish_hosted_release,
 };
 pub use linux_sealed::{LinuxSealedError, linux_sealed_stage};
 pub use prepared_artifact::{PreparedArtifactError, prepared_artifact};
