@@ -589,6 +589,7 @@ fn reconcile_client_recovery(
                         phase: None,
                         nothing_stolen: false,
                         transplant: None,
+                        parked: None,
                     };
                     let body = if task_reply {
                         CommandAnswer::Task(Box::new(wire::intent::TaskAnswer {

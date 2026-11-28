@@ -190,6 +190,7 @@ fn claim_opening(journal: &mut Journal, command: u8, source: body::SourceBoundar
                 phase: None,
                 nothing_stolen: false,
                 transplant: None,
+                parked: None,
             },
         )
         .expect("the claim receipt builds");
@@ -286,6 +287,7 @@ fn free(journal: &mut Journal, command: u8) {
                 phase: None,
                 nothing_stolen: false,
                 transplant: None,
+                parked: None,
             },
         )
         .expect("the release receipt builds");
@@ -1114,6 +1116,7 @@ fn a_task_command_that_appends_no_fact_is_refused_instead_of_receipted() {
                 phase: None,
                 nothing_stolen: false,
                 transplant: None,
+                parked: None,
             },
         )
         .expect("the receipt itself is well formed");
