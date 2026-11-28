@@ -339,6 +339,7 @@ pub struct Selection<'a> {
     effective_priority: i64,
     downstream_weight: usize,
     last_resort: bool,
+    independent_handoff: bool,
     topic_origin_at: Option<Instant>,
 }
 
@@ -379,11 +380,11 @@ impl<'a> Selection<'a> {
 ///
 /// This is the only allocation policy in `board`. It derives completed
 /// dependencies from the same supplied head set and applies ordinary task and
-/// environment filters. Independent handoffs back to their prior claimant,
-/// self-authored reviews, and explicitly freed rows form the last-resort class.
-/// Effective priority and downstream weight follow, then the oldest topic
-/// origin, then the handle.
-/// Identical evidence always returns the same task regardless of slice order.
+/// environment filters. A handoff to a peer ranks first; a handoff back to its
+/// prior author and a row the actor freed form the last-resort class. Effective
+/// priority and downstream weight follow, then the oldest topic origin, then
+/// the handle. Identical evidence always returns the same task regardless of
+/// slice order.
 #[must_use]
 pub fn select<'a>(
     entries: &'a [Entry],
@@ -584,37 +585,50 @@ fn indexed_candidates<'a>(
         .enumerate()
         .filter(|(_, entry)| selectable(entry, actor, subscription, completed, now))
         .filter(|(_, entry)| environment_satisfied(entry, environment))
-        .map(|(entry_index, entry)| Selection {
-            entry,
-            entry_index,
-            urgency: Urgency::from_heads(entry),
-            effective_priority: scores.effective_priorities[entry_index],
-            downstream_weight: scores.downstream_weights[entry_index],
-            last_resort: is_independent_handoff(entry, actor) || is_released_by(entry, actor),
-            topic_origin_at: entry.topic_origin_at(),
+        .map(|(entry_index, entry)| {
+            let handoff = entry.phase_handoff();
+            let last_resort = handoff.is_some_and(|handoff| handoff.contains(actor))
+                || is_released_by(entry, actor);
+            Selection {
+                entry,
+                entry_index,
+                urgency: Urgency::from_heads(entry),
+                effective_priority: scores.effective_priorities[entry_index],
+                downstream_weight: scores.downstream_weights[entry_index],
+                last_resort,
+                independent_handoff: handoff.is_some() && !last_resort,
+                topic_origin_at: entry.topic_origin_at(),
+            }
         })
         .collect()
 }
 
 /// Index of the one candidate the allocator hands out first.
 ///
-/// Ordinary work outranks last-resort rows, then effective priority and
-/// downstream weight. In that group, rows whose wait since topic origin
-/// exceeds the policy's horizon are overdue and rank oldest first above any
-/// score; otherwise the claimant's `match_score` (higher first, absent zero),
-/// asked of every row in the group, decides. The tied rows then fall to the
-/// oldest topic origin, then the handle.
+/// Ordinary work outranks last-resort rows, and a handoff to an independent
+/// peer outranks ordinary work. Effective priority and downstream weight
+/// follow. In that group, rows whose wait since topic origin exceeds the
+/// policy's horizon are overdue and rank oldest first above any score;
+/// otherwise the claimant's `match_score` (higher first, absent zero), asked of
+/// every row in the group, decides. The tied rows then fall to the oldest topic
+/// origin, then the handle.
 fn choose(candidates: &[Selection<'_>], ranking: Ranking<'_>) -> Option<usize> {
     let peer_class = candidates.iter().any(|candidate| !candidate.last_resort);
+    let handoff_class = candidates
+        .iter()
+        .any(|candidate| candidate.last_resort != peer_class && candidate.independent_handoff);
     let effective_priority = candidates
         .iter()
-        .filter(|candidate| candidate.last_resort != peer_class)
+        .filter(|candidate| {
+            candidate.last_resort != peer_class && candidate.independent_handoff == handoff_class
+        })
         .map(|candidate| candidate.effective_priority)
         .max()?;
     let downstream_weight = candidates
         .iter()
         .filter(|candidate| {
             candidate.last_resort != peer_class
+                && candidate.independent_handoff == handoff_class
                 && candidate.effective_priority == effective_priority
         })
         .map(|candidate| candidate.downstream_weight)
@@ -624,6 +638,7 @@ fn choose(candidates: &[Selection<'_>], ranking: Ranking<'_>) -> Option<usize> {
         .enumerate()
         .filter(|(_, candidate)| {
             candidate.last_resort != peer_class
+                && candidate.independent_handoff == handoff_class
                 && candidate.effective_priority == effective_priority
                 && candidate.downstream_weight == downstream_weight
         })

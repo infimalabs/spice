@@ -92,6 +92,15 @@ fn handoff(entry: Entry, until: &str) -> Entry {
     entry.with_phase_handoff(Some(board::PhaseHandoff::new(Actor::Spice, until, until)))
 }
 
+fn peer_handoff(entry: Entry) -> Entry {
+    let until = instant("2026-08-01T05:00:00.000Z");
+    entry.with_phase_handoff(Some(board::PhaseHandoff::new(
+        Actor::Lane(uuid("019fbbde-5105-75a3-a76a-722afde1e499")),
+        until,
+        until,
+    )))
+}
+
 fn now() -> Instant {
     instant("2026-08-01T06:00:00.000Z")
 }
@@ -155,6 +164,30 @@ fn priority_weight_and_class_each_beat_any_score() {
     let favored_last_resort = handoff(favored, "2026-08-01T05:00:00.000Z");
     let entries = [favored_last_resort, ordinary.clone()];
     assert_eq!(select(&entries, Some(&handle)).born(), ordinary.born());
+}
+
+#[test]
+fn peer_handoff_beats_priority_weight_score_age_and_handle() {
+    let peer_work = peer_handoff(
+        entry("BOARD-z1", "/board/peer", 40, None)
+            .with_topic_origin_at(Some(instant("2026-08-01T05:59:59.000Z"))),
+    );
+    let weighted_own_work = entry("BOARD-a1", "/board/own", 1, Some(TaskPriority::High))
+        .with_topic_origin_at(Some(instant("2026-08-01T02:00:00.000Z")));
+    let mut dependent = statement("BOARD-a2", "/board/own", 2);
+    dependent
+        .dependencies
+        .push(weighted_own_work.born().clone());
+    let entries = [
+        peer_work.clone(),
+        weighted_own_work.clone(),
+        admitted(dependent, None),
+    ];
+
+    assert_eq!(
+        select(&entries, Some(weighted_own_work.handle().as_str())).born(),
+        peer_work.born()
+    );
 }
 
 #[test]
