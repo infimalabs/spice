@@ -12,8 +12,10 @@ const TARGET: ReleaseTarget = ReleaseTarget::X86_64PcWindowsMsvc;
 
 /// The artifact root below the output directory; the build key and command
 /// records sit beside it, outside the inventory.
-const ROOT: &str = "root";
+pub(super) const ROOT: &str = "root";
 const BUILD_KEY: &str = "build-key.json";
+/// Where a symbol set places the PDB the candidate link wrote.
+pub(super) const CANDIDATE_PDB: &str = "candidate/spice.pdb";
 
 /// The repository-owned executables the Windows workflow runs beside the
 /// candidate, by package and binary.
@@ -28,11 +30,22 @@ pub struct CrossImage<'a> {
     pub msvc_generation: &'a str,
 }
 
+/// What one cross build lays out under its artifact root.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CrossSet {
+    /// The candidate, both runners, and every proof member's tests.
+    Release,
+    /// Only the candidate and the PDB its link wrote, for a detached symbol
+    /// rebuild; no runner or proof executable is built.
+    Symbols,
+}
+
 /// Cross-build the candidate, the hosted runner, the release publisher, and
 /// every proof member's test executables for `x86_64-pc-windows-msvc`, and lay
 /// them out under `out/root` with their build key at `out/build-key.json`.
 /// The toolchain the build observed lies beside the candidate, where the
-/// prebuilt stage checks it against the release pins.
+/// prebuilt stage checks it against the release pins. A [`CrossSet::Symbols`]
+/// build lays out only the candidate and the PDB its link wrote.
 ///
 /// The source is the release archive, as [`stage_target`] builds it: a
 /// delivered archive's tree is the workspace, otherwise the stage root's
@@ -48,6 +61,7 @@ pub fn cross_build_windows(
     environment: ReleaseEnvironment,
     image: CrossImage<'_>,
     app: AppOrigin,
+    set: CrossSet,
     out: &Path,
     output: &mut impl Write,
 ) -> Result<(), TargetBuildError> {
@@ -66,7 +80,15 @@ pub fn cross_build_windows(
     let executor = SystemExecutor::new(&root, &environment, &programs.rustc)?;
     let result = (|| {
         let toolchain = observe_toolchain(&executor, &programs, TARGET)?;
-        let outputs = build_set(&root, &build_root, &version, canvas, &programs, &executor)?;
+        let outputs = build_set(
+            &root,
+            &build_root,
+            &version,
+            canvas,
+            set,
+            &programs,
+            &executor,
+        )?;
         archive.verify()?;
         let mut inputs = build_key(&root, &archive, image, &programs, &executor)?;
         if let Some(linked_canvas) = linked_canvas {
@@ -91,6 +113,7 @@ fn build_set<E: Executor>(
     build_root: &Path,
     version: &ProductVersion,
     canvas: Option<crate::app::StagedCanvas>,
+    set: CrossSet,
     programs: &Programs,
     executor: &E,
 ) -> Result<Vec<Placed>, TargetBuildError> {
@@ -126,8 +149,15 @@ fn build_set<E: Executor>(
         .expect("a built candidate names its executable");
     let mut placed = vec![Placed {
         path: prebuilt::CANDIDATE.to_owned(),
-        source: executable,
+        source: executable.clone(),
     }];
+    if set == CrossSet::Symbols {
+        placed.push(Placed {
+            path: CANDIDATE_PDB.to_owned(),
+            source: executable.with_extension("pdb"),
+        });
+        return Ok(placed);
+    }
 
     let mut arguments = vec![
         OsString::from("build"),

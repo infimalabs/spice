@@ -47,7 +47,6 @@ pub struct ProviderCanvas<'a> {
 const CROSS_OUT: &str = "/windows-cross";
 /// Writable private stage used only while reconstructing detached symbols.
 const SYMBOL_STAGE: &str = "/symbol-stage";
-const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// Label that marks a persistent sealed Cargo target with the purpose it
 /// serves, so the first run under a new image finds the volumes it supersedes.
@@ -224,13 +223,16 @@ impl Container {
 
     /// Rebuild a Windows candidate and its PDB inside the exact cross image.
     ///
-    /// The source, provider canvas, Cargo target, and writable stage use the
-    /// same sealed boundary as the canonical cross build. The cross image
-    /// carries the admitted MSVC closure; the proof image identity remains the
-    /// one recorded in the generated release recipe.
+    /// The run is the canonical cross build's own `windows-cross-build`, so
+    /// the candidate links from the same source, canvas, image, and target
+    /// paths as the released candidate; it lays out only that candidate and
+    /// its PDB under `stage`. Nothing here runs the Windows executable. The
+    /// cross image carries the admitted MSVC closure; the proof image
+    /// identity remains the one recorded in the generated release recipe.
     pub fn stage_windows_symbols(
         &self,
         cross_image: &str,
+        msvc_generation: &str,
         git_common: &Path,
         stage: &Path,
         delivered: &str,
@@ -251,8 +253,6 @@ impl Container {
             &target,
         )?;
         runtime_arguments.extend([
-            "--env".to_owned(),
-            format!("{STAGE_ROOT}={SYMBOL_STAGE}"),
             cross_image.to_owned(),
             "cargo".to_owned(),
             "run".to_owned(),
@@ -260,11 +260,12 @@ impl Container {
             "-p".to_owned(),
             "xtask".to_owned(),
             "--".to_owned(),
-            "stage-target".to_owned(),
-            WINDOWS_TARGET.to_owned(),
-            "--unsigned".to_owned(),
-            "--proof-container".to_owned(),
-            self.image.to_string(),
+            "windows-cross-build".to_owned(),
+            SYMBOL_STAGE.to_owned(),
+            "--cross-image".to_owned(),
+            cross_image.to_owned(),
+            "--msvc-generation".to_owned(),
+            msvc_generation.to_owned(),
             "--symbols".to_owned(),
         ]);
         let run = self.sealed_release_run(
