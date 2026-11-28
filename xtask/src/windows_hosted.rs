@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -63,47 +63,93 @@ fn prepared_repository(repository: &str) -> String {
 /// latter cannot read its own GitHub user.
 const GHCR_USERNAME: &str = "spice-release";
 const REGISTRY_AUTH_RUNTIME: Duration = Duration::from_secs(2 * 60);
+static GHCR_HOLDERS: Mutex<GhcrHolders> = Mutex::new(GhcrHolders { active: 0 });
+
+struct GhcrHolders {
+    active: usize,
+}
+
+impl GhcrHolders {
+    fn acquire(&mut self) -> bool {
+        let login = self.active == 0;
+        self.active += 1;
+        login
+    }
+
+    fn release(&mut self) -> Result<bool, String> {
+        self.active = self
+            .active
+            .checked_sub(1)
+            .ok_or_else(|| "GHCR credential holder count underflowed".to_owned())?;
+        Ok(self.active == 0)
+    }
+}
 
 /// Run `operation` while Docker and ORAS can read this machine's `gh`
-/// credential for GHCR, then remove that credential again.
+/// credential for GHCR. Concurrent operations share one credential; the last
+/// holder removes it.
 fn with_ghcr_login<T>(
     environment: &sill::Environment,
     cwd: &Path,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let token = command_text(
-        "GitHub registry token lookup",
-        REGISTRY_AUTH_RUNTIME,
-        environment,
-        cwd,
-        "gh",
-        &["auth", "token"],
-    )?;
-    command::run(
-        "GHCR login",
-        REGISTRY_AUTH_RUNTIME,
-        "docker",
-        [
-            "login",
-            "ghcr.io",
-            "--username",
-            GHCR_USERNAME,
-            "--password-stdin",
-        ],
-        environment,
-        cwd,
-        Some(token.trim().as_bytes()),
-    )?;
+    {
+        let mut holders = GHCR_HOLDERS
+            .lock()
+            .map_err(|_| "GHCR credential holder lock is poisoned".to_owned())?;
+        if holders.acquire() {
+            let login = || {
+                let token = command_text(
+                    "GitHub registry token lookup",
+                    REGISTRY_AUTH_RUNTIME,
+                    environment,
+                    cwd,
+                    "gh",
+                    &["auth", "token"],
+                )?;
+                command::run(
+                    "GHCR login",
+                    REGISTRY_AUTH_RUNTIME,
+                    "docker",
+                    [
+                        "login",
+                        "ghcr.io",
+                        "--username",
+                        GHCR_USERNAME,
+                        "--password-stdin",
+                    ],
+                    environment,
+                    cwd,
+                    Some(token.trim().as_bytes()),
+                )
+                .map(drop)
+            };
+            if let Err(error) = login() {
+                holders.active -= 1;
+                return Err(error);
+            }
+        }
+    }
+
     let result = operation();
-    let logout = command::run(
-        "GHCR logout",
-        REGISTRY_AUTH_RUNTIME,
-        "docker",
-        ["logout", "ghcr.io"],
-        environment,
-        cwd,
-        None,
-    );
+    let logout = {
+        let mut holders = GHCR_HOLDERS
+            .lock()
+            .map_err(|_| "GHCR credential holder lock is poisoned".to_owned())?;
+        holders.release()?.then(|| {
+            command::run(
+                "GHCR logout",
+                REGISTRY_AUTH_RUNTIME,
+                "docker",
+                ["logout", "ghcr.io"],
+                environment,
+                cwd,
+                None,
+            )
+            .map(drop)
+        })
+    }
+    .transpose();
     match (result, logout) {
         (Ok(value), Ok(_)) => Ok(value),
         (Ok(_), Err(error)) => Err(error),
@@ -721,5 +767,21 @@ impl From<WindowsHostedError> for HostedReleaseError {
 impl From<SessionError> for HostedReleaseError {
     fn from(source: SessionError) -> Self {
         Self::Session(source.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GhcrHolders;
+
+    #[test]
+    fn concurrent_registry_operations_logout_only_after_the_last_holder() {
+        let mut holders = GhcrHolders { active: 0 };
+
+        assert!(holders.acquire());
+        assert!(!holders.acquire());
+        assert!(!holders.release().unwrap());
+        assert!(holders.release().unwrap());
+        assert!(holders.release().is_err());
     }
 }
