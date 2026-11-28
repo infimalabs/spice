@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 use windows_execution::hosted::client::{Attach, ReleaseInputs};
 
@@ -147,7 +148,7 @@ pub fn publish_hosted_release(
             .map(|inputs| inputs.manifest().run_id),
     );
     let notes = notes.result?;
-    let inputs = inputs.result?;
+    let inputs = Arc::new(inputs.result?);
     let stage_root = session.stage_root();
     let spans = hosted_release_stage_with_inputs_into(
         inputs.manifest().run_id,

@@ -43,6 +43,7 @@ const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 
 /// The release host's environments the Windows cross build reads, as
 /// `windows-cross` reads them.
+#[derive(Clone)]
 pub struct CrossHost {
     pub release: ReleaseEnvironment,
     pub ambient: sill::Environment,
