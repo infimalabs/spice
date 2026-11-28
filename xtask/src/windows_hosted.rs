@@ -696,8 +696,18 @@ fn windows_hosted_stage_controlled(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
+    writeln!(
+        output,
+        "Windows staging phase: Linux-hosted cross preparation"
+    )
+    .map_err(WindowsHostedError::Output)?;
     let repository = windows_execution::hosted::client::require_public_attestation_repository()?;
     let bundle = cross_bundle::release_bundle(host, inputs, &repository, output, error_output)?;
+    writeln!(
+        output,
+        "Windows staging phase: native Windows provider dispatch and execution"
+    )
+    .map_err(WindowsHostedError::Output)?;
     let mut commands = vec![bundle.stage];
     commands.extend_from_slice(bundle.battery.commands());
     let execution = windows_execution::hosted::client::windows_release_commands_into_controlled(
@@ -721,6 +731,11 @@ fn windows_hosted_stage_controlled(
                 "hosted Windows proof receipt refused: {error}"
             ))
         })?;
+        writeln!(
+            output,
+            "Windows staging phase: admitted native Windows provider output"
+        )
+        .map_err(WindowsHostedError::Output)?;
     }
     Ok(execution)
 }
