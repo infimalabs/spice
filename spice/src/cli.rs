@@ -136,8 +136,8 @@ impl ExitOutcome {
 }
 
 /// Common bound for every app opening and command answer. A supervised tool
-/// call still unanswered at this same bound is reported as blocked, so client
-/// failure and operator status never use independent timing policy.
+/// call still unanswered at this same bound admits pending steering through
+/// the existing safe interruption path without changing the lane's liveness.
 pub const APP_ANSWER_BOUND: Duration = Duration::from_secs(20);
 
 /// Bound for an answer the resident composes from state it already holds.

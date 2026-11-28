@@ -15,12 +15,6 @@ pub(in crate::resident) fn command_result<B: serde::Serialize, A: serde::Seriali
 }
 
 const QUIET_HORIZON: Duration = Duration::from_millis(wire::intent::LANE_QUIET_HORIZON_MILLIS);
-const TOOL_BLOCK_HORIZON: Duration = crate::cli::APP_ANSWER_BOUND;
-enum ToolState {
-    Clear,
-    Pending(Duration),
-    Blocked(String),
-}
 
 /// One lane answer over `head`; each row shows the code `codes` reports for
 /// its lane.
@@ -32,19 +26,7 @@ pub(super) fn answer(
     codes: &bus::TaskFacts,
 ) -> CommandResult<LaneAnswer> {
     let now = Monotonic::now();
-    let mut answer = answer_at(
-        head,
-        selected,
-        now,
-        |lane| seats.activity(lane),
-        |lane| match seats.tool_call_status(lane, now, TOOL_BLOCK_HORIZON) {
-            lane::occupant::ToolCallStatus::Clear => ToolState::Clear,
-            lane::occupant::ToolCallStatus::Pending(remaining) => ToolState::Pending(remaining),
-            lane::occupant::ToolCallStatus::Blocked(call) => {
-                ToolState::Blocked(call.command().to_owned())
-            }
-        },
-    )?;
+    let mut answer = answer_at(head, selected, now, |lane| seats.activity(lane))?;
     for row in &mut answer.lanes {
         row.speech = worktree_speech(paths, &row.worktree);
         row.jobs = terminal::unheard(&terminal::Jobs::for_lane(paths, row.lane));
@@ -58,7 +40,6 @@ fn answer_at(
     selected: Option<CanonicalUuid>,
     now: Monotonic,
     activity: impl Fn(CanonicalUuid) -> Option<lane::occupant::Activity>,
-    tool: impl Fn(CanonicalUuid) -> ToolState,
 ) -> CommandResult<LaneAnswer> {
     let mut refresh_after_millis: Option<u32> = None;
     let lanes = head
@@ -67,18 +48,8 @@ fn answer_at(
         .filter(|row| selected.is_none_or(|lane| row.lane == lane))
         .map(|row| {
             let observed = activity(row.lane);
-            let mut liveness = liveness(row, observed, now)?;
-            let blocked_on = match tool(row.lane) {
-                ToolState::Clear => None,
-                ToolState::Pending(remaining) => {
-                    schedule_refresh(&mut refresh_after_millis, remaining);
-                    None
-                }
-                ToolState::Blocked(command) => {
-                    liveness = wire::intent::LaneLiveness::Blocked;
-                    Some(command)
-                }
-            };
+            let liveness = liveness(row, observed, now)?;
+            let blocked_on = None;
             if liveness == wire::intent::LaneLiveness::Working
                 && let Some(observed) = observed
             {
@@ -737,16 +708,11 @@ mod tests {
             None,
             observed + Duration::from_millis(59_999),
             |_| Some(activity),
-            |_| ToolState::Clear,
         )
         .expect("recent activity projects");
-        let quiet = answer_at(
-            &head,
-            None,
-            observed + Duration::from_secs(60),
-            |_| Some(activity),
-            |_| ToolState::Clear,
-        )
+        let quiet = answer_at(&head, None, observed + Duration::from_secs(60), |_| {
+            Some(activity)
+        })
         .expect("boundary activity projects");
 
         assert_eq!(
@@ -764,56 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn a_long_tool_call_is_blocked_and_names_the_command() {
-        let head = wire::ResidencyHead {
-            epoch: uuid(4),
-            state: ResidentState::Seated,
-            topology_revision: 7,
-            lanes: vec![occupied()],
-            subscriptions: subscriptions(),
-            renewals: Vec::new(),
-        };
-        let now = Monotonic::now();
-        let pending = answer_at(
-            &head,
-            None,
-            now,
-            |_| Some(lane::occupant::Activity::new(uuid(2), now)),
-            |_| ToolState::Pending(TOOL_BLOCK_HORIZON),
-        )
-        .expect("pre-bound supervision projects");
-        assert_eq!(
-            pending.lanes[0].liveness,
-            wire::intent::LaneLiveness::Working
-        );
-        assert_eq!(
-            pending.refresh_after_millis,
-            Some(
-                u32::try_from(TOOL_BLOCK_HORIZON.as_millis() + 1)
-                    .expect("tool horizon fits browser milliseconds")
-            )
-        );
-
-        let answer = answer_at(
-            &head,
-            None,
-            now + TOOL_BLOCK_HORIZON,
-            |_| Some(lane::occupant::Activity::new(uuid(2), now)),
-            |_| ToolState::Blocked("spice room contribute DIRECTI-example".to_owned()),
-        )
-        .expect("blocked supervision projects");
-
-        assert_eq!(
-            answer.lanes[0].liveness,
-            wire::intent::LaneLiveness::Blocked
-        );
-        assert_eq!(
-            answer.lanes[0].blocked_on.as_deref(),
-            Some("spice room contribute DIRECTI-example")
-        );
-    }
-
-    #[test]
     fn lane_reads_expose_display_identity_without_capabilities() {
         let row = occupied();
         let capability = row.capabilities[0].to_string();
@@ -827,13 +743,9 @@ mod tests {
             renewals: vec![renewal.clone()],
         };
         let observed = Monotonic::now();
-        let answer = answer_at(
-            &head,
-            None,
-            observed,
-            |_| Some(lane::occupant::Activity::new(uuid(2), observed)),
-            |_| ToolState::Clear,
-        )
+        let answer = answer_at(&head, None, observed, |_| {
+            Some(lane::occupant::Activity::new(uuid(2), observed))
+        })
         .expect("supervised lane projects");
         let encoded = String::from_utf8(wire::encode(&answer).expect("answer encodes"))
             .expect("wire encoding is UTF-8");
@@ -868,14 +780,8 @@ mod tests {
             subscriptions: subscriptions(),
             renewals: Vec::new(),
         };
-        let error = answer_at(
-            &head,
-            None,
-            Monotonic::now(),
-            |_| None,
-            |_| ToolState::Clear,
-        )
-        .expect_err("unobserved occupancy must fail loudly");
+        let error = answer_at(&head, None, Monotonic::now(), |_| None)
+            .expect_err("unobserved occupancy must fail loudly");
         let Outcome::Fault(fault) = error else {
             panic!("unobserved occupancy must be a fault")
         };
@@ -893,14 +799,8 @@ mod tests {
             renewals: Vec::new(),
         };
 
-        let answer = answer_at(
-            &head,
-            None,
-            Monotonic::now(),
-            |_| None,
-            |_| ToolState::Clear,
-        )
-        .expect("simulated occupancy projects without a process");
+        let answer = answer_at(&head, None, Monotonic::now(), |_| None)
+            .expect("simulated occupancy projects without a process");
 
         assert_eq!(
             answer.lanes[0].liveness,
@@ -929,13 +829,9 @@ mod tests {
             subscriptions: subscriptions(),
             renewals: Vec::new(),
         };
-        let error = answer_at(
-            &head,
-            None,
-            Monotonic::now(),
-            |_| Some(lane::occupant::Activity::new(occupant, Monotonic::now())),
-            |_| ToolState::Clear,
-        )
+        let error = answer_at(&head, None, Monotonic::now(), |_| {
+            Some(lane::occupant::Activity::new(occupant, Monotonic::now()))
+        })
         .expect_err("simulated occupancy must never acquire real supervision");
         let Outcome::Fault(fault) = error else {
             panic!("simulated supervision must be a fault")

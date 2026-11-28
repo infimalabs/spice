@@ -87,38 +87,6 @@ impl Activity {
     }
 }
 
-/// One tool call the supervised occupant has started but not yet answered.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolCall {
-    occupant: CanonicalUuid,
-    call_id: String,
-    command: String,
-    started: Monotonic,
-}
-
-impl ToolCall {
-    /// Command the occupant is waiting on.
-    #[must_use]
-    pub fn command(&self) -> &str {
-        &self.command
-    }
-
-    /// Monotonic instant at which the call started.
-    #[must_use]
-    pub const fn started(&self) -> Monotonic {
-        self.started
-    }
-}
-/// Whether the oldest unanswered call is clear, approaching its bound, or
-/// blocked. The pending duration lets readers schedule the exact transition
-/// without polling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolCallStatus<'a> {
-    Clear,
-    Pending(Duration),
-    Blocked(&'a ToolCall),
-}
-
 impl Occupant {
     /// The lane this occupant sits in.
     #[must_use]
@@ -261,7 +229,6 @@ pub struct Seats {
     occupied: BTreeMap<CanonicalUuid, Occupant>,
     started: BTreeMap<CanonicalUuid, Activity>,
     activity: BTreeMap<CanonicalUuid, Activity>,
-    tool_calls: BTreeMap<CanonicalUuid, Vec<ToolCall>>,
     vacated: Vec<(CanonicalUuid, CanonicalUuid)>,
 }
 
@@ -273,7 +240,6 @@ impl Seats {
             occupied: BTreeMap::new(),
             started: BTreeMap::new(),
             activity: BTreeMap::new(),
-            tool_calls: BTreeMap::new(),
             vacated: Vec::new(),
         }
     }
@@ -320,78 +286,6 @@ impl Seats {
         }
         self.activity.insert(lane, Activity::new(occupant, at));
         true
-    }
-
-    /// Record one tool call started by the exact supervised occupant.
-    ///
-    /// Returns `false` for a stale report naming a vacant or succeeded seat.
-    pub fn start_tool_call(
-        &mut self,
-        lane: CanonicalUuid,
-        occupant: CanonicalUuid,
-        call_id: impl Into<String>,
-        command: impl Into<String>,
-        started: Monotonic,
-    ) -> bool {
-        if !self
-            .occupied
-            .get(&lane)
-            .is_some_and(|sitting| sitting.occupant == occupant)
-        {
-            return false;
-        }
-        let call_id = call_id.into();
-        let calls = self.tool_calls.entry(lane).or_default();
-        calls.retain(|call| call.call_id != call_id);
-        calls.push(ToolCall {
-            occupant,
-            call_id,
-            command: command.into(),
-            started,
-        });
-        true
-    }
-
-    /// Retire one answered tool call from the exact supervised occupant.
-    pub fn finish_tool_call(
-        &mut self,
-        lane: CanonicalUuid,
-        occupant: CanonicalUuid,
-        call_id: &str,
-    ) -> bool {
-        let Some(calls) = self.tool_calls.get_mut(&lane) else {
-            return false;
-        };
-        let before = calls.len();
-        calls.retain(|call| call.occupant != occupant || call.call_id != call_id);
-        let removed = calls.len() != before;
-        if calls.is_empty() {
-            self.tool_calls.remove(&lane);
-        }
-        removed
-    }
-
-    /// State of the oldest unanswered tool call at `now`.
-    #[must_use]
-    pub fn tool_call_status(
-        &self,
-        lane: CanonicalUuid,
-        now: Monotonic,
-        horizon: Duration,
-    ) -> ToolCallStatus<'_> {
-        let Some(call) = self
-            .tool_calls
-            .get(&lane)
-            .and_then(|calls| calls.iter().min_by_key(|call| call.started))
-        else {
-            return ToolCallStatus::Clear;
-        };
-        let elapsed = now.duration_since(call.started);
-        if elapsed >= horizon {
-            ToolCallStatus::Blocked(call)
-        } else {
-            ToolCallStatus::Pending(horizon - elapsed)
-        }
     }
 
     /// Every occupied lane, ordered by lane.
@@ -446,7 +340,6 @@ impl Seats {
     pub fn vacate(&mut self, lane: CanonicalUuid) -> Option<Occupant> {
         self.started.remove(&lane);
         self.activity.remove(&lane);
-        self.tool_calls.remove(&lane);
         let occupant = self.occupied.remove(&lane)?;
         self.vacated.push((lane, occupant.occupant()));
         Some(occupant)
@@ -478,7 +371,6 @@ impl Seats {
         self.occupied.clear();
         self.started.clear();
         self.activity.clear();
-        self.tool_calls.clear();
     }
 }
 
@@ -486,7 +378,7 @@ impl Seats {
 mod tests {
     use std::time::Duration;
 
-    use super::{DetachedProcess, DetachedWait, SeatError, Seats, ToolCallStatus};
+    use super::{DetachedProcess, DetachedWait, SeatError, Seats};
     use journal::crossing::CanonicalUuid;
     use sill::{WaitError, WaitOutcome};
 
@@ -550,49 +442,6 @@ mod tests {
             vec![(uuid(2), uuid(4)), (uuid(1), uuid(3))]
         );
         assert!(seats.take_vacated().is_empty());
-    }
-
-    #[test]
-    fn a_tool_call_becomes_blocked_at_the_bound_and_clears_on_its_result() {
-        let mut seats = Seats::new();
-        seats
-            .seat_detached(uuid(1), uuid(3), Box::new(Detached(1)))
-            .expect("the seat takes a detached handle");
-        let started = seats.started(uuid(1)).expect("seating is timed").at();
-        assert!(seats.start_tool_call(
-            uuid(1),
-            uuid(3),
-            "call-1",
-            "spice room contribute DIRECTI-example",
-            started,
-        ));
-
-        assert_eq!(
-            seats.tool_call_status(
-                uuid(1),
-                started + Duration::from_secs(19),
-                Duration::from_secs(20),
-            ),
-            ToolCallStatus::Pending(Duration::from_secs(1))
-        );
-        let ToolCallStatus::Blocked(blocked) = seats.tool_call_status(
-            uuid(1),
-            started + Duration::from_secs(20),
-            Duration::from_secs(20),
-        ) else {
-            panic!("the unanswered call crosses the exact bound");
-        };
-        assert_eq!(blocked.command(), "spice room contribute DIRECTI-example");
-
-        assert!(seats.finish_tool_call(uuid(1), uuid(3), "call-1"));
-        assert_eq!(
-            seats.tool_call_status(
-                uuid(1),
-                started + Duration::from_secs(30),
-                Duration::from_secs(20),
-            ),
-            ToolCallStatus::Clear
-        );
     }
 
     /// An empty seat takes one group, and the seat names what sits in it.
