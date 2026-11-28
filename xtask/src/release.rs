@@ -43,7 +43,7 @@ pub use windows_appliance::build_windows_appliance;
 mod prebuilt;
 pub use prebuilt::stage_prebuilt_target;
 mod windows_cross;
-pub use windows_cross::{CrossImage, cross_build_windows};
+pub use windows_cross::{CrossImage, CrossSet, cross_build_windows};
 
 #[cfg(unix)]
 mod signing;

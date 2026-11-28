@@ -384,7 +384,14 @@ fn cross_build(
             let delivered = source.delivered.ok_or(WindowsCrossError::SymbolInputs)?;
             let canvas = source.canvas.ok_or(WindowsCrossError::SymbolInputs)?;
             let run = container
-                .stage_windows_symbols(&cross_image, source.git_common, stage, delivered, canvas)
+                .stage_windows_symbols(
+                    &cross_image,
+                    &msvc.generation,
+                    source.git_common,
+                    stage,
+                    delivered,
+                    canvas,
+                )
                 .map_err(WindowsCrossError::Run)?;
             write_stage(&run, output, error_output)
         }

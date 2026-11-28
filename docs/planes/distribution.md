@@ -197,7 +197,11 @@ identity equals the recipe. The recipe binds the published executable and the
 executable as built before signing; the rebuild must reproduce the latter
 exactly, together with the Mach-O UUID on macOS, the ELF build ID on Linux,
 and the PE digest on Windows. Scratch and build outputs never enter the
-canonical release stage.
+canonical release stage. A Windows rebuild runs the canonical cross build,
+`windows-cross-build OUT ... --symbols`, in the exact cross image: it links
+only the candidate, keeps the PDB that link wrote, and executes no Windows
+image. The PDB is retained only when the candidate equals the recipe's built
+executable byte for byte under the recorded toolchain.
 
 Linux symbol rebuilds mount their private Cargo target as the sealed
 container's only writable host target. After any root-owned dependency restore,
