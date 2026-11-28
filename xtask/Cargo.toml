@@ -32,7 +32,7 @@ zip = { version = "9.3", default-features = false }
 signal-hook = "0.3.18"
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.189"
+libc = "0.2.191"
 
 # Hardware SHA-256 on aarch64; see wire/Cargo.toml.
 [target.'cfg(all(target_arch = "aarch64", not(target_env = "msvc")))'.dependencies]
