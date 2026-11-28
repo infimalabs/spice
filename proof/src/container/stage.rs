@@ -2,6 +2,8 @@
 //! or execute the Linux release themselves.
 
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 use super::{
@@ -212,6 +214,7 @@ impl Container {
             path: out.to_path_buf(),
             source,
         })?;
+        Self::make_cross_output_writable(out)?;
         let out = representable(out)?;
         let (target, notice) = self.persistent_target(WINDOWS_CROSS_PURPOSE, cross_image);
         let mut runtime_arguments =
@@ -240,6 +243,29 @@ impl Container {
             "sealed Windows cross build",
             "complete Windows cross build",
         )
+    }
+
+    #[cfg(unix)]
+    fn make_cross_output_writable(out: &Path) -> Result<(), ContainerError> {
+        let mut permissions = fs::metadata(out)
+            .map_err(|source| ContainerError::InspectWorkspace {
+                path: out.to_path_buf(),
+                source,
+            })?
+            .permissions();
+        // Docker may map its root user away from the host user that created
+        // this private bind source. The sealed run has no other writable host
+        // path.
+        permissions.set_mode(permissions.mode() | 0o777);
+        fs::set_permissions(out, permissions).map_err(|source| ContainerError::InspectWorkspace {
+            path: out.to_path_buf(),
+            source,
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn make_cross_output_writable(_out: &Path) -> Result<(), ContainerError> {
+        Ok(())
     }
 
     /// Runtime arguments every sealed release run shares, up to its image.
