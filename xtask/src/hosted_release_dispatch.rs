@@ -43,7 +43,7 @@ pub fn dispatch_hosted_release(
         source_commit: &source_commit,
         notes: &notes_record,
         notes_identity: &notes_identity,
-        stage_only,
+        stage_only: if stage_only { "true" } else { "false" },
     })?;
 
     let mut command = Command::new("gh");
@@ -103,7 +103,7 @@ struct WorkflowInputs<'a> {
     source_commit: &'a str,
     notes: &'a str,
     notes_identity: &'a str,
-    stage_only: bool,
+    stage_only: &'static str,
 }
 
 /// Why local notes could not be admitted and dispatched.
@@ -168,5 +168,30 @@ impl From<WindowsHostedError> for DispatchHostedReleaseError {
 impl From<serde_json::Error> for DispatchHostedReleaseError {
     fn from(error: serde_json::Error) -> Self {
         Self::Encode(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_dispatch_inputs_are_strings() {
+        let source_commit = "a".repeat(40);
+        let notes_identity = "b".repeat(64);
+        let encoded = serde_json::to_value(WorkflowInputs {
+            source_commit: &source_commit,
+            notes: "{}",
+            notes_identity: &notes_identity,
+            stage_only: "true",
+        })
+        .expect("inputs encode");
+        assert!(
+            encoded
+                .as_object()
+                .expect("inputs encode as an object")
+                .values()
+                .all(serde_json::Value::is_string)
+        );
     }
 }
