@@ -247,20 +247,47 @@ impl Container {
 
     #[cfg(unix)]
     fn make_cross_output_writable(out: &Path) -> Result<(), ContainerError> {
-        let mut permissions = fs::metadata(out)
-            .map_err(|source| ContainerError::InspectWorkspace {
-                path: out.to_path_buf(),
+        fn make_directory_writable(path: &Path) -> Result<(), ContainerError> {
+            let mut permissions = fs::metadata(path)
+                .map_err(|source| ContainerError::InspectWorkspace {
+                    path: path.to_path_buf(),
+                    source,
+                })?
+                .permissions();
+            // Docker may map its root user away from the host user that created
+            // this private bind source. The sealed run has no other writable
+            // host path.
+            permissions.set_mode(permissions.mode() | 0o777);
+            fs::set_permissions(path, permissions).map_err(|source| {
+                ContainerError::InspectWorkspace {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+            for entry in fs::read_dir(path).map_err(|source| ContainerError::InspectWorkspace {
+                path: path.to_path_buf(),
                 source,
-            })?
-            .permissions();
-        // Docker may map its root user away from the host user that created
-        // this private bind source. The sealed run has no other writable host
-        // path.
-        permissions.set_mode(permissions.mode() | 0o777);
-        fs::set_permissions(out, permissions).map_err(|source| ContainerError::InspectWorkspace {
-            path: out.to_path_buf(),
-            source,
-        })
+            })? {
+                let entry = entry.map_err(|source| ContainerError::InspectWorkspace {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                let child = entry.path();
+                if entry
+                    .file_type()
+                    .map_err(|source| ContainerError::InspectWorkspace {
+                        path: child.clone(),
+                        source,
+                    })?
+                    .is_dir()
+                {
+                    make_directory_writable(&child)?;
+                }
+            }
+            Ok(())
+        }
+
+        make_directory_writable(out)
     }
 
     #[cfg(not(unix))]
