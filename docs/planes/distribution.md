@@ -373,22 +373,27 @@ conflict. Missing or mismatched GHCR content refuses without consulting a
 workflow artifact or another store. Coordinator `gh` authentication must carry
 `read:packages`; publication additionally requires `write:packages`.
 
-`.github/workflows/proof-image.yml` prepares the Linux/amd64 proof image when
-one of its exact inputs changes. It builds and exercises the image, stamps the
-prepared build key into its admitted config, then has BuildKit export the
-already-admitted image directly to the `prepared` package under a `proof-KEY`
-discovery tag. This preserves stable compressed layer descriptors instead of
-having the Docker engine recompress every layer during publication. Input
-staging resolves that tag, admits the build-key and vendor-set labels plus the
-Linux/amd64 config identity, and records the immutable image manifest and
-config digests. It never transfers the image. The Linux stage and the release
-coordinator's Windows cross branch resolve the recorded manifest again, pull
-only `repository@sha256:…`, and re-admit its platform, labels, and config
-identity before installing the vendor-set tag used by sealed builds. Neither
-hosted consumer fetches the local archive form. Registry layer identity
-therefore deduplicates unchanged base, apt, tool, and vendor layers across
-proof-image versions. Local `proof-image build`, `load`, and `verify` retain
-their archive contract for development and break-glass recovery.
+`.github/workflows/proof-image.yml` is dispatch-only. The complete-release
+coordinator starts it for the exact selected landed commit immediately after
+admitting the request, then continues coordinator and input preparation
+without waiting for it. The proof workflow builds and exercises the image,
+stamps the prepared build key into its admitted config, then has BuildKit
+export the already-admitted image directly to the `prepared` package under a
+`proof-KEY` discovery tag. An existing exact key is rebuilt under the same
+admission and must reproduce its identity, but is not republished. Input
+staging derives that same key and waits under one declared deadline for its
+immutable tag, so a cold proof build overlaps source/canvas production without
+letting a consumer infer or substitute another image. It then admits the
+build-key and vendor-set labels plus the Linux/amd64 config identity and
+records the immutable image manifest and config digests. It never transfers
+the image. The Linux stage and the release coordinator's Windows cross branch
+resolve the recorded manifest again, pull only `repository@sha256:…`, and
+re-admit its platform, labels, and config identity before installing the
+vendor-set tag used by sealed builds. Neither hosted consumer fetches the
+local archive form. Registry layer identity therefore deduplicates unchanged
+base, apt, tool, and vendor layers across proof-image versions. Local
+`proof-image build`, `load`, and `verify` retain their archive contract for
+development and break-glass recovery.
 
 The hosted builder restores and exports a BuildKit layer cache scoped to the
 Linux proof image. That cache is derivable acceleration only: xtask passes
@@ -523,25 +528,30 @@ redispatches successful siblings. Either form accepts a trailing
 engine. Its supported entry point is the local journal-backed
 `dispatch-hosted-release` command. The workflow runs only by manual dispatch
 from the exact landed `main` revision named by the admitted notes; ordinary
-pushes cannot start it. One repository-wide concurrency group serializes
-public release effects. Immediately after building the coordinator and before
-proof-image or platform setup, the coordinator requires the structured note
+pushes start neither the complete release nor proof-image preparation. One
+repository-wide concurrency group serializes public release effects.
+Immediately after admitting the exact landed request, the coordinator
+dispatches proof-image preparation for that selected commit and continues its
+own setup. After building the coordinator, it requires the structured note
 record's source commit and domain-separated document identity, then re-admits
 its schema, curated Highlights, inventory boundary, and exact bytes without
 opening or reconstructing the local journal. The publisher repeats the same
-admission before any native stage. The coordinator compiles under its private
-Cargo home but records the runner's native rustup proxy home as bootstrap
-authority, so Windows cross staging resolves the tracked Rust channel without
-consulting the private dependency cache for toolchain executables. The workflow
-preserves the Git-common publication authority after every attempt under a
-run- and attempt-scoped artifact, validates and restores only regular files
-beneath `releases/`, and resumes the pinned commit on a rerun. A completed
-attempt records the notes-record and publication-plan digests; later attempts
-re-admit those bytes and freshly read the public release instead of publishing
-again. The final readback is the workflow's one result artifact. Notes
-admission and input production overlap, then Linux, Darwin, and Windows stage
-concurrently; each platform's tool and dependency preparation waits only for
-the immutable input record it consumes, never for a sibling.
+admission before any native stage. Proof preparation overlaps coordinator
+setup and input production; input resolution waits under a declared bound
+only for the immutable build key it derived. The coordinator compiles under
+its private Cargo home but records the runner's native rustup proxy home as
+bootstrap authority, so Windows cross staging resolves the tracked Rust
+channel without consulting the private dependency cache for toolchain
+executables. The workflow preserves the Git-common publication authority
+after every attempt under a run- and attempt-scoped artifact, validates and
+restores only regular files beneath `releases/`, and resumes the pinned commit
+on a rerun. A completed attempt records the notes-record and publication-plan
+digests; later attempts re-admit those bytes and freshly read the public
+release instead of publishing again. The final readback is the workflow's one
+result artifact. Notes admission and input production overlap, then Linux,
+Darwin, and Windows stage concurrently; each platform's tool and dependency
+preparation waits only for the immutable input record it consumes, never for
+a sibling.
 Each platform executes the complete proof battery in its provider-specific sealed
 environment and returns its detached receipt with the staged bytes. When a
 battery refuses, its displayed error names every non-clean member, its

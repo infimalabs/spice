@@ -1,26 +1,13 @@
 name: Proof image preparation
-run-name: Proof image preparation ${{ github.sha }}
+run-name: Proof image preparation ${{ inputs.source_commit }}
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .cargo/config.toml
-      - .github/workflows/proof-image.yml
-      - .github/scripts/proof-image-build-key.sh
-      - Cargo.lock
-      - dist/proof-image/**
-      - rust-toolchain.toml
-      - prepared/**
-      - xtask/src/proof_image.rs
-      - proof/**
-      - vendor-set/**
-      - xtask/Cargo.toml
-      - xtask/src/lib.rs
-      - xtask/src/main.rs
-      - xtask/src/prepared_artifact.rs
-      - wire/src/manifest.rs
   workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact landed main commit whose proof image is required
+        required: true
+        type: string
 
 permissions: {}
 
@@ -36,9 +23,22 @@ jobs:
       - name: Check out exact source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_commit }}
           fetch-depth: 1
           persist-credentials: false
+
+      - name: Admit exact landed source
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$SOURCE_COMMIT" refs/remotes/origin/main
 
       - name: Set up cache-capable Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
