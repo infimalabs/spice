@@ -107,8 +107,8 @@ fn rebuild_symbol_artifact(
 }
 
 fn admit_rebuilt_recipe(expected: &SymbolRecipe, generated: &SymbolRecipe) -> Result<(), String> {
-    if generated.released_binary != expected.released_binary {
-        return Err("rebuilt executable digest differs from the released binary".to_owned());
+    if generated.built_binary != expected.built_binary {
+        return Err("rebuilt executable digest differs from the released build".to_owned());
     }
     if generated.build_id != expected.build_id {
         return Err(format!(
@@ -262,18 +262,25 @@ mod tests {
             toolchain: "rustc 1.97.1".to_owned(),
             flags: vec!["--locked".to_owned()],
             released_binary: Digest::compute(Domain::DistArtifact, b"binary"),
+            built_binary: Digest::compute(Domain::DistArtifact, b"binary"),
             build_id: "0123456789abcdef".to_owned(),
         }
     }
 
+    /// A signed release publishes the signed executable, while a rebuild can
+    /// only reproduce the executable as it was built before signing.
     #[test]
-    fn rebuilt_recipe_refuses_binary_drift_with_the_same_build_identity() {
-        let expected = recipe();
+    fn rebuilt_recipe_of_a_signed_release_admits_its_unsigned_build() {
+        let mut expected = recipe();
+        expected.target = ReleaseTarget::Aarch64AppleDarwin;
         let mut rebuilt = expected.clone();
-        rebuilt.released_binary = Digest::compute(Domain::DistArtifact, b"different binary");
+        expected.released_binary = Digest::compute(Domain::DistArtifact, b"signed binary");
 
+        admit_rebuilt_recipe(&expected, &rebuilt).expect("an exact unsigned rebuild admits");
+
+        rebuilt.built_binary = Digest::compute(Domain::DistArtifact, b"different binary");
+        rebuilt.released_binary = rebuilt.built_binary.clone();
         assert!(admit_rebuilt_recipe(&expected, &rebuilt).is_err());
-        admit_rebuilt_recipe(&expected, &expected).expect("an exact rebuild admits");
     }
 
     #[test]

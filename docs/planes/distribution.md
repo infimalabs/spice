@@ -193,9 +193,11 @@ whose executable carries no archive refuses installed serving at startup.
 first admits the released binary digest, checked-out commit and lock authority.
 It rebuilds the same line-table candidate in private scratch, extracts the
 target's detached debug artifact, and publishes it only when the fresh native
-identity equals the recipe. macOS compares the Mach-O UUID, Linux compares the
-ELF build ID, and Windows compares the exact rebuilt PE digest. Scratch and
-build outputs never enter the canonical release stage.
+identity equals the recipe. The recipe binds the published executable and the
+executable as built before signing; the rebuild must reproduce the latter
+exactly, together with the Mach-O UUID on macOS, the ELF build ID on Linux,
+and the PE digest on Windows. Scratch and build outputs never enter the
+canonical release stage.
 
 `dispatch-hosted-release --symbols` sets the explicit `release_symbols` input.
 After canonical release completion, `release.yml` dispatches one independent
@@ -260,7 +262,8 @@ credential or OIDC authority. Its signing job admits the native bytes from
 that stage and runs only host credential and Apple signing tools; no
 repository-built executable enters that job. A following job, holding neither
 credentials nor OIDC authority, runs the transported finalizer to rebind the
-payload, the symbol recipe's released binary, and any dSYM to the signed bytes
+payload, the symbol recipe's released binary, and any dSYM to the signed bytes,
+leaving the recipe's as-built executable untouched,
 and admits the resulting stage. A default stage inventories only the
 executable and recipe; admission refuses a recipe naming any other executable.
 The OIDC job only downloads those files and invokes GitHub's pinned provenance

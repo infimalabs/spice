@@ -809,6 +809,7 @@ mod tests {
             toolchain: pins.rust.clone(),
             flags: vec!["--release".to_owned()],
             released_binary: native.clone(),
+            built_binary: native.clone(),
             build_id: format!("fixture-{target}"),
         })
         .expect("symbol recipe encodes");

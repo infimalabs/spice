@@ -906,8 +906,13 @@ pub struct SymbolRecipe {
     pub toolchain: String,
     /// Stable Cargo and linker arguments needed for the canonical binary.
     pub flags: Vec<String>,
-    /// Exact final executable admitted by the published payload.
+    /// Exact final executable admitted by the published payload; on a signed
+    /// platform, the signed executable.
     pub released_binary: Digest,
+    /// Exact executable as built, before any platform signing. A rebuild
+    /// reproduces this identity; it equals `released_binary` where the
+    /// platform does not sign.
+    pub built_binary: Digest,
     /// Platform build identity; native UUID/build-id where available.
     pub build_id: String,
 }

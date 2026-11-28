@@ -377,7 +377,7 @@ fn symbol_recipe(
     build_id: &str,
     artifacts: &[Artifact],
 ) -> Result<SymbolRecipe, serde_json::Error> {
-    let released_binary = artifacts
+    let built_binary = artifacts
         .iter()
         .find(|artifact| artifact.path == target.executable_path())
         .expect("the built inventory carries the native executable")
@@ -417,7 +417,8 @@ fn symbol_recipe(
         proof_container: pins.proof_container.clone(),
         toolchain: pins.rust.clone(),
         flags,
-        released_binary,
+        released_binary: built_binary.clone(),
+        built_binary,
         build_id,
     })
 }
@@ -779,6 +780,7 @@ mod signed_darwin_tests {
             proof_container: pins.proof_container.clone(),
             toolchain: pins.rust.clone(),
             flags: vec!["rustc".to_owned()],
+            built_binary: released_binary.clone(),
             released_binary,
             build_id: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
         }
@@ -900,7 +902,12 @@ mod signed_darwin_tests {
 
         let native_digest = digest(Domain::DistArtifact, &signed);
         assert_eq!(staged.payload.native, native_digest);
-        assert_eq!(finalized_recipe(&staged).released_binary, native_digest);
+        let recipe = finalized_recipe(&staged);
+        assert_eq!(recipe.released_binary, native_digest);
+        assert_eq!(
+            recipe.built_binary,
+            digest(Domain::DistArtifact, &unsigned.native)
+        );
         assert_eq!(
             staged
                 .payload
