@@ -10,6 +10,8 @@ mod app_demo;
 mod build_cache;
 mod develop;
 mod gate_command;
+#[cfg(not(target_arch = "wasm32"))]
+mod hosted_release_dispatch;
 mod hosted_release_publish;
 mod hosted_release_session;
 mod linux_sealed;
@@ -54,6 +56,8 @@ pub use verify_error::{GateArmError, VerifyError};
 // off the wasm target; the workspace wasm check compiles this crate too.
 #[cfg(not(target_arch = "wasm32"))]
 pub use develop::refresh_install;
+#[cfg(not(target_arch = "wasm32"))]
+pub use hosted_release_dispatch::{DispatchHostedReleaseError, dispatch_hosted_release};
 pub use hosted_release_publish::{
     PublishEffect, PublishError, PublishRequest, publish_hosted_release,
 };

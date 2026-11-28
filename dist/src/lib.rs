@@ -20,7 +20,7 @@ pub use darwin_signing::{
 };
 pub use notes::{
     Correction, Landing, NotesError, NotesInput, ReleaseCommit, ReviewStanding,
-    curated_release_notes, release_notes,
+    admit_curated_release_notes, curated_release_notes, release_notes,
 };
 pub use pins::{PinError, PinName, RequiredPins};
 pub use source::{

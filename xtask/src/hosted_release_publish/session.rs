@@ -105,17 +105,22 @@ impl Publications {
     /// may pin `main`. Any other pairing refuses before a provider call.
     pub(super) fn admit(&self, request: &PublishRequest) -> Result<Option<String>, PublishError> {
         match (self.pending()?, request) {
-            (None, PublishRequest::New { .. }) => Ok(None),
-            (Some(pinned), PublishRequest::Resume { commit, .. }) if pinned == *commit => {
-                Ok(Some(pinned))
-            }
+            (None, PublishRequest::New { .. } | PublishRequest::NewAdmitted { .. }) => Ok(None),
+            (
+                Some(pinned),
+                PublishRequest::Resume { commit, .. }
+                | PublishRequest::ResumeAdmitted { commit, .. },
+            ) if pinned == *commit => Ok(Some(pinned)),
             (Some(pinned), _) => Err(self.pinned_elsewhere(&pinned)?),
-            (None, PublishRequest::Resume { commit, .. } | PublishRequest::Abandon(commit)) => {
-                Err(PublishError::Refused(format!(
-                    "no publication request is pending, so {commit} cannot be resumed or \
-                     abandoned; run publish-hosted-release with --notes FILE to pin main"
-                )))
-            }
+            (
+                None,
+                PublishRequest::Resume { commit, .. }
+                | PublishRequest::ResumeAdmitted { commit, .. }
+                | PublishRequest::Abandon(commit),
+            ) => Err(PublishError::Refused(format!(
+                "no publication request is pending, so {commit} cannot be resumed or \
+                 abandoned; run publish-hosted-release with --notes FILE to pin main"
+            ))),
         }
     }
 

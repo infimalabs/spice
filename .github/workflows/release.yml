@@ -4,8 +4,16 @@ run-name: Complete release from ${{ github.sha }}
 on:
   workflow_dispatch:
     inputs:
+      source_commit:
+        description: Exact landed main commit admitted with the local journal
+        required: true
+        type: string
       notes:
-        description: Authored Markdown release notes, including Highlights
+        description: Complete curated release-notes record admitted by the local journal
+        required: true
+        type: string
+      notes_identity:
+        description: Domain-separated identity of the exact release-note document
         required: true
         type: string
       stage_only:
@@ -42,12 +50,16 @@ jobs:
 
       - name: Admit the explicit landed request
         shell: bash
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit }}
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REF" = refs/heads/main
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$REQUESTED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$REQUESTED_SOURCE_COMMIT" = "$GITHUB_SHA"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
 
@@ -185,14 +197,19 @@ jobs:
           mkdir -p "$common/.spice"
           printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
 
-      - name: Prepare authored release notes
+      - name: Admit the dispatched release notes record
         shell: bash
         env:
-          RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_NOTES_RECORD: ${{ inputs.notes }}
+          RELEASE_NOTES_IDENTITY: ${{ inputs.notes_identity }}
         run: |
           set -euo pipefail
-          test -n "$RELEASE_NOTES"
-          printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes.md"
+          [[ "$RELEASE_NOTES_IDENTITY" =~ ^[0-9a-f]{64}$ ]]
+          test -n "$RELEASE_NOTES_RECORD"
+          notes="$RUNNER_TEMP/release-notes.json"
+          printf '%s' "$RELEASE_NOTES_RECORD" > "$notes"
+          test "$(jq -r .identity "$notes")" = "$RELEASE_NOTES_IDENTITY"
+          test "$(jq -r .release_commit "$notes")" = "$GITHUB_SHA"
 
       - name: Resume or run the complete release
         shell: bash
@@ -203,7 +220,7 @@ jobs:
         run: |
           set -euo pipefail
           xtask="$CARGO_TARGET_DIR/debug/xtask"
-          notes="$RUNNER_TEMP/release-notes.md"
+          notes="$RUNNER_TEMP/release-notes.json"
           publications="$(git rev-parse --git-common-dir)/.spice/authority/releases/publication"
           complete="$publications/coordinator-complete.json"
           pending="$publications/pending.json"
@@ -215,9 +232,9 @@ jobs:
             if test -f "$pending"; then
               source_commit=$(jq -r .source_commit "$pending")
               [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
-              "$xtask" publish-hosted-release "$source_commit" --notes "$notes" --stage-only
+              "$xtask" publish-hosted-release "$source_commit" --admitted-notes "$notes" --stage-only
             else
-              "$xtask" publish-hosted-release --notes "$notes" --stage-only
+              "$xtask" publish-hosted-release --admitted-notes "$notes" --stage-only
             fi
             printf '### Staged release\n\n- source commit: `%s`\n' \
               "$(jq -r .source_commit "$pending")" >> "$GITHUB_STEP_SUMMARY"
@@ -235,9 +252,9 @@ jobs:
             if test -f "$pending"; then
               source_commit=$(jq -r .source_commit "$pending")
               [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
-              "$xtask" publish-hosted-release "$source_commit" --notes "$notes"
+              "$xtask" publish-hosted-release "$source_commit" --admitted-notes "$notes"
             elif test "${#plans[@]}" = 0; then
-              "$xtask" publish-hosted-release --notes "$notes"
+              "$xtask" publish-hosted-release --admitted-notes "$notes"
             elif test "${#plans[@]}" = 1 \
               && test ! -e "$(dirname "${plans[0]}")/unpublished"; then
               # The publisher removes pending.json only after fresh public
