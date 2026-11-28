@@ -81,6 +81,7 @@ impl SourceArchive {
             OsString::from("-C"),
             scratch.as_os_str().to_owned(),
         ];
+        let started = std::time::Instant::now();
         let output = std::process::Command::new(tar)
             .args(&arguments)
             .output()
@@ -89,14 +90,15 @@ impl SourceArchive {
                 source,
             })?;
         if !output.status.success() {
-            return Err(TargetBuildError::CommandFailed(CommandRecord {
+            return Err(TargetBuildError::CommandFailed(Box::new(CommandRecord {
                 label: "source-extract",
                 program: tar.to_path_buf(),
                 arguments,
                 code: output.status.code(),
+                elapsed: started.elapsed(),
                 stdout: output.stdout,
                 stderr: output.stderr,
-            }));
+            })));
         }
         Ok(scratch.join(crate::source_archive::ARCHIVE_ROOT))
     }

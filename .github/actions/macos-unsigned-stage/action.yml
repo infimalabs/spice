@@ -80,19 +80,20 @@ runs:
         canvas_object="$RUNNER_TEMP/release-canvas/release.macos-aarch64.o"
         "$PREPARED_ARTIFACT_TOOL" canvas-object macos-arm64 "$RELEASE_CANVAS" "$canvas_object"
         env "${candidate_env[@]}" "$cargo" rustc --locked --release --target aarch64-apple-darwin \
-          --target-dir "$release_target" --config "$debug_config" \
+          --target-dir "$release_target" --config "$debug_config" --timings \
           --package xtask --bin xtask --features spice/canvas -- \
           -C "link-arg=$canvas_object"
         driver_seconds=$(($(date +%s) - driver_started))
         proof_started=$(date +%s)
-        proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
-        proof_arguments=("$proof_target" --seal-only)
+        # The runner builds beside the xtask library in the driver's target
+        # directory under the same settings, so only the proof runner compiles.
+        proof_arguments=("$release_target" --seal-only --release-driver "$debug_config")
         case '${{ inputs.proof-dependencies-restored }}' in
           true) proof_arguments+=(--reuse-vendor) ;;
           false) ;;
           *) echo "proof-dependencies-restored must be true or false" >&2; exit 65 ;;
         esac
-        SPICE_PROOF_CARGO="$cargo" \
+        env "${candidate_env[@]}" SPICE_PROOF_CARGO="$cargo" \
           dist/proof-runner/build.sh "${proof_arguments[@]}"
         proof_seconds=$(($(date +%s) - proof_started))
         dependency_marker="$RUNNER_TEMP/native-dependencies/builds-complete"

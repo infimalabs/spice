@@ -412,13 +412,13 @@ the preparation and proof-build contracts. A change to those inputs selects a
 new key rather than restoring units Cargo would discard. An exact-source
 `prepared-artifact` bootstrap resolves the deterministic discovery tag, admits
 its config and manifest, fetches by manifest digest, and safely unpacks the
-inventoried candidate and proof target directories plus the vendored closure
-inside the native build boundary. Dependency archives preserve Cargo's output
+inventoried candidate target directories plus the vendored closure inside the
+native build boundary. Dependency archives preserve Cargo's output
 and fingerprint modification-time ordering; the restore copies those times
 intact so Cargo can keep admitted third-party units fresh.
-Before publication, Cargo removes every workspace package from both cold target
-copies. The vendor tree and remaining compiled bytes can therefore satisfy
-only unchanged third-party units. Every workspace crate,
+Before publication, Cargo removes every workspace package from the cold
+candidate target. The vendor tree and remaining compiled bytes can therefore
+satisfy only unchanged third-party units. Every workspace crate,
 repository-sensitive build script, generated proof pin, sealed proof runner,
 and final executable rebuilds from the admitted source.
 
@@ -680,8 +680,12 @@ in `dist/release/candidate.toml`, including the target and build directories,
 rustflags, debug-artifact profile override, and environment that `stage-target`
 gives its candidate build. The later candidate invocation therefore reuses the
 complete dependency and product-library graph and compiles only the `spice`
-binary unit. The stage summary records release-driver, proof-preparation,
-candidate-stage, and artifact-transition seconds separately. Binaryen's
+binary unit. The proof runner builds in the same target directory under the
+same settings beside the xtask library, so Cargo resolves the release driver's
+features and compiles only the runner. The stage summary records
+release-driver, proof-preparation, candidate-stage, and artifact-transition
+seconds separately, and the driver build's Cargo timings report is uploaded.
+Binaryen's
 admitted tool closure retains `wasm-opt` with its pinned sibling dynamic
 libraries; extracting the executable alone is not an executable tool.
 

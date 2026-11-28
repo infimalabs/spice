@@ -49,30 +49,41 @@ bundle="$root/target/proof-native-darwin" # env-policy: allow
 # The unsealed and sealed runner builds share one release target directory, the
 # optional first argument or this worktree's `target/`, so the sealed build
 # recompiles only the selected-source runner after `SPICE_NATIVE_PINS` changes.
-# Hosted release staging gives proof its own admitted dependency root rather
-# than sharing either candidate Cargo root.
-target=${1:-$root/target} # env-policy: allow
-bind=true
-case "${2:-}" in # env-policy: allow
-    '') ;;
-    --seal-only) bind=false ;;
-    *)
-        printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
-        exit 65
-        ;;
-esac
-reuse_vendor=false
-case "${3:-}" in # env-policy: allow
-    '') ;;
-    --reuse-vendor) reuse_vendor=true ;;
-    *)
-        printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
-        exit 65
-        ;;
-esac
-if [ "$#" -gt 3 ]; then
-    printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor]\n' "$0" >&2
+# Hosted release staging passes `--release-driver CONFIG` with the candidate
+# environment and the release driver's target directory: the runner then builds
+# for the candidate target under the candidate debug configuration beside the
+# xtask library, so Cargo resolves the same features and every crate the
+# release driver already compiled stays fresh.
+usage() {
+    printf 'usage: %s [TARGET] [--seal-only] [--reuse-vendor] [--release-driver CONFIG]\n' "$0" >&2 # env-policy: allow
     exit 65
+}
+target=${1:-$root/target} # env-policy: allow
+if [ "$#" -gt 0 ]; then # env-policy: allow
+    shift
+fi
+bind=true
+reuse_vendor=false
+driver_config=
+while [ "$#" -gt 0 ]; do # env-policy: allow
+    case "$1" in # env-policy: allow
+        --seal-only) bind=false ;;
+        --reuse-vendor) reuse_vendor=true ;;
+        --release-driver)
+            if [ "$#" -lt 2 ] || [ -z "$2" ]; then # env-policy: allow
+                usage
+            fi
+            driver_config=$2 # env-policy: allow
+            shift
+            ;;
+        *) usage ;;
+    esac
+    shift
+done
+if [ -n "$driver_config" ]; then # env-policy: allow
+    output="$target/aarch64-apple-darwin/release" # env-policy: allow
+else
+    output="$target/release" # env-policy: allow
 fi
 vendor="$bundle/vendor" # env-policy: allow
 if [ "$reuse_vendor" = true ]; then # env-policy: allow
@@ -95,9 +106,27 @@ fi
 # The unsealed build of the runner is the one tool that computes the identities
 # the sealed build is pinned with, so the pins never come from a second
 # implementation that could disagree with the one enforcing them.
+build_runner() {
+    if [ -n "$driver_config" ]; then # env-policy: allow
+        dev_cargo build --locked --release --target-dir "$target" \
+            --target aarch64-apple-darwin --config "$driver_config" \
+            -p proof --bin spice-proof-darwin-runner \
+            -p xtask --lib --features spice/canvas # env-policy: allow
+    else
+        dev_cargo build --locked --release --target-dir "$target" \
+            -p proof --bin spice-proof-darwin-runner # env-policy: allow
+    fi
+}
+if [ -n "$driver_config" ]; then # env-policy: allow
+    build_runner
+fi
 unsealed() {
-    dev_cargo run --locked -q --release --target-dir "$target" \
-        -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
+    if [ -n "$driver_config" ]; then # env-policy: allow
+        "$output/spice-proof-darwin-runner" "$@" # env-policy: allow
+    else
+        dev_cargo run --locked -q --release --target-dir "$target" \
+            -p proof --bin spice-proof-darwin-runner -- "$@" # env-policy: allow
+    fi
 }
 
 if [ -n "${SPICE_PROOF_CARGO:-}" ]; then # env-policy: allow
@@ -136,12 +165,10 @@ pins=$(printf '%s\n' \
     "path = \"$sandbox_path\"" \
     "digest = \"$(unsealed tool-digest "$sandbox_path")\"") # env-policy: allow
 
-SPICE_NATIVE_PINS="$pins" \
-    dev_cargo build --locked --release --target-dir "$target" \
-    -p proof --bin spice-proof-darwin-runner # env-policy: allow
+SPICE_NATIVE_PINS="$pins" build_runner # env-policy: allow
 
 runner="$bundle/bin/spice-proof-darwin-runner" # env-policy: allow
-install -m 555 "$target/release/spice-proof-darwin-runner" "$runner" # env-policy: allow
+install -m 555 "$output/spice-proof-darwin-runner" "$runner" # env-policy: allow
 identity=$("$runner" runner-identity "$runner") # env-policy: allow
 # The runner names its scratch root after the challenge, so this exercise mints
 # a fresh one the way the host does. A fixed spelling collides with any seal

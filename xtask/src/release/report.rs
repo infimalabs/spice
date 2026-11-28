@@ -45,11 +45,12 @@ pub(super) fn render_command_records(
     for record in records {
         writeln!(
             output,
-            "[release:{}] {} {:?} exit={:?}",
+            "[release:{}] {} {:?} exit={:?} elapsed={:.1}s",
             record.label,
             record.program.display(),
             record.arguments,
-            record.code
+            record.code,
+            record.elapsed.as_secs_f64()
         )
         .map_err(TargetBuildError::Output)?;
         output
@@ -93,7 +94,7 @@ pub enum TargetBuildError {
         label: &'static str,
         stream: &'static str,
     },
-    CommandFailed(CommandRecord),
+    CommandFailed(Box<CommandRecord>),
     Io {
         path: PathBuf,
         source: io::Error,

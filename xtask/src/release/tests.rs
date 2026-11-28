@@ -277,6 +277,7 @@ impl Executor for FakeExecutor {
             program: command.program,
             arguments: command.arguments,
             code: Some(i32::from(refused)),
+            elapsed: Duration::ZERO,
             stdout,
             stderr: Vec::new(),
         };
