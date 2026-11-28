@@ -654,12 +654,15 @@ fn windows_cross_output_is_writable_to_a_remapped_container_user() {
     let git_common = fixture.workspace.join(".git");
     fs::create_dir_all(&git_common).expect("fixture Git common directory");
     let out = fixture.root.join("windows-cross-out");
-    fs::create_dir_all(&out).expect("fixture cross output");
-    let mut permissions = fs::metadata(&out)
-        .expect("cross output metadata")
-        .permissions();
-    permissions.set_mode(0o700);
-    fs::set_permissions(&out, permissions).expect("restrict cross output");
+    let stale_root = out.join("root/proof");
+    fs::create_dir_all(&stale_root).expect("fixture stale cross output");
+    for path in [&out, &out.join("root"), &stale_root] {
+        let mut permissions = fs::metadata(path)
+            .expect("cross output metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(path, permissions).expect("restrict cross output");
+    }
 
     container
         .cross_build_windows(super::WindowsCross {
@@ -672,14 +675,16 @@ fn windows_cross_output_is_writable_to_a_remapped_container_user() {
         })
         .expect("sealed cross build");
 
-    assert_eq!(
-        fs::metadata(out)
-            .expect("cross output metadata")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o777
-    );
+    for path in [out, stale_root] {
+        assert_eq!(
+            fs::metadata(path)
+                .expect("cross output metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o777
+        );
+    }
 }
 
 #[test]
