@@ -18,6 +18,7 @@ on:
       - xtask/Cargo.toml
       - xtask/src/lib.rs
       - xtask/src/main.rs
+      - xtask/src/prepared_artifact.rs
       - wire/src/manifest.rs
   workflow_dispatch:
 
