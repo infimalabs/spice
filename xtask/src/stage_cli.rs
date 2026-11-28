@@ -21,6 +21,7 @@ pub(super) fn run_stage_target(
         proof_runner,
         scope,
         route,
+        capture_symbols,
         attach,
         release_inputs,
         prebuilt,
@@ -94,7 +95,8 @@ pub(super) fn run_stage_target(
         return Err(usage_error().into());
     }
     if target == LINUX_TARGET && (route == StageRoute::Sealed || !cfg!(target_os = "linux")) {
-        return xtask::linux_sealed_stage(&environment, output, error_output).map_err(Into::into);
+        return xtask::linux_sealed_stage(&environment, capture_symbols, output, error_output)
+            .map_err(Into::into);
     }
     let signing = if target == DARWIN_TARGET {
         darwin_signing(unsigned)?
@@ -104,15 +106,7 @@ pub(super) fn run_stage_target(
     // Every Darwin or Windows stage links the canvas of the Linux payload
     // staged from the same archive: the local stage root's, or the one a
     // hosted runner downloaded beside its checkout.
-    let app = if scope == StageScope::StagedApp {
-        xtask::AppOrigin::Workspace
-    } else if environment.release_canvas.is_some() {
-        xtask::AppOrigin::Provider
-    } else if target == LINUX_TARGET {
-        xtask::AppOrigin::Compile
-    } else {
-        xtask::AppOrigin::Linux
-    };
+    let app = stage_app_origin(scope, target, &environment);
     preflight_native_release(target, proof_runner).and_then(|()| {
         xtask::stage_target(
             target,
@@ -120,13 +114,30 @@ pub(super) fn run_stage_target(
             signing.as_ref(),
             proof_container,
             app,
-            false,
+            capture_symbols,
             output,
         )
         .map(|_| ())
         .map_err(Into::into)
     })
 }
+
+fn stage_app_origin(
+    scope: StageScope,
+    target: &str,
+    environment: &xtask::ReleaseEnvironment,
+) -> xtask::AppOrigin {
+    if scope == StageScope::StagedApp {
+        xtask::AppOrigin::Workspace
+    } else if environment.release_canvas.is_some() {
+        xtask::AppOrigin::Provider
+    } else if target == LINUX_TARGET {
+        xtask::AppOrigin::Compile
+    } else {
+        xtask::AppOrigin::Linux
+    }
+}
+
 fn run_hosted_macos(
     inputs: &xtask::ReleaseInputs,
     ambient: &Ambient,
@@ -150,6 +161,8 @@ struct StageRequest<'a> {
     proof_runner: Option<&'a str>,
     scope: StageScope,
     route: StageRoute,
+    /// Capture the detached debug object in this private stage.
+    capture_symbols: bool,
     /// The provider run a hosted stage re-enters instead of dispatching.
     attach: Option<xtask::Attach>,
     /// The provider preflight run whose canonical inputs this stage consumes.
@@ -189,6 +202,10 @@ fn parse_stage_route(arguments: &[OsString]) -> (StageRoute, &[OsString]) {
 fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
     let (attach, release_inputs, arguments) = parse_provider_controls(arguments)?;
     let (route, arguments) = parse_stage_route(arguments);
+    let (capture_symbols, arguments) = match arguments.split_last() {
+        Some((flag, rest)) if flag == OsStr::new("--symbols") => (true, rest),
+        _ => (false, arguments),
+    };
     let (prebuilt, arguments) = parse_prebuilt(arguments);
     let (proof_runner, arguments) = match arguments {
         [rest @ .., flag, runner] if flag == OsStr::new("--proof-runner") => {
@@ -196,41 +213,7 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         }
         _ => (None, arguments),
     };
-    let (target, unsigned, proof_container, scope) = match arguments {
-        [target] => (target, false, None, StageScope::Target),
-        [target, flag] if flag == OsStr::new("--unsigned") => {
-            (target, true, None, StageScope::Target)
-        }
-        [target, flag, image] if flag == OsStr::new("--proof-container") => {
-            (target, false, Some(image.to_str()?), StageScope::Target)
-        }
-        [target, unsigned_flag, image_flag, image]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && image_flag == OsStr::new("--proof-container") =>
-        {
-            (target, true, Some(image.to_str()?), StageScope::Target)
-        }
-        [target, unsigned_flag, scope_flag]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && scope_flag == OsStr::new("--app-only") =>
-        {
-            (target, true, None, StageScope::AppOnly)
-        }
-        [target, unsigned_flag, image_flag, image, scope_flag]
-            if unsigned_flag == OsStr::new("--unsigned")
-                && image_flag == OsStr::new("--proof-container") =>
-        {
-            let scope = if scope_flag == OsStr::new("--staged-app") {
-                StageScope::StagedApp
-            } else if scope_flag == OsStr::new("--app-only") {
-                StageScope::AppOnly
-            } else {
-                return None;
-            };
-            (target, true, Some(image.to_str()?), scope)
-        }
-        _ => return None,
-    };
+    let (target, unsigned, proof_container, scope) = parse_target_options(arguments)?;
     let target = target.to_str()?;
     if !stage_route_admitted(
         target,
@@ -258,10 +241,59 @@ fn parse_stage_target(arguments: &[OsString]) -> Option<StageRequest<'_>> {
         scope,
         route,
         attach,
+        capture_symbols,
         release_inputs,
         prebuilt,
     };
-    request.prebuilt_admitted().then_some(request)
+    request
+        .prebuilt_admitted()
+        .then_some(request)
+        .filter(|request| {
+            !request.capture_symbols
+                || (request.prebuilt.is_none()
+                    && request.attach.is_none()
+                    && request.release_inputs.is_none()
+                    && request.route != StageRoute::Hosted
+                    && request.scope == StageScope::Target)
+        })
+}
+
+fn parse_target_options(
+    arguments: &[OsString],
+) -> Option<(&OsStr, bool, Option<&str>, StageScope)> {
+    match arguments {
+        [target] => Some((target, false, None, StageScope::Target)),
+        [target, flag] if flag == OsStr::new("--unsigned") => {
+            Some((target, true, None, StageScope::Target))
+        }
+        [target, flag, image] if flag == OsStr::new("--proof-container") => {
+            Some((target, false, Some(image.to_str()?), StageScope::Target))
+        }
+        [target, unsigned_flag, image_flag, image]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && image_flag == OsStr::new("--proof-container") =>
+        {
+            Some((target, true, Some(image.to_str()?), StageScope::Target))
+        }
+        [target, unsigned_flag, scope_flag]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && scope_flag == OsStr::new("--app-only") =>
+        {
+            Some((target, true, None, StageScope::AppOnly))
+        }
+        [target, unsigned_flag, image_flag, image, scope_flag]
+            if unsigned_flag == OsStr::new("--unsigned")
+                && image_flag == OsStr::new("--proof-container") =>
+        {
+            let scope = match scope_flag.to_str()? {
+                "--staged-app" => StageScope::StagedApp,
+                "--app-only" => StageScope::AppOnly,
+                _ => return None,
+            };
+            Some((target, true, Some(image.to_str()?), scope))
+        }
+        _ => None,
+    }
 }
 
 fn parse_prebuilt(arguments: &[OsString]) -> (Option<(&Path, &Path)>, &[OsString]) {

@@ -198,7 +198,7 @@ jobs:
             ${{ runner.temp }}/input/canvas.zip
             ${{ runner.temp }}/input/result.json
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
 
   attest:

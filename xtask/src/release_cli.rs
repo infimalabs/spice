@@ -35,17 +35,21 @@ pub(super) fn run_rebuild_release_symbols(
     arguments: Vec<OsString>,
     ambient: &Ambient,
     output: &mut impl io::Write,
+    error_output: &mut impl io::Write,
 ) -> CommandResult {
     let [recipe, released_binary, destination] = arguments.as_slice() else {
         eprintln!("{}", help());
         return Err(usage_error().into());
     };
+    let execution = ambient.environment()?;
     xtask::rebuild_release_symbols(
         Path::new(recipe),
         Path::new(released_binary),
         Path::new(destination),
         release_environment(ambient),
+        &execution,
         output,
+        error_output,
     )
     .map_err(Into::into)
 }

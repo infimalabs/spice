@@ -14,6 +14,7 @@ use super::{
 /// Where the release pipeline publishes target payloads, relative to the
 /// workspace. The only workspace path the staging container may write.
 const STAGE: &str = "dist/stage";
+const WORKSPACE_STAGE: &str = "/workspace/dist/stage";
 
 /// The one Linux release target the sealed image links and executes.
 const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
@@ -21,6 +22,9 @@ const LINUX_TARGET: &str = "x86_64-unknown-linux-musl";
 /// The environment name that hands `stage-target` the identity of the source
 /// archive whose exact tree is the workspace.
 const SOURCE_ARCHIVE: &str = "SPICE_SOURCE_ARCHIVE"; // env-policy: allow
+/// The environment name that redirects the staged payload outside the
+/// read-only workspace.
+const STAGE_ROOT: &str = "SPICE_HOSTED_STAGE"; // env-policy: allow
 
 /// The environment names that hand `stage-target` the provider-built canvas
 /// every native release target links unchanged, and its app generation.
@@ -41,6 +45,9 @@ pub struct ProviderCanvas<'a> {
 /// Where the Windows cross build's one writable host directory is mounted,
 /// outside the read-only workspace.
 const CROSS_OUT: &str = "/windows-cross";
+/// Writable private stage used only while reconstructing detached symbols.
+const SYMBOL_STAGE: &str = "/symbol-stage";
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// Label that marks a persistent sealed Cargo target with the purpose it
 /// serves, so the first run under a new image finds the volumes it supersedes.
@@ -138,12 +145,20 @@ impl Container {
         delivered: Option<&str>,
         canvas: Option<ProviderCanvas<'_>>,
         target: Option<&Path>,
+        stage: Option<&Path>,
+        capture_symbols: bool,
     ) -> Result<ReleaseStage, ContainerError> {
-        let stage = self.workspace.join(STAGE);
+        let (stage, destination, redirected) = match stage {
+            Some(stage) => (stage.to_path_buf(), SYMBOL_STAGE, true),
+            None => (self.workspace.join(STAGE), WORKSPACE_STAGE, false),
+        };
         fs::create_dir_all(&stage).map_err(|source| ContainerError::InspectWorkspace {
             path: stage.clone(),
             source,
         })?;
+        if redirected {
+            Self::make_cross_output_writable(&stage)?;
+        }
         let (target, notice) = match target {
             Some(path) => (SealedTarget::Host(representable(path)?), None),
             None => self.persistent_target(LINUX_STAGE_PURPOSE, self.image.as_str()),
@@ -151,11 +166,14 @@ impl Container {
         let mut runtime_arguments = self.sealed_release_arguments(
             git_common,
             &stage,
-            &format!("{WORKSPACE_MOUNT}/{STAGE}"),
+            destination,
             delivered,
             canvas,
             &target,
         )?;
+        if redirected {
+            runtime_arguments.extend(["--env".to_owned(), format!("{STAGE_ROOT}={SYMBOL_STAGE}")]);
+        }
         runtime_arguments.extend([
             self.image.to_string(),
             "cargo".to_owned(),
@@ -173,11 +191,67 @@ impl Container {
         if delivered.is_none() {
             runtime_arguments.push("--staged-app".to_owned());
         }
+        if capture_symbols {
+            runtime_arguments.push("--symbols".to_owned());
+        }
         self.sealed_release_run(
             runtime_arguments,
             notice,
             "sealed Linux release staging",
             "complete Linux release staging",
+        )
+    }
+
+    /// Rebuild a Windows candidate and its PDB inside the exact cross image.
+    ///
+    /// The source, provider canvas, Cargo target, and writable stage use the
+    /// same sealed boundary as the canonical cross build. The cross image
+    /// carries the admitted MSVC closure; the proof image identity remains the
+    /// one recorded in the generated release recipe.
+    pub fn stage_windows_symbols(
+        &self,
+        cross_image: &str,
+        git_common: &Path,
+        stage: &Path,
+        delivered: &str,
+        canvas: ProviderCanvas<'_>,
+    ) -> Result<ReleaseStage, ContainerError> {
+        fs::create_dir_all(stage).map_err(|source| ContainerError::InspectWorkspace {
+            path: stage.to_path_buf(),
+            source,
+        })?;
+        Self::make_cross_output_writable(stage)?;
+        let (target, notice) = self.persistent_target(WINDOWS_CROSS_PURPOSE, cross_image);
+        let mut runtime_arguments = self.sealed_release_arguments(
+            git_common,
+            stage,
+            SYMBOL_STAGE,
+            Some(delivered),
+            Some(canvas),
+            &target,
+        )?;
+        runtime_arguments.extend([
+            "--env".to_owned(),
+            format!("{STAGE_ROOT}={SYMBOL_STAGE}"),
+            cross_image.to_owned(),
+            "cargo".to_owned(),
+            "run".to_owned(),
+            "--locked".to_owned(),
+            "-p".to_owned(),
+            "xtask".to_owned(),
+            "--".to_owned(),
+            "stage-target".to_owned(),
+            WINDOWS_TARGET.to_owned(),
+            "--unsigned".to_owned(),
+            "--proof-container".to_owned(),
+            self.image.to_string(),
+            "--symbols".to_owned(),
+        ]);
+        self.sealed_release_run(
+            runtime_arguments,
+            notice,
+            "sealed Windows symbol staging",
+            "complete Windows symbol staging",
         )
     }
 
