@@ -2,14 +2,16 @@
 
 use std::error::Error;
 use std::fmt;
-use std::io::Write;
-use std::path::Path;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::SystemTime;
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::hosted_release_session::{
-    NativeTarget, ReleaseSession, SessionError, TargetWorkflow, schema_provider_failure,
-    terminal_provider_failure,
+    NativeTarget, ReleaseSession, SessionError, TargetRecorder, TargetWorkflow,
+    schema_provider_failure, terminal_provider_failure,
 };
 pub use windows_execution::hosted::client::{
     Attach, HostedExecution, ReleaseInputs, WindowsHostedError, landed_commit, windows_hosted,
@@ -143,21 +145,10 @@ pub fn hosted_release_stage(
             "aggregate hosted release requires one exact preflight run".to_owned(),
         ));
     };
-    let inputs = hosted_release_inputs(Attach::Run(inputs_run))?;
-    hosted_release_stage_with_inputs(inputs_run, &inputs, host, output, error_output)
-}
-
-/// Create or resume all native stages from already admitted release inputs.
-pub fn hosted_release_stage_with_inputs(
-    inputs_run: u64,
-    inputs: &ReleaseInputs,
-    host: &CrossHost,
-    output: &mut impl Write,
-    error_output: &mut impl Write,
-) -> Result<(), HostedReleaseError> {
+    let inputs = Arc::new(hosted_release_inputs(Attach::Run(inputs_run))?);
     hosted_release_stage_with_inputs_into(
         inputs_run,
-        inputs,
+        &inputs,
         host,
         Path::new("dist/stage"),
         output,
@@ -174,13 +165,25 @@ pub(crate) struct TargetSpan {
     pub(crate) run: Option<u64>,
 }
 
+/// The native targets every aggregate hosted release stages.
+const NATIVE_TARGETS: [NativeTarget; 3] = [
+    NativeTarget::Linux,
+    NativeTarget::Macos,
+    NativeTarget::Windows,
+];
+
+/// Longest the coordinator log stays silent while a native stage runs.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(4 * 60);
+
 /// Create or resume all native stages beneath a caller-owned stage root.
 ///
 /// Each target starts as soon as the admitted inputs exist and never waits on a
-/// sibling; the answer names when each ran and its admitted provider run.
+/// sibling; its lines reach `output` and `error_output` as it writes them. The
+/// first failed target ends the wait; the answer names when each finished
+/// target ran and its admitted provider run.
 pub(crate) fn hosted_release_stage_with_inputs_into(
     inputs_run: u64,
-    inputs: &ReleaseInputs,
+    inputs: &Arc<ReleaseInputs>,
     host: &CrossHost,
     stage_root: &Path,
     output: &mut impl Write,
@@ -190,89 +193,245 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
     let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
     write_session_path(output, &session)?;
 
-    let linux_attach = session.attachment(NativeTarget::Linux)?;
-    let macos_attach = session.attachment(NativeTarget::Macos)?;
-    let windows_attach = session.attachment(NativeTarget::Windows)?;
-    let linux_workflow = session.workflow(NativeTarget::Linux)?;
-    let macos_workflow = session.workflow(NativeTarget::Macos)?;
-    let windows_workflow = session.workflow(NativeTarget::Windows)?;
-    let linux_recorder = session.recorder(NativeTarget::Linux);
-    let macos_recorder = session.recorder(NativeTarget::Macos);
-    let windows_recorder = session.recorder(NativeTarget::Windows);
+    let mut stages = Vec::with_capacity(NATIVE_TARGETS.len());
+    for target in NATIVE_TARGETS {
+        stages.push(NativeStage {
+            target,
+            attach: session.attachment(target)?,
+            workflow: session.workflow(target)?,
+            recorder: session.recorder(target),
+        });
+    }
+    let host = Arc::new(host.clone());
+    let (events, received) = mpsc::channel();
+    for stage in stages {
+        stage.spawn(
+            Arc::clone(inputs),
+            Arc::clone(&host),
+            stage_root.to_path_buf(),
+            events.clone(),
+        );
+    }
+    drop(events);
+    await_stages(&received, &session, output, error_output)
+}
 
-    let outcomes = std::thread::scope(|scope| {
-        let linux = scope.spawn(|| {
-            let started = SystemTime::now();
-            let mut output = Vec::new();
-            let control = resumable_control(&linux_recorder, &linux_workflow);
-            let result = linux_hosted_stage_controlled(
-                inputs,
-                linux_attach,
-                stage_root,
-                control,
-                &mut output,
-            );
-            PlatformOutcome::new(NativeTarget::Linux, started, output, Vec::new(), result)
-        });
-        let macos = scope.spawn(|| {
-            let started = SystemTime::now();
-            let mut output = Vec::new();
-            let control = resumable_control(&macos_recorder, &macos_workflow);
-            let result = macos_hosted_stage_controlled(
-                inputs,
-                macos_attach,
-                stage_root,
-                control,
-                &mut output,
-            );
-            PlatformOutcome::new(NativeTarget::Macos, started, output, Vec::new(), result)
-        });
-        let windows = scope.spawn(|| {
-            let started = SystemTime::now();
-            let mut output = Vec::new();
-            let mut error = Vec::new();
-            let control = resumable_control(&windows_recorder, &windows_workflow);
-            let result = windows_hosted_stage_controlled(
-                inputs,
-                host,
-                windows_attach,
-                stage_root,
-                control,
-                &mut output,
-                &mut error,
-            )
-            .and_then(|execution| {
-                (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
-                    WindowsHostedError::ProviderResponse(format!(
-                        "hosted Windows staging exited {}",
-                        execution.exit_code()
-                    ))
-                })
-            });
-            PlatformOutcome::new(NativeTarget::Windows, started, output, error, result)
-        });
-        [
-            linux.join().expect("Linux hosted stage panicked"),
-            macos.join().expect("macOS hosted stage panicked"),
-            windows.join().expect("Windows hosted stage panicked"),
-        ]
-    });
+/// One native target's admitted resume state, moved onto the thread that
+/// stages it.
+struct NativeStage {
+    target: NativeTarget,
+    attach: Option<Attach>,
+    workflow: TargetWorkflow,
+    recorder: TargetRecorder,
+}
 
+impl NativeStage {
+    /// Stage this target on its own detached thread, sending its lines and then
+    /// its outcome to `events`. When the coordinator stops waiting after a
+    /// sibling fails, the thread ends with the process; the session already
+    /// binds its provider run for resume.
+    fn spawn(
+        self,
+        inputs: Arc<ReleaseInputs>,
+        host: Arc<CrossHost>,
+        stage_root: PathBuf,
+        events: mpsc::Sender<StageEvent>,
+    ) {
+        thread::spawn(move || {
+            let started = SystemTime::now();
+            let mut output = StageLines::new(self.target, Stream::Output, events.clone());
+            let mut error_output = StageLines::new(self.target, Stream::Error, events.clone());
+            let control = resumable_control(&self.recorder, &self.workflow);
+            let result = match self.target {
+                NativeTarget::Linux => linux_hosted_stage_controlled(
+                    &inputs,
+                    self.attach,
+                    &stage_root,
+                    control,
+                    &mut output,
+                ),
+                NativeTarget::Macos => macos_hosted_stage_controlled(
+                    &inputs,
+                    self.attach,
+                    &stage_root,
+                    control,
+                    &mut output,
+                ),
+                NativeTarget::Windows => windows_hosted_stage_controlled(
+                    &inputs,
+                    &host,
+                    self.attach,
+                    &stage_root,
+                    control,
+                    &mut output,
+                    &mut error_output,
+                )
+                .and_then(|execution| {
+                    (execution.exit_code() == 0).then_some(()).ok_or_else(|| {
+                        WindowsHostedError::ProviderResponse(format!(
+                            "hosted Windows staging exited {}",
+                            execution.exit_code()
+                        ))
+                    })
+                }),
+            };
+            drop((output, error_output));
+            // A coordinator that stopped waiting no longer receives.
+            let _ = events.send(StageEvent::Finished(PlatformOutcome {
+                target: self.target,
+                started,
+                finished: SystemTime::now(),
+                result,
+            }));
+        });
+    }
+}
+
+/// Settle each native stage as it finishes and write its lines as they arrive.
+/// Whenever no line arrives for [`PROGRESS_INTERVAL`], name the stages still
+/// running. Stop waiting once any stage fails.
+fn await_stages(
+    received: &mpsc::Receiver<StageEvent>,
+    session: &ReleaseSession,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<Vec<TargetSpan>, HostedReleaseError> {
+    let started = Instant::now();
+    let mut running = NATIVE_TARGETS.to_vec();
     let mut failures = Vec::new();
-    let mut spans = Vec::with_capacity(outcomes.len());
-    for outcome in outcomes {
-        spans.extend(settle(
-            outcome,
-            &session,
-            &mut failures,
-            output,
-            error_output,
-        )?);
+    let mut spans = Vec::with_capacity(NATIVE_TARGETS.len());
+    while !running.is_empty() && failures.is_empty() {
+        match received.recv_timeout(PROGRESS_INTERVAL) {
+            Ok(StageEvent::Line {
+                target,
+                stream,
+                line,
+            }) => {
+                let sink: &mut dyn Write = match stream {
+                    Stream::Output => &mut *output,
+                    Stream::Error => &mut *error_output,
+                };
+                write!(sink, "[{}] ", target.name())
+                    .and_then(|()| sink.write_all(&line))
+                    .map_err(WindowsHostedError::Output)?;
+            }
+            Ok(StageEvent::Finished(outcome)) => {
+                running.retain(|target| *target != outcome.target);
+                spans.extend(settle(
+                    outcome,
+                    session,
+                    &mut failures,
+                    output,
+                    error_output,
+                )?);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => writeln!(
+                output,
+                "hosted release still staging {} after {}s",
+                target_names(&running),
+                started.elapsed().as_secs()
+            )
+            .map_err(WindowsHostedError::Output)?,
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!(
+                "hosted {} stage ended without an outcome",
+                target_names(&running)
+            ),
+        }
     }
     if failures.is_empty() {
-        Ok(spans)
-    } else {
-        Err(HostedReleaseError::Platform(failures))
+        return Ok(spans);
+    }
+    if !running.is_empty() {
+        writeln!(
+            error_output,
+            "hosted release stops waiting on {} after a failed stage; the session keeps each bound provider run for resume",
+            target_names(&running)
+        )
+        .map_err(WindowsHostedError::Output)?;
+    }
+    Err(HostedReleaseError::Platform(failures))
+}
+
+fn target_names(targets: &[NativeTarget]) -> String {
+    targets
+        .iter()
+        .map(|target| target.name())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[derive(Clone, Copy)]
+enum Stream {
+    Output,
+    Error,
+}
+
+enum StageEvent {
+    Line {
+        target: NativeTarget,
+        stream: Stream,
+        line: Vec<u8>,
+    },
+    Finished(PlatformOutcome),
+}
+
+/// Forwards each complete line one native stage writes to the coordinator as
+/// soon as it is written.
+struct StageLines {
+    target: NativeTarget,
+    stream: Stream,
+    pending: Vec<u8>,
+    events: mpsc::Sender<StageEvent>,
+}
+
+impl StageLines {
+    fn new(target: NativeTarget, stream: Stream, events: mpsc::Sender<StageEvent>) -> Self {
+        Self {
+            target,
+            stream,
+            pending: Vec::new(),
+            events,
+        }
+    }
+
+    fn send(&self, line: Vec<u8>) {
+        // A coordinator that stopped waiting no longer receives.
+        let _ = self.events.send(StageEvent::Line {
+            target: self.target,
+            stream: self.stream,
+            line,
+        });
+    }
+
+    /// Send an unterminated trailing line, terminated.
+    fn finish_line(&mut self) {
+        if !self.pending.is_empty() {
+            let mut line = std::mem::take(&mut self.pending);
+            line.push(b'\n');
+            self.send(line);
+        }
+    }
+}
+
+impl Write for StageLines {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.pending.extend_from_slice(bytes);
+        while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let line = self.pending.drain(..=end).collect();
+            self.send(line);
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.finish_line();
+        Ok(())
+    }
+}
+
+impl Drop for StageLines {
+    fn drop(&mut self) {
+        self.finish_line();
     }
 }
 
@@ -285,12 +444,6 @@ fn settle(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<Option<TargetSpan>, WindowsHostedError> {
-    output
-        .write_all(&outcome.output)
-        .map_err(WindowsHostedError::Output)?;
-    error_output
-        .write_all(&outcome.error_output)
-        .map_err(WindowsHostedError::Output)?;
     match outcome.result {
         Ok(()) => {
             if let Err(error) = session.succeeded(outcome.target) {
@@ -505,28 +658,7 @@ struct PlatformOutcome {
     target: NativeTarget,
     started: SystemTime,
     finished: SystemTime,
-    output: Vec<u8>,
-    error_output: Vec<u8>,
     result: Result<(), WindowsHostedError>,
-}
-
-impl PlatformOutcome {
-    fn new(
-        target: NativeTarget,
-        started: SystemTime,
-        output: Vec<u8>,
-        error_output: Vec<u8>,
-        result: Result<(), WindowsHostedError>,
-    ) -> Self {
-        Self {
-            target,
-            started,
-            finished: SystemTime::now(),
-            output,
-            error_output,
-            result,
-        }
-    }
 }
 
 /// Aggregate hosted release session failure.

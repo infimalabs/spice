@@ -28,6 +28,7 @@ const RUNNER_PROGRAM: &str = "runner/windows-hosted.exe";
 
 /// The release host's environments the Windows cross build reads, as
 /// `windows-cross` reads them.
+#[derive(Clone)]
 pub struct CrossHost {
     pub release: ReleaseEnvironment,
     pub ambient: sill::Environment,
