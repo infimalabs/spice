@@ -39,6 +39,14 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Set up cache-capable Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+        with:
+          driver: docker-container
+
+      - name: Expose GitHub cache runtime
+        uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487
+
       - name: Restore derivable producer environment
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
@@ -60,6 +68,18 @@ jobs:
           rustup toolchain install --no-self-update
           cargo build --locked --package xtask
 
+      - name: Derive immutable image key
+        id: prepared
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/prepared"
+          mkdir -p "$root"
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          .github/scripts/proof-image-build-key.sh "$root/build-key.json"
+          key="$($xtask prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
+          [[ "$key" =~ ^[0-9a-f]{64}$ ]]
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
       - name: Build and admit proof image
         id: image
         env:
@@ -67,32 +87,19 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
-          mkdir -p "$root/inventory"
+          mkdir -p "$root"
           archive="$root/proof-image.tar"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          "$xtask" proof-image build "$archive" | tee "$root/build.out"
-          ln "$archive" "$root/inventory/proof-image.tar"
+          "$xtask" proof-image build \
+            --cache-from 'type=gha,scope=proof-image-linux-amd64' \
+            --cache-to 'type=gha,mode=max,scope=proof-image-linux-amd64,ignore-error=true' \
+            --build-key 'sha256:${{ steps.prepared.outputs.key }}' \
+            "$archive" | tee "$root/build.out"
           identity="$(sed -n 's/^proof image //p' "$root/build.out")"
           [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
 
-      - name: Describe prepared artifact
-        id: prepared
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/prepared"
-          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          .github/scripts/proof-image-build-key.sh "$root/build-key.json"
-          "$xtask" prepared-artifact manifest \
-            image linux-amd64 "$root/build-key.json" \
-            application/vnd.infimalabs.spice.proof-image.v1+tar \
-            "$root/proof-image.tar" "$root/inventory" \
-            '${{ steps.image.outputs.identity }}' "$root/prepared.json"
-          key="$($xtask prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
-          [[ "$key" =~ ^[0-9a-f]{64}$ ]]
-          echo "key=$key" >> "$GITHUB_OUTPUT"
-
-      - name: Publish immutable prepared image
+      - name: Publish immutable layered proof image
         env:
           GHCR_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -100,9 +107,32 @@ jobs:
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          key='${{ steps.prepared.outputs.key }}'
+          reference="$repository:proof-$key"
+          expected_key="sha256:$key"
+          expected_identity='${{ steps.image.outputs.identity }}'
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact publish \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared" \
-            '${{ steps.prepared.outputs.key }}' \
-            "$root/prepared.json" "$root/proof-image.tar"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          resolution="$("$xtask" prepared-artifact resolve-image-if-present \
+            "$reference" "$expected_key")"
+          if [[ "$resolution" == absent ]]; then
+            docker tag "$expected_identity" "$reference"
+            docker push "$reference" | tee "$root/push.out"
+          else
+            read -r label manifest config identity <<< "$resolution"
+            test "$label" = resolved
+            test "$config" = "$expected_identity"
+            test "$identity" = "$expected_identity"
+          fi
+          read -r label manifest config identity < <(
+            "$xtask" prepared-artifact resolve-image "$reference" "$expected_key"
+          )
+          test "$label" = resolved
+          [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$config" = "$expected_identity"
+          test "$identity" = "$expected_identity"
+          rm -f "$root/proof-image.tar" "$root/proof-image.tar.sha256" \
+            "$root/proof-image.tar.identity"
+          docker logout ghcr.io
           oras logout ghcr.io

@@ -120,6 +120,7 @@ jobs:
           test "$(jq -r .proof_build_key "$result")" = "$PROOF_BUILD_KEY"
           test "$(jq -r .proof_manifest "$result")" = "$PROOF_MANIFEST"
           test "$(jq -r .proof_identity "$result")" = "$PROOF_IDENTITY"
+          test "$(jq -r .proof_config_sha256 "$result")" = "${PROOF_IDENTITY#sha256:}"
           archive="$root/source.tar"
           test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$ARCHIVE_SHA256"
           find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
@@ -153,40 +154,41 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/bootstrap-target
         run: cargo build --locked --package xtask
 
-      - name: Fetch admitted proof image
+      - name: Pull admitted layered proof image
+        id: image
         env:
           GHCR_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact fetch \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared@${{ inputs.proof_manifest }}" \
-            "${{ inputs.proof_build_key }}" "$RUNNER_TEMP/proof-image"
-          jq -r .proof_archive_sha256 "$RUNNER_TEMP/input/result.json" \
-            > "$RUNNER_TEMP/proof-image/proof-image.tar.sha256"
-          printf '%s\n' '${{ inputs.proof_identity }}' \
-            > "$RUNNER_TEMP/proof-image/proof-image.tar.identity"
-          oras logout ghcr.io
-
-      - name: Load admitted proof image
-        id: image
-        env:
-          CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
           EXPECTED_PROOF_IDENTITY: ${{ inputs.proof_identity }}
         run: |
           set -euo pipefail
-          result="$RUNNER_TEMP/input/result.json"
-          archive="$RUNNER_TEMP/proof-image/proof-image.tar"
-          checksum="$(jq -r .proof_archive_sha256 "$result")"
-          test "$(sha256sum "$archive" | cut -d' ' -f1)" = "$checksum"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          "$xtask" proof-image load "$archive" | tee "$RUNNER_TEMP/proof-image.out"
-          identity="$(sed -n 's/^loaded proof image //p' "$RUNNER_TEMP/proof-image.out")"
-          [[ "$identity" == "$EXPECTED_PROOF_IDENTITY" ]]
-          echo "identity=$identity" >> "$GITHUB_OUTPUT"
-          rm -rf "$RUNNER_TEMP/proof-image"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          reference="$repository@${{ inputs.proof_manifest }}"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          read -r label manifest config identity < <(
+            "$xtask" prepared-artifact resolve-image \
+              "$reference" "${{ inputs.proof_build_key }}"
+          )
+          test "$label" = resolved
+          test "$manifest" = '${{ inputs.proof_manifest }}'
+          test "$config" = "$EXPECTED_PROOF_IDENTITY"
+          test "$identity" = "$EXPECTED_PROOF_IDENTITY"
+          docker pull "$reference"
+          vendor_set="$("$xtask" prepared-artifact vendor-set Cargo.lock | sed -n 's/^vendor set //p')"
+          read -r observed architecture os observed_vendor observed_key < <(
+            docker image inspect --format \
+              '{{.Id}} {{.Architecture}} {{.Os}} {{index .Config.Labels "org.spice.vendor-set"}} {{index .Config.Labels "org.spice.build-key"}}' \
+              "$reference"
+          )
+          test "$observed" = "$EXPECTED_PROOF_IDENTITY"
+          test "$architecture $os" = "amd64 linux"
+          test "$observed_vendor" = "$vendor_set"
+          test "$observed_key" = '${{ inputs.proof_build_key }}'
+          echo "identity=$observed" >> "$GITHUB_OUTPUT"
+          docker logout ghcr.io
+          oras logout ghcr.io
 
       - name: Stage and prove in the sealed image
         env:

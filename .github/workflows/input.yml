@@ -100,17 +100,17 @@ jobs:
           key="$($xtask prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
           [[ "$key" =~ ^[0-9a-f]{64}$ ]]
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact resolve \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:$key" "sha256:$key" \
+          "$xtask" prepared-artifact resolve-image \
+            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:proof-$key" "sha256:$key" \
             | tee "$root/resolve.out"
-          read -r label manifest payload identity < "$root/resolve.out"
+          read -r label manifest config identity < "$root/resolve.out"
           test "$label" = resolved
           [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$payload" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$config" = "$identity"
           [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "build_key=sha256:$key" >> "$GITHUB_OUTPUT"
           echo "manifest=$manifest" >> "$GITHUB_OUTPUT"
-          echo "payload=$payload" >> "$GITHUB_OUTPUT"
+          echo "config=$config" >> "$GITHUB_OUTPUT"
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
           oras logout ghcr.io
       - name: Record immutable producer result
@@ -120,7 +120,7 @@ jobs:
           PROOF_BUILD_KEY: ${{ steps.proof.outputs.build_key }}
           PROOF_MANIFEST: ${{ steps.proof.outputs.manifest }}
           PROOF_IDENTITY: ${{ steps.proof.outputs.identity }}
-          PROOF_ARCHIVE_SHA256: ${{ steps.proof.outputs.payload }}
+          PROOF_CONFIG_SHA256: ${{ steps.proof.outputs.config }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/input"
@@ -139,7 +139,7 @@ jobs:
             --arg proof_build_key "$PROOF_BUILD_KEY" \
             --arg proof_manifest "$PROOF_MANIFEST" \
             --arg proof_identity "$PROOF_IDENTITY" \
-            --arg proof_archive_sha256 "${PROOF_ARCHIVE_SHA256#sha256:}" \
+            --arg proof_config_sha256 "${PROOF_CONFIG_SHA256#sha256:}" \
             --arg workflow ".github/workflows/input.yml" \
             --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
@@ -157,7 +157,7 @@ jobs:
               proof_build_key: $proof_build_key,
               proof_manifest: $proof_manifest,
               proof_identity: $proof_identity,
-              proof_archive_sha256: $proof_archive_sha256,
+              proof_config_sha256: $proof_config_sha256,
               workflow: $workflow,
               workflow_ref: $workflow_ref,
               workflow_sha: $workflow_sha,
@@ -166,6 +166,7 @@ jobs:
               toolchain: {rustc: $rustc, cargo: $cargo, trunk: $trunk}
             }' "$root/producer.json" > "$root/result.json"
           test "$(jq -r .source_commit "$root/result.json")" = "$SOURCE_COMMIT"
+          test "$(jq -r .proof_config_sha256 "$root/result.json")" = "${PROOF_IDENTITY#sha256:}"
           rm "$root/producer.json"
 
       - name: Publish canonical release inputs

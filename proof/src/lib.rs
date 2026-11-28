@@ -139,4 +139,7 @@ pub use replay::{
     ReceiptError, ReplayError, ReplayFailure, ReplayVerdict, replay,
 };
 pub use seal::{SealError, seal, seal_hosted_windows};
-pub use vendor_set::{PROOF_IMAGE_REPOSITORY, VENDOR_SET_LABEL, VendorSet, VendorSetError};
+pub use vendor_set::{
+    PROOF_IMAGE_BUILD_KEY_LABEL, PROOF_IMAGE_REPOSITORY, VENDOR_SET_LABEL, VendorSet,
+    VendorSetError,
+};

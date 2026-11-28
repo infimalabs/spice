@@ -354,12 +354,24 @@ workflow artifact or another store. Coordinator `gh` authentication must carry
 `read:packages`; publication additionally requires `write:packages`.
 
 `.github/workflows/proof-image.yml` prepares the Linux/amd64 proof image when
-one of its exact inputs changes. It builds and exercises the image, packages
-the runnable archive through the common OCI contract, and publishes it by
-build-key tag. Input staging resolves and admits only the small config and
-records the resulting manifest, payload and runtime identities; it never
-builds, loads, saves, caches, uploads, or downloads the image. The Linux stage
-fetches that payload by manifest digest and re-admits it before loading.
+one of its exact inputs changes. It builds and exercises the image, stamps the
+prepared build key into its admitted config, and pushes the real layered image
+to the `prepared` package under a `proof-KEY` discovery tag. Input staging
+resolves that tag, admits the build-key and vendor-set labels plus the
+Linux/amd64 config identity, and records the immutable image manifest and
+config digests. It never transfers the image. The Linux stage resolves the
+recorded manifest again, pulls only `repository@sha256:…`, and re-admits its
+platform, labels, and config identity before use. Registry layer identity
+therefore deduplicates unchanged base, apt, tool, and vendor layers across
+proof-image versions. Local `proof-image build`, `load`, and `verify` retain
+their archive contract for development and break-glass recovery.
+
+The hosted builder restores and exports a BuildKit layer cache scoped to the
+Linux proof image. That cache is derivable acceleration only: xtask passes
+`--cache-from` and `--cache-to` to Buildx only when the caller supplies them,
+and local builds remain cold by default. A cache-backed build failure retries
+once without cache. Warm and cold builds undergo the same vendor-set,
+platform, build-key, and exact OCI identity admission before publication.
 The finalized Windows result and the finalized notarized macOS stage are
 deterministic `tar.gz` prepared bundles. Their workflows publish by complete
 build key only after assembling the exact attestation subject tree; the coordinator
@@ -432,15 +444,17 @@ GitHub Release before classifying anything. A release publishes
 asset conservatively retain every prepared version that existed when they were
 published. `.github/prepared-retention.json` is the explicit hand-maintained
 current-locator authority. Before classification, the workflow also derives
-the current proof-image build-key tag from the checked-out tree through the
-same repository-owned input derivation and prepared-artifact contract used by
+the current `proof-KEY` image tag from the checked-out tree through the same
+repository-owned input derivation and layered-image admission used by
 proof-image publication and release-input resolution; derivation failure
-refuses the plan. Live-release references and current locators always win,
-followed by the newest 50 versions and every version updated within 30 days.
-The workflow prints and preserves the complete dry-run plan with each rule,
-then refetches package and release authority before any scheduled or explicitly
-requested deletion. Missing, malformed, stale, or changing authority refuses
-mutation.
+refuses the plan. Live-release references and current locators always win.
+Unreferenced proof images remain only while among the newest three proof
+images or updated within seven days; every retained image manifest keeps all
+of its registry layers reachable. Other prepared versions retain the newest
+50 and every version updated within 30 days. The workflow prints and preserves
+the complete dry-run plan with each rule, then refetches package and release
+authority before any scheduled or explicitly requested deletion. Missing,
+malformed, stale, or changing authority refuses mutation.
 
 **Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
 sole publication command. The notes file must carry authored Highlights;
