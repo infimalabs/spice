@@ -709,12 +709,19 @@ mod tests {
             uuid: "11111111-2222-3333-4444-555555555555".to_owned(),
             executable: native.clone(),
         };
+        let recipe = b"symbol recipe fixture";
         let inventory = vec![
             InventoryEntry {
                 path: "bin/spice".to_owned(),
                 mode: 0o755,
                 bytes: executable.len() as u64,
                 digest: native.clone(),
+            },
+            InventoryEntry {
+                path: "symbols/recipe.json".to_owned(),
+                mode: DATA_MODE,
+                bytes: recipe.len() as u64,
+                digest: Digest::compute(Domain::DistArtifact, recipe),
             },
             InventoryEntry {
                 path: metadata.path.clone(),

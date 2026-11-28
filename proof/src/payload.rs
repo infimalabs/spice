@@ -50,8 +50,8 @@ impl AdmittedPayload {
 ///
 /// Refuses malformed or noncanonical bytes, a non-current schema (naming the
 /// release that last wrote it), an unpinned proof environment, inconsistent
-/// subordinate digests, or any inventory other than the target's canonical
-/// executable and required debug artifact in exact order and mode.
+/// subordinate digests, or an inventory outside the canonical executable,
+/// compact symbol recipe, and optional target debug artifact.
 pub fn admit(bytes: &[u8]) -> Result<AdmittedPayload, PayloadError> {
     let Versioned { version } =
         wire::decode(bytes).map_err(|source| PayloadError::Decode(source.to_string()))?;
@@ -97,10 +97,8 @@ pub fn admit(bytes: &[u8]) -> Result<AdmittedPayload, PayloadError> {
 fn verify_symbol_metadata(payload: &TargetPayload) -> Result<(), PayloadError> {
     let symbols = match (payload.target, payload.symbols.as_ref()) {
         (wire::manifest::ReleaseTarget::Aarch64AppleDarwin, Some(symbols)) => symbols,
-        (wire::manifest::ReleaseTarget::Aarch64AppleDarwin, None) => {
-            return Err(PayloadError::SymbolMetadata("missing for Darwin"));
-        }
-        (
+        (wire::manifest::ReleaseTarget::Aarch64AppleDarwin, None)
+        | (
             wire::manifest::ReleaseTarget::X86_64UnknownLinuxMusl
             | wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc,
             None,
@@ -196,9 +194,23 @@ fn expected_artifacts(payload: &TargetPayload) -> Vec<Artifact> {
         mode: 0o755,
         digest: Some(DigestField::Native),
     }];
-    if let Some(path) = payload.target.debug_path() {
+    artifacts.push(Artifact {
+        path: "symbols/recipe.json".to_owned(),
+        mode: 0o644,
+        digest: None,
+    });
+    let debug_path = match payload.target {
+        wire::manifest::ReleaseTarget::Aarch64AppleDarwin => "symbols/spice.symbols",
+        wire::manifest::ReleaseTarget::X86_64UnknownLinuxMusl => "symbols/spice.debug",
+        wire::manifest::ReleaseTarget::X86_64PcWindowsMsvc => "symbols/spice.pdb",
+    };
+    if payload
+        .inventory
+        .iter()
+        .any(|entry| entry.path == debug_path)
+    {
         artifacts.push(Artifact {
-            path: path.to_owned(),
+            path: debug_path.to_owned(),
             mode: 0o644,
             digest: (payload.target == wire::manifest::ReleaseTarget::Aarch64AppleDarwin)
                 .then_some(DigestField::Symbols),
@@ -437,6 +449,13 @@ mod tests {
             &encode(&missing),
             PayloadError::MissingArtifact("bin/spice".to_owned()),
         );
+        let mut missing_recipe = payload();
+        missing_recipe.inventory.remove(1);
+        refresh_inventory(&mut missing_recipe);
+        assert_refuses_before_proof(
+            &encode(&missing_recipe),
+            PayloadError::MissingArtifact("symbols/recipe.json".to_owned()),
+        );
 
         let mut extra = payload();
         extra.inventory.push(InventoryEntry {
@@ -467,7 +486,7 @@ mod tests {
             PayloadError::ReorderedArtifact {
                 index: 0,
                 expected: "bin/spice".to_owned(),
-                observed: "symbols/spice.symbols".to_owned(),
+                observed: "symbols/recipe.json".to_owned(),
             },
         );
     }
@@ -482,7 +501,7 @@ mod tests {
                 &encode(&wrong_mode),
                 PayloadError::ArtifactMode {
                     path: entry.path,
-                    expected: 0o755,
+                    expected: entry.mode,
                     observed: 0,
                 },
             );
@@ -494,12 +513,10 @@ mod tests {
             PayloadError::ArtifactDigest("bin/spice".to_owned()),
         );
 
-        let mut darwin = payload();
-        darwin.target = ReleaseTarget::Aarch64AppleDarwin;
-        assert_refuses_before_proof(
-            &encode(&darwin),
-            PayloadError::SymbolMetadata("missing for Darwin"),
-        );
+        let mut darwin_without_symbols = payload();
+        darwin_without_symbols.target = ReleaseTarget::Aarch64AppleDarwin;
+        admit(&encode(&darwin_without_symbols))
+            .expect("canonical Darwin payload admits without detached symbols");
         let mut darwin = self::darwin();
         admit(&encode(&darwin)).expect("Darwin symbol metadata admits");
         darwin.symbols.as_mut().expect("Darwin symbols").bytes += 1;
@@ -510,19 +527,16 @@ mod tests {
     }
 
     #[test]
-    fn windows_payload_requires_its_executable_and_nonempty_pdb() {
+    fn windows_payload_admits_without_a_pdb_and_validates_one_when_present() {
         let windows = windows();
         admit(&encode(&windows)).expect("canonical Windows payload admits");
 
-        let mut missing_pdb = windows.clone();
-        missing_pdb
+        let mut without_pdb = windows.clone();
+        without_pdb
             .inventory
             .retain(|entry| entry.path != "symbols/spice.pdb");
-        refresh_inventory(&mut missing_pdb);
-        assert_refuses_before_proof(
-            &encode(&missing_pdb),
-            PayloadError::MissingArtifact("symbols/spice.pdb".to_owned()),
-        );
+        refresh_inventory(&mut without_pdb);
+        admit(&encode(&without_pdb)).expect("canonical publication carries no PDB");
 
         let mut empty_pdb = windows;
         let pdb = empty_pdb
@@ -571,12 +585,13 @@ mod tests {
         };
         let app = Digest::compute(Domain::DistArtifact, b"app generation");
         let native = Digest::compute(Domain::DistArtifact, b"native");
-        let inventory = vec![InventoryEntry {
+        let mut inventory = vec![InventoryEntry {
             path: "bin/spice".to_owned(),
             mode: 0o755,
             bytes: 6,
             digest: native.clone(),
         }];
+        crate::test_support::symbol_recipe(&mut inventory);
         TargetPayload {
             version: wire::manifest::TARGET_PAYLOAD_VERSION,
             target: ReleaseTarget::X86_64UnknownLinuxMusl,

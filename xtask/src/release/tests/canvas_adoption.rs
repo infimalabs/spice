@@ -59,6 +59,7 @@ fn darwin_links_the_staged_linux_canvas_without_compiling_the_app() {
             archive: &archive(&fixture),
             proof_container: FIXTURE_PROOF_IMAGE,
             canvas: Some(canvas),
+            capture_symbols: true,
         },
         &fixture.programs(),
         &executor,

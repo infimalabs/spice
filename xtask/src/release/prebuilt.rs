@@ -11,10 +11,9 @@ use super::*;
 /// The one target a cross-built bundle carries a candidate for.
 const TARGET: ReleaseTarget = ReleaseTarget::X86_64PcWindowsMsvc;
 
-/// Where the bundle's artifact root places the candidate executable, its
-/// PDB, and the toolchain the cross build observed.
+/// Where the bundle's artifact root places the candidate executable and the
+/// toolchain the cross build observed.
 pub(super) const CANDIDATE: &str = "candidate/spice.exe";
-pub(super) const DEBUG: &str = "candidate/spice.pdb";
 pub(super) const TOOLCHAIN: &str = "candidate/toolchain.json";
 
 /// The build tools one release build observed: every pin except the proof
@@ -43,12 +42,11 @@ impl Toolchain {
 ///
 /// `manifest` is the bundle's prepared manifest and `bundle` its unpacked
 /// artifact root. The manifest is admitted only when it was built from this
-/// release's source archive; the candidate, its PDB, and the recorded
-/// toolchain are read only when their bytes match the manifest. The recorded
-/// toolchain must meet the release pins, the candidate must link the canvas
-/// `app` names, and its executed version report must name this release, as
-/// on the built route. The stage layout and target payload are the ones the
-/// built route publishes.
+/// release's source archive; the candidate and recorded toolchain are read
+/// only when their bytes match the manifest. The recorded toolchain must meet
+/// the release pins, the candidate must link the canvas `app` names, and its
+/// executed version report must name this release, as on the built route. The
+/// stage layout and target payload are the ones the built route publishes.
 ///
 /// # Errors
 ///
@@ -164,7 +162,6 @@ pub(super) fn stage_prebuilt<E: Executor>(
     } = request;
     let identity = archive.source(root)?.identity;
     let native = bundle.read(CANDIDATE)?;
-    let debug = bundle.read(DEBUG)?;
     let toolchain: Toolchain =
         serde_json::from_slice(&bundle.read(TOOLCHAIN)?).map_err(|error| {
             TargetBuildError::Prebuilt(format!("{TOOLCHAIN} is not a toolchain record: {error}"))
@@ -179,7 +176,6 @@ pub(super) fn stage_prebuilt<E: Executor>(
         canvas,
         executable: &executable,
         native: Some(native),
-        debug: Some(debug),
         executor,
     };
     let mut publisher = PrebuiltPublisher {
@@ -212,7 +208,6 @@ struct PrebuiltBuilder<'a, E> {
     canvas: crate::app::StagedCanvas,
     executable: &'a Path,
     native: Option<Vec<u8>>,
-    debug: Option<Vec<u8>>,
     executor: &'a E,
 }
 
@@ -253,10 +248,6 @@ impl<E: Executor> Builder for PrebuiltBuilder<'_, E> {
             .map_err(build_error)?;
         String::from_utf8(report.stdout)
             .map_err(|_| BuildError::new("prebuilt executable version report is not UTF-8"))
-    }
-
-    fn take_windows_debug_artifact(&mut self) -> Option<Vec<u8>> {
-        self.debug.take()
     }
 }
 

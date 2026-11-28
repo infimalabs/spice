@@ -67,6 +67,7 @@ fn stage_signed(
             archive: &archive,
             proof_container: FIXTURE_PROOF_IMAGE,
             canvas: None,
+            capture_symbols: true,
         },
         &fixture.programs(),
         executor,

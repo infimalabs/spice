@@ -11,15 +11,10 @@ pub(super) struct NativeBuild {
     pub(super) link: crate::app::NativeLink,
 }
 
-/// Ask Cargo for the exact linked binary carrying `canvas`, which also names
-/// the version the executable reports, retaining line tables for targets
-/// whose declared debug artifact consumes them. The macOS executable must
-/// leave the link unstripped:
-/// `dsymutil` follows the symbol table's object-file entries to assemble the
-/// dSYM, after which the builder strips the executable itself. Linux declares
-/// no debug artifact, so its symbol table goes at link. MSVC receives no strip
-/// setting because rustc spells one as `/DEBUG:NONE`, which would suppress the
-/// declared PDB.
+/// Ask Cargo for the exact linked binary carrying `canvas`. Every candidate
+/// retains line tables in its private build outputs so an authenticated symbol
+/// sidecar can be reproduced later. The platform adapter strips the public
+/// executable before it enters the staged payload.
 pub(super) fn cargo_build(
     target: ReleaseTarget,
     target_dir: &Path,
@@ -47,18 +42,10 @@ pub(super) fn cargo_build(
     ]);
     arguments.push(target_dir.as_os_str().to_owned());
     arguments.push(OsString::from("--message-format=json-render-diagnostics"));
-    if target.debug_path().is_some() {
-        arguments.extend([
-            OsString::from("--config"),
-            OsString::from(super::candidate().debug_config()),
-        ]);
-    }
-    if target == ReleaseTarget::X86_64UnknownLinuxMusl {
-        arguments.extend([
-            OsString::from("--config"),
-            OsString::from("profile.release.strip=\"symbols\""),
-        ]);
-    }
+    arguments.extend([
+        OsString::from("--config"),
+        OsString::from(super::candidate().debug_config()),
+    ]);
     let link = canvas.native_link(target_dir, object, crate::app::LinkProfile::Release)?;
     arguments.extend(link.arguments.iter().cloned());
     Ok(NativeBuild { arguments, link })

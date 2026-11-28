@@ -8,6 +8,8 @@ use std::time::Duration;
 use sill::Deadlines;
 use spice::ambient::Ambient;
 
+mod release_cli;
+
 const USAGE_EXIT: u8 = 2;
 type CommandResult = Result<(), Box<dyn std::error::Error>>;
 const USAGE: &str = concat!(
@@ -23,7 +25,8 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|admit-hosted-release-notes RECORD COMMIT IDENTITY|dispatch-hosted-release --notes FILE [--stage-only]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "rebuild-release-symbols RECIPE RELEASED_BINARY OUTPUT|",
+    "stage-hosted-release INPUTS_RUN|admit-hosted-release-notes RECORD COMMIT IDENTITY|dispatch-hosted-release --notes FILE [--stage-only] [--symbols]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -134,6 +137,9 @@ fn main() -> ExitCode {
             &mut output,
             &mut io::stderr().lock(),
         ),
+        Some(value) if value == OsStr::new("rebuild-release-symbols") => {
+            release_cli::run_rebuild_release_symbols(arguments.collect(), &ambient, &mut output)
+        }
         Some(value) if value == OsStr::new("windows-appliance") => {
             run_windows_appliance(arguments.collect(), &ambient, &mut output)
         }
@@ -399,6 +405,7 @@ fn run_seal_darwin(
         signing.as_ref(),
         None,
         xtask::AppOrigin::Compile,
+        true,
         output,
     )?;
     if let Some(directory) = destination {
@@ -519,7 +526,7 @@ fn run_hosted_release_command(
     match command.to_str().expect("exact command is Unicode") {
         "stage-hosted-release" => run_hosted_release(arguments, ambient, output, error_output),
         "admit-hosted-release-notes" => run_admit_hosted_release_notes(arguments, output),
-        "dispatch-hosted-release" => run_dispatch_hosted_release(arguments, output),
+        "dispatch-hosted-release" => release_cli::run_dispatch_hosted_release(arguments, output),
         "publish-hosted-release" => run_publish_hosted_release(arguments, ambient, output),
         _ => unreachable!("predicate admits only hosted release commands"),
     }
@@ -567,28 +574,6 @@ fn run_admit_hosted_release_notes(
         notes.identity, notes.release_commit
     )
     .map_err(Into::into)
-}
-
-fn run_dispatch_hosted_release(
-    arguments: Vec<OsString>,
-    output: &mut impl io::Write,
-) -> CommandResult {
-    let arguments = arguments
-        .iter()
-        .map(|argument| argument.to_str())
-        .collect::<Option<Vec<_>>>()
-        .ok_or_else(usage_error)?;
-    let (notes, stage_only) = match arguments.as_slice() {
-        ["--notes", notes] => (notes, false),
-        ["--notes", notes, "--stage-only"] => (notes, true),
-        _ => {
-            eprintln!("{}", help());
-            return Err(usage_error().into());
-        }
-    };
-    xtask::dispatch_hosted_release(Path::new(notes), stage_only, output)
-        .map(|_| ())
-        .map_err(Into::into)
 }
 
 fn run_publish_hosted_release(
@@ -754,6 +739,7 @@ fn run_stage_target(
             signing.as_ref(),
             proof_container,
             app,
+            false,
             output,
         )
         .map(|_| ())

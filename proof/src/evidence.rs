@@ -629,6 +629,7 @@ mod tests {
             bytes: 6,
             digest: native.clone(),
         }];
+        crate::test_support::symbol_recipe(&mut inventory);
         let symbols = crate::test_support::symbols(target, &native, &mut inventory);
         inventory.sort_by(|left, right| left.path.cmp(&right.path));
         TargetPayload {

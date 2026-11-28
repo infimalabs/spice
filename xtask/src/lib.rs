@@ -66,8 +66,8 @@ pub use prepared_artifact::{PreparedArtifactError, prepared_artifact};
 pub use proof_image::{ProofImageError, build_proof_image, load_proof_image};
 pub use release::{
     AppOrigin, CommandRecord, CrossImage, MacSymbols, ReleaseEnvironment, TargetBuild,
-    TargetBuildError, build_windows_appliance, cross_build_windows, release_proof_image,
-    stage_prebuilt_target, stage_target, stage_target_app,
+    TargetBuildError, build_windows_appliance, cross_build_windows, rebuild_release_symbols,
+    release_proof_image, stage_prebuilt_target, stage_target, stage_target_app,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use release_inputs::{

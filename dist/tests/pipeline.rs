@@ -30,6 +30,8 @@ fn source_digest() -> TargetSource {
     TargetSource {
         commit: Digest::from_str(&"1".repeat(64)).expect("fixture digest is canonical"),
         archive: Digest::compute(Domain::DistSourceArchive, b"source archive"),
+        source_commit: "1".repeat(40),
+        cargo_lock: Digest::compute(Domain::DistArtifact, b"Cargo.lock"),
     }
 }
 
@@ -495,19 +497,32 @@ fn default_artifact_absence_and_empty_windows_debug_output_are_distinct() {
         RequiredPins::new(required.clone()).expect("pins are valid"),
         product_version(),
     );
-    let mut builder = DefaultArtifactsBuilder::default();
-    let mut publisher = MemoryPublisher::default();
-    let staged = pipeline
-        .stage(
-            ReleaseTarget::X86_64UnknownLinuxMusl,
-            source_digest(),
-            &required,
-            &mut builder,
-            &mut publisher,
-        )
-        .expect("a Linux builder needs no separate debug artifact");
-    assert_eq!(staged.payload.inventory.len(), 1);
-    assert_eq!(staged.payload.inventory[0].path, "bin/spice");
+    for target in [
+        ReleaseTarget::Aarch64AppleDarwin,
+        ReleaseTarget::X86_64UnknownLinuxMusl,
+        ReleaseTarget::X86_64PcWindowsMsvc,
+    ] {
+        let mut builder = DefaultArtifactsBuilder::default();
+        let mut publisher = MemoryPublisher::default();
+        let staged = pipeline
+            .stage(
+                target,
+                source_digest(),
+                &required,
+                &mut builder,
+                &mut publisher,
+            )
+            .expect("a default builder needs no detached debug artifact");
+        assert_eq!(
+            staged
+                .payload
+                .inventory
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            [target.executable_path(), "symbols/recipe.json"]
+        );
+    }
 
     struct EmptyPdbBuilder(RecordingBuilder);
     impl Builder for EmptyPdbBuilder {

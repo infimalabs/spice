@@ -113,10 +113,19 @@ impl SourceArchive {
             })?
             .commit()
             .to_owned();
+        let lock_path = root.join("Cargo.lock");
+        let lock = fs::read(&lock_path).map_err(|error| {
+            TargetBuildError::SourceArchive(format!(
+                "cannot read selected {}: {error}",
+                lock_path.display()
+            ))
+        })?;
         Ok(ExtractedSource {
             identity: dist::TargetSource {
                 commit: Digest::compute(Domain::DistSourceCommit, commit.as_bytes()),
                 archive: self.digest.clone(),
+                source_commit: commit.clone(),
+                cargo_lock: Digest::compute(Domain::DistArtifact, &lock),
             },
             commit,
         })

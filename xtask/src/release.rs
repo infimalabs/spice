@@ -23,6 +23,8 @@ use wire::{Digest, Domain};
 
 mod candidate;
 use candidate::candidate;
+mod local_symbols;
+pub use local_symbols::rebuild_release_symbols;
 mod builder;
 mod native;
 #[cfg(all(test, unix))]
@@ -369,6 +371,7 @@ pub fn stage_target(
     signing: Option<&DarwinSigning>,
     proof_container: Option<&str>,
     app: AppOrigin,
+    capture_symbols: bool,
     output: &mut impl Write,
 ) -> Result<TargetBuild, TargetBuildError> {
     let target = parse_target(spelling)?;
@@ -403,6 +406,7 @@ pub fn stage_target(
             archive: &archive,
             proof_container,
             canvas,
+            capture_symbols,
         },
         &programs,
         &executor,
@@ -604,6 +608,7 @@ fn stage_with<E: Executor>(
             archive: &archive,
             proof_container: FIXTURE_PROOF_IMAGE,
             canvas: None,
+            capture_symbols: true,
         },
         programs,
         executor,
@@ -620,6 +625,7 @@ struct StageRequest<'a> {
     archive: &'a SourceArchive,
     proof_container: &'a str,
     canvas: Option<crate::app::StagedCanvas>,
+    capture_symbols: bool,
 }
 
 fn stage_with_roots<E: Executor>(
@@ -637,6 +643,7 @@ fn stage_with_roots<E: Executor>(
         archive,
         proof_container,
         canvas,
+        capture_symbols,
     } = request;
     let source = archive.source(root)?;
     #[cfg(unix)]
@@ -665,8 +672,10 @@ fn stage_with_roots<E: Executor>(
         commit: &commit,
         #[cfg(unix)]
         signing,
+        capture_symbols,
         symbols: None,
         symbol_artifact: None,
+        linux_debug_artifact: None,
         windows_debug_artifact: None,
         canvas,
         executable: None,

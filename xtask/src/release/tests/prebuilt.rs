@@ -3,23 +3,19 @@ use std::collections::BTreeMap;
 use sha2::{Digest as _, Sha256};
 
 use super::super::prebuilt::{
-    Bundle, CANDIDATE, DEBUG, PrebuiltRequest, TOOLCHAIN, Toolchain, stage_prebuilt,
+    Bundle, CANDIDATE, PrebuiltRequest, TOOLCHAIN, Toolchain, stage_prebuilt,
 };
 use super::*;
 
 const TARGET: ReleaseTarget = ReleaseTarget::X86_64PcWindowsMsvc;
 
-/// A bundle root under the fixture carrying `candidate`, the fixture PDB,
-/// and `toolchain`, with the manifest digests of exactly those bytes.
+/// A bundle root under the fixture carrying `candidate` and `toolchain`, with
+/// the manifest digests of exactly those bytes.
 fn bundle(fixture: &Fixture, candidate: &[u8], toolchain: &Toolchain) -> Bundle {
     let root = fixture.root.join("bundle");
     let toolchain = serde_json::to_vec(toolchain).expect("toolchain record encodes");
     let mut files = BTreeMap::new();
-    for (path, bytes) in [
-        (CANDIDATE, candidate),
-        (DEBUG, b"fixture PDB".as_slice()),
-        (TOOLCHAIN, &toolchain),
-    ] {
+    for (path, bytes) in [(CANDIDATE, candidate), (TOOLCHAIN, &toolchain)] {
         let file = root.join(path);
         fs::create_dir_all(file.parent().expect("bundle file parent")).expect("bundle directory");
         fs::write(&file, bytes).expect("write bundle file");
@@ -59,6 +55,29 @@ fn stage(
     )
 }
 
+fn build_without_symbols(fixture: &Fixture, executor: &FakeExecutor) -> TargetBuild {
+    let stage_root = fixture.root.join("dist/stage");
+    let archive = SourceArchive::read(&stage_root.join(dist::SOURCE_ARCHIVE_FILE))
+        .expect("fixture source archive");
+    stage_with_roots(
+        &fixture.root,
+        &fixture.root.join("target"),
+        &stage_root,
+        StageRequest {
+            target: TARGET,
+            version: &ProductVersion::parse(FIXTURE_VERSION).expect("fixture version"),
+            signing: None,
+            archive: &archive,
+            proof_container: FIXTURE_PROOF_IMAGE,
+            canvas: None,
+            capture_symbols: false,
+        },
+        &fixture.programs(),
+        executor,
+    )
+    .expect("built stage succeeds")
+}
+
 /// Every published stage file, relative to the stage root.
 fn published(fixture: &Fixture) -> Vec<(PathBuf, Vec<u8>)> {
     fn walk(root: &Path, directory: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
@@ -87,14 +106,7 @@ fn published(fixture: &Fixture) -> Vec<(PathBuf, Vec<u8>)> {
 #[test]
 fn a_prebuilt_candidate_publishes_the_built_stage_without_compiling() {
     let built_fixture = Fixture::new();
-    let built = stage_with(
-        &built_fixture.root,
-        &built_fixture.root.join("target"),
-        TARGET,
-        &built_fixture.programs(),
-        &FakeExecutor::new(&built_fixture, TARGET),
-    )
-    .expect("built stage succeeds");
+    let built = build_without_symbols(&built_fixture, &FakeExecutor::new(&built_fixture, TARGET));
 
     let fixture = Fixture::new();
     let executor = FakeExecutor::new(&fixture, TARGET);
