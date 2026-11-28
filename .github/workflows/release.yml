@@ -139,6 +139,12 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
         run: |
           set -euo pipefail
+          native_rustup="$(command -v rustup)"
+          test -x "$native_rustup"
+          bootstrap_cargo_home="${native_rustup%/bin/rustup}"
+          test "$bootstrap_cargo_home/bin/rustup" -ef "$native_rustup"
+          test "$bootstrap_cargo_home" != "$native_rustup"
+          printf 'SPICE_BOOTSTRAP_CARGO_HOME=%s\n' "$bootstrap_cargo_home" >> "$GITHUB_ENV"
           rustup toolchain install --no-self-update
           cargo build --locked --package xtask
 

@@ -520,7 +520,10 @@ proof-image or platform setup, the coordinator requires the structured note
 record's source commit and domain-separated document identity, then re-admits
 its schema, curated Highlights, inventory boundary, and exact bytes without
 opening or reconstructing the local journal. The publisher repeats the same
-admission before any native stage. The workflow
+admission before any native stage. The coordinator compiles under its private
+Cargo home but records the runner's native rustup proxy home as bootstrap
+authority, so Windows cross staging resolves the tracked Rust channel without
+consulting the private dependency cache for toolchain executables. The workflow
 preserves the Git-common publication authority after every attempt under a
 run- and attempt-scoped artifact, validates and restores only regular files
 beneath `releases/`, and resumes the pinned commit on a rerun. A completed
