@@ -218,6 +218,11 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/coordinator-target
           STAGE_ONLY: ${{ inputs.stage_only }}
+          # The checkout keeps no credential; only this step's Git reaches
+          # github.com, through the job token, to push the release tag.
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: credential.https://github.com.helper
+          GIT_CONFIG_VALUE_0: "!gh auth git-credential"
         run: |
           set -euo pipefail
           xtask="$CARGO_TARGET_DIR/debug/xtask"
