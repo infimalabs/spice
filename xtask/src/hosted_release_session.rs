@@ -670,6 +670,32 @@ mod tests {
     }
 
     #[test]
+    fn pre_dispatch_refusal_retries_only_the_unstarted_target() {
+        let workflows = workflows("a");
+        let inputs = identity("inputs");
+        let mut session = SessionFile::new(41, workflows.clone(), inputs.clone());
+        session
+            .record(NativeTarget::Linux, &binding(101, &workflows.linux, false))
+            .unwrap();
+        session
+            .record(NativeTarget::Macos, &binding(102, &workflows.macos, false))
+            .unwrap();
+        session.targets.linux.succeeded().unwrap();
+        session.targets.macos.succeeded().unwrap();
+
+        session.admit(41, &workflows, &inputs).unwrap();
+        assert_eq!(
+            session.target(NativeTarget::Linux).attachment(),
+            Some(Attach::Run(101))
+        );
+        assert_eq!(
+            session.target(NativeTarget::Macos).attachment(),
+            Some(Attach::Run(102))
+        );
+        assert_eq!(session.target(NativeTarget::Windows).attachment(), None);
+    }
+
+    #[test]
     fn an_observed_run_that_concluded_in_failure_is_redispatched() {
         let workflows = workflows("a");
         let mut session = SessionFile::new(41, workflows.clone(), identity("inputs"));
