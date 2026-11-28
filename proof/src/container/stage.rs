@@ -197,12 +197,29 @@ impl Container {
         if capture_symbols {
             runtime_arguments.push("--symbols".to_owned());
         }
-        self.sealed_release_run(
+        let run = self.sealed_release_run(
             runtime_arguments,
             notice,
             "sealed Linux release staging",
             "complete Linux release staging",
-        )
+        )?;
+        if redirected {
+            if let SealedTarget::Host(path) = &target {
+                self.make_bind_descendants_removable(
+                    self.image.as_str(),
+                    &[
+                        (stage.as_path(), SYMBOL_STAGE),
+                        (path.as_path(), CARGO_TARGET),
+                    ],
+                )?;
+            } else {
+                self.make_bind_descendants_removable(
+                    self.image.as_str(),
+                    &[(stage.as_path(), SYMBOL_STAGE)],
+                )?;
+            }
+        }
+        Ok(run)
     }
 
     /// Rebuild a Windows candidate and its PDB inside the exact cross image.
@@ -250,12 +267,14 @@ impl Container {
             self.image.to_string(),
             "--symbols".to_owned(),
         ]);
-        self.sealed_release_run(
+        let run = self.sealed_release_run(
             runtime_arguments,
             notice,
             "sealed Windows symbol staging",
             "complete Windows symbol staging",
-        )
+        )?;
+        self.make_bind_descendants_removable(cross_image, &[(stage, SYMBOL_STAGE)])?;
+        Ok(run)
     }
 
     /// Cross-build the Windows MSVC release set in `cross_image`, the Windows
@@ -320,6 +339,73 @@ impl Container {
             "sealed Windows cross build",
             "complete Windows cross build",
         )
+    }
+
+    /// Restore host removability after a remapped container user populated
+    /// private bind directories. Only descendant directories need write
+    /// permission for the host owner to unlink the scratch tree.
+    fn make_bind_descendants_removable(
+        &self,
+        image: &str,
+        bindings: &[(&Path, &str)],
+    ) -> Result<(), ContainerError> {
+        let mut runtime_arguments = vec![
+            "run".to_owned(),
+            "--rm".to_owned(),
+            "--platform".to_owned(),
+            RUN_PLATFORM.to_owned(),
+            "--network=none".to_owned(),
+            "--read-only".to_owned(),
+            "--cap-drop=ALL".to_owned(),
+            "--security-opt=no-new-privileges".to_owned(),
+        ];
+        for (source, destination) in bindings {
+            let source = representable(source)?;
+            runtime_arguments.extend([
+                "--mount".to_owned(),
+                format!(
+                    "type=bind,source={},destination={destination}",
+                    source.display()
+                ),
+            ]);
+        }
+        runtime_arguments.extend([
+            image.to_owned(),
+            "find".to_owned(),
+            bindings[0].1.to_owned(),
+        ]);
+        runtime_arguments.extend(
+            bindings
+                .iter()
+                .skip(1)
+                .map(|(_, destination)| (*destination).to_owned()),
+        );
+        runtime_arguments.extend([
+            "-mindepth".to_owned(),
+            "1".to_owned(),
+            "-type".to_owned(),
+            "d".to_owned(),
+            "-exec".to_owned(),
+            "chmod".to_owned(),
+            "a+rwx".to_owned(),
+            "{}".to_owned(),
+            "+".to_owned(),
+        ]);
+        let execution = self.run(self.runtime_spec(
+            runtime_arguments,
+            "restore sealed symbol scratch removability",
+        )?)?;
+        if matches!(
+            execution.completion,
+            ExecutionCompletion::Exited { success: true, .. }
+        ) {
+            Ok(())
+        } else {
+            Err(Self::control_refusal(
+                "restore sealed symbol scratch removability",
+                &execution,
+            ))
+        }
     }
 
     #[cfg(unix)]
