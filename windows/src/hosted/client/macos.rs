@@ -1,6 +1,6 @@
 //! Provider client for one disposable hosted signed macOS release stage.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,10 @@ const RUN_TITLE_PREFIX: &str = "macOS staging ";
 const FINALIZE_JOB: &str = "Finalize macOS";
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const TARGET: &str = "aarch64-apple-darwin";
+const RECIPE_PATH: &str = "symbols/recipe.json";
 const SYMBOL_PATH: &str = "symbols/spice.symbols";
+/// The only payload paths a finalized Darwin stage may inventory.
+const INVENTORY_PATHS: [&str; 3] = ["bin/spice", RECIPE_PATH, SYMBOL_PATH];
 const PAYLOAD_LIMIT: u64 = 1024 * 1024;
 
 /// The provider-authenticated outcome of one hosted macOS stage.
@@ -389,21 +392,20 @@ fn admit_stage(
     if payload.pins.proof_container != expected.inputs.proof_identity {
         return Err(differs("proof-container pin"));
     }
-    if payload.inventory.len() != 2 {
+    if payload.inventory.len() > INVENTORY_PATHS.len() {
         return Err(differs("inventory cardinality"));
     }
-    let native = payload
+    let entries = payload
         .inventory
         .iter()
-        .find(|entry| entry.path == payload.target.executable_path())
-        .ok_or_else(|| differs("executable inventory"))?;
-    let symbols = payload
-        .inventory
-        .iter()
-        .find(|entry| entry.path == SYMBOL_PATH)
-        .ok_or_else(|| differs("symbol inventory"))?;
-    let native_path = object_path(stage, &native.digest, native.mode);
-    let symbol_path = object_path(stage, &symbols.digest, symbols.mode);
+        .map(|entry| {
+            if INVENTORY_PATHS.contains(&entry.path.as_str()) {
+                Ok((entry, object_path(stage, &entry.digest, entry.mode)))
+            } else {
+                Err(differs("inventory"))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let receipt_relative = PathBuf::from(format!(
         "proofs/{}/{}/receipt.json",
         payload.source, payload.target
@@ -411,23 +413,33 @@ fn admit_stage(
     let receipt_path = stage.join(&receipt_relative);
     let staged =
         |path: &Path| relative(stage, path).map(|path| Path::new(STAGE_DIRECTORY).join(path));
-    declared.require(&[
-        staged(&native_path)?,
-        staged(&symbol_path)?,
-        Path::new(STAGE_DIRECTORY).join(&receipt_relative),
-    ])?;
-    let native_bytes = read_exact(&native_path, native.bytes)?;
-    let symbol_bytes = read_exact(&symbol_path, symbols.bytes)?;
+    let mut required = entries
+        .iter()
+        .map(|(_, path)| staged(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    required.push(Path::new(STAGE_DIRECTORY).join(&receipt_relative));
+    declared.require(&required)?;
+    let objects = entries
+        .iter()
+        .map(|(entry, path)| Ok((entry.path.as_str(), read_exact(path, entry.bytes)?)))
+        .collect::<Result<BTreeMap<_, _>, WindowsHostedError>>()?;
     let receipt_bytes = read_limited(&receipt_path, PAYLOAD_LIMIT)?;
-    dist::admit_finalized_darwin(&payload_bytes, &native_bytes, &symbol_bytes)
-        .map_err(|error| differs(&error.to_string()))?;
+    let object = |path: &str| objects.get(path).map(Vec::as_slice);
+    dist::admit_finalized_darwin(
+        &payload_bytes,
+        dist::DarwinObjects {
+            native: object(payload.target.executable_path())
+                .ok_or_else(|| differs("executable inventory"))?,
+            recipe: object(RECIPE_PATH).ok_or_else(|| differs("symbol recipe inventory"))?,
+            symbols: object(SYMBOL_PATH),
+        },
+    )
+    .map_err(|error| differs(&error.to_string()))?;
 
-    let expected = BTreeSet::from([
-        PathBuf::from(PAYLOAD_PATH),
-        relative(stage, &native_path)?,
-        relative(stage, &symbol_path)?,
-        receipt_relative.clone(),
-    ]);
+    let mut expected = BTreeSet::from([PathBuf::from(PAYLOAD_PATH), receipt_relative.clone()]);
+    for (_, path) in &entries {
+        expected.insert(relative(stage, path)?);
+    }
     let mut observed = BTreeSet::new();
     collect_files(stage, stage, &mut observed)?;
     if observed != expected {
@@ -446,7 +458,7 @@ fn admit_stage(
             digest: Digest::compute(Domain::DistArtifact, &receipt_bytes),
         },
     ];
-    for (entry, path) in [(native, native_path), (symbols, symbol_path)] {
+    for (entry, path) in entries {
         artifacts.push(crate::hosted::Artifact {
             path: relative(stage, &path)?.to_string_lossy().replace('\\', "/"),
             bytes: entry.bytes,

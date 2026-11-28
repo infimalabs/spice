@@ -241,12 +241,13 @@ release entry point.
 
 **Invariant —** Darwin staging gives the release executable a notarized
 Developer ID signature before the pipeline reads the bytes it publishes. After
-the dSYM is derived and the image stripped, it signs with the hardened runtime
+any requested dSYM is derived and the image stripped, it signs with the hardened runtime
 and a secure timestamp, submits an archive of the signed file to Apple
 notarization, and finishes only when strict `codesign` verification and
 Gatekeeper's primary-signature assessment accept the file as notarized. The
-target payload, its inventory, and the symbol artifact therefore bind the
-signed bytes, and no step changes the executable after they are read. Apple's
+target payload, its inventory, the compact symbol recipe, and any captured
+symbol artifact therefore bind the signed bytes, and no step changes the
+executable after they are read. Apple's
 timestamp makes two signings of the same image differ, so a signed digest is
 never reproduced, and nothing claims to reproduce it. The artifact gate and
 proof replay verify the sealed digests of the bytes the stage wrote. The bare
@@ -259,8 +260,11 @@ credential or OIDC authority. Its signing job admits the native bytes from
 that stage and runs only host credential and Apple signing tools; no
 repository-built executable enters that job. A following job, holding neither
 credentials nor OIDC authority, runs the transported finalizer to rebind the
-payload and dSYM to the signed bytes and admits the resulting stage. The OIDC
-job only downloads those files and invokes GitHub's pinned provenance action.
+payload, the symbol recipe's released binary, and any dSYM to the signed bytes
+and admits the resulting stage. A default stage inventories only the
+executable and recipe; admission refuses a recipe naming any other executable.
+The OIDC job only downloads those files and invokes GitHub's pinned provenance
+action.
 Cargo build scripts, proc-macros, Trunk, and the app toolchain therefore never
 execute with the Developer ID key, notary credential, unlocked signing
 keychain, or OIDC token request.
@@ -270,8 +274,9 @@ immutable challenge-bound draft-release asset and dispatches the workflow from
 the admitted `main` workflow blob. The provider verifies the raw archive
 SHA-256, canonical source identity, commit, and tree before any build, and also
 receives the exact proof-container and Linux-canvas identities. The client
-admits the signed result plus final payload, executable, dSYM, file set, and
-Darwin bindings; verifies GitHub provenance against that exact workflow commit
+admits the signed result plus final payload, executable, symbol recipe, any
+dSYM, file set, and Darwin bindings; verifies GitHub provenance against that
+exact workflow commit
 and branch; then publishes the payload last under `dist/stage`. Run artifacts
 remain evidence until provider retention expires them; the client deletes the
 challenge transport after every terminal outcome.

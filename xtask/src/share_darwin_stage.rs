@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
@@ -7,13 +7,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use atomic::{RootedFiles, RootedPublish as _};
 use dist::DarwinSigning;
-use wire::manifest::{MacSymbolArtifact, ReleaseTarget};
+use wire::manifest::ReleaseTarget;
 use wire::{Digest, Domain};
 
 use crate::{ShareDarwinRequest, share_darwin};
 
 const PAYLOAD_PATH: &str = "targets/aarch64-apple-darwin/payload.json";
 const PAYLOAD_LIMIT: u64 = 1024 * 1024;
+const RECIPE_PATH: &str = "symbols/recipe.json";
+const SYMBOL_PATH: &str = "symbols/spice.symbols";
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Sign and notarize an already-built Darwin stage without exposing credentials
@@ -32,7 +34,7 @@ pub fn sign_staged_darwin(
 ) -> Result<(), StagedDarwinError> {
     require_fresh_output(output)?;
     let unsigned = read_stage(input)?;
-    let temporary = TemporaryExecutable::create(input, &unsigned.native)?;
+    let temporary = TemporaryExecutable::create(input, unsigned.objects()?.native)?;
     share_darwin(&ShareDarwinRequest::new(temporary.path(), signing), log)?;
     let signed = read_regular(temporary.path())?;
     finalize_stage(unsigned, signed, output, log)
@@ -64,12 +66,8 @@ fn finalize_stage(
     log: &mut impl Write,
 ) -> Result<(), StagedDarwinError> {
     require_canvas(&unsigned.payload, &signed)?;
-    let finalized = dist::restage_signed_darwin(
-        &unsigned.payload_bytes,
-        &unsigned.native,
-        &unsigned.symbols,
-        signed,
-    )?;
+    let finalized =
+        dist::restage_signed_darwin(&unsigned.payload_bytes, unsigned.objects()?, signed)?;
     let mut publisher = RootedFiles::new(output);
     for artifact in &finalized.artifacts {
         publisher.publish(&artifact.object_path(), artifact.mode, &artifact.bytes)?;
@@ -91,7 +89,8 @@ fn finalize_stage(
 /// # Errors
 ///
 /// Refuses a noncanonical payload, missing or extra objects, stale digests,
-/// stale dSYM binding, or a native executable whose linked canvas moved.
+/// a symbol recipe or dSYM bound to another executable, or a native executable
+/// whose linked canvas moved.
 pub fn verify_staged_darwin(stage: &Path) -> Result<(), StagedDarwinError> {
     let verified = read_stage(stage)?;
     require_exact_output(stage, &verified)
@@ -100,9 +99,24 @@ pub fn verify_staged_darwin(stage: &Path) -> Result<(), StagedDarwinError> {
 struct ReadStage {
     payload: wire::manifest::TargetPayload,
     payload_bytes: Vec<u8>,
-    native: Vec<u8>,
-    symbols: Vec<u8>,
+    /// Inventoried object bytes keyed by their payload path.
+    objects: BTreeMap<String, Vec<u8>>,
     paths: BTreeSet<PathBuf>,
+}
+
+impl ReadStage {
+    fn objects(&self) -> Result<dist::DarwinObjects<'_>, StagedDarwinError> {
+        let object = |path: &str| self.objects.get(path).map(Vec::as_slice);
+        let required = |path: &str| {
+            object(path)
+                .ok_or_else(|| StagedDarwinError::Inventory(format!("missing Darwin {path}")))
+        };
+        Ok(dist::DarwinObjects {
+            native: required(ReleaseTarget::Aarch64AppleDarwin.executable_path())?,
+            recipe: required(RECIPE_PATH)?,
+            symbols: object(SYMBOL_PATH),
+        })
+    }
 }
 
 fn read_stage(root: &Path) -> Result<ReadStage, StagedDarwinError> {
@@ -113,68 +127,27 @@ fn read_stage(root: &Path) -> Result<ReadStage, StagedDarwinError> {
     if payload.target != ReleaseTarget::Aarch64AppleDarwin {
         return Err(StagedDarwinError::Target(payload.target));
     }
-    if payload.inventory.len() != 2 {
-        return Err(StagedDarwinError::Inventory(
-            "Darwin stage must contain exactly its executable and dSYM artifact".to_owned(),
-        ));
+    let mut objects = BTreeMap::new();
+    let mut paths = BTreeSet::from([PathBuf::from(PAYLOAD_PATH)]);
+    for entry in &payload.inventory {
+        let path = object_path(root, &entry.digest, entry.mode);
+        let bytes = read_exact(&path, entry.bytes)?;
+        require_digest(&path, &bytes, &entry.digest)?;
+        paths.insert(
+            path.strip_prefix(root)
+                .expect("derived object is rooted")
+                .to_path_buf(),
+        );
+        objects.insert(entry.path.clone(), bytes);
     }
-    let native_entry = payload
-        .inventory
-        .iter()
-        .find(|entry| entry.path == payload.target.executable_path())
-        .ok_or_else(|| StagedDarwinError::Inventory("missing Darwin executable".to_owned()))?;
-    let symbol_entry = payload
-        .inventory
-        .iter()
-        .find(|entry| entry.path == "symbols/spice.symbols")
-        .ok_or_else(|| StagedDarwinError::Inventory("missing Darwin dSYM artifact".to_owned()))?;
-    let native_path = object_path(root, &native_entry.digest, native_entry.mode);
-    let symbol_path = object_path(root, &symbol_entry.digest, symbol_entry.mode);
-    let native = read_exact(&native_path, native_entry.bytes)?;
-    let symbols = read_exact(&symbol_path, symbol_entry.bytes)?;
-    require_digest(&native_path, &native, &native_entry.digest)?;
-    require_digest(&symbol_path, &symbols, &symbol_entry.digest)?;
-    if payload.native != native_entry.digest {
-        return Err(StagedDarwinError::Inventory(
-            "payload native digest differs from its executable inventory".to_owned(),
-        ));
-    }
-    let document = MacSymbolArtifact::decode(&symbols)
-        .map_err(|error| StagedDarwinError::Inventory(error.to_string()))?;
-    let metadata = payload
-        .symbols
-        .as_ref()
-        .ok_or_else(|| StagedDarwinError::Inventory("missing Darwin symbol metadata".to_owned()))?;
-    if document.executable != payload.native
-        || metadata.executable != payload.native
-        || metadata.digest != symbol_entry.digest
-        || metadata.bytes != symbol_entry.bytes
-        || metadata.mode != symbol_entry.mode
-        || metadata.path != symbol_entry.path
-        || metadata.uuid != document.uuid
-    {
-        return Err(StagedDarwinError::Inventory(
-            "Darwin dSYM artifact is not bound to the staged executable".to_owned(),
-        ));
-    }
-    require_canvas(&payload, &native)?;
-    Ok(ReadStage {
+    let stage = ReadStage {
         payload,
         payload_bytes,
-        native,
-        symbols,
-        paths: BTreeSet::from([
-            PathBuf::from(PAYLOAD_PATH),
-            native_path
-                .strip_prefix(root)
-                .expect("derived object is rooted")
-                .to_path_buf(),
-            symbol_path
-                .strip_prefix(root)
-                .expect("derived object is rooted")
-                .to_path_buf(),
-        ]),
-    })
+        objects,
+        paths,
+    };
+    dist::admit_finalized_darwin(&stage.payload_bytes, stage.objects()?)?;
+    Ok(stage)
 }
 
 fn require_canvas(
