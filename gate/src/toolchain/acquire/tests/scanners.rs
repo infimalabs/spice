@@ -186,6 +186,28 @@ fn javascript_unused_reports_candidate_and_test_only_but_suppresses_the_exact_ex
     );
 }
 
+#[test]
+fn javascript_unused_accepts_a_focused_selected_scope_without_losing_findings() {
+    let mut fixture = Fixture::new("gate-javascript-focused-scope");
+    fixture.write("web/worker.js", "function unusedWorkerEntry() {}\n");
+    let mut source = fixture.source(&["web/worker.js"]);
+    source.reached_paths = Some(vec!["web/worker.js".to_owned()]);
+
+    let measurement = admitted(&source, GateId::JavascriptUnused, &[]);
+
+    assert_eq!(measurement.outcome, ArmOutcome::Findings);
+    assert_eq!(
+        measurement.findings,
+        [javascript_unused(
+            "web/worker.js",
+            1,
+            "unusedWorkerEntry",
+            "function",
+            0,
+        )]
+    );
+}
+
 /// What a module owns, and what counts as reaching it.
 ///
 /// The nested locals below are declared and never read, so an inventory that

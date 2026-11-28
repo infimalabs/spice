@@ -565,16 +565,7 @@ fn scoped_declaration(
     mut declaration: ToolchainDeclaration,
     source: &ToolchainSource<'_>,
 ) -> ToolchainDeclaration {
-    if source.reached_paths().is_some()
-        && matches!(
-            declaration.id,
-            GateId::Formatters
-                | GateId::JavascriptUnused
-                | GateId::CsharpUnusedCandidates
-                | GateId::PythonTypecheck
-                | GateId::EnvNameLedger
-        )
-    {
+    if source.reached_paths().is_some() && super::accepts_selected_scope(declaration.id) {
         declaration.jurisdiction.input = TreeInput::SelectedChanges;
     }
     declaration
