@@ -44,7 +44,6 @@ const WINDOWS_RECORDS: &[RequiredRecord] = &[
         "stage/targets/x86_64-pc-windows-msvc/payload.json",
     ),
     RequiredRecord::nested("object", "stage/objects/", ""),
-    RequiredRecord::nested("proof", "stage/proofs/", "/receipt.json"),
 ];
 
 /// The one relative layout published by every native hosted stage.
@@ -383,7 +382,6 @@ mod tests {
                 "runner/windows-hosted.exe",
                 "stage/targets/x86_64-pc-windows-msvc/payload.json",
                 "stage/objects/object",
-                "stage/proofs/proof/receipt.json",
             ],
             _ => panic!("unexpected production target {target}"),
         };
