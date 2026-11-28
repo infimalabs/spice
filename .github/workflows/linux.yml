@@ -284,8 +284,8 @@ jobs:
             "$repository:$tag" "$key"); then
             exit 1
           fi
-          # The sealed container runs as root without capabilities, so its
-          # target is a root-owned directory it may write without overrides.
+          # Restore the target under host root, then hand only this admitted
+          # bind source to the runner before sealed-target admission.
           sudo install -d -o 0 -g 0 -m 0755 "$target"
           case "$resolved_layer" in
             absent)
@@ -313,6 +313,7 @@ jobs:
               exit 65
               ;;
           esac
+          sudo chown -R "$(id -u):$(id -g)" "$target"
           {
             printf 'DEPENDENCY_BUILD_KEY=%s\n' "$key"
             printf 'DEPENDENCY_REPOSITORY=%s\n' "$repository"
