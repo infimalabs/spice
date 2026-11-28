@@ -964,6 +964,7 @@ fn lapse_claim(bus: &Bus, task: &TaskStamp) {
                 task: task.clone(),
                 occupant: claim.occupant,
                 expiry: at,
+                parked: None,
             },
             FactCause::Root,
         )

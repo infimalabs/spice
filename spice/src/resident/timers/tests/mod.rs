@@ -64,6 +64,18 @@ struct SeedFacts {
     seated: PendingFact,
 }
 
+/// An owned repository and environment that lend a timer its host.
+struct Hosted {
+    repository: spice::repository::Repository,
+    ambient: spice::ambient::Ambient,
+}
+
+impl Hosted {
+    fn host(&self) -> crate::command_client::Host<'_> {
+        crate::command_client::Host::new(&self.repository, &self.ambient)
+    }
+}
+
 impl Authority {
     fn born(&self) -> wire::TaskStamp {
         self.task.born().expect("fixture task carries a stamp")
@@ -74,6 +86,14 @@ impl Fixture {
     fn repository(&self) -> spice::repository::Repository {
         spice::repository::Repository::discover(&self.policy_root.0)
             .expect("timer policy authority")
+    }
+
+    /// The fixture repository with an empty process environment.
+    fn hosted(&self) -> Hosted {
+        Hosted {
+            repository: self.repository(),
+            ambient: spice::ambient::Ambient::default(),
+        }
     }
 
     /// The fixture task's latest claim with its lease.
@@ -114,7 +134,7 @@ fn automatic_claim_heartbeat_rolls_one_hundred_seconds_and_rearms_lapse() {
         .expect("due automatic heartbeat fires");
     assert_eq!(event.kind(), TimerKind::ClaimRenew);
     assert_eq!(
-        timers.consume(&fixture.bus, event, Some(&fixture.repository())),
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host())),
         Ok(Fired::ClaimRenew)
     );
     timers
@@ -193,7 +213,7 @@ fn automatic_claim_heartbeat_refuses_moved_occupant_authority() {
     move_residency(&fixture, fixture.authority.epoch, uuid(24));
 
     assert_eq!(
-        timers.consume(&fixture.bus, event, Some(&fixture.repository())),
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host())),
         Ok(Fired::Stale)
     );
     timers
@@ -232,7 +252,7 @@ fn automatic_claim_heartbeat_refuses_a_moved_lease_head() {
     renew_claim(&fixture, fixture.authority.expiry);
 
     assert_eq!(
-        timers.consume(&fixture.bus, event, Some(&fixture.repository())),
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host())),
         Ok(Fired::Stale)
     );
     assert_eq!(
@@ -302,7 +322,7 @@ fn expired_automatic_claim_lapses_without_arming_a_renewal_loop() {
 
     assert_eq!(event.kind(), TimerKind::ClaimLapse);
     let Ok(Fired::ClaimLapse(Some(lapsed))) =
-        timers.consume(&fixture.bus, event, Some(&fixture.repository()))
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host()))
     else {
         panic!("the expired claim lapse commits");
     };
@@ -368,7 +388,7 @@ fn expired_commit_bearing_claim_lapses_and_returns_to_allocation() {
         .block_on(timers.recv())
         .expect("expired claim timer fires");
     timers
-        .consume(&fixture.bus, fired, Some(&fixture.repository()))
+        .consume(&fixture.bus, fired, Some(fixture.hosted().host()))
         .expect("expired claim lapses");
     timers
         .synchronize(&fixture.bus)
@@ -406,7 +426,7 @@ fn expired_claim_lapses_after_resident_epoch_and_occupant_move() {
         .block_on(timers.recv())
         .expect("expired stale claim timer fires");
     timers
-        .consume(&fixture.bus, fired, Some(&fixture.repository()))
+        .consume(&fixture.bus, fired, Some(fixture.hosted().host()))
         .expect("expired stale claim lapses");
 
     let heads = lapsed_heads(&fixture);

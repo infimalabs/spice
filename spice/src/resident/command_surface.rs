@@ -135,18 +135,19 @@ impl<'a> Surface<'a> {
         }
     }
 
-    pub(super) fn repository(&self) -> &'a Repository {
-        self.repository
+    /// This resident's repository with the environment its Git reads see.
+    pub(super) fn host(&self) -> crate::command_client::Host<'a> {
+        crate::command_client::Host {
+            repository: self.repository,
+            ambient: &self.config.ambient,
+        }
     }
 
     /// What an invitation join decides against: this resident's repository
     /// and its one resource ledger.
     pub(super) fn joining(&self) -> crate::board_command::Joining<'a> {
         crate::board_command::Joining {
-            host: crate::command_client::Host {
-                repository: self.repository,
-                ambient: &self.config.ambient,
-            },
+            host: self.host(),
             resources: self.resources,
         }
     }

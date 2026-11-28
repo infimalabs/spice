@@ -106,6 +106,7 @@ pub(super) fn claim_refresh_with_clock(
         nothing_stolen: false,
         transplant: None,
         parked: None,
+        uncarried: None,
     };
     if let Err(error) = write.command_result(
         request(command, refresh.clone()),
@@ -758,6 +759,7 @@ fn carried_claim_answer(
         nothing_stolen: false,
         transplant: None,
         parked: None,
+        uncarried: None,
     }
 }
 

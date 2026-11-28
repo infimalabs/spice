@@ -63,7 +63,7 @@ fn lane_held_claim_rolls_past_the_hour_its_allocation_minted() {
 
     assert_eq!(event.kind(), TimerKind::ClaimRenew);
     assert_eq!(
-        timers.consume(&fixture.bus, event, Some(&fixture.repository())),
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host())),
         Ok(Fired::ClaimRenew)
     );
     timers
@@ -131,7 +131,7 @@ fn lane_held_claim_stops_rolling_once_its_occupant_leaves_the_lane() {
     move_residency(&fixture, fixture.authority.epoch, uuid(24));
 
     assert_eq!(
-        timers.consume(&fixture.bus, event, Some(&fixture.repository())),
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host())),
         Ok(Fired::Stale)
     );
     timers

@@ -230,6 +230,12 @@ pub(in crate::resident) struct ClaimLapseNotice {
     pub(in crate::resident) occupant: CanonicalUuid,
     pub(in crate::resident) task: String,
     pub(in crate::resident) expiry: wire::Instant,
+    /// The lane's work was copied onto the task for its next claim.
+    #[serde(default)]
+    pub(in crate::resident) parked: bool,
+    /// Why the lane's work could not be copied onto the task.
+    #[serde(default)]
+    pub(in crate::resident) uncarried: Option<String>,
 }
 
 impl<W: Write + Send + 'static> Driver<W> {
@@ -495,13 +501,26 @@ impl<W: Write + Send + 'static> Driver<W> {
     /// Tell this occupant that a claim its lane held lapsed, once per lapse.
     pub(super) fn deliver_claim_lapse(&self, notice: &ClaimLapseNotice) {
         deliver_once(&self.claim_lapse, notice, || {
+            let work = if notice.parked {
+                "Its unpublished commits and dirty work were copied onto the task as parked work \
+                 that its next claim replays; this worktree is unchanged, so clean it up \
+                 yourself."
+                    .to_owned()
+            } else if let Some(reason) = &notice.uncarried {
+                format!(
+                    "Its work could not be copied onto the task ({reason}); commits made for it \
+                     and not yet published stay loose here and cannot complete it."
+                )
+            } else {
+                "Commits made for it and not yet published are loose and cannot complete it."
+                    .to_owned()
+            };
             let message = format!(
                 "<system-notice>\nThe claim this lane held on task {} lapsed: its lease expired \
                  at {} and the resident released it. This lane no longer holds that task; stop \
-                 working on it. Commits made for it and not yet published are loose and cannot \
-                 complete it; run `spice task show {}` for its current holder before asking the \
-                 allocator for work. This is a private lapse notice; no acknowledgment key or \
-                 visible ACK/NAK is required.\n</system-notice>",
+                 working on it. {work} Run `spice task show {}` for its current holder before \
+                 asking the allocator for work. This is a private lapse notice; no \
+                 acknowledgment key or visible ACK/NAK is required.\n</system-notice>",
                 notice.task, notice.expiry, notice.task,
             );
             self.background(&format!("task:{}", notice.task), &message)

@@ -696,6 +696,7 @@ fn abandonment_moves_the_horizon_and_settlement_drops_the_fold() {
             task: design(),
             occupant: lane(1),
             expiry: instant(),
+            parked: None,
         }),
     );
     assert_eq!(journal.facts().end, Some(DesignPassEnd::Abandoned));

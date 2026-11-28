@@ -257,6 +257,7 @@ pub(in crate::board_command) fn claim_free(
         nothing_stolen: false,
         transplant: None,
         parked: parked_answer(entry.handle(), parked.as_ref()),
+        uncarried: None,
     };
     finish_release(bus, command, task, write, answer, parked)
 }

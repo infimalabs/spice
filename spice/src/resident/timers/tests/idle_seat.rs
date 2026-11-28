@@ -167,7 +167,7 @@ fn a_parked_idle_claim_lapses_on_the_lease_it_carries() {
 
     assert_eq!(event.kind(), TimerKind::ClaimLapse);
     let Ok(Fired::ClaimLapse(Some(lapsed))) =
-        timers.consume(&fixture.bus, event, Some(&fixture.repository()))
+        timers.consume(&fixture.bus, event, Some(fixture.hosted().host()))
     else {
         panic!("the idle claim lapse commits");
     };

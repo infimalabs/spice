@@ -41,6 +41,17 @@ pub(super) fn completion_operation() -> CanonicalUuid {
 /// exact expiry the lease carries, so this is the production lapse rather than
 /// a hand-written claim head.
 pub(super) fn lapse_claim(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, task: &TaskHandle) {
+    lapse_claim_carrying(bus, epoch, seat, task, None);
+}
+
+/// Expire a fixture claim whose holder's work the resident copied onto it.
+pub(super) fn lapse_claim_carrying(
+    bus: &Bus,
+    epoch: CanonicalUuid,
+    seat: &Seat,
+    task: &TaskHandle,
+    parked: Option<wire::body::TaskParkedCommits>,
+) {
     let held = board(bus, epoch, Actor::Lane(seat.lane));
     let expiry = at(&held, task)
         .latest_claim()
@@ -55,6 +66,7 @@ pub(super) fn lapse_claim(bus: &Bus, epoch: CanonicalUuid, seat: &Seat, task: &T
         expiry,
         at: expiry,
         intent: TaskRef { task: task.clone() },
+        parked,
     };
     let snapshot = validated_snapshot(bus, None, Actor::Spice).expect("lapse policy snapshot");
     let owners = snapshot.owners;

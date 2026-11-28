@@ -122,7 +122,7 @@ pub(super) fn capture(root: Worktree<'_>, head: &str) -> Result<Option<Captured>
                 "initialize snapshot index",
             )?;
         }
-        let message = index::message(root, original.is_some())?;
+        let message = index::message(root, original.is_some(), &environment)?;
         checked(
             run_with_environment(root, &["add", "-A", "--", "."], &environment)?,
             "capture dirty worktree",

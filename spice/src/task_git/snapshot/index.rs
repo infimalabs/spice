@@ -11,12 +11,22 @@ const TRAILER: &str = "Spice-Index: ";
 /// `update-index --index-info` removes a path given this mode and object.
 const REMOVED: &str = "0 0000000000000000000000000000000000000000";
 
-/// The snapshot message, naming the current index tree when the lane has one.
-pub(super) fn message(root: Worktree<'_>, indexed: bool) -> Result<String, Error> {
+/// The snapshot message, naming the index tree when the lane has one.
+///
+/// The tree is written from the scratch copy of the lane index, so capture
+/// never rewrites the lane's own index file.
+pub(super) fn message(
+    root: Worktree<'_>,
+    indexed: bool,
+    environment: &[(&str, &str)],
+) -> Result<String, Error> {
     if !indexed {
         return Ok(SUBJECT.to_owned());
     }
-    let tree = checked(run(root, &["write-tree"])?, "write snapshot index tree")?;
+    let tree = checked(
+        run_with_environment(root, &["write-tree"], environment)?,
+        "write snapshot index tree",
+    )?;
     Ok(format!("{SUBJECT}\n\n{TRAILER}{tree}"))
 }
 

@@ -105,6 +105,13 @@ pub struct ClaimAnswer {
         deserialize_with = "crate::optional::present"
     )]
     pub parked: Option<ClaimParked>,
+    /// Why a steal could not copy the displaced holder's work onto this lane.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub uncarried: Option<Box<str>>,
 }
 
 fn claim_warnings_empty(warnings: &[ClaimWarning]) -> bool {
