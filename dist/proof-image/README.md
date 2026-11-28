@@ -91,9 +91,11 @@ outlives a run unless another run still mounts it. When the runtime cannot list
 or create the volume, the run compiles in fresh scratch and says so first on
 its standard error. Remove a volume with `docker volume rm NAME` to force a
 cold build. Docker builds the cross image without a provenance attestation,
-whose build time would give every rebuild of unchanged layers a new identity,
-and the image links with `lld-link /Brepro`, so a reused target links the same
-bytes a fresh one does.
+whose build time would give every rebuild of unchanged layers a new identity.
+The image links with `lld-link /Brepro`; before linking, its wrapper copies
+rustc's Natvis files and synthesized object to paths derived from their
+content. lld embeds those paths in the PDB whose signature is embedded in the
+PE, so a reused target links the same PE and PDB bytes as a fresh one.
 
 All three sealed containers also mount an empty, non-executable tmpfs at `/tmp`.
 Nothing in the build is pointed at it (`TMPDIR` stays under the target
