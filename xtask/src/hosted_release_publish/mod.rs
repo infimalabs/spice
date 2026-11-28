@@ -25,10 +25,16 @@ use timeline::{Phase, Timeline};
 /// What one `publish-hosted-release` invocation asks of the pinned request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PublishRequest {
-    /// Pin landed `main` as a new request using these curated notes.
+    /// Pin landed `main` as a new request using locally curated Markdown.
     New { notes: PathBuf },
-    /// Continue the pending request using exactly this commit and these notes.
+    /// Pin landed `main` using a complete notes record already admitted
+    /// against canonical history.
+    NewAdmitted { notes: PathBuf },
+    /// Continue the pending request using locally curated Markdown.
     Resume { commit: String, notes: PathBuf },
+    /// Continue the pending request using a complete notes record already
+    /// admitted against canonical history.
+    ResumeAdmitted { commit: String, notes: PathBuf },
     /// Drop the pending request pinned to exactly this commit before any
     /// release mutation.
     Abandon(String),
@@ -37,9 +43,16 @@ pub enum PublishRequest {
 impl PublishRequest {
     fn notes(&self) -> Option<&Path> {
         match self {
-            Self::New { notes } | Self::Resume { notes, .. } => Some(notes),
+            Self::New { notes }
+            | Self::NewAdmitted { notes }
+            | Self::Resume { notes, .. }
+            | Self::ResumeAdmitted { notes, .. } => Some(notes),
             Self::Abandon(_) => None,
         }
+    }
+
+    const fn notes_are_admitted(&self) -> bool {
+        matches!(self, Self::NewAdmitted { .. } | Self::ResumeAdmitted { .. })
     }
 }
 
@@ -95,9 +108,11 @@ pub fn publish_hosted_release(
     let session = publications.begin(&source_commit)?;
     let unpublished = !session.publication_may_have_started()?;
     let input_commit = source_commit.clone();
+    let admitted = request.notes_are_admitted();
     let (notes, inputs) = std::thread::scope(|scope| {
-        let notes =
-            scope.spawn(|| timed(|| admit_notes(&worktree, &candidate, &source_commit, &session)));
+        let notes = scope.spawn(|| {
+            timed(|| admit_notes(&worktree, &candidate, &source_commit, &session, admitted))
+        });
         let inputs = scope.spawn(|| timed(|| admit_inputs(&session, input_commit)));
         (
             notes.join().expect("release notes admission panicked"),
@@ -178,12 +193,34 @@ fn admit_notes(
     candidate: &str,
     source_commit: &str,
     session: &PublicationSession,
+    admitted: bool,
 ) -> Result<wire::ReleaseNotes, PublishError> {
-    let canonical = spice::release_history::draft(worktree, Some(source_commit))
-        .map_err(|error| PublishError::Refused(error.to_string()))?;
-    let notes = dist::curated_release_notes(candidate, &canonical)
-        .map_err(|error| PublishError::Refused(error.to_string()))?;
+    let notes = if admitted {
+        decode_admitted_notes(candidate, source_commit)?
+    } else {
+        let canonical = spice::release_history::draft(worktree, Some(source_commit))
+            .map_err(|error| PublishError::Refused(error.to_string()))?;
+        dist::curated_release_notes(candidate, &canonical)
+            .map_err(|error| PublishError::Refused(error.to_string()))?
+    };
     PublicationPlan::admit_existing_notes(session.root(), source_commit, &notes)?;
+    Ok(notes)
+}
+
+fn decode_admitted_notes(
+    candidate: &str,
+    source_commit: &str,
+) -> Result<wire::ReleaseNotes, PublishError> {
+    let notes: wire::ReleaseNotes =
+        serde_json::from_str(candidate).map_err(PublishError::Decode)?;
+    dist::admit_curated_release_notes(&notes)
+        .map_err(|error| PublishError::Refused(error.to_string()))?;
+    if notes.release_commit != source_commit {
+        return Err(PublishError::Refused(format!(
+            "release notes name {}, not the requested {source_commit}",
+            notes.release_commit
+        )));
+    }
     Ok(notes)
 }
 
@@ -354,5 +391,31 @@ impl From<proof::PackageError> for PublishError {
 impl From<zip::result::ZipError> for PublishError {
     fn from(error: zip::result::ZipError) -> Self {
         Self::Archive(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admitted_notes_are_bound_to_the_requested_source_commit() {
+        let document =
+            "## Highlights\n\n- Exact notes.\n\n<details>\n</details>\n\n## Package Notes\n";
+        let notes = wire::ReleaseNotes {
+            version: wire::manifest::RELEASE_NOTES_VERSION,
+            identity: wire::Digest::compute(wire::Domain::DistReleaseNotes, document.as_bytes()),
+            release_version: "0.0.0".to_owned(),
+            release_commit: "a".repeat(40),
+            previous_tag: None,
+            bounded_recent_window: true,
+            entries: Vec::new(),
+            document: document.to_owned(),
+        };
+        let encoded = serde_json::to_string(&notes).expect("record encodes");
+
+        let error =
+            decode_admitted_notes(&encoded, &"b".repeat(40)).expect_err("another commit refuses");
+        assert!(error.to_string().contains("not the requested"));
     }
 }

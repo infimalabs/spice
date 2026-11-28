@@ -133,6 +133,43 @@ pub fn curated_release_notes(
     notes.document = document;
     Ok(notes)
 }
+/// Admit a complete curated notes record without consulting its source
+/// history.
+///
+/// The producer has already folded canonical history into the immutable
+/// inventory. This boundary verifies the document schema, content identity,
+/// curation rules, and generated-tail boundary without regenerating that
+/// inventory.
+///
+/// # Errors
+///
+/// Refuses another schema, a stale document identity, any surviving
+/// placeholder, a curator region without highlights, or a missing inventory
+/// boundary.
+pub fn admit_curated_release_notes(notes: &ReleaseNotes) -> Result<(), NotesError> {
+    if notes.version != RELEASE_NOTES_VERSION {
+        return Err(NotesError::Schema {
+            observed: notes.version,
+        });
+    }
+    if notes.identity != Digest::compute(Domain::DistReleaseNotes, notes.document.as_bytes()) {
+        return Err(NotesError::Identity);
+    }
+    if notes.document.contains(HIGHLIGHTS_PLACEHOLDER) {
+        return Err(NotesError::HighlightsPlaceholder);
+    }
+    let Some((curated, inventory)) = notes.document.split_once(INVENTORY_OPEN) else {
+        return Err(NotesError::InventoryMissing);
+    };
+    if !carries_highlights(curated) {
+        return Err(NotesError::HighlightsAbsent);
+    }
+    if !inventory.contains("</details>") || !inventory.contains("## Package Notes") {
+        return Err(NotesError::InventoryMissing);
+    }
+    Ok(())
+}
+
 
 fn fold_entries(input: &NotesInput) -> Result<Vec<ReleaseNotesEntry>, NotesError> {
     let parents = correction_parents(&input.corrections)?;
@@ -451,6 +488,12 @@ fn short_commit(commit: &str) -> &str {
 /// Why typed landing authority could not become publishable release notes.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum NotesError {
+    /// The record belongs to another release-note schema.
+    #[error("release notes use schema {observed}, not the current schema")]
+    Schema { observed: u16 },
+    /// The declared identity does not cover the exact document bytes.
+    #[error("release-note identity does not match the document bytes")]
+    Identity,
     /// More than one task claims the same integrated commit.
     #[error("integrated commit {commit} has ambiguous typed release-note landings")]
     AmbiguousLanding { commit: String },
@@ -718,6 +761,34 @@ mod tests {
         );
         assert!(!curated.document.contains("old inventory"));
         assert_ne!(curated.identity, canonical.identity);
+    }
+
+    #[test]
+    fn admitted_curated_records_bind_the_exact_document_bytes() {
+        let canonical = release_notes(fixture(Vec::new(), Vec::new(), Vec::new()))
+            .expect("history folds");
+        let curated = curated_release_notes(
+            "## Highlights\n\n- Hosted publication admits the local inventory.",
+            &canonical,
+        )
+        .expect("highlights curate");
+        admit_curated_release_notes(&curated).expect("curated record admits");
+
+        let mut changed = curated.clone();
+        changed.document.push_str("\nchanged");
+        assert_eq!(
+            admit_curated_release_notes(&changed),
+            Err(NotesError::Identity)
+        );
+
+        let mut another_schema = curated;
+        another_schema.version += 1;
+        assert_eq!(
+            admit_curated_release_notes(&another_schema),
+            Err(NotesError::Schema {
+                observed: RELEASE_NOTES_VERSION + 1,
+            })
+        );
     }
 
     fn fixture(

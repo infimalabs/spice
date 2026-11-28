@@ -47,10 +47,14 @@ writes a draft whose Highlights must be replaced with an authored overview.
 The generated commit inventory groups changes by topic, orders topic paths
 lexically so shared roots remain adjacent, and orders each topic's mentions by
 commit timestamp. The same command can target an older release tag when its
-published notes need repair. Publication requires `--notes FILE`, keeps only
-that authored region, regenerates the canonical commit inventory for the pinned
-source, and retains the resulting notes with its exact plan, assets, and
-checksum document.
+published notes need repair. Local publication requires `--notes FILE`, keeps
+only that authored region, regenerates the canonical commit inventory for the
+pinned source, and retains the resulting notes with its exact plan, assets, and
+checksum document. `spice dev xtask -- dispatch-hosted-release --notes FILE`
+performs that same journal-backed admission locally, then dispatches the exact
+structured notes record and its content identity to the hosted coordinator.
+The runner verifies those bytes and uses their carried inventory; it never
+regenerates release history without the journal.
 
 The publication assets are the three standalone native executables, one
 deterministic `spice-release-evidence.zip`, and `SHA256SUMS`. Publication
@@ -448,13 +452,17 @@ then refetches package and release authority before any scheduled or explicitly
 requested deletion. Missing, malformed, stale, or changing authority refuses
 mutation.
 
-**Invariant —** `spice dev xtask -- publish-hosted-release --notes FILE` is the
-sole publication command. The notes file must carry authored Highlights;
-untouched drafts, placeholders, empty overview scaffolds, and history that
-cannot derive at the pinned commit refuse before provider dispatch. A new
-request reads `main` exactly once and pins that commit; the local checkout
-never selects the release. Before that preflight, and before any aggregate or
-single macOS or Windows hosted stage, the coordinator spends its `gh`
+**Invariant —** `spice dev xtask -- publish-hosted-release` is the sole
+publication engine. Local calls use `--notes FILE`; hosted coordination uses
+only the complete `--admitted-notes FILE` record emitted by
+`dispatch-hosted-release --notes FILE`. Both routes admit the same document
+identity, curated Highlights, generated inventory boundary, and source commit.
+Untouched drafts, placeholders, empty overview scaffolds, stale identities,
+and history that cannot derive at the pinned commit refuse before native stage
+dispatch. A new request reads `main` exactly once and pins that commit; the
+local checkout never selects the release.
+Before that preflight, and before any aggregate or single macOS or Windows
+hosted stage, the coordinator spends its `gh`
 identity's GHCR pull token on one read of the repository `prepared` package;
 a registry denial refuses with GHCR's answer and the package authority to
 grant, before any provider run exists. The registry decides, not the token's
@@ -476,18 +484,23 @@ redispatches successful siblings. Either form accepts a trailing
 `--stage-only`: it runs the same pin, preflight, and native staging.
 
 `.github/workflows/release.yml` is the one provider-side coordinator for that
-command. It runs only by manual dispatch from an exact landed `main` revision;
-ordinary pushes cannot start it. One repository-wide concurrency group
-serializes public release effects. The workflow preserves the Git-common
-publication authority after every attempt under a run- and attempt-scoped
-artifact, validates and restores only regular files beneath `releases/`, and
-resumes the pinned commit on a rerun. A completed attempt records the authored
-notes and publication-plan digests; later attempts re-admit those bytes and
-freshly read the public release instead of publishing again. The final
-readback is the workflow's one result artifact. Inside the coordinator,
-notes admission and input production overlap, then Linux, Darwin, and Windows
-stage concurrently; each platform's tool and dependency preparation waits
-only for the immutable input record it consumes, never for a sibling.
+engine. Its supported entry point is the local journal-backed
+`dispatch-hosted-release` command. The workflow runs only by manual dispatch
+from the exact landed `main` revision named by the admitted notes; ordinary
+pushes cannot start it. One repository-wide concurrency group serializes
+public release effects. Before any native stage, the coordinator requires the
+structured note record's source commit and domain-separated document identity,
+then re-admits its schema, curated Highlights, inventory boundary, and exact
+bytes without opening or reconstructing the local journal. The workflow
+preserves the Git-common publication authority after every attempt under a
+run- and attempt-scoped artifact, validates and restores only regular files
+beneath `releases/`, and resumes the pinned commit on a rerun. A completed
+attempt records the notes-record and publication-plan digests; later attempts
+re-admit those bytes and freshly read the public release instead of publishing
+again. The final readback is the workflow's one result artifact. Notes
+admission and input production overlap, then Linux, Darwin, and Windows stage
+concurrently; each platform's tool and dependency preparation waits only for
+the immutable input record it consumes, never for a sibling.
 Each platform executes the complete proof battery in its provider-specific sealed
 environment and returns its detached receipt with the staged bytes. When a
 battery refuses, its displayed error names every non-clean member, its
