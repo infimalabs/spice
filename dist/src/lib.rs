@@ -28,8 +28,9 @@ pub use source::{
     source_archive_identity, source_counter_sum, source_identity, source_version,
 };
 pub use stage::{
-    BuildError, BuildStep, Builder, FinalizedArtifact, FinalizedDarwinStage, Pipeline, StageError,
-    StagedTarget, TargetSource, admit_finalized_darwin, restage_signed_darwin,
+    BuildError, BuildStep, Builder, DarwinObjects, FinalizedArtifact, FinalizedDarwinStage,
+    Pipeline, StageError, StagedTarget, TargetSource, admit_finalized_darwin,
+    restage_signed_darwin,
 };
 pub use version::{
     BUILD_RECORD_FILE, Build, CounterError, SOURCE_ARCHIVE_FILE, TrackedVersion,

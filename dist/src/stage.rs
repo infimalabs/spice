@@ -479,9 +479,24 @@ fn publish_artifacts<P: RootedPublish>(
     Ok(())
 }
 
+/// The inventoried objects of one Darwin stage: its executable, its compact
+/// symbol recipe, and the dSYM artifact when symbols were captured.
+#[derive(Clone, Copy, Debug)]
+pub struct DarwinObjects<'a> {
+    pub native: &'a [u8],
+    pub recipe: &'a [u8],
+    pub symbols: Option<&'a [u8]>,
+}
+
+/// The executable-bound documents one admitted Darwin stage carries.
+struct AdmittedDarwin {
+    recipe: SymbolRecipe,
+    symbols: Option<MacSymbolArtifact>,
+}
+
 /// Replace one admitted unsigned Darwin executable with its signed and
-/// notarized bytes, then rebind the dSYM artifact and payload to those final
-/// bytes without running build code.
+/// notarized bytes, then rebind the symbol recipe, any dSYM artifact, and the
+/// payload to those final bytes without running build code.
 ///
 /// The caller owns Developer ID and notarization verification. This function
 /// admits the complete unsigned tuple, changes only the executable-dependent
@@ -490,34 +505,34 @@ fn publish_artifacts<P: RootedPublish>(
 ///
 /// # Errors
 ///
-/// Refuses a noncanonical or non-Darwin payload, stale input objects, malformed
-/// symbol evidence, or pin and inventory digests that do not bind their
-/// documents.
+/// Refuses a noncanonical or non-Darwin payload, stale input objects, a symbol
+/// recipe or symbol evidence that does not bind the executable, or pin and
+/// inventory digests that do not bind their documents.
 pub fn restage_signed_darwin(
     payload_bytes: &[u8],
-    unsigned_native: &[u8],
-    symbol_bytes: &[u8],
+    unsigned: DarwinObjects<'_>,
     signed_native: Vec<u8>,
 ) -> Result<FinalizedDarwinStage, StageError> {
     let payload = admit_darwin_payload(payload_bytes)?;
-    let symbol_document = admit_darwin_artifacts(&payload, unsigned_native, symbol_bytes)?;
-    finalize_signed_darwin(payload, symbol_document, signed_native)
+    let admitted = admit_darwin_artifacts(&payload, unsigned)?;
+    finalize_signed_darwin(payload, admitted, signed_native)
 }
 
-/// Admit one complete finalized Darwin payload and its two inventoried objects.
+/// Admit one complete Darwin payload and every object it inventories.
 ///
 /// # Errors
 ///
-/// Refuses noncanonical payloads, stale digests, malformed or unbound dSYM
-/// evidence, and executables whose linked canvas differs from the payload.
+/// Refuses noncanonical payloads, an inventory other than the executable,
+/// symbol recipe, and optional dSYM artifact, stale digests, a recipe naming
+/// another executable, malformed or unbound dSYM evidence, and executables
+/// whose linked canvas differs from the payload.
 pub fn admit_finalized_darwin(
     payload_bytes: &[u8],
-    native: &[u8],
-    symbols: &[u8],
+    objects: DarwinObjects<'_>,
 ) -> Result<TargetPayload, StageError> {
     let payload = admit_darwin_payload(payload_bytes)?;
-    admit_darwin_artifacts(&payload, native, symbols)?;
-    let linked = rack::link::extract(native)
+    admit_darwin_artifacts(&payload, objects)?;
+    let linked = rack::link::extract(objects.native)
         .map_err(|error| native_build_error(format!("Darwin canvas does not decode: {error}")))?;
     let observed = Digest::compute(Domain::DistArtifact, linked);
     if observed != payload.canvas {
@@ -554,92 +569,150 @@ fn admit_darwin_payload(payload_bytes: &[u8]) -> Result<TargetPayload, StageErro
             "Darwin payload has a stale inventory digest",
         ));
     }
-    if payload.inventory.len() != 2 {
-        return Err(native_build_error(
-            "Darwin payload does not contain exactly its executable and dSYM artifact",
-        ));
-    }
     Ok(payload)
 }
 
 fn admit_darwin_artifacts(
     payload: &TargetPayload,
-    native: &[u8],
-    symbol_bytes: &[u8],
-) -> Result<MacSymbolArtifact, StageError> {
+    objects: DarwinObjects<'_>,
+) -> Result<AdmittedDarwin, StageError> {
     let native_path = ReleaseTarget::Aarch64AppleDarwin.executable_path();
-    let native_entry = payload
+    let mut expected = vec![native_path, SYMBOL_RECIPE_PATH];
+    if objects.symbols.is_some() {
+        expected.push(MAC_SYMBOL_PATH);
+    }
+    expected.sort_unstable();
+    if !payload
         .inventory
         .iter()
-        .find(|entry| entry.path == native_path)
-        .ok_or_else(|| native_build_error("Darwin payload has no executable"))?;
-    let symbol_entry = payload
-        .inventory
-        .iter()
-        .find(|entry| entry.path == MAC_SYMBOL_PATH)
-        .ok_or_else(|| native_build_error("Darwin payload has no dSYM artifact"))?;
-    let native_digest = Digest::compute(Domain::DistArtifact, native);
-    if native_entry.mode != EXECUTABLE_MODE
-        || native_entry.bytes != native.len() as u64
-        || native_entry.digest != native_digest
-        || payload.native != native_digest
+        .map(|entry| entry.path.as_str())
+        .eq(expected)
     {
+        return Err(native_build_error(
+            "Darwin payload does not inventory exactly its executable, symbol recipe, and supplied dSYM artifact",
+        ));
+    }
+    let native_digest = admit_darwin_object(payload, native_path, EXECUTABLE_MODE, objects.native)?;
+    if payload.native != native_digest {
         return Err(native_build_error(
             "Darwin executable does not match its payload",
         ));
     }
-    let symbol_digest = Digest::compute(Domain::DistArtifact, symbol_bytes);
-    if symbol_entry.mode != DATA_MODE
-        || symbol_entry.bytes != symbol_bytes.len() as u64
-        || symbol_entry.digest != symbol_digest
+    admit_darwin_object(payload, SYMBOL_RECIPE_PATH, DATA_MODE, objects.recipe)?;
+    let recipe = admit_darwin_recipe(objects.recipe, &native_digest)?;
+    let symbols = match (objects.symbols, payload.symbols.as_ref()) {
+        (Some(bytes), Some(metadata)) => Some(admit_darwin_symbols(
+            payload,
+            bytes,
+            metadata,
+            &native_digest,
+        )?),
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(native_build_error(
+                "Darwin dSYM metadata and artifact are not both present",
+            ));
+        }
+    };
+    Ok(AdmittedDarwin { recipe, symbols })
+}
+
+fn admit_darwin_object(
+    payload: &TargetPayload,
+    path: &str,
+    mode: u32,
+    bytes: &[u8],
+) -> Result<Digest, StageError> {
+    let digest = Digest::compute(Domain::DistArtifact, bytes);
+    let matches = payload.inventory.iter().any(|entry| {
+        entry.path == path
+            && entry.mode == mode
+            && entry.bytes == bytes.len() as u64
+            && entry.digest == digest
+    });
+    if matches {
+        Ok(digest)
+    } else {
+        Err(native_build_error(format!(
+            "Darwin {path} does not match its inventory"
+        )))
+    }
+}
+
+fn admit_darwin_recipe(bytes: &[u8], native: &Digest) -> Result<SymbolRecipe, StageError> {
+    let recipe: SymbolRecipe = wire::decode(bytes).map_err(|error| {
+        native_build_error(format!("Darwin symbol recipe does not decode: {error}"))
+    })?;
+    if wire::encode(&recipe)? != bytes {
+        return Err(native_build_error("Darwin symbol recipe is not canonical"));
+    }
+    if recipe.version != SYMBOL_RECIPE_VERSION
+        || recipe.target != ReleaseTarget::Aarch64AppleDarwin
+        || recipe.released_binary != *native
     {
         return Err(native_build_error(
-            "Darwin dSYM artifact does not match its inventory",
+            "Darwin symbol recipe does not bind its executable",
         ));
     }
-    let symbol_document = MacSymbolArtifact::decode(symbol_bytes)
+    Ok(recipe)
+}
+
+fn admit_darwin_symbols(
+    payload: &TargetPayload,
+    bytes: &[u8],
+    metadata: &MacSymbolMetadata,
+    native: &Digest,
+) -> Result<MacSymbolArtifact, StageError> {
+    let digest = admit_darwin_object(payload, MAC_SYMBOL_PATH, DATA_MODE, bytes)?;
+    let document = MacSymbolArtifact::decode(bytes)
         .map_err(|error| native_build_error(format!("dSYM artifact does not decode: {error}")))?;
-    let symbol_metadata = payload
-        .symbols
-        .as_ref()
-        .ok_or_else(|| native_build_error("Darwin payload has no dSYM metadata"))?;
-    if symbol_metadata.path != symbol_entry.path
-        || symbol_metadata.mode != symbol_entry.mode
-        || symbol_metadata.bytes != symbol_entry.bytes
-        || symbol_metadata.digest != symbol_entry.digest
-        || symbol_metadata.uuid != symbol_document.uuid
-        || symbol_metadata.executable != native_digest
-        || symbol_document.executable != native_digest
+    if metadata.path != MAC_SYMBOL_PATH
+        || metadata.mode != DATA_MODE
+        || metadata.bytes != bytes.len() as u64
+        || metadata.digest != digest
+        || metadata.uuid != document.uuid
+        || metadata.executable != *native
+        || document.executable != *native
     {
         return Err(native_build_error(
             "Darwin dSYM metadata does not bind its artifact and executable",
         ));
     }
-    Ok(symbol_document)
+    Ok(document)
 }
 
 fn finalize_signed_darwin(
     mut payload: TargetPayload,
-    mut symbol_document: MacSymbolArtifact,
+    admitted: AdmittedDarwin,
     signed_native: Vec<u8>,
 ) -> Result<FinalizedDarwinStage, StageError> {
-    let native_path = ReleaseTarget::Aarch64AppleDarwin.executable_path();
-    let native = artifact(native_path, EXECUTABLE_MODE, signed_native);
-    symbol_document.executable = native.digest.clone();
-    let rebound_symbols = symbol_document
-        .encode()
-        .map_err(|error| native_build_error(format!("dSYM artifact cannot be rebound: {error}")))?;
-    let (symbols, metadata) = symbol_artifact(rebound_symbols, &native.digest)?;
-    let mut artifacts = vec![symbols, native];
+    let native = artifact(
+        ReleaseTarget::Aarch64AppleDarwin.executable_path(),
+        EXECUTABLE_MODE,
+        signed_native,
+    );
+    let mut recipe = admitted.recipe;
+    recipe.released_binary = native.digest.clone();
+    let mut artifacts = vec![artifact(
+        SYMBOL_RECIPE_PATH,
+        DATA_MODE,
+        wire::encode(&recipe)?,
+    )];
+    payload.symbols = match admitted.symbols {
+        Some(mut document) => {
+            document.executable = native.digest.clone();
+            let rebound = document.encode().map_err(|error| {
+                native_build_error(format!("dSYM artifact cannot be rebound: {error}"))
+            })?;
+            let (symbols, metadata) = symbol_artifact(rebound, &native.digest)?;
+            artifacts.push(symbols);
+            Some(metadata)
+        }
+        None => None,
+    };
+    payload.native = native.digest.clone();
+    artifacts.push(native);
     artifacts.sort_by(|left, right| left.path.cmp(&right.path));
-
-    payload.native = artifacts
-        .iter()
-        .find(|artifact| artifact.path == native_path)
-        .expect("finalized Darwin artifacts include the executable")
-        .digest
-        .clone();
-    payload.symbols = Some(metadata);
     payload.inventory = artifacts.iter().map(inventory_entry).collect();
     payload.inventory_digest =
         Digest::compute(Domain::DistInventory, &wire::encode(&payload.inventory)?);
@@ -677,21 +750,52 @@ mod signed_darwin_tests {
         Digest::compute(domain, bytes)
     }
 
-    fn unsigned_stage() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    struct UnsignedStage {
+        payload: Vec<u8>,
+        native: Vec<u8>,
+        recipe: Vec<u8>,
+        symbols: Option<Vec<u8>>,
+    }
+
+    impl UnsignedStage {
+        fn objects(&self) -> DarwinObjects<'_> {
+            DarwinObjects {
+                native: &self.native,
+                recipe: &self.recipe,
+                symbols: self.symbols.as_deref(),
+            }
+        }
+    }
+
+    fn recipe(released_binary: Digest, pins: &BuildPins) -> SymbolRecipe {
+        SymbolRecipe {
+            version: SYMBOL_RECIPE_VERSION,
+            target: ReleaseTarget::Aarch64AppleDarwin,
+            source_commit: "1111111111111111111111111111111111111111".to_owned(),
+            source: digest(Domain::DistSourceCommit, b"source"),
+            source_archive: digest(Domain::DistSourceArchive, b"archive"),
+            cargo_lock: digest(Domain::DistArtifact, b"Cargo.lock"),
+            vendor_authority: digest(Domain::DistPins, &wire::encode(pins).expect("pins encode")),
+            proof_container: pins.proof_container.clone(),
+            toolchain: pins.rust.clone(),
+            flags: vec!["rustc".to_owned()],
+            released_binary,
+            build_id: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
+        }
+    }
+
+    fn entry(path: &str, mode: u32, bytes: &[u8]) -> InventoryEntry {
+        InventoryEntry {
+            path: path.to_owned(),
+            mode,
+            bytes: bytes.len() as u64,
+            digest: digest(Domain::DistArtifact, bytes),
+        }
+    }
+
+    fn unsigned_stage(with_symbols: bool, recipe_binary: Option<Digest>) -> UnsignedStage {
         let native = b"unsigned executable".to_vec();
         let native_digest = digest(Domain::DistArtifact, &native);
-        let symbols = MacSymbolArtifact {
-            version: wire::manifest::MAC_SYMBOL_ARTIFACT_VERSION,
-            uuid: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
-            executable: native_digest.clone(),
-            commit: "1111111111111111111111111111111111111111".to_owned(),
-            dirty: false,
-            info: b"Info.plist".to_vec(),
-            dwarf: b"debug symbols".to_vec(),
-        }
-        .encode()
-        .expect("symbols encode");
-        let symbols_digest = digest(Domain::DistArtifact, &symbols);
         let pins = BuildPins {
             rust: "rustc test".to_owned(),
             wasm_target: "wasm32-unknown-unknown".to_owned(),
@@ -699,20 +803,39 @@ mod signed_darwin_tests {
             proof_container:
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
         };
-        let inventory = vec![
-            InventoryEntry {
-                path: "symbols/spice.symbols".to_owned(),
+        let recipe = wire::encode(&recipe(
+            recipe_binary.unwrap_or_else(|| native_digest.clone()),
+            &pins,
+        ))
+        .expect("recipe encodes");
+        let mut inventory = vec![
+            entry("bin/spice", EXECUTABLE_MODE, &native),
+            entry(SYMBOL_RECIPE_PATH, DATA_MODE, &recipe),
+        ];
+        let symbols = with_symbols.then(|| {
+            MacSymbolArtifact {
+                version: wire::manifest::MAC_SYMBOL_ARTIFACT_VERSION,
+                uuid: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
+                executable: native_digest.clone(),
+                commit: "1111111111111111111111111111111111111111".to_owned(),
+                dirty: false,
+                info: b"Info.plist".to_vec(),
+                dwarf: b"debug symbols".to_vec(),
+            }
+            .encode()
+            .expect("symbols encode")
+        });
+        let metadata = symbols.as_ref().map(|symbols| {
+            inventory.push(entry(MAC_SYMBOL_PATH, DATA_MODE, symbols));
+            MacSymbolMetadata {
+                path: MAC_SYMBOL_PATH.to_owned(),
                 mode: DATA_MODE,
                 bytes: symbols.len() as u64,
-                digest: symbols_digest.clone(),
-            },
-            InventoryEntry {
-                path: "bin/spice".to_owned(),
-                mode: EXECUTABLE_MODE,
-                bytes: native.len() as u64,
-                digest: native_digest.clone(),
-            },
-        ];
+                digest: digest(Domain::DistArtifact, symbols),
+                uuid: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
+                executable: native_digest.clone(),
+            }
+        });
         let payload = TargetPayload {
             version: TARGET_PAYLOAD_VERSION,
             target: ReleaseTarget::Aarch64AppleDarwin,
@@ -720,15 +843,8 @@ mod signed_darwin_tests {
             archive: digest(Domain::DistSourceArchive, b"archive"),
             app: digest(Domain::DistArtifact, b"app"),
             canvas: digest(Domain::DistArtifact, b"canvas"),
-            native: native_digest.clone(),
-            symbols: Some(MacSymbolMetadata {
-                path: "symbols/spice.symbols".to_owned(),
-                mode: DATA_MODE,
-                bytes: symbols.len() as u64,
-                digest: symbols_digest,
-                uuid: "01234567-89AB-CDEF-0123-456789ABCDEF".to_owned(),
-                executable: native_digest,
-            }),
+            native: native_digest,
+            symbols: metadata,
             pins: pins.clone(),
             pins_digest: digest(Domain::DistPins, &wire::encode(&pins).expect("pins encode")),
             inventory_digest: digest(
@@ -737,22 +853,54 @@ mod signed_darwin_tests {
             ),
             inventory,
         };
-        (
-            wire::encode(&payload).expect("payload encodes"),
+        UnsignedStage {
+            payload: wire::encode(&payload).expect("payload encodes"),
             native,
+            recipe,
             symbols,
+        }
+    }
+
+    fn finalized_recipe(staged: &FinalizedDarwinStage) -> SymbolRecipe {
+        let recipe = staged
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.path == SYMBOL_RECIPE_PATH)
+            .expect("recipe artifact");
+        wire::decode(&recipe.bytes).expect("recipe decodes")
+    }
+
+    /// The finalized stage admits on its own, as `verify-staged-darwin` reads it.
+    fn readmit(staged: &FinalizedDarwinStage) {
+        let object = |path: &str| {
+            staged
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.path == path)
+                .map(|artifact| artifact.bytes.as_slice())
+        };
+        let payload = admit_darwin_payload(&staged.payload_bytes).expect("finalized payload");
+        admit_darwin_artifacts(
+            &payload,
+            DarwinObjects {
+                native: object("bin/spice").expect("finalized executable"),
+                recipe: object(SYMBOL_RECIPE_PATH).expect("finalized recipe"),
+                symbols: object(MAC_SYMBOL_PATH),
+            },
         )
+        .expect("finalized stage admits");
     }
 
     #[test]
-    fn signed_darwin_restage_rebinds_the_executable_and_symbols() {
-        let (payload, native, symbols) = unsigned_stage();
+    fn signed_darwin_restage_rebinds_the_executable_recipe_and_symbols() {
+        let unsigned = unsigned_stage(true, None);
         let signed = b"signed executable".to_vec();
-        let staged =
-            restage_signed_darwin(&payload, &native, &symbols, signed.clone()).expect("restage");
+        let staged = restage_signed_darwin(&unsigned.payload, unsigned.objects(), signed.clone())
+            .expect("restage");
 
         let native_digest = digest(Domain::DistArtifact, &signed);
         assert_eq!(staged.payload.native, native_digest);
+        assert_eq!(finalized_recipe(&staged).released_binary, native_digest);
         assert_eq!(
             staged
                 .payload
@@ -780,22 +928,68 @@ mod signed_darwin_tests {
                 &wire::encode(&staged.payload.inventory).expect("inventory encodes")
             )
         );
+        readmit(&staged);
+    }
+
+    #[test]
+    fn signed_darwin_restage_admits_a_default_stage_without_a_dsym() {
+        let unsigned = unsigned_stage(false, None);
+        let signed = b"signed executable".to_vec();
+        let staged = restage_signed_darwin(&unsigned.payload, unsigned.objects(), signed.clone())
+            .expect("restage");
+
+        let native_digest = digest(Domain::DistArtifact, &signed);
+        assert_eq!(staged.payload.symbols, None);
+        assert_eq!(finalized_recipe(&staged).released_binary, native_digest);
+        assert!(
+            staged
+                .payload
+                .inventory
+                .iter()
+                .all(|entry| entry.path != MAC_SYMBOL_PATH)
+        );
+        readmit(&staged);
     }
 
     #[test]
     fn signed_darwin_restage_refuses_a_stale_unsigned_executable() {
-        let (payload, _, symbols) = unsigned_stage();
-        let error = restage_signed_darwin(
-            &payload,
-            b"different unsigned executable",
-            &symbols,
-            b"signed".to_vec(),
-        )
-        .expect_err("stale executable");
-        assert!(
-            error
-                .to_string()
-                .contains("executable does not match its payload")
-        );
+        let unsigned = unsigned_stage(true, None);
+        let stale = DarwinObjects {
+            native: b"different unsigned executable",
+            ..unsigned.objects()
+        };
+        let error = restage_signed_darwin(&unsigned.payload, stale, b"signed".to_vec())
+            .expect_err("stale executable");
+        assert!(error.to_string().contains("bin/spice does not match"));
+    }
+
+    #[test]
+    fn darwin_admission_refuses_a_recipe_naming_another_executable() {
+        let other = digest(Domain::DistArtifact, b"other executable");
+        for with_symbols in [false, true] {
+            let unsigned = unsigned_stage(with_symbols, Some(other.clone()));
+            let error =
+                restage_signed_darwin(&unsigned.payload, unsigned.objects(), b"signed".to_vec())
+                    .expect_err("recipe names another executable");
+            assert!(error.to_string().contains("recipe does not bind"));
+        }
+    }
+
+    #[test]
+    fn darwin_admission_refuses_a_dsym_the_payload_does_not_inventory() {
+        let with = unsigned_stage(true, None);
+        let without = unsigned_stage(false, None);
+        let extra = DarwinObjects {
+            symbols: with.symbols.as_deref(),
+            ..without.objects()
+        };
+        restage_signed_darwin(&without.payload, extra, b"signed".to_vec())
+            .expect_err("uninventoried dSYM");
+        let missing = DarwinObjects {
+            symbols: None,
+            ..with.objects()
+        };
+        restage_signed_darwin(&with.payload, missing, b"signed".to_vec())
+            .expect_err("inventoried dSYM withheld");
     }
 }
