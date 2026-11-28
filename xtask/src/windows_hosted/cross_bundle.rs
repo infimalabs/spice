@@ -8,6 +8,8 @@
 
 use std::fs;
 use std::io::Write;
+use std::path::Path;
+use std::process::Command as Process;
 
 use sha2::{Digest as _, Sha256};
 use windows_execution::hosted::CrossBundlePin;
@@ -81,6 +83,7 @@ pub(super) fn release_bundle(
             .map_err(WindowsHostedError::Output)?;
             let identity = source.to_string();
             let app = inputs.manifest().app.to_string();
+            admitted_proof_image(inputs, repository, output, error_output)?;
             crate::windows_cross::windows_cross_release(
                 &host.release,
                 &host.ambient,
@@ -108,6 +111,86 @@ pub(super) fn release_bundle(
     .map_err(refused)?;
     writeln!(output, "[windows-cross] published {digest}").map_err(WindowsHostedError::Output)?;
     pinned(bundle, digest, &inputs.manifest().proof_identity).map_err(refused)
+}
+
+/// Make the proof image `inputs` names the local image of its vendor set,
+/// fetching and loading the prepared archive unless that tag already resolves
+/// to the admitted identity. The loader refuses an archive whose bytes or
+/// loaded image differ from the identities the inputs admitted.
+fn admitted_proof_image(
+    inputs: &ReleaseInputs,
+    repository: &str,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsHostedError> {
+    let refused = |error: String| {
+        WindowsHostedError::ProviderResponse(format!("admitted proof image: {error}"))
+    };
+    let manifest = inputs.manifest();
+    let tag = proof::VendorSet::read(inputs.tree().join("Cargo.lock"))
+        .map_err(|error| refused(error.to_string()))?
+        .image_tag();
+    if local_image(&tag).as_deref() == Some(manifest.proof_identity.as_str()) {
+        return Ok(());
+    }
+    let fetched = std::env::temp_dir().join(format!(
+        "spice-proof-image-{}-{}",
+        std::process::id(),
+        manifest.challenge
+    ));
+    let result = fetch_and_load(inputs, repository, &fetched, output, error_output);
+    let _ = fs::remove_dir_all(&fetched);
+    result.map_err(refused)
+}
+
+fn fetch_and_load(
+    inputs: &ReleaseInputs,
+    repository: &str,
+    fetched: &Path,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), String> {
+    let manifest = inputs.manifest();
+    let reference = format!(
+        "{}@{}",
+        prepared_repository(repository),
+        manifest.proof_manifest
+    );
+    with_ghcr_login(|| {
+        crate::prepared_artifact::prepared_artifact(
+            vec![
+                "fetch".into(),
+                reference.into(),
+                manifest.proof_build_key.clone().into(),
+                fetched.into(),
+            ],
+            &mut *output,
+        )
+        .map_err(|error| error.to_string())
+    })?;
+    let archive = fetched.join("proof-image.tar");
+    for (suffix, value) in [
+        ("sha256", &manifest.proof_archive_sha256),
+        ("identity", &manifest.proof_identity),
+    ] {
+        let sidecar = fetched.join(format!("proof-image.tar.{suffix}"));
+        fs::write(&sidecar, format!("{value}\n"))
+            .map_err(|error| format!("{}: {error}", sidecar.display()))?;
+    }
+    crate::proof_image::load_proof_image(inputs.tree(), &archive, output, error_output)
+        .map_err(|error| error.to_string())
+}
+
+/// The image ID `tag` names in the local Docker store, when it names one.
+fn local_image(tag: &str) -> Option<String> {
+    let inspected = Process::new("docker")
+        .args(["image", "inspect", "--format", "{{.Id}}", tag])
+        .output()
+        .ok()?;
+    inspected
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&inspected.stdout).trim().to_owned())
 }
 
 /// The request parts one admitted bundle published as OCI manifest
