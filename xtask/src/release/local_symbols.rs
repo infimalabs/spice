@@ -30,7 +30,12 @@ pub fn rebuild_release_symbols(
     let recipe: SymbolRecipe = wire::decode(&recipe_bytes).map_err(|error| error.to_string())?;
     admit_recipe(&recipe)?;
     admit_local_inputs(&recipe, released_binary)?;
-    let (work, stage) = configure_scratch(destination, &mut environment)?;
+    // Cargo hashes the final unit's link arguments, which name the canvas
+    // object under the target directory, so a Darwin rebuild links only from
+    // the canonical stage's own target directory when the caller names it.
+    let canonical_target = recipe.target == wire::manifest::ReleaseTarget::Aarch64AppleDarwin
+        && environment.cargo_target_dir.is_some();
+    let (work, stage) = configure_scratch(destination, &mut environment, canonical_target)?;
     let build = match recipe.target {
         wire::manifest::ReleaseTarget::X86_64UnknownLinuxMusl => {
             crate::linux_sealed_stage(&environment, true, output, error_output)
@@ -90,16 +95,18 @@ fn admit_local_inputs(recipe: &SymbolRecipe, released_binary: &Path) -> Result<(
 fn configure_scratch(
     destination: &Path,
     environment: &mut ReleaseEnvironment,
+    canonical_target: bool,
 ) -> Result<(PathBuf, PathBuf), String> {
     let work = work_root(destination)?;
     fs::create_dir(&work).map_err(|error| format!("cannot create {}: {error}", work.display()))?;
     let stage = work.join("stage");
-    let target = work.join("target");
     let temporary = work.join("tmp");
     fs::create_dir(&temporary)
         .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
     environment.stage_root = Some(stage.clone().into_os_string());
-    environment.cargo_target_dir = Some(target.into_os_string());
+    if !canonical_target {
+        environment.cargo_target_dir = Some(work.join("target").into_os_string());
+    }
     environment.temporary = Some(temporary.into_os_string());
     Ok((work, stage))
 }
