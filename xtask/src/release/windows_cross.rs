@@ -108,8 +108,10 @@ fn build_set<E: Executor>(
         commit: "",
         #[cfg(unix)]
         signing: None,
+        capture_symbols: false,
         symbols: None,
         symbol_artifact: None,
+        linux_debug_artifact: None,
         windows_debug_artifact: None,
         canvas,
         executable: None,
@@ -122,16 +124,10 @@ fn build_set<E: Executor>(
         .executable
         .take()
         .expect("a built candidate names its executable");
-    let mut placed = vec![
-        Placed {
-            path: prebuilt::CANDIDATE.to_owned(),
-            source: executable.clone(),
-        },
-        Placed {
-            path: prebuilt::DEBUG.to_owned(),
-            source: executable.with_extension("pdb"),
-        },
-    ];
+    let mut placed = vec![Placed {
+        path: prebuilt::CANDIDATE.to_owned(),
+        source: executable,
+    }];
 
     let mut arguments = vec![
         OsString::from("build"),

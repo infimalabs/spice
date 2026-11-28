@@ -482,7 +482,8 @@ mod tests {
     use wire::manifest::{
         BuildPins, InventoryEntry, MacSymbolMetadata, PROOF_RECEIPT_VERSION, ProductVersion,
         ProofEnvironment, ProofReceipt, ProofStanding, RELEASE_MANIFEST_VERSION, ReleaseManifest,
-        ReleaseManifestTarget, TARGET_PAYLOAD_VERSION, TargetPayload,
+        ReleaseManifestTarget, SYMBOL_RECIPE_VERSION, SymbolRecipe, TARGET_PAYLOAD_VERSION,
+        TargetPayload,
     };
     use wire::{Digest, Domain};
 
@@ -796,6 +797,27 @@ mod tests {
                 digest: Digest::compute(Domain::DistArtifact, b"Windows PDB fixture"),
             });
         }
+        let recipe = wire::encode(&SymbolRecipe {
+            version: SYMBOL_RECIPE_VERSION,
+            target,
+            source_commit: "1".repeat(40),
+            source: source.clone(),
+            source_archive: Digest::compute(Domain::DistSourceArchive, b"source archive"),
+            cargo_lock: Digest::compute(Domain::DistArtifact, b"Cargo.lock"),
+            vendor_authority: Digest::compute(Domain::DistArtifact, b"vendor authority"),
+            proof_container: pins.proof_container.clone(),
+            toolchain: pins.rust.clone(),
+            flags: vec!["--release".to_owned()],
+            released_binary: native.clone(),
+            build_id: format!("fixture-{target}"),
+        })
+        .expect("symbol recipe encodes");
+        inventory.push(InventoryEntry {
+            path: "symbols/recipe.json".to_owned(),
+            mode: 0o644,
+            bytes: recipe.len() as u64,
+            digest: Digest::compute(Domain::DistArtifact, &recipe),
+        });
         inventory.sort_by(|left, right| left.path.cmp(&right.path));
         let manifest_inventory = inventory.clone();
         let payload = TargetPayload {

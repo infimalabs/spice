@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use atomic::RootedPublish;
 use wire::manifest::{
     BuildPins, InventoryEntry, MacSymbolArtifact, MacSymbolMetadata, ProductVersion, ReleaseTarget,
-    TARGET_PAYLOAD_VERSION, TargetPayload,
+    SYMBOL_RECIPE_VERSION, SymbolRecipe, TARGET_PAYLOAD_VERSION, TargetPayload,
 };
 use wire::{Digest, Domain};
 
@@ -16,6 +16,8 @@ const DATA_MODE: u32 = 0o644;
 const EXECUTABLE_MODE: u32 = 0o755;
 const MAC_SYMBOL_PATH: &str = "symbols/spice.symbols";
 const WINDOWS_DEBUG_PATH: &str = "symbols/spice.pdb";
+const LINUX_DEBUG_PATH: &str = "symbols/spice.debug";
+const SYMBOL_RECIPE_PATH: &str = "symbols/recipe.json";
 
 /// Build work occurs in this fixed order.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,8 +55,16 @@ pub trait Builder {
     ) -> Result<Vec<u8>, BuildError>;
     /// Run the final executable once and answer its version report.
     fn report_version(&mut self) -> Result<String, BuildError>;
+    /// Derive the platform build identity from the final executable.
+    fn build_id(&mut self, _target: ReleaseTarget, native: &[u8]) -> Result<String, BuildError> {
+        Ok(Digest::compute(Domain::DistArtifact, native).to_string())
+    }
 
     fn take_symbol_artifact(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Take the detached unstripped Linux executable, when explicitly built.
+    fn take_linux_debug_artifact(&mut self) -> Option<Vec<u8>> {
         None
     }
     /// Take the raw PDB produced beside a Windows release executable.
@@ -106,6 +116,10 @@ impl FinalizedArtifact {
 pub struct TargetSource {
     pub commit: Digest,
     pub archive: Digest,
+    /// Full lowercase Git object name carried by the selected source record.
+    pub source_commit: String,
+    /// Domain-separated identity of the selected `Cargo.lock`.
+    pub cargo_lock: Digest,
 }
 
 /// Pin- and version-guarded deterministic stage assembly.
@@ -142,7 +156,19 @@ impl Pipeline {
         publisher: &mut P,
     ) -> Result<StagedTarget, StageError> {
         self.pins.verify(observed)?;
-        let built = build_artifacts(target, &self.version, builder)?;
+        let mut built = build_artifacts(target, &self.version, builder)?;
+        let recipe = symbol_recipe(
+            target,
+            &source,
+            self.pins.get(),
+            &built.build_id,
+            &built.artifacts,
+        )?;
+        built.artifacts.push(artifact(
+            SYMBOL_RECIPE_PATH,
+            DATA_MODE,
+            wire::encode(&recipe)?,
+        ));
         let payload = make_payload(
             target,
             source,
@@ -197,6 +223,7 @@ struct Artifact {
 struct BuiltArtifacts {
     canvas: Canvas,
     symbols: Option<MacSymbolMetadata>,
+    build_id: String,
     artifacts: Vec<Artifact>,
 }
 
@@ -230,7 +257,14 @@ fn build_artifacts<B: Builder>(
     canvas
         .verify_release_report(version, &report)
         .map_err(native_build_error)?;
+    let build_id = builder
+        .build_id(target, &native)
+        .map_err(|source| StageError::Build {
+            step: BuildStep::Native,
+            source,
+        })?;
     let symbols = builder.take_symbol_artifact();
+    let linux_debug = builder.take_linux_debug_artifact();
     let windows_debug = builder.take_windows_debug_artifact();
     let mut artifacts = Vec::new();
     let native = artifact(target.executable_path(), EXECUTABLE_MODE, native);
@@ -240,14 +274,14 @@ fn build_artifacts<B: Builder>(
             artifacts.push(artifact);
             Some(metadata)
         }
-        (ReleaseTarget::Aarch64AppleDarwin, None) => {
-            return Err(native_build_error(
-                "macOS build produced no symbol artifact",
-            ));
+        (ReleaseTarget::Aarch64AppleDarwin, None)
+        | (ReleaseTarget::X86_64UnknownLinuxMusl | ReleaseTarget::X86_64PcWindowsMsvc, None) => {
+            None
         }
-        (ReleaseTarget::X86_64UnknownLinuxMusl | ReleaseTarget::X86_64PcWindowsMsvc, None) => None,
         (ReleaseTarget::X86_64UnknownLinuxMusl, Some(_)) => {
-            return Err(native_build_error("Linux build produced a symbol artifact"));
+            return Err(native_build_error(
+                "Linux build produced a macOS symbol artifact",
+            ));
         }
         (ReleaseTarget::X86_64PcWindowsMsvc, Some(_)) => {
             return Err(native_build_error(
@@ -255,6 +289,22 @@ fn build_artifacts<B: Builder>(
             ));
         }
     };
+    match (target, linux_debug) {
+        (ReleaseTarget::X86_64UnknownLinuxMusl, Some(bytes)) if !bytes.is_empty() => {
+            artifacts.push(artifact(LINUX_DEBUG_PATH, DATA_MODE, bytes));
+        }
+        (ReleaseTarget::X86_64UnknownLinuxMusl, Some(_)) => {
+            return Err(native_build_error(
+                "Linux build produced an empty debug artifact",
+            ));
+        }
+        (_, None) => {}
+        (_, Some(_)) => {
+            return Err(native_build_error(
+                "non-Linux build produced a Linux debug artifact",
+            ));
+        }
+    }
     match (target, windows_debug) {
         (ReleaseTarget::X86_64PcWindowsMsvc, Some(bytes)) if !bytes.is_empty() => {
             artifacts.push(artifact(WINDOWS_DEBUG_PATH, DATA_MODE, bytes));
@@ -262,10 +312,7 @@ fn build_artifacts<B: Builder>(
         (ReleaseTarget::X86_64PcWindowsMsvc, Some(_)) => {
             return Err(native_build_error("Windows build produced an empty PDB"));
         }
-        (ReleaseTarget::X86_64PcWindowsMsvc, None) => {
-            return Err(native_build_error("Windows build produced no PDB"));
-        }
-        (ReleaseTarget::Aarch64AppleDarwin | ReleaseTarget::X86_64UnknownLinuxMusl, None) => {}
+        (_, None) => {}
         (_, Some(_)) => {
             return Err(native_build_error(
                 "non-Windows build produced a Windows debug artifact",
@@ -276,6 +323,7 @@ fn build_artifacts<B: Builder>(
     Ok(BuiltArtifacts {
         canvas,
         symbols,
+        build_id,
         artifacts,
     })
 }
@@ -321,6 +369,57 @@ fn artifact(path: impl Into<String>, mode: u32, bytes: Vec<u8>) -> Artifact {
         bytes,
         digest,
     }
+}
+fn symbol_recipe(
+    target: ReleaseTarget,
+    source: &TargetSource,
+    pins: &BuildPins,
+    build_id: &str,
+    artifacts: &[Artifact],
+) -> Result<SymbolRecipe, serde_json::Error> {
+    let released_binary = artifacts
+        .iter()
+        .find(|artifact| artifact.path == target.executable_path())
+        .expect("the built inventory carries the native executable")
+        .digest
+        .clone();
+    let vendor_authority = Digest::compute(Domain::DistPins, &wire::encode(pins)?);
+    let build_id = build_id.to_owned();
+    let mut flags = vec![
+        "rustc".to_owned(),
+        "--locked".to_owned(),
+        "--release".to_owned(),
+        "-p".to_owned(),
+        "spice".to_owned(),
+        "--bin".to_owned(),
+        "spice".to_owned(),
+        "--target".to_owned(),
+        target.to_string(),
+        "--config".to_owned(),
+        "profile.release.debug=\"line-tables-only\"".to_owned(),
+    ];
+    flags.push(
+        match target {
+            ReleaseTarget::Aarch64AppleDarwin => "post-link=strip",
+            ReleaseTarget::X86_64UnknownLinuxMusl => "post-link=strip --strip-all",
+            ReleaseTarget::X86_64PcWindowsMsvc => "debug-sidecar=spice.pdb",
+        }
+        .to_owned(),
+    );
+    Ok(SymbolRecipe {
+        version: SYMBOL_RECIPE_VERSION,
+        target,
+        source_commit: source.source_commit.clone(),
+        source: source.commit.clone(),
+        source_archive: source.archive.clone(),
+        cargo_lock: source.cargo_lock.clone(),
+        vendor_authority,
+        proof_container: pins.proof_container.clone(),
+        toolchain: pins.rust.clone(),
+        flags,
+        released_binary,
+        build_id,
+    })
 }
 
 fn make_payload(

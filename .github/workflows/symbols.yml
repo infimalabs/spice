@@ -1,0 +1,182 @@
+name: Detached release symbols
+run-name: Symbols ${{ inputs.target }} from release ${{ inputs.release_run }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run:
+        description: Completed release coordinator run carrying the public tag
+        required: true
+        type: string
+      source_commit:
+        description: Exact landed source commit published by that release
+        required: true
+        type: string
+      target:
+        description: Platform whose detached symbols are rebuilt
+        required: true
+        type: choice
+        options:
+          - aarch64-apple-darwin
+          - x86_64-unknown-linux-musl
+          - x86_64-pc-windows-msvc
+
+permissions: {}
+
+jobs:
+  symbols:
+    name: Rebuild ${{ inputs.target }} symbols
+    runs-on: ${{ inputs.target == 'aarch64-apple-darwin' && 'macos-15' || inputs.target == 'x86_64-pc-windows-msvc' && 'windows-2025' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact released source
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+
+      - name: Download the completed release identity
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-result-${{ inputs.release_run }}
+          run-id: ${{ inputs.release_run }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release
+
+      - name: Admit the released source and fetch its public assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          result="$RUNNER_TEMP/release/final-release.json"
+          test "$(jq -r .source_commit "$result")" = "$SOURCE_COMMIT"
+          tag="$(jq -r .tag "$result")"
+          test -n "$tag"
+          root="$RUNNER_TEMP/symbol-input"
+          mkdir -p "$root"
+          suffix=""
+          test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$root" \
+            --pattern "spice-$TARGET$suffix" \
+            --pattern spice-release-evidence.zip
+          unzip -p "$root/spice-release-evidence.zip" \
+            "targets/$TARGET/symbols/recipe.json" > "$root/recipe.json"
+          test -s "$root/recipe.json"
+
+      - name: Install the exact Rust toolchain
+        shell: bash
+        run: rustup toolchain install --no-self-update
+
+      - name: Install the Linux native linker
+        if: ${{ inputs.target == 'x86_64-unknown-linux-musl' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Restore detached symbol tooling
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: |
+            ${{ runner.temp }}/symbol-cargo
+            ${{ runner.temp }}/symbol-target
+          key: release-symbols-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
+
+      - name: Build the repository-owned symbol driver and app tools
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/symbol-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/symbol-target
+        run: |
+          set -euo pipefail
+          cargo install --locked --version 0.22.1 trunk
+          cargo install --locked --version 0.2.126 wasm-bindgen-cli
+          cargo build --locked --package xtask
+
+      - name: Rebuild and package detached symbols
+        shell: bash
+        env:
+          CARGO_HOME: ${{ runner.temp }}/symbol-cargo
+          CARGO_TARGET_DIR: ${{ runner.temp }}/symbol-target
+          TARGET: ${{ inputs.target }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/symbol-input"
+          suffix=""
+          test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
+          binary="$root/spice-$TARGET$suffix"
+          raw="$RUNNER_TEMP/spice-$TARGET.symbols"
+          "$CARGO_TARGET_DIR/debug/xtask" rebuild-release-symbols \
+            "$root/recipe.json" "$binary" "$raw"
+          archive="$RUNNER_TEMP/spice-$TARGET-symbols.tar.gz"
+          tar -czf "$archive" -C "$RUNNER_TEMP" "$(basename "$raw")"
+          bytes="$(wc -c < "$archive" | tr -d ' ')"
+          sha256() {
+          python -c '
+          import collections
+          import hashlib
+          import sys
+
+          digest = hashlib.sha256()
+          source = open(sys.argv[1], "rb")
+          collections.deque(
+              map(digest.update, iter(lambda: source.read(1024 * 1024), b"")),
+              maxlen=0,
+          )
+          print(digest.hexdigest())
+          ' "$1"
+          }
+          symbol_sha256="$(sha256 "$raw")"
+          archive_sha256="$(sha256 "$archive")"
+          jq -n --sort-keys \
+            --arg target "$TARGET" \
+            --arg source_commit "$SOURCE_COMMIT" \
+            --arg released_binary "$(jq -r .released_binary "$root/recipe.json")" \
+            --arg build_id "$(jq -r .build_id "$root/recipe.json")" \
+            --arg toolchain "$(jq -r .toolchain "$root/recipe.json")" \
+            --arg symbol_sha256 "$symbol_sha256" \
+            --arg archive_sha256 "$archive_sha256" \
+            --argjson compressed_bytes "$bytes" \
+            '{schema:1,target:$target,source_commit:$source_commit,released_binary:$released_binary,
+              build_id:$build_id,toolchain:$toolchain,symbol_sha256:$symbol_sha256,
+              archive_sha256:$archive_sha256,compressed_bytes:$compressed_bytes}' \
+            > "$RUNNER_TEMP/spice-$TARGET-symbols.json"
+          {
+            printf '### Detached symbols\n\n'
+            printf -- '- target: `%s`\n' "$TARGET"
+            printf -- '- compressed bytes: `%s`\n' "$bytes"
+            printf -- '- archive SHA-256: `%s`\n' "$archive_sha256"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$bytes" -le 268435456
+
+      - name: Attest the detached symbol archive and binding
+        uses: actions/attest-build-provenance@62fc1d596301d0ab9914e1fec14dc5c8d93f65cd
+        with:
+          subject-path: |
+            ${{ runner.temp }}/spice-${{ inputs.target }}-symbols.tar.gz
+            ${{ runner.temp }}/spice-${{ inputs.target }}-symbols.json
+
+      - name: Retain the bounded detached symbols
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: symbols-${{ inputs.target }}-${{ inputs.source_commit }}
+          path: |
+            ${{ runner.temp }}/spice-${{ inputs.target }}-symbols.tar.gz
+            ${{ runner.temp }}/spice-${{ inputs.target }}-symbols.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30

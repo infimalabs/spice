@@ -750,12 +750,15 @@ fn admit_target_members(
                                     .debug_path()
                                     .expect("Darwin debug path exists")
                     }
-                    (None, ReleaseTarget::X86_64PcWindowsMsvc) => true,
+                    (
+                        None,
+                        ReleaseTarget::X86_64UnknownLinuxMusl | ReleaseTarget::X86_64PcWindowsMsvc,
+                    ) => true,
                     _ => false,
                 }
         }
         (Some(_), None, Some(_)) => true,
-        (None, None, None) => payload.symbols.is_none(),
+        (Some(_), None, None) | (None, None, None) => payload.symbols.is_none(),
         _ => false,
     };
     let executable_inventory = payload

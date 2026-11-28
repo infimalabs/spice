@@ -60,6 +60,15 @@ pub(crate) mod test_support {
         }
     }
 
+    pub(crate) fn symbol_recipe(inventory: &mut Vec<InventoryEntry>) {
+        inventory.push(InventoryEntry {
+            path: "symbols/recipe.json".to_owned(),
+            mode: 0o644,
+            bytes: b"symbol recipe fixture".len() as u64,
+            digest: Digest::compute(Domain::DistArtifact, b"symbol recipe fixture"),
+        });
+    }
+
     pub(crate) fn symbols(
         target: ReleaseTarget,
         native: &Digest,

@@ -40,6 +40,7 @@ impl Fixture {
         let build_record = dist::build_record_bytes(&fixture_build());
         fs::write(root.join(dist::BUILD_RECORD_FILE), &build_record)
             .expect("write exported fixture identity");
+        fs::write(root.join("Cargo.lock"), b"# fixture lock\n").expect("write fixture lockfile");
         fs::write(
             root.join("dist/stage").join(dist::SOURCE_ARCHIVE_FILE),
             SOURCE_ARCHIVE,
@@ -227,14 +228,12 @@ impl Executor for FakeExecutor {
             fs::write(dwarf, b"fixture DWARF").expect("write derived DWARF member");
         }
         if command.label == "native-strip" && !refused {
-            fs::write(
-                PathBuf::from(&command.arguments[0]),
-                linked(self.target, &self.archive, b"stripped"),
-            )
-            .expect("strip exact linked executable fixture");
+            let executable =
+                PathBuf::from(command.arguments.last().expect("strip executable argument"));
+            fs::write(&executable, linked(self.target, &self.archive, b"stripped"))
+                .expect("strip exact linked executable fixture");
             if self.moved_symbols_after_uuid.get() {
-                let dwarf = dsym_path(Path::new(&command.arguments[0]))
-                    .join("Contents/Resources/DWARF/spice");
+                let dwarf = dsym_path(&executable).join("Contents/Resources/DWARF/spice");
                 fs::rename(&dwarf, dwarf.with_extension("captured"))
                     .expect("retain captured DWARF fixture");
                 fs::write(dwarf, b"changed DWARF")
@@ -261,6 +260,7 @@ impl Executor for FakeExecutor {
             }
             "executable-uuid" => self.executable_uuid.borrow().clone(),
             "dsym-uuid" => self.dsym_uuid.borrow().clone(),
+            "linux-build-id" => b"    Build ID: 0123456789abcdef\n".to_vec(),
             "app-build" | "dsym-generate" | "native-strip" => {
                 format!("{} complete\n", command.label).into_bytes()
             }
@@ -409,10 +409,12 @@ fn all_targets_use_the_fixed_commands_and_real_artifact_bytes() {
             Digest::compute(Domain::DistArtifact, &fixture.archive)
         );
         assert_eq!(build.staged.canvas, *staged.canvas());
-        let mut inventory = vec![target.executable_path()];
-        if let Some(debug) = target.debug_path() {
-            inventory.push(debug);
-        }
+        let debug = match target {
+            ReleaseTarget::Aarch64AppleDarwin => "symbols/spice.symbols",
+            ReleaseTarget::X86_64UnknownLinuxMusl => "symbols/spice.debug",
+            ReleaseTarget::X86_64PcWindowsMsvc => "symbols/spice.pdb",
+        };
+        let inventory = vec![target.executable_path(), "symbols/recipe.json", debug];
         assert_eq!(
             build
                 .staged
@@ -426,10 +428,10 @@ fn all_targets_use_the_fixed_commands_and_real_artifact_bytes() {
         let native = linked(
             target,
             &fixture.archive,
-            if target == ReleaseTarget::Aarch64AppleDarwin {
-                b"stripped"
-            } else {
+            if target == ReleaseTarget::X86_64PcWindowsMsvc {
                 b"linked"
+            } else {
+                b"stripped"
             },
         );
         assert_eq!(
@@ -440,6 +442,66 @@ fn all_targets_use_the_fixed_commands_and_real_artifact_bytes() {
         assert_eq!(
             fs::read(fixture.pointer(target)).expect("target pointer reads"),
             build.staged.payload_bytes
+        );
+    }
+}
+
+#[test]
+fn default_candidates_strip_without_publishing_debug_artifacts() {
+    for target in [
+        ReleaseTarget::Aarch64AppleDarwin,
+        ReleaseTarget::X86_64UnknownLinuxMusl,
+        ReleaseTarget::X86_64PcWindowsMsvc,
+    ] {
+        let fixture = Fixture::new();
+        let programs = fixture.programs();
+        let executor = FakeExecutor::new(&fixture, target);
+        let stage_root = fixture.root.join("dist/stage");
+        let archive = SourceArchive::read(&stage_root.join(dist::SOURCE_ARCHIVE_FILE))
+            .expect("fixture source archive");
+        let build = stage_with_roots(
+            &fixture.root,
+            &fixture.root.join("target"),
+            &stage_root,
+            StageRequest {
+                target,
+                version: &ProductVersion::parse(FIXTURE_VERSION).expect("fixture version"),
+                signing: None,
+                archive: &archive,
+                proof_container: FIXTURE_PROOF_IMAGE,
+                canvas: None,
+                capture_symbols: false,
+            },
+            &programs,
+            &executor,
+        )
+        .expect("default target stage succeeds");
+        assert_eq!(
+            build
+                .staged
+                .payload
+                .inventory
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            [target.executable_path(), "symbols/recipe.json"]
+        );
+        let labels = executor.labels();
+        assert!(!labels.contains(&"dsym-generate"));
+        assert_eq!(
+            labels.contains(&"native-strip"),
+            target != ReleaseTarget::X86_64PcWindowsMsvc
+        );
+        let native = build
+            .commands
+            .iter()
+            .find(|record| record.label == "native-build")
+            .expect("native build record");
+        assert!(
+            native
+                .arguments
+                .iter()
+                .any(|argument| { argument == "profile.release.debug=\"line-tables-only\"" })
         );
     }
 }
@@ -473,6 +535,7 @@ fn a_prebuilt_canvas_skips_the_target_app_build() {
             archive: &archive,
             proof_container: FIXTURE_PROOF_IMAGE,
             canvas: Some(canvas),
+            capture_symbols: true,
         },
         &programs,
         &executor,
@@ -514,8 +577,8 @@ fn fixture_build() -> wire::manifest::BuildInfo {
     }
 }
 
-/// The native build runs Cargo, carries line tables for declared debug
-/// artifacts, and links last an object carrying exactly the staged archive.
+/// The explicit symbol rebuild runs Cargo with line tables and links last an
+/// object carrying exactly the staged archive.
 fn assert_native_build(
     record: &CommandRecord,
     programs: &Programs,
@@ -524,19 +587,17 @@ fn assert_native_build(
     archive: &[u8],
 ) -> crate::app::StagedCanvas {
     assert_eq!(record.program, programs.cargo);
-    assert_eq!(
+    assert!(
         record
             .arguments
             .iter()
-            .any(|argument| argument == "profile.release.debug=\"line-tables-only\""),
-        target.debug_path().is_some()
+            .any(|argument| argument == "profile.release.debug=\"line-tables-only\"")
     );
-    assert_eq!(
-        record
+    assert!(
+        !record
             .arguments
             .iter()
-            .any(|argument| argument == "profile.release.strip=\"symbols\""),
-        target == ReleaseTarget::X86_64UnknownLinuxMusl
+            .any(|argument| argument == "profile.release.strip=\"symbols\"")
     );
     let binary = record
         .arguments

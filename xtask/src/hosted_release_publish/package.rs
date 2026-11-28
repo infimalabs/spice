@@ -4,7 +4,10 @@ use std::path::Path;
 
 use sha2::{Digest as _, Sha256};
 use wire::ReleaseNotes;
-use wire::manifest::{InventoryEntry, ProductVersion, ReleaseManifest, TargetPayload};
+use wire::manifest::{
+    InventoryEntry, ProductVersion, ReleaseManifest, SYMBOL_RECIPE_VERSION, SymbolRecipe,
+    TargetPayload,
+};
 use zip::write::SimpleFileOptions;
 
 use super::PublishError;
@@ -29,8 +32,10 @@ pub(super) fn capture(
     notes: &ReleaseNotes,
 ) -> Result<CapturedPackage, PublishError> {
     let tree = package_tree(stage_root, version, notes)?;
+    let recipes = recipe_members(stage_root)?;
     let path = assets_root.join(ASSET_NAME);
-    let members = evidence_members(tree.members())?;
+    let mut members = evidence_members(tree.members())?;
+    members.extend(recipes.iter());
     publish_archive(&path, &members)?;
     let (bytes, sha256) = file_sha256(&path)?;
     if bytes > MAX_PACKAGE_BYTES {
@@ -176,6 +181,48 @@ fn evidence_members(
         )));
     }
     Ok(selected)
+}
+
+fn recipe_members(stage: &Path) -> Result<Vec<proof::PackageMember>, PublishError> {
+    let (_, manifest_bytes) =
+        document_member(stage, "release/manifest.json", "release/manifest.json")?;
+    let manifest: ReleaseManifest = wire::decode(&manifest_bytes).map_err(PublishError::Decode)?;
+    let mut members = Vec::with_capacity(manifest.targets.len());
+    for sealed in manifest.targets {
+        let target = sealed.target;
+        let payload_path = format!("targets/{target}/payload.json");
+        let (_, payload_bytes) = document_member(stage, &payload_path, &payload_path)?;
+        let payload: TargetPayload = wire::decode(&payload_bytes).map_err(PublishError::Decode)?;
+        let entry = inventory(&payload, "symbols/recipe.json")?;
+        let member = artifact_member(stage, target, entry)?;
+        let bytes = member
+            .read_bounded(proof::PACKAGE_DOCUMENT_LIMIT)
+            .map_err(PublishError::Package)?;
+        let recipe: SymbolRecipe = wire::decode(&bytes).map_err(PublishError::Decode)?;
+        let valid = recipe.version == SYMBOL_RECIPE_VERSION
+            && recipe.target == target
+            && recipe.source == payload.source
+            && recipe.source_archive == payload.archive
+            && recipe.vendor_authority == payload.pins_digest
+            && recipe.proof_container == payload.pins.proof_container
+            && recipe.toolchain == payload.pins.rust
+            && recipe.released_binary == payload.native
+            && wire::manifest::git_commit_is_canonical(&recipe.source_commit)
+            && !recipe.build_id.is_empty();
+        if !valid {
+            return Err(PublishError::Refused(format!(
+                "staged {target} symbol recipe does not bind its target payload"
+            )));
+        }
+        members.push(member);
+    }
+    if members.len() != 3 {
+        return Err(PublishError::Refused(format!(
+            "sealed release carries {} symbol recipes, expected 3",
+            members.len()
+        )));
+    }
+    Ok(members)
 }
 
 fn publish_archive(path: &Path, members: &[&proof::PackageMember]) -> Result<(), PublishError> {
@@ -324,9 +371,24 @@ mod tests {
             )
             .expect("symbol member"),
         );
+        let recipes = [
+            "aarch64-apple-darwin",
+            "x86_64-unknown-linux-musl",
+            "x86_64-pc-windows-msvc",
+        ]
+        .map(|target| {
+            proof::PackageMember::admit_inline(
+                format!("targets/{target}/symbols/recipe.json"),
+                0o644,
+                br#"{"version":1}"#,
+                proof::PACKAGE_DOCUMENT_LIMIT,
+            )
+            .expect("recipe member")
+        });
         let first = scratch.0.join("first.zip");
         let second = scratch.0.join("second.zip");
-        let members = evidence_members(&all).expect("evidence members");
+        let mut members = evidence_members(&all).expect("evidence members");
+        members.extend(recipes.iter());
         publish_archive(&first, &members).expect("first archive");
         let mut reversed = members;
         reversed.reverse();
@@ -338,7 +400,7 @@ mod tests {
 
         let file = File::open(first).expect("archive opens");
         let mut archive = zip::ZipArchive::new(file).expect("archive reads");
-        assert_eq!(archive.len(), 7);
+        assert_eq!(archive.len(), 10);
         let mut first_member = archive.by_index(0).expect("first member");
         assert_eq!(
             first_member.name().expect("first member name").as_ref(),
@@ -358,6 +420,11 @@ mod tests {
             archive
                 .by_name("targets/aarch64-apple-darwin/symbols/spice.symbols")
                 .is_err()
+        );
+        assert!(
+            archive
+                .by_name("targets/x86_64-unknown-linux-musl/symbols/recipe.json")
+                .is_ok()
         );
         let extracted = scratch.0.join("extracted");
         archive.extract(&extracted).expect("archive extracts");

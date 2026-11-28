@@ -343,6 +343,7 @@ fn fixture() -> Fixture {
             bytes: executable.len() as u64,
             digest: native.clone(),
         }];
+        crate::test_support::symbol_recipe(&mut inventory);
         let symbols = if target == ReleaseTarget::Aarch64AppleDarwin {
             crate::test_support::symbols(target, &native, &mut inventory)
         } else {

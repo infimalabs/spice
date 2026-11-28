@@ -21,6 +21,11 @@ on:
         required: false
         default: false
         type: boolean
+      release_symbols:
+        description: Start detached authenticated symbol rebuilds after canonical publication
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -337,3 +342,24 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 30
+
+      - name: Start detached symbol rebuilds
+        if: ${{ success() && inputs.release_symbols && !inputs.stage_only }}
+        shell: bash
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source_commit="$(jq -r .source_commit "$RUNNER_TEMP/final-release.json")"
+          [[ "$source_commit" =~ ^[0-9a-f]{40}$ ]]
+          for target in \
+            aarch64-apple-darwin \
+            x86_64-unknown-linux-musl \
+            x86_64-pc-windows-msvc
+          do
+            gh workflow run symbols.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f release_run="$GITHUB_RUN_ID" \
+              -f source_commit="$source_commit" \
+              -f target="$target"
+          done

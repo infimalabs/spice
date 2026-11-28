@@ -63,6 +63,8 @@ pub struct JournalBackupManifest {
 pub const PROOF_RECEIPT_VERSION: u16 = 1;
 /// The sole current target payload schema.
 pub const TARGET_PAYLOAD_VERSION: u16 = 1;
+/// The sole current compact release-symbol recipe schema.
+pub const SYMBOL_RECIPE_VERSION: u16 = 1;
 /// The sole current deterministic macOS symbol artifact schema.
 pub const MAC_SYMBOL_ARTIFACT_VERSION: u16 = 1;
 /// Most encoded bytes one compressed macOS symbol artifact may carry.
@@ -880,6 +882,34 @@ impl MacSymbolMetadata {
     pub fn uuid_is_canonical(&self) -> bool {
         macho_uuid_is_canonical(&self.uuid)
     }
+}
+/// Compact authenticated instructions for reproducing one release target's
+/// detached debug artifact without transporting it on the canonical path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolRecipe {
+    pub version: u16,
+    pub target: ReleaseTarget,
+    /// Full lowercase Git object name of the selected release source.
+    pub source_commit: String,
+    /// Domain-separated identity of the selected source commit.
+    pub source: Digest,
+    /// Exact source archive every platform release consumed.
+    pub source_archive: Digest,
+    /// Domain-separated identity of the selected `Cargo.lock`.
+    pub cargo_lock: Digest,
+    /// Identity of the complete admitted toolchain and vendor boundary.
+    pub vendor_authority: Digest,
+    /// Exact proof image carrying the vendored dependency closure.
+    pub proof_container: String,
+    /// Exact Rust toolchain report admitted by the target stage.
+    pub toolchain: String,
+    /// Stable Cargo and linker arguments needed for the canonical binary.
+    pub flags: Vec<String>,
+    /// Exact final executable admitted by the published payload.
+    pub released_binary: Digest,
+    /// Platform build identity; native UUID/build-id where available.
+    pub build_id: String,
 }
 
 /// The receipt-free object submitted to proof for one release target.

@@ -170,41 +170,49 @@ unqualified `spice://` remains the CLI resource index.
 
 Every target's relocatable object defines `spicezip` and `spicezip_len`; the
 final-image readers locate exactly one rack section and recover the rack bytes
-from it. The Windows target inventory names `bin/spice.exe` and its matching
-`symbols/spice.pdb`; both remain admitted stage artifacts, while `proof.json`
-is the detached signature artifact. Public release evidence carries the
-payload and proof, not the PDB.
+from it. Canonical platform stages strip their executable and carry no debug
+bytes by default. Each signed target payload instead inventories one compact
+`symbols/recipe.json`: the selected source commit, source archive and
+`Cargo.lock`, admitted vendor/toolchain boundary, proof image, target flags,
+released executable digest and platform build identity. Candidate compilation
+keeps line tables only in its private build root; no dSYM, ELF debug or PDB
+bytes enter the stage, public release evidence or cross-run bundle.
 
-The Mach-O and ELF builds then derive symbols, strip, and sign where
-applicable. No step appends bytes after signing. The final image's section
-metadata is the canonical external extraction boundary; no build-time file
-offset is persisted. The running process stores no offset and parses no image:
-the linker resolves both symbols to the mapped address and byte length. The
-final executable is refused unless exactly one section carries the staged
-archive and its one version report names both the admitted product version and
-G exactly. Only these builds write the object carrying the archive and enable
-the `canvas` feature that names its symbols, so no compile step reads a file
-outside the selected tree. A resident whose executable carries no archive
-refuses installed serving at startup.
+The Mach-O and ELF builds strip and sign where applicable. No step appends bytes
+after signing. The final image's section metadata is the canonical external
+extraction boundary; no build-time file offset is persisted. The running
+process stores no offset and parses no image: the linker resolves both symbols
+to the mapped address and byte length. The final executable is refused unless
+exactly one section carries the staged archive and its one version report names
+both the admitted product version and G exactly. Only these builds write the
+object carrying the archive and enable the `canvas` feature that names its
+symbols, so no compile step reads a file outside the selected tree. A resident
+whose executable carries no archive refuses installed serving at startup.
 
-The Darwin target inventories one schema-1 symbol artifact containing only the
-captured `Info.plist` and complete `DWARF/spice` bytes. A short canonical
-metadata header is followed directly by one deterministic deflate stream over
-both members; their decoded lengths split the stream without duplicating either
-member or expanding it through a text encoding. Either decoded member and their
-combined decoded length are bounded at 402,653,184 bytes; the complete
-compressed artifact is bounded at 268,435,456 bytes. Any other schema version
-refuses. Capture admits `dsymutil`'s optional
-`Relocations/<one-architecture>/spice.yml` by-product but does not publish it;
-any other extra dSYM entry refuses staging.
+`spice dev xtask -- rebuild-release-symbols RECIPE RELEASED_BINARY OUTPUT`
+first admits the released binary digest, checked-out commit and lock authority.
+It rebuilds the same line-table candidate in private scratch, extracts the
+target's detached debug artifact, and publishes it only when the fresh native
+identity equals the recipe. macOS compares the Mach-O UUID, Linux compares the
+ELF build ID, and Windows compares the exact rebuilt PE digest. Scratch and
+build outputs never enter the canonical release stage.
+
+`dispatch-hosted-release --symbols` sets the explicit `release_symbols` input.
+After canonical release completion, `release.yml` dispatches one independent
+`symbols.yml` run per platform and does not wait for them. Each run uses the
+same local rebuild command, compresses the result, refuses archives above
+268,435,456 bytes, reports its compressed size, and attests a binding of the
+released binary, symbol digest, platform, source commit, toolchain and build
+identity. The detached workflow can be dispatched or retried from the recorded
+release run without rebuilding or republishing any canonical payload. Default
+releases dispatch no symbol workflow and transport no symbol bytes.
 
 Windows deliberately admits no embedded Authenticode certificate. The
-executable, PDB, payload, linked app archive, build pins, provider run, runner
-image, and toolchain are instead bound by the public GitHub Sigstore
-attestation over the hosted result. The PE image is re-admitted after the
-link, the only byte-changing Windows step, and its content digest is re-admitted
-when packaged, so neither symbol capture nor detached signing can mutate the
-image.
+executable, payload, linked app archive, build pins, provider run, runner image,
+and toolchain are instead bound by the public GitHub Sigstore attestation over
+the hosted result. The PE image is re-admitted after the link, the only
+byte-changing Windows step, and its content digest is re-admitted when
+packaged, so detached symbol capture cannot mutate the published image.
 
 App and release builds resolve the compiler in Cargo order: `RUSTC`,
 `CARGO_BUILD_RUSTC`, the nearest ancestor Cargo config naming `build.rustc`,

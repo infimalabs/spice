@@ -18,6 +18,7 @@ const BRANCH: &str = "main";
 pub fn dispatch_hosted_release(
     notes_path: &Path,
     stage_only: bool,
+    release_symbols: bool,
     output: &mut impl Write,
 ) -> Result<u64, DispatchHostedReleaseError> {
     let current = std::env::current_dir().map_err(|source| DispatchHostedReleaseError::Io {
@@ -44,6 +45,7 @@ pub fn dispatch_hosted_release(
         notes: &notes_record,
         notes_identity: &notes_identity,
         stage_only: if stage_only { "true" } else { "false" },
+        release_symbols: if release_symbols { "true" } else { "false" },
     })?;
 
     let mut command = Command::new("gh");
@@ -104,6 +106,7 @@ struct WorkflowInputs<'a> {
     notes: &'a str,
     notes_identity: &'a str,
     stage_only: &'static str,
+    release_symbols: &'static str,
 }
 
 /// Why local notes could not be admitted and dispatched.
@@ -184,6 +187,7 @@ mod tests {
             notes: "{}",
             notes_identity: &notes_identity,
             stage_only: "true",
+            release_symbols: "false",
         })
         .expect("inputs encode");
         assert!(
