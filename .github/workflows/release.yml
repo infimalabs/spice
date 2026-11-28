@@ -176,40 +176,15 @@ jobs:
           jq -rn --arg statement "$WINDOWS_MSVC_ACCEPTANCE" \
             '"statement = \($statement | tojson)"' > dist/windows/msvc.local.toml
 
-      - name: Load the admitted proof image
+      - name: Select the Docker proof runtime
         shell: bash
-        env:
-          CARGO_HOME: ${{ runner.temp }}/coordinator-cargo
-          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          xtask="$RUNNER_TEMP/coordinator-target/debug/xtask"
-          root="$RUNNER_TEMP/prepared"
-          fetched="$root/proof-image"
-          mkdir -p "$root"
-          .github/scripts/proof-image-build-key.sh "$root/build-key.json"
-          key="$("$xtask" prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
-          [[ "$key" =~ ^[0-9a-f]{64}$ ]]
-          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact resolve \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:$key" "sha256:$key" > "$root/resolve.out"
-          read -r label manifest payload identity < "$root/resolve.out"
-          test "$label" = resolved
-          [[ "$payload" =~ ^sha256:[0-9a-f]{64}$ ]]
-          "$xtask" prepared-artifact fetch \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared@$manifest" "sha256:$key" "$fetched"
-          oras logout ghcr.io
-          archive="$fetched/proof-image.tar"
-          printf '%s\n' "${payload#sha256:}" > "$archive.sha256"
-          printf '%s\n' "$identity" > "$archive.identity"
-          test "$(sha256sum "$archive" | cut -d' ' -f1)" = "${payload#sha256:}"
-          "$xtask" proof-image load "$archive" | tee "$root/load.out"
-          test "$(sed -n 's/^loaded proof image //p' "$root/load.out")" = "$identity"
-          rm -rf "$fetched"
+          # The Windows stage loads the proof image its admitted inputs name
+          # once the input run has prepared it.
           common="$(git rev-parse --git-common-dir)"
           mkdir -p "$common/.spice"
           printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
-
 
       - name: Resume or run the complete release
         shell: bash
