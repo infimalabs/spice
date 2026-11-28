@@ -98,10 +98,12 @@ content. lld embeds those paths in the PDB whose signature is embedded in the
 PE, so a reused target links the same PE and PDB bytes as a fresh one.
 
 All three sealed containers also mount an empty, non-executable tmpfs at `/tmp`.
-Nothing in the build is pointed at it (`TMPDIR` stays under the target
-directory the image fixes); it exists for Rosetta, which translates the amd64
-image on an arm64 Docker host and aborts any thread whose context it must back
-with a temporary file there when that file cannot be created.
+Only the Windows cross linker wrapper writes there, placing its
+content-addressed link inputs under `/tmp/spice-link-inputs`; `TMPDIR` stays
+under the target directory the image fixes. The tmpfs exists for Rosetta,
+which translates the amd64 image on an arm64 Docker host and aborts any thread
+whose context it must back with a temporary file there when that file cannot
+be created.
 
 Any further production invocation must declare its constraint here.
 
