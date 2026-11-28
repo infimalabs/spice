@@ -186,6 +186,9 @@ jobs:
           test "$architecture $os" = "amd64 linux"
           test "$observed_vendor" = "$vendor_set"
           test "$observed_key" = '${{ inputs.proof_build_key }}'
+          local_tag="spice-proof-image:${vendor_set#sha256:}"
+          docker tag "$observed" "$local_tag"
+          test "$(docker image inspect --format '{{.Id}}' "$local_tag")" = "$observed"
           echo "identity=$observed" >> "$GITHUB_OUTPUT"
           docker logout ghcr.io
           oras logout ghcr.io
