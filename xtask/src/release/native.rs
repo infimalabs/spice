@@ -46,7 +46,13 @@ pub(super) fn cargo_build(
         OsString::from("--config"),
         OsString::from(super::candidate().debug_config()),
     ]);
-    let link = canvas.native_link(target_dir, object, crate::app::LinkProfile::Release)?;
+    let mut link = canvas.native_link(target_dir, object, crate::app::LinkProfile::Release)?;
+    if target == ReleaseTarget::X86_64UnknownLinuxMusl {
+        link.arguments.extend([
+            OsString::from("-C"),
+            OsString::from("link-arg=-Wl,--build-id=sha1"),
+        ]);
+    }
     arguments.extend(link.arguments.iter().cloned());
     Ok(NativeBuild { arguments, link })
 }
