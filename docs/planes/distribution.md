@@ -486,8 +486,10 @@ only the complete `--admitted-notes FILE` record emitted by
 identity, curated Highlights, generated inventory boundary, and source commit.
 Untouched drafts, placeholders, empty overview scaffolds, stale identities,
 and history that cannot derive at the pinned commit refuse before native stage
-dispatch. A new request reads `main` exactly once and pins that commit; the
-local checkout never selects the release.
+dispatch. A new local Markdown request reads `main` exactly once. A hosted
+request instead pins the source commit already authenticated by its admitted
+notes record, so movement of `main` during coordinator setup cannot replace
+the dispatched source. The local checkout never selects the release.
 Before that preflight, and before any aggregate or single macOS or Windows
 hosted stage, the coordinator spends its `gh`
 identity's GHCR pull token on one read of the repository `prepared` package;
