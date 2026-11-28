@@ -869,7 +869,7 @@ fn active_lanes(bus: &Bus, epoch: CanonicalUuid, task: &TaskHandle) -> Vec<Canon
 }
 
 #[test]
-fn a_steal_on_a_full_round_displaces_the_newest_claim() {
+fn steals_fill_spare_capacity_then_displace_the_newest_claim() {
     let (root, bus, epoch, seats) = fixture("task-steal-newest", 4);
     let task = add(
         &bus,
@@ -887,8 +887,14 @@ fn a_steal_on_a_full_round_displaces_the_newest_claim() {
         ("todo", 2),
     ));
     claim_task(&bus, epoch, &seats[0], &Actor::Lane(seats[0].lane), &task);
-    assert_committed(direct_join(&bus, epoch, &seats[1], &task));
-
+    assert_committed(super::room::design_standing::win_named(
+        &bus, epoch, &seats[1], &task, "steal",
+    ));
+    assert_eq!(
+        active_lanes(&bus, epoch, &task),
+        vec![seats[0].lane, seats[1].lane],
+        "a steal fills spare capacity without displacing its holder"
+    );
     assert_committed(super::room::design_standing::win_named(
         &bus, epoch, &seats[2], &task, "steal",
     ));

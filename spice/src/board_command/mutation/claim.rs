@@ -1235,7 +1235,7 @@ pub(in crate::board_command) fn claim_git_boundary<'a>(
                 }),
             }
         }
-        Possession::Steal => match stolen_work(resident, snapshot, command, selected) {
+        Possession::Steal => match stolen_work(resident, snapshot, selected) {
             Ok(Some(work)) => spice::task_git::prepare_task_claim(&lane, ambient, Some(&work)),
             Ok(None) => spice::task_git::prepare_explicit_claim(&lane, ambient),
             Err(reason) => {
@@ -1276,13 +1276,9 @@ pub(in crate::board_command) fn claim_git_boundary<'a>(
 fn stolen_work(
     resident: Host<'_>,
     snapshot: &ValidatedSnapshot,
-    command: &wire::AdmittedCommand,
     selected: &Entry,
 ) -> Result<Option<wire::body::TaskParkedCommits>, String> {
-    let Some(victim) = selected
-        .active_claims()
-        .find(|held| held.claim().actor != *command.actor())
-    else {
+    let Some(victim) = selected.displaced_by_steal() else {
         return Ok(None);
     };
     let Some(won) = snapshot
