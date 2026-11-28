@@ -133,6 +133,16 @@ runs:
             stage-target aarch64-apple-darwin --unsigned \
             --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
         fi
+        candidate_seconds=$(($(date +%s) - candidate_started))
+        if test "$symbol_inputs" = 3; then
+          # A symbol rebuild stages privately; it has no canonical payload to hand on.
+          {
+            printf '### macOS symbol rebuild phases\n\n'
+            printf -- '- proof preparation: `%ss`\n' "$proof_seconds"
+            printf -- '- candidate rebuild: `%ss`\n' "$candidate_seconds"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
         transition_started=$(date +%s)
 
         payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
