@@ -107,6 +107,9 @@ fn rebuild_symbol_artifact(
 }
 
 fn admit_rebuilt_recipe(expected: &SymbolRecipe, generated: &SymbolRecipe) -> Result<(), String> {
+    if generated.released_binary != expected.released_binary {
+        return Err("rebuilt executable digest differs from the released binary".to_owned());
+    }
     if generated.build_id != expected.build_id {
         return Err(format!(
             "rebuilt platform identity {} differs from released {}",
@@ -261,6 +264,16 @@ mod tests {
             released_binary: Digest::compute(Domain::DistArtifact, b"binary"),
             build_id: "0123456789abcdef".to_owned(),
         }
+    }
+
+    #[test]
+    fn rebuilt_recipe_refuses_binary_drift_with_the_same_build_identity() {
+        let expected = recipe();
+        let mut rebuilt = expected.clone();
+        rebuilt.released_binary = Digest::compute(Domain::DistArtifact, b"different binary");
+
+        assert!(admit_rebuilt_recipe(&expected, &rebuilt).is_err());
+        admit_rebuilt_recipe(&expected, &expected).expect("an exact rebuild admits");
     }
 
     #[test]
