@@ -529,7 +529,10 @@ engine. Its supported entry point is the local journal-backed
 `dispatch-hosted-release` command. The workflow runs only by manual dispatch
 from the exact landed `main` revision named by the admitted notes; ordinary
 pushes start neither the complete release nor proof-image preparation. One
-repository-wide concurrency group serializes public release effects.
+repository-wide concurrency group serializes public release effects. The
+checkout persists no credential; only the publication step's Git receives the
+job token, through a credential helper set in that step's environment, so it
+can push the annotated release tag.
 Immediately after admitting the exact landed request, the coordinator
 dispatches proof-image preparation for that selected commit and continues its
 own setup. After building the coordinator, it requires the structured note
