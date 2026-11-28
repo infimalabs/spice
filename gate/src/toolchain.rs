@@ -117,6 +117,17 @@ pub enum TreeInput {
     CompleteSelectedTree,
 }
 
+const fn accepts_selected_scope(gate: GateId) -> bool {
+    matches!(
+        gate,
+        GateId::Formatters
+            | GateId::JavascriptUnused
+            | GateId::CsharpUnusedCandidates
+            | GateId::PythonTypecheck
+            | GateId::EnvNameLedger
+    )
+}
+
 /// Compiled evidence-normalization implementation recorded in every report arm.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -825,7 +836,7 @@ fn measure_arm(
     let gate = declaration.id;
     let declared_input = declaration.jurisdiction.input;
     if observation.tree_input != declared_input
-        && !(gate == GateId::Formatters
+        && !(accepts_selected_scope(gate)
             && observation.tree_input == TreeInput::SelectedChanges
             && declared_input == TreeInput::CompleteSelectedTree)
     {
