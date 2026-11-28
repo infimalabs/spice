@@ -164,7 +164,11 @@ jobs:
         env:
           CARGO_HOME: ${{ runner.temp }}/symbol-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/symbol-target
-        run: cargo build --locked --package xtask
+        run: |
+          set -euo pipefail
+          mkdir -p "$CARGO_HOME/bin"
+          ln -sfn "$(command -v rustup)" "$CARGO_HOME/bin/rustup"
+          cargo build --locked --package xtask
 
       - name: Pull and admit the exact proof image
         if: ${{ inputs.target != 'aarch64-apple-darwin' }}
@@ -237,6 +241,7 @@ jobs:
           TARGET: ${{ inputs.target }}
         run: |
           set -euo pipefail
+          mkdir -p "$SPICE_SEALED_TARGET"
           suffix=""
           test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
           "$CARGO_TARGET_DIR/debug/xtask" rebuild-release-symbols \
