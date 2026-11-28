@@ -709,19 +709,36 @@ fn an_unavailable_persistent_target_compiles_in_fresh_scratch() {
 }
 
 #[test]
-fn a_named_host_target_replaces_the_persistent_volume() {
+fn a_named_host_target_is_writable_and_replaces_the_persistent_volume() {
     let fixture = Fixture::new();
     let container = fixture.container();
     let git_common = fixture.workspace.join(".git");
     fs::create_dir_all(&git_common).expect("fixture Git common directory");
     let target = fixture.root.join("sealed-target");
     fs::create_dir_all(&target).expect("fixture host target");
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(&target)
+            .expect("host target metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&target, permissions).expect("restrict host target");
+    }
 
     container
         .stage_release(&git_common, None, None, Some(&target), None, false)
         .expect("sealed stage");
 
     let target = fs::canonicalize(&target).expect("canonical host target");
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(&target)
+            .expect("host target metadata")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o777
+    );
     assert_eq!(
         fixture.runtime.events(),
         [format!(
