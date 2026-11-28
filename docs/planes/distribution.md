@@ -375,9 +375,11 @@ workflow artifact or another store. Coordinator `gh` authentication must carry
 
 `.github/workflows/proof-image.yml` prepares the Linux/amd64 proof image when
 one of its exact inputs changes. It builds and exercises the image, stamps the
-prepared build key into its admitted config, and pushes the real layered image
-to the `prepared` package under a `proof-KEY` discovery tag. Input staging
-resolves that tag, admits the build-key and vendor-set labels plus the
+prepared build key into its admitted config, then has BuildKit export the
+already-admitted image directly to the `prepared` package under a `proof-KEY`
+discovery tag. This preserves stable compressed layer descriptors instead of
+having the Docker engine recompress every layer during publication. Input
+staging resolves that tag, admits the build-key and vendor-set labels plus the
 Linux/amd64 config identity, and records the immutable image manifest and
 config digests. It never transfers the image. The Linux stage resolves the
 recorded manifest again, pulls only `repository@sha256:…`, and re-admits its

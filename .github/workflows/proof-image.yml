@@ -80,7 +80,33 @@ jobs:
           [[ "$key" =~ ^[0-9a-f]{64}$ ]]
           echo "key=$key" >> "$GITHUB_OUTPUT"
 
-      - name: Build and admit proof image
+      - name: Admit existing proof image or authorize publication
+        id: remote
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          key='${{ steps.prepared.outputs.key }}'
+          reference="$repository:proof-$key"
+          expected_key="sha256:$key"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          resolution="$("$xtask" prepared-artifact resolve-image-if-present \
+            "$reference" "$expected_key")"
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
+          if [[ "$resolution" == absent ]]; then
+            echo "publish=1" >> "$GITHUB_OUTPUT"
+          else
+            read -r label manifest config identity <<< "$resolution"
+            test "$label" = resolved
+            test "$config" = "$identity"
+            echo "publish=0" >> "$GITHUB_OUTPUT"
+            echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build, admit, and publish proof image
         id: image
         env:
           CARGO_HOME: ${{ runner.temp }}/bootstrap-cargo
@@ -97,34 +123,31 @@ jobs:
             "$archive" | tee "$root/build.out"
           identity="$(sed -n 's/^proof image //p' "$root/build.out")"
           [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]]
+          if [[ '${{ steps.remote.outputs.publish }}' == 0 ]]; then
+            test "$identity" = '${{ steps.remote.outputs.identity }}'
+          else
+            vendor_set="$("$xtask" prepared-artifact vendor-set Cargo.lock \
+              | sed -n 's/^vendor set //p')"
+            [[ "$vendor_set" =~ ^sha256:[0-9a-f]{64}$ ]]
+            docker buildx build \
+              --output 'type=registry,name=${{ steps.remote.outputs.reference }},compression=gzip' \
+              --platform linux/amd64 \
+              --provenance=false \
+              --sbom=false \
+              --build-arg "spice_vendor_set=$vendor_set" \
+              --label 'org.spice.build-key=sha256:${{ steps.prepared.outputs.key }}' \
+              "$GITHUB_WORKSPACE/target/proof-image/context"
+          fi
           echo "identity=$identity" >> "$GITHUB_OUTPUT"
 
-      - name: Publish immutable layered proof image
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-          GH_TOKEN: ${{ github.token }}
+      - name: Admit immutable layered proof image
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
-          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
-          key='${{ steps.prepared.outputs.key }}'
-          reference="$repository:proof-$key"
-          expected_key="sha256:$key"
+          reference='${{ steps.remote.outputs.reference }}'
+          expected_key='sha256:${{ steps.prepared.outputs.key }}'
           expected_identity='${{ steps.image.outputs.identity }}'
-          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          resolution="$("$xtask" prepared-artifact resolve-image-if-present \
-            "$reference" "$expected_key")"
-          if [[ "$resolution" == absent ]]; then
-            docker tag "$expected_identity" "$reference"
-            docker push "$reference" | tee "$root/push.out"
-          else
-            read -r label manifest config identity <<< "$resolution"
-            test "$label" = resolved
-            test "$config" = "$expected_identity"
-            test "$identity" = "$expected_identity"
-          fi
           read -r label manifest config identity < <(
             "$xtask" prepared-artifact resolve-image "$reference" "$expected_key"
           )
