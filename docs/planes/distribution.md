@@ -381,9 +381,11 @@ discovery tag. This preserves stable compressed layer descriptors instead of
 having the Docker engine recompress every layer during publication. Input
 staging resolves that tag, admits the build-key and vendor-set labels plus the
 Linux/amd64 config identity, and records the immutable image manifest and
-config digests. It never transfers the image. The Linux stage resolves the
-recorded manifest again, pulls only `repository@sha256:…`, and re-admits its
-platform, labels, and config identity before use. Registry layer identity
+config digests. It never transfers the image. The Linux stage and the release
+coordinator's Windows cross branch resolve the recorded manifest again, pull
+only `repository@sha256:…`, and re-admit its platform, labels, and config
+identity before installing the vendor-set tag used by sealed builds. Neither
+hosted consumer fetches the local archive form. Registry layer identity
 therefore deduplicates unchanged base, apt, tool, and vendor layers across
 proof-image versions. Local `proof-image build`, `load`, and `verify` retain
 their archive contract for development and break-glass recovery.
