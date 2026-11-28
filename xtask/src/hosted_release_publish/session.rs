@@ -100,8 +100,8 @@ impl Publications {
         Ok(Some(pending.source_commit))
     }
 
-    /// Admit `request` against the pending pin: the exact pinned commit a
-    /// resumption names, or `None` when nothing is pending and a new request
+    /// Admit a local request against the pending pin: the exact pinned commit
+    /// a resumption names, or `None` when nothing is pending and a new request
     /// may pin `main`. Any other pairing refuses before a provider call.
     pub(super) fn admit(&self, request: &PublishRequest) -> Result<Option<String>, PublishError> {
         match (self.pending()?, request) {
@@ -122,6 +122,46 @@ impl Publications {
                  abandoned; run publish-hosted-release with --notes FILE to pin main"
             ))),
         }
+    }
+
+    /// Select retained authority for one source-bound admitted notes record.
+    ///
+    /// Matching authority resumes. A different source replaces the retained
+    /// request only while it is safe to abandon; once publication may have
+    /// started, [`Self::abandon`] refuses and preserves the original pin.
+    pub(super) fn admit_admitted(
+        &self,
+        request: &PublishRequest,
+        source_commit: &str,
+    ) -> Result<Option<String>, PublishError> {
+        match (self.pending()?, request) {
+            (None, PublishRequest::NewAdmitted { .. }) => Ok(None),
+            (Some(pinned), PublishRequest::NewAdmitted { .. }) => {
+                self.select_admitted(pinned, source_commit)
+            }
+            (Some(pinned), PublishRequest::ResumeAdmitted { commit, .. }) if pinned == *commit => {
+                self.select_admitted(pinned, source_commit)
+            }
+            (Some(pinned), _) => Err(self.pinned_elsewhere(&pinned)?),
+            (None, PublishRequest::ResumeAdmitted { commit, .. }) => Err(PublishError::Refused(
+                format!("no publication request is pending, so {commit} cannot be resumed"),
+            )),
+            (None, _) => Err(PublishError::Refused(
+                "an admitted source requires an admitted release-notes request".into(),
+            )),
+        }
+    }
+
+    fn select_admitted(
+        &self,
+        pinned: String,
+        source_commit: &str,
+    ) -> Result<Option<String>, PublishError> {
+        if pinned == source_commit {
+            return Ok(Some(pinned));
+        }
+        self.abandon(&pinned)?;
+        Ok(None)
     }
 
     /// Drop the pending request pinned to exactly `commit`, with its recorded
@@ -375,6 +415,19 @@ mod tests {
         }
     }
 
+    fn admitted_request() -> PublishRequest {
+        PublishRequest::NewAdmitted {
+            notes: PathBuf::from("notes.json"),
+        }
+    }
+
+    fn admitted_resume(commit: String) -> PublishRequest {
+        PublishRequest::ResumeAdmitted {
+            commit,
+            notes: PathBuf::from("notes.json"),
+        }
+    }
+
     #[test]
     fn a_pending_request_resumes_only_when_its_commit_is_named() {
         let scratch = Scratch::new();
@@ -400,6 +453,47 @@ mod tests {
         refused(
             publications.admit(&resume(pinned)),
             "no publication request",
+        );
+    }
+
+    #[test]
+    fn admitted_source_replaces_only_safe_retained_authority() {
+        let scratch = Scratch::new();
+        let first = "a".repeat(COMMIT_HEX_LENGTH);
+        let second = "b".repeat(COMMIT_HEX_LENGTH);
+        let third = "c".repeat(COMMIT_HEX_LENGTH);
+        let publications = scratch.publications().expect("publication authority");
+        let first_session = publications.begin(&first).expect("first pin");
+        fs::write(first_session.root.join(PLAN_FILE), b"admitted plan").expect("persist plan");
+        first_session.mark_unpublished().expect("stage-only marker");
+
+        assert_eq!(
+            publications
+                .admit_admitted(&admitted_resume(first.clone()), &second)
+                .expect("another admitted source replaces safe retained authority"),
+            None
+        );
+        assert!(
+            !first_session.root.exists(),
+            "superseded source authority survived"
+        );
+
+        let second_session = publications.begin(&second).expect("second pin");
+        assert_eq!(
+            publications
+                .admit_admitted(&admitted_resume(second.clone()), &second)
+                .expect("exact admitted source resumes"),
+            Some(second.clone())
+        );
+
+        fs::write(second_session.root.join(PLAN_FILE), b"crossed plan").expect("persist plan");
+        refused(
+            publications.admit_admitted(&admitted_request(), &third),
+            "resume it",
+        );
+        assert_eq!(
+            publications.pending().expect("retained crossed pin"),
+            Some(second)
         );
     }
 

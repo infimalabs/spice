@@ -73,10 +73,10 @@ pub enum PublishEffect {
 /// storage. [`PublishEffect::StageOnly`] stops at the persisted plan.
 ///
 /// A new Markdown request reads `main` once; a source-bound admitted notes
-/// record pins the commit it already names. While a request is pending, an
-/// invocation must name the pinned commit to resume it or abandon it; a bare
-/// invocation or another commit refuses. The local checkout never selects the
-/// release.
+/// record pins the commit it already names. Exact-source admitted requests
+/// resume retained authority. A different admitted source replaces retained
+/// authority only while that earlier request cannot have crossed a publication
+/// effect. The local checkout never selects the release.
 pub fn publish_hosted_release(
     request: &PublishRequest,
     effect: PublishEffect,
@@ -106,11 +106,14 @@ pub fn publish_hosted_release(
         .notes_are_admitted()
         .then(|| decode_admitted_notes(&candidate, None))
         .transpose()?;
-    let source_commit =
-        match recorded_source_commit(publications.admit(request)?, admitted_notes.as_ref()) {
-            Some(commit) => commit,
-            None => landed_commit()?,
-        };
+    let retained = admitted_notes.as_ref().map_or_else(
+        || publications.admit(request),
+        |notes| publications.admit_admitted(request, &notes.release_commit),
+    )?;
+    let source_commit = match recorded_source_commit(retained, admitted_notes.as_ref()) {
+        Some(commit) => commit,
+        None => landed_commit()?,
+    };
     let session = publications.begin(&source_commit)?;
     let unpublished = !session.publication_may_have_started()?;
     let input_commit = source_commit.clone();
