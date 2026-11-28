@@ -349,7 +349,14 @@ fn publish(
         observed: error.to_string(),
     })?;
     fs::write(&recorded, encoded).map_err(io(&recorded))?;
+    // A retained key may belong to a host identity this run cannot write;
+    // unlinking it needs only the output directory's write permission.
     let key = out.join(BUILD_KEY);
+    match fs::remove_file(&key) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => return Err(io(&key)(source)),
+    }
     let encoded = serde_json::to_vec(inputs).map_err(|error| TargetBuildError::Observation {
         label: "windows cross build key",
         observed: error.to_string(),
@@ -379,5 +386,44 @@ mod tests {
             ("test", "suite")
         );
         assert_eq!(built[0].executable, PathBuf::from("/t/suite-1.exe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publish_replaces_a_retained_build_key_it_cannot_write() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let out = std::env::temp_dir().join(format!(
+            "spice-windows-cross-publish-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&out);
+        fs::create_dir_all(out.join(ROOT).join("stale")).unwrap();
+        let retained = out.join(BUILD_KEY);
+        fs::write(&retained, b"{\"source\":\"earlier\"}").unwrap();
+        fs::set_permissions(&retained, fs::Permissions::from_mode(0o444)).unwrap();
+        let built = out.join("built.exe");
+        fs::write(&built, b"candidate").unwrap();
+        let inputs = BTreeMap::from([("source".to_owned(), "current".to_owned())]);
+        let toolchain = prebuilt::Toolchain {
+            rust: "rust".to_owned(),
+            wasm_target: "wasm".to_owned(),
+            trunk: "trunk".to_owned(),
+        };
+        let placed = [Placed {
+            source: built,
+            path: "candidate/spice.exe".to_owned(),
+        }];
+
+        let published = publish(&out, &placed, &inputs, &toolchain);
+        let key = fs::read(&retained);
+        let stale = out.join(ROOT).join("stale").exists();
+        let candidate = fs::read(out.join(ROOT).join("candidate/spice.exe"));
+        fs::remove_dir_all(&out).unwrap();
+
+        published.unwrap();
+        assert_eq!(key.unwrap(), serde_json::to_vec(&inputs).unwrap());
+        assert!(!stale);
+        assert_eq!(candidate.unwrap(), b"candidate");
     }
 }
