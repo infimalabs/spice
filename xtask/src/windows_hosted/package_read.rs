@@ -7,15 +7,15 @@
 //! authorization a prepared-bundle fetch needs. Classic, fine-grained, and app
 //! credentials pass or refuse alike on that answer.
 
-use std::io::Write as _;
-use std::process::{Command, Stdio};
-
 use serde::Deserialize;
+use std::path::Path;
+use std::time::Duration;
 
-use super::{GHCR_USERNAME, WindowsHostedError, command_text, prepared_repository};
+use super::{GHCR_USERNAME, WindowsHostedError, command, command_text, prepared_repository};
 
 const REGISTRY: &str = "ghcr.io";
 const HTTP_OK: &str = "200";
+const PREPARED_READ_RUNTIME: Duration = Duration::from_secs(2 * 60);
 
 #[derive(Deserialize)]
 struct RegistryToken {
@@ -41,20 +41,32 @@ struct RegistryError {
 /// Refuses when `gh` holds no credential, GHCR cannot be reached, or the
 /// registry denies the read, naming GHCR's answer and the package authority
 /// to grant.
-pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
+pub(crate) fn require_prepared_read(
+    environment: &sill::Environment,
+    cwd: &Path,
+) -> Result<(), WindowsHostedError> {
     let repository = windows_execution::hosted::client::require_public_attestation_repository()?;
     let reference = prepared_repository(&repository);
     let package = reference
         .strip_prefix(&format!("{REGISTRY}/"))
         .expect("the prepared repository lives on GHCR");
-    let token =
-        command_text("gh", &["auth", "token"]).map_err(WindowsHostedError::ProviderResponse)?;
+    let token = command_text(
+        "GitHub registry token lookup",
+        PREPARED_READ_RUNTIME,
+        environment,
+        cwd,
+        "gh",
+        &["auth", "token"],
+    )
+    .map_err(WindowsHostedError::ProviderResponse)?;
     let (status, body) = get(
         &format!("https://{REGISTRY}/token?scope=repository:{package}:pull&service={REGISTRY}"),
         &format!(
             "user = \"{}\"",
             quoted(&format!("{GHCR_USERNAME}:{}", token.trim()))
         ),
+        environment,
+        cwd,
     )?;
     read_verdict(&status, &body).map_err(|answer| denied(&reference, &answer))?;
     let pull: RegistryToken = serde_json::from_str(&body).map_err(|error| {
@@ -66,6 +78,8 @@ pub(crate) fn require_prepared_read() -> Result<(), WindowsHostedError> {
     let (status, body) = get(
         &format!("https://{REGISTRY}/v2/{package}/tags/list?n=1"),
         &format!("header = \"Authorization: Bearer {}\"", quoted(&pull.token)),
+        environment,
+        cwd,
     )?;
     read_verdict(&status, &body).map_err(|answer| denied(&reference, &answer))
 }
@@ -105,9 +119,17 @@ fn quoted(value: &str) -> String {
 /// GET `url` with curl, passing `config` (which carries the credential) on
 /// standard input rather than the command line. Returns the HTTP status and
 /// body.
-fn get(url: &str, config: &str) -> Result<(String, String), WindowsHostedError> {
-    let mut child = Command::new("curl")
-        .args([
+fn get(
+    url: &str,
+    config: &str,
+    environment: &sill::Environment,
+    cwd: &Path,
+) -> Result<(String, String), WindowsHostedError> {
+    let output = command::run(
+        "GHCR prepared package read",
+        PREPARED_READ_RUNTIME,
+        "curl",
+        [
             "--silent",
             "--show-error",
             "--config",
@@ -115,39 +137,15 @@ fn get(url: &str, config: &str) -> Result<(String, String), WindowsHostedError> 
             "--write-out",
             "\n%{http_code}",
             url,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| WindowsHostedError::Launch {
-            program: "curl".to_owned(),
-            source,
-        })?;
-    let written = child
-        .stdin
-        .take()
-        .expect("piped curl config")
-        .write_all(config.as_bytes());
-    let output = child
-        .wait_with_output()
-        .map_err(|source| WindowsHostedError::Launch {
-            program: "curl".to_owned(),
-            source,
-        })?;
-    if let Err(source) = written {
-        return Err(WindowsHostedError::Launch {
-            program: "curl".to_owned(),
-            source,
-        });
-    }
-    if !output.status.success() {
-        return Err(WindowsHostedError::ProviderResponse(format!(
-            "could not reach {REGISTRY} to check prepared package read: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
+        ],
+        environment,
+        cwd,
+        Some(config.as_bytes()),
+    )
+    .map_err(WindowsHostedError::ProviderResponse)?;
+    let text = output
+        .stdout_text("GHCR prepared package read")
+        .map_err(WindowsHostedError::ProviderResponse)?;
     let (body, status) = text.rsplit_once('\n').unwrap_or(("", &text));
     Ok((status.trim().to_owned(), body.to_owned()))
 }

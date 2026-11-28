@@ -4,7 +4,6 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -20,15 +19,23 @@ use windows_execution::hosted::client::{
     HostedRunControl, HostedRunObserver, HostedWorkflow, Preflight, PreparedBundleTransport,
 };
 
+mod command;
 mod cross_bundle;
 mod package_read;
 
 pub use cross_bundle::CrossHost;
 use package_read::require_prepared_read;
 
-struct PreparedBundles;
+struct PreparedBundles {
+    environment: sill::Environment,
+    cwd: PathBuf,
+}
 
-static PREPARED_BUNDLES: PreparedBundles = PreparedBundles;
+impl PreparedBundles {
+    fn new(environment: sill::Environment, cwd: PathBuf) -> Self {
+        Self { environment, cwd }
+    }
+}
 
 impl PreparedBundleTransport for PreparedBundles {
     fn fetch(
@@ -39,7 +46,7 @@ impl PreparedBundleTransport for PreparedBundles {
         destination: &Path,
     ) -> Result<(), String> {
         let repository = prepared_repository(repository);
-        with_ghcr_login(|| {
+        with_ghcr_login(&self.environment, &self.cwd, || {
             crate::prepared_artifact::fetch_bundle(&repository, tag, build_key, destination)
                 .map_err(|error| error.to_string())
         })
@@ -55,65 +62,73 @@ fn prepared_repository(repository: &str) -> String {
 /// host's personal token and a workflow's installation token alike; the
 /// latter cannot read its own GitHub user.
 const GHCR_USERNAME: &str = "spice-release";
+const REGISTRY_AUTH_RUNTIME: Duration = Duration::from_secs(2 * 60);
 
-/// Run `operation` while ORAS holds this machine's `gh` credential for GHCR,
-/// then log out again.
-fn with_ghcr_login<T>(operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    let token = command_text("gh", &["auth", "token"])?;
-    let mut login = crate::prepared_artifact::exact_oras_command()
-        .map_err(|error| error.to_string())?
-        .args([
+/// Run `operation` while Docker and ORAS can read this machine's `gh`
+/// credential for GHCR, then remove that credential again.
+fn with_ghcr_login<T>(
+    environment: &sill::Environment,
+    cwd: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let token = command_text(
+        "GitHub registry token lookup",
+        REGISTRY_AUTH_RUNTIME,
+        environment,
+        cwd,
+        "gh",
+        &["auth", "token"],
+    )?;
+    command::run(
+        "GHCR login",
+        REGISTRY_AUTH_RUNTIME,
+        "docker",
+        [
             "login",
             "ghcr.io",
             "--username",
             GHCR_USERNAME,
             "--password-stdin",
-        ])
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("could not launch oras login: {error}"))?;
-    login
-        .stdin
-        .take()
-        .expect("piped login input")
-        .write_all(token.trim().as_bytes())
-        .map_err(|error| format!("could not supply GHCR credential: {error}"))?;
-    let status = login
-        .wait()
-        .map_err(|error| format!("could not wait for oras login: {error}"))?;
-    if !status.success() {
-        return Err(format!("oras login refused with {status}"));
-    }
+        ],
+        environment,
+        cwd,
+        Some(token.trim().as_bytes()),
+    )?;
     let result = operation();
-    let logout = crate::prepared_artifact::exact_oras_command().and_then(|mut command| {
-        command
-            .args(["logout", "ghcr.io"])
-            .status()
-            .map_err(prepared_artifact::PreparedArtifactError::Launch)
-    });
+    let logout = command::run(
+        "GHCR logout",
+        REGISTRY_AUTH_RUNTIME,
+        "docker",
+        ["logout", "ghcr.io"],
+        environment,
+        cwd,
+        None,
+    );
     match (result, logout) {
-        (Ok(value), Ok(status)) if status.success() => Ok(value),
-        (Ok(_), Ok(status)) => Err(format!("oras logout refused with {status}")),
-        (Ok(_), Err(error)) => Err(error.to_string()),
+        (Ok(value), Ok(_)) => Ok(value),
+        (Ok(_), Err(error)) => Err(error),
         (Err(error), _) => Err(error),
     }
 }
 
-fn command_text(program: &str, arguments: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(arguments)
-        .output()
-        .map_err(|error| format!("could not launch {program}: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "{program} {} refused with {}: {}",
-            arguments.join(" "),
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    String::from_utf8(output.stdout)
-        .map_err(|error| format!("{program} returned non-UTF-8 output: {error}"))
+fn command_text(
+    operation: &str,
+    runtime: Duration,
+    environment: &sill::Environment,
+    cwd: &Path,
+    program: &str,
+    arguments: &[&str],
+) -> Result<String, String> {
+    command::run(
+        operation,
+        runtime,
+        program,
+        arguments,
+        environment,
+        cwd,
+        None,
+    )?
+    .stdout_text(operation)
 }
 
 /// Re-enter one provider preflight; its signed result names the source.
@@ -126,8 +141,13 @@ pub fn hosted_release_inputs(attach: Attach) -> Result<ReleaseInputs, WindowsHos
 /// fetch.
 pub fn hosted_release_inputs_dispatch(
     source_commit: String,
+    host: &CrossHost,
 ) -> Result<ReleaseInputs, WindowsHostedError> {
-    require_prepared_read()?;
+    let cwd = std::env::current_dir().map_err(|source| WindowsHostedError::Io {
+        path: PathBuf::from("."),
+        source,
+    })?;
+    require_prepared_read(&host.ambient, &cwd)?;
     windows_execution::hosted::client::release_inputs(Preflight::Dispatch(source_commit))
 }
 
@@ -189,9 +209,9 @@ pub(crate) fn hosted_release_stage_with_inputs_into(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<Vec<TargetSpan>, HostedReleaseError> {
-    require_prepared_read()?;
     let session = ReleaseSession::open(inputs_run, inputs.workflows().clone(), inputs)?;
     write_session_path(output, &session)?;
+    require_prepared_read(&host.ambient, inputs.tree())?;
 
     let mut stages = Vec::with_capacity(NATIVE_TARGETS.len());
     for target in NATIVE_TARGETS {
@@ -241,7 +261,8 @@ impl NativeStage {
             let started = SystemTime::now();
             let mut output = StageLines::new(self.target, Stream::Output, events.clone());
             let mut error_output = StageLines::new(self.target, Stream::Error, events.clone());
-            let control = resumable_control(&self.recorder, &self.workflow);
+            let prepared = PreparedBundles::new(host.ambient.clone(), inputs.tree().to_path_buf());
+            let control = resumable_control(&self.recorder, &self.workflow, &prepared);
             let result = match self.target {
                 NativeTarget::Linux => linux_hosted_stage_controlled(
                     &inputs,
@@ -499,13 +520,14 @@ fn write_session_path(
 fn resumable_control<'a>(
     observer: &'a dyn HostedRunObserver,
     workflow: &'a TargetWorkflow,
+    prepared: &'a PreparedBundles,
 ) -> HostedRunControl<'a> {
     let workflow = match workflow {
         TargetWorkflow::Source => HostedWorkflow::Source,
         TargetWorkflow::Current => HostedWorkflow::Current,
         TargetWorkflow::Exact(blob) => HostedWorkflow::Exact(blob),
     };
-    HostedRunControl::resumable(observer, workflow).with_prepared_bundles(&PREPARED_BUNDLES)
+    HostedRunControl::resumable(observer, workflow).with_prepared_bundles(prepared)
 }
 
 /// Stage the signed macOS release target on one fresh provider-hosted machine,
@@ -513,15 +535,17 @@ fn resumable_control<'a>(
 /// provider-attested files into `dist/stage`.
 pub fn macos_hosted_stage(
     inputs: &ReleaseInputs,
+    host: &CrossHost,
     attach: Option<Attach>,
     output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
-    require_prepared_read()?;
+    require_prepared_read(&host.ambient, inputs.tree())?;
+    let prepared = PreparedBundles::new(host.ambient.clone(), inputs.tree().to_path_buf());
     macos_hosted_stage_controlled(
         inputs,
         attach,
         Path::new("dist/stage"),
-        HostedRunControl::default().with_prepared_bundles(&PREPARED_BUNDLES),
+        HostedRunControl::default().with_prepared_bundles(&prepared),
         output,
     )
 }
@@ -604,13 +628,14 @@ pub fn windows_hosted_stage(
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<HostedExecution, WindowsHostedError> {
-    require_prepared_read()?;
+    require_prepared_read(&host.ambient, inputs.tree())?;
+    let prepared = PreparedBundles::new(host.ambient.clone(), inputs.tree().to_path_buf());
     windows_hosted_stage_controlled(
         inputs,
         host,
         attach,
         Path::new("dist/stage"),
-        HostedRunControl::default().with_prepared_bundles(&PREPARED_BUNDLES),
+        HostedRunControl::default().with_prepared_bundles(&prepared),
         output,
         error_output,
     )

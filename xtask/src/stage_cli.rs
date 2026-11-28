@@ -83,7 +83,7 @@ pub(super) fn run_stage_target(
         let inputs = xtask::hosted_release_inputs(release_inputs.ok_or_else(usage_error)?)?;
         return match target {
             LINUX_TARGET => xtask::linux_hosted_stage(&inputs, attach, output).map_err(Into::into),
-            DARWIN_TARGET => xtask::macos_hosted_stage(&inputs, attach, output).map_err(Into::into),
+            DARWIN_TARGET => run_hosted_macos(&inputs, ambient, attach, output),
             _ => unreachable!("hosted route parser admits only hosted targets"),
         };
     }
@@ -126,6 +126,14 @@ pub(super) fn run_stage_target(
         .map(|_| ())
         .map_err(Into::into)
     })
+}
+fn run_hosted_macos(
+    inputs: &xtask::ReleaseInputs,
+    ambient: &Ambient,
+    attach: Option<xtask::Attach>,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    xtask::macos_hosted_stage(inputs, &cross_host(ambient)?, attach, output).map_err(Into::into)
 }
 
 /// The named proof image, or the current vendor-set image this worktree

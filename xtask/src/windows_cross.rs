@@ -7,10 +7,12 @@ use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
-use sill::Deadlines;
+use sill::{
+    Argv, Cancellation, Completion, Deadlines, Output, ProcessGroup, Redaction, RestartDisposition,
+    Spec, StdinPolicy, StreamPolicy, WaitPolicy,
+};
 
 use crate::{AppBuildError, ReleaseEnvironment};
 
@@ -58,6 +60,9 @@ pub enum WindowsCrossError {
         code: Option<i32>,
         stderr: String,
     },
+    ImageBuildTimeout {
+        deadline: Duration,
+    },
     App(AppBuildError),
     SourceArchive,
     ProviderCanvas,
@@ -94,6 +99,11 @@ impl fmt::Display for WindowsCrossError {
                     "Windows cross image build exited {code:?}: {stderr}"
                 )
             }
+            Self::ImageBuildTimeout { deadline } => write!(
+                formatter,
+                "Windows cross image build exceeded its {} second deadline",
+                deadline.as_secs()
+            ),
             Self::App(error) => write!(formatter, "app stage for the Windows cross build: {error}"),
             Self::SourceArchive => {
                 formatter.write_str("the delivered source archive identity is not Unicode")
@@ -126,6 +136,7 @@ impl Error for WindowsCrossError {
             Self::Bundle(error) => Some(error),
             Self::RuntimeUnset
             | Self::ImageBuild { .. }
+            | Self::ImageBuildTimeout { .. }
             | Self::SourceArchive
             | Self::ProviderCanvas
             | Self::Build(_) => None,
@@ -291,6 +302,7 @@ fn cross_build(
     let context = cross_context(source.workspace, &build_root, &msvc)?;
     let cross_image = build_image(
         &admitted,
+        ambient,
         &context,
         &build_root,
         &proof_tag,
@@ -351,6 +363,7 @@ fn cross_context(
 /// so the bundle build key and the persistent Cargo target it names stay put.
 fn build_image(
     admitted: &proof::OciRuntime,
+    ambient: &sill::Environment,
     context: &Path,
     build_root: &Path,
     proof_tag: &str,
@@ -378,15 +391,69 @@ fn build_image(
         format!("{IMAGE_REPOSITORY}:{msvc_generation}").into(),
         context.into(),
     ]);
-    let built = Command::new(runtime)
-        .args(&arguments)
-        .output()
-        .map_err(io_at(runtime))?;
-    if !built.status.success() {
-        return Err(WindowsCrossError::ImageBuild {
-            code: built.status.code(),
-            stderr: String::from_utf8_lossy(&built.stderr).into_owned(),
-        });
+    let spec = Spec {
+        argv: Argv::new(runtime, arguments).map_err(|error| WindowsCrossError::ImageBuild {
+            code: None,
+            stderr: error.to_string(),
+        })?,
+        cwd: context.to_path_buf(),
+        environment: ambient.clone(),
+        group: ProcessGroup::New,
+        deadlines: Deadlines::new(CROSS_RUNTIME, OUTPUT_DRAIN, REAP)
+            .map_err(|error| WindowsCrossError::Limits(Box::new(error)))?,
+        wait: WaitPolicy::new(
+            "Windows cross image build",
+            Cancellation::Never,
+            RestartDisposition::Never,
+        )
+        .map_err(|error| WindowsCrossError::Limits(Box::new(error)))?,
+        output: Output::new(
+            StdinPolicy::Null,
+            StreamPolicy::CaptureTail {
+                limit: OUTPUT_LIMIT,
+            },
+            StreamPolicy::CaptureTail {
+                limit: OUTPUT_LIMIT,
+            },
+        ),
+        redaction: Redaction::None,
+        grace: GRACE,
+    };
+    let built = sill::spawn(spec)
+        .map_err(|source| WindowsCrossError::Io {
+            path: runtime.to_path_buf(),
+            source,
+        })?
+        .wait()
+        .map_err(|error| WindowsCrossError::ImageBuild {
+            code: None,
+            stderr: error.to_string(),
+        })?;
+    match built.completion() {
+        Completion::Exited(status) if status.success() => {}
+        Completion::Exited(status) => {
+            return Err(WindowsCrossError::ImageBuild {
+                code: status.code(),
+                stderr: String::from_utf8_lossy(
+                    built
+                        .stderr()
+                        .map(|stderr| stderr.bytes())
+                        .unwrap_or_default(),
+                )
+                .into_owned(),
+            });
+        }
+        Completion::TimedOut(_) => {
+            return Err(WindowsCrossError::ImageBuildTimeout {
+                deadline: CROSS_RUNTIME,
+            });
+        }
+        Completion::Cancelled(_) => {
+            return Err(WindowsCrossError::ImageBuild {
+                code: None,
+                stderr: "Windows cross image build was cancelled".to_owned(),
+            });
+        }
     }
     let image = fs::read_to_string(&identity).map_err(io_at(&identity))?;
     Ok(image.trim().to_owned())
