@@ -545,13 +545,17 @@ only for the immutable build key it derived. The coordinator compiles under
 its private Cargo home but records the runner's native rustup proxy home as
 bootstrap authority, so Windows cross staging resolves the tracked Rust
 channel without consulting the private dependency cache for toolchain
-executables. The workflow preserves the Git-common publication authority
-after every attempt under a run- and attempt-scoped artifact, validates and
-restores only regular files beneath `releases/`, and resumes the pinned commit
-on a rerun. A completed attempt records the notes-record and publication-plan
-digests; later attempts re-admit those bytes and freshly read the public
-release instead of publishing again. The final readback is the workflow's one
-result artifact. Notes admission and input production overlap, then Linux,
+executables. After every attempt, the workflow stores the validated Git-common
+publication authority in a cache keyed by the exact source, run and attempt,
+and also uploads the same run- and attempt-scoped archive for bounded audit.
+GitHub replaces a job's prior-attempt artifacts when that job is rerun, while
+the exact-run cache remains available to the next attempt. A rerun restores
+only the newest matching cache, validates regular files beneath `releases/`,
+and resumes the pinned commit. A completed attempt records the notes-record
+and publication-plan digests; later attempts re-admit those bytes and freshly
+read the public release instead of publishing again. The final readback is the
+workflow's one result artifact. Notes admission and input production overlap,
+then Linux,
 Darwin, and Windows stage concurrently; each platform's tool and dependency
 preparation waits only for the immutable input record it consumes, never for
 a sibling.

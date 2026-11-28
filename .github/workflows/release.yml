@@ -83,39 +83,47 @@ jobs:
           [[ "$url" == https://github.com/*/actions/runs/* ]]
           printf '### Proof image preparation\n\n- run: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Restore prior attempt authority
+      - name: Restore cached release authority
+        id: release_state_cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ${{ runner.temp }}/release-state.tar.gz
+          key: release-state-${{ runner.os }}-${{ github.run_id }}-${{ github.sha }}-${{ github.run_attempt }}
+          restore-keys: |
+            release-state-${{ runner.os }}-${{ github.run_id }}-${{ github.sha }}-
+
+      - name: Admit prior attempt authority
         id: state
         shell: bash
+        env:
+          RESTORED_CACHE_KEY: ${{ steps.release_state_cache.outputs.cache-matched-key }}
         run: |
           set -euo pipefail
           authority="$(git rev-parse --git-common-dir)/.spice/authority"
+          archive="$RUNNER_TEMP/release-state.tar.gz"
+          cache_prefix="release-state-$RUNNER_OS-$GITHUB_RUN_ID-$GITHUB_SHA-"
           test ! -e "$authority/releases"
           restored=0
           if ((GITHUB_RUN_ATTEMPT > 1)); then
-            best_attempt=0
-            best_name=
-            while IFS= read -r name; do
-              case "$name" in
-                "release-state-$GITHUB_RUN_ID-"*)
-                  attempt=${name##*-}
-                  if [[ "$attempt" =~ ^[0-9]+$ ]] \
-                    && ((attempt < GITHUB_RUN_ATTEMPT && attempt > best_attempt)); then
-                    best_attempt=$attempt
-                    best_name=$name
-                  fi
-                  ;;
-              esac
-            done < <(gh api --paginate \
-              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '.artifacts[] | select(.expired == false) | .name')
-            if test -z "$best_name"; then
+            case "$RESTORED_CACHE_KEY" in
+              "$cache_prefix"*) ;;
+              *)
+                echo "rerun restored release authority outside its source and run" >&2
+                exit 65
+                ;;
+            esac
+            restored_attempt=${RESTORED_CACHE_KEY#"$cache_prefix"}
+            if [[ ! "$restored_attempt" =~ ^[0-9]+$ ]] \
+              || ((restored_attempt >= GITHUB_RUN_ATTEMPT)); then
+              echo "rerun restored invalid prior attempt $restored_attempt" >&2
+              exit 65
+            fi
+            if test ! -f "$archive"; then
               echo "rerun has no admitted prior-attempt release authority" >&2
               exit 65
             fi
-            download="$RUNNER_TEMP/release-state-download"
-            mkdir -p "$download" "$authority"
-            gh run download "$GITHUB_RUN_ID" --name "$best_name" --dir "$download"
-            python3 - "$download/release-state.tar.gz" "$authority" <<'PY'
+            mkdir -p "$authority"
+            python3 - "$archive" "$authority" <<'PY'
           import pathlib, sys, tarfile
           archive, destination = sys.argv[1:]
           with tarfile.open(archive, "r:gz") as source:
@@ -131,6 +139,9 @@ jobs:
               source.extractall(destination, members=members)
           PY
             restored=1
+          else
+            test ! -e "$archive"
+            test -z "$RESTORED_CACHE_KEY"
           fi
           printf 'restored=%s\n' "$restored" >> "$GITHUB_OUTPUT"
 
@@ -324,6 +335,13 @@ jobs:
           authority="$(git rev-parse --git-common-dir)/.spice/authority"
           mkdir -p "$authority/releases"
           tar -czf "$RUNNER_TEMP/release-state.tar.gz" -C "$authority" releases
+
+      - name: Cache attempt-scoped coordinator authority
+        if: ${{ always() }}
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ${{ runner.temp }}/release-state.tar.gz
+          key: release-state-${{ runner.os }}-${{ github.run_id }}-${{ github.sha }}-${{ github.run_attempt }}
 
       - name: Preserve attempt-scoped coordinator authority
         if: ${{ always() }}
