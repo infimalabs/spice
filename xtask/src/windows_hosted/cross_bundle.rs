@@ -9,14 +9,21 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::process::Command as Process;
+use std::time::Duration;
 
 use sha2::{Digest as _, Sha256};
+use sill::{
+    Argv, Cancellation, Completion, Deadlines, Environment, Output, ProcessGroup, Redaction,
+    RestartDisposition, Spec, StdinPolicy, StreamPolicy, WaitPolicy,
+};
 use windows_execution::hosted::CrossBundlePin;
 use windows_execution::hosted::bundle::{MANIFEST_ARGUMENT, ROOT_ARGUMENT, SOURCE_ROOT_DIRECTORY};
+use windows_execution::hosted::release_inputs::ResultManifest;
 use windows_execution::protocol::{BUNDLE_PROGRAM, BundleProgram, Command};
 
-use super::{ReleaseInputs, WindowsHostedError, prepared_repository, with_ghcr_login};
+use super::{
+    ReleaseInputs, WindowsHostedError, command_text, prepared_repository, with_ghcr_login,
+};
 use crate::ReleaseEnvironment;
 use crate::prepared_artifact::WindowsReleaseBundle;
 use crate::windows_cross::{BUNDLE_MANIFEST, BUNDLE_PAYLOAD, ReleaseSource};
@@ -25,6 +32,14 @@ use crate::windows_cross::{BUNDLE_MANIFEST, BUNDLE_PAYLOAD, ReleaseSource};
 const STAGE_PROGRAM: &str = "runner/xtask.exe";
 /// The bundled runner the workflow starts.
 const RUNNER_PROGRAM: &str = "runner/windows-hosted.exe";
+
+/// A layered image normally transfers in seconds; this bound also covers a
+/// cold multi-gigabyte pull without letting provider staging wait forever.
+const IMAGE_PULL_RUNTIME: Duration = Duration::from_secs(30 * 60);
+const OUTPUT_DRAIN: Duration = Duration::from_secs(10);
+const REAP: Duration = Duration::from_secs(10);
+const GRACE: Duration = Duration::from_secs(5);
+const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 
 /// The release host's environments the Windows cross build reads, as
 /// `windows-cross` reads them.
@@ -83,7 +98,7 @@ pub(super) fn release_bundle(
             .map_err(WindowsHostedError::Output)?;
             let identity = source.to_string();
             let app = inputs.manifest().app.to_string();
-            admitted_proof_image(inputs, repository, output, error_output)?;
+            admitted_proof_image(inputs, repository, &host.ambient, output, error_output)?;
             crate::windows_cross::windows_cross_release(
                 &host.release,
                 &host.ambient,
@@ -113,84 +128,183 @@ pub(super) fn release_bundle(
     pinned(bundle, digest, &inputs.manifest().proof_identity).map_err(refused)
 }
 
-/// Make the proof image `inputs` names the local image of its vendor set,
-/// fetching and loading the prepared archive unless that tag already resolves
-/// to the admitted identity. The loader refuses an archive whose bytes or
-/// loaded image differ from the identities the inputs admitted.
+/// Make the layered proof image `inputs` names the local image of its vendor
+/// set. Remote manifest, configuration, platform, labels, and image identity
+/// are admitted before the deterministic local tag is installed.
 fn admitted_proof_image(
     inputs: &ReleaseInputs,
     repository: &str,
+    ambient: &Environment,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), WindowsHostedError> {
     let refused = |error: String| {
         WindowsHostedError::ProviderResponse(format!("admitted proof image: {error}"))
     };
+    let vendor_set = proof::VendorSet::read(inputs.tree().join("Cargo.lock"))
+        .map_err(|error| refused(error.to_string()))?;
+    let tag = vendor_set.image_tag();
     let manifest = inputs.manifest();
-    let tag = proof::VendorSet::read(inputs.tree().join("Cargo.lock"))
-        .map_err(|error| refused(error.to_string()))?
-        .image_tag();
     if local_image(&tag).as_deref() == Some(manifest.proof_identity.as_str()) {
         return Ok(());
     }
-    let fetched = std::env::temp_dir().join(format!(
-        "spice-proof-image-{}-{}",
-        std::process::id(),
-        manifest.challenge
-    ));
-    let result = fetch_and_load(inputs, repository, &fetched, output, error_output);
-    let _ = fs::remove_dir_all(&fetched);
-    result.map_err(refused)
+    let mut operation = || -> Result<(), String> {
+        let reference = format!(
+            "{}@{}",
+            prepared_repository(repository),
+            manifest.proof_manifest
+        );
+        let mut resolution = Vec::new();
+        with_ghcr_login(|| {
+            crate::prepared_artifact::prepared_artifact(
+                vec![
+                    "resolve-image".into(),
+                    reference.clone().into(),
+                    manifest.proof_build_key.clone().into(),
+                ],
+                &mut resolution,
+            )
+            .map_err(|error| error.to_string())?;
+            admit_resolution(&resolution, manifest)?;
+            pull_image(&reference, ambient, inputs.tree(), output, error_output)
+        })?;
+
+        let format = format!(
+            "{{{{.Id}}}} {{{{.Architecture}}}} {{{{.Os}}}} \
+             {{{{index .Config.Labels {:?}}}}} {{{{index .Config.Labels {:?}}}}}",
+            proof::VENDOR_SET_LABEL,
+            proof::PROOF_IMAGE_BUILD_KEY_LABEL
+        );
+        let inspected = command_text(
+            "docker",
+            &["image", "inspect", "--format", &format, &reference],
+        )?;
+        let fields = inspected.split_whitespace().collect::<Vec<_>>();
+        let [identity, architecture, os, observed_vendor, observed_key] = fields.as_slice() else {
+            return Err(format!(
+                "docker returned an invalid proof image inspection: {:?}",
+                inspected.trim()
+            ));
+        };
+        if *identity != manifest.proof_identity {
+            return Err(format!(
+                "pulled image identity differs: expected {}, observed {identity}",
+                manifest.proof_identity
+            ));
+        }
+        if (*architecture, *os) != ("amd64", "linux") {
+            return Err(format!(
+                "pulled image platform differs: expected amd64 linux, observed {architecture} {os}"
+            ));
+        }
+        if *observed_vendor != vendor_set.as_str() {
+            return Err(format!(
+                "pulled image vendor set differs: expected {vendor_set}, observed {observed_vendor}"
+            ));
+        }
+        if *observed_key != manifest.proof_build_key {
+            return Err(format!(
+                "pulled image build key differs: expected {}, observed {observed_key}",
+                manifest.proof_build_key
+            ));
+        }
+        command_text("docker", &["tag", identity, &tag])?;
+        if local_image(&tag).as_deref() != Some(identity) {
+            return Err(format!("local proof image tag {tag} differs after tagging"));
+        }
+        Ok(())
+    };
+    operation().map_err(refused)
 }
 
-fn fetch_and_load(
-    inputs: &ReleaseInputs,
-    repository: &str,
-    fetched: &Path,
+fn admit_resolution(resolution: &[u8], manifest: &ResultManifest) -> Result<(), String> {
+    let resolution = std::str::from_utf8(resolution)
+        .map_err(|error| format!("proof image resolution is not UTF-8: {error}"))?;
+    let fields = resolution.split_whitespace().collect::<Vec<_>>();
+    let [label, observed_manifest, config, identity] = fields.as_slice() else {
+        return Err(format!(
+            "proof image resolution is invalid: {:?}",
+            resolution.trim()
+        ));
+    };
+    if *label != "resolved"
+        || *observed_manifest != manifest.proof_manifest
+        || *config != manifest.proof_identity
+        || *identity != manifest.proof_identity
+    {
+        return Err(format!(
+            "proof image resolution differs: expected manifest {} identity {}, observed {:?}",
+            manifest.proof_manifest,
+            manifest.proof_identity,
+            resolution.trim()
+        ));
+    }
+    Ok(())
+}
+
+fn pull_image(
+    reference: &str,
+    ambient: &Environment,
+    cwd: &Path,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), String> {
-    let manifest = inputs.manifest();
-    let reference = format!(
-        "{}@{}",
-        prepared_repository(repository),
-        manifest.proof_manifest
-    );
-    with_ghcr_login(|| {
-        crate::prepared_artifact::prepared_artifact(
-            vec![
-                "fetch".into(),
-                reference.into(),
-                manifest.proof_build_key.clone().into(),
-                fetched.into(),
-            ],
-            &mut *output,
+    let spec = Spec {
+        argv: Argv::new("docker", ["pull", reference]).map_err(|error| error.to_string())?,
+        cwd: cwd.to_path_buf(),
+        environment: ambient.clone(),
+        group: ProcessGroup::New,
+        deadlines: Deadlines::new(IMAGE_PULL_RUNTIME, OUTPUT_DRAIN, REAP)
+            .map_err(|error| error.to_string())?,
+        wait: WaitPolicy::new(
+            "layered proof image pull",
+            Cancellation::Never,
+            RestartDisposition::Never,
         )
-        .map_err(|error| error.to_string())
-    })?;
-    let archive = fetched.join("proof-image.tar");
-    for (suffix, value) in [
-        ("sha256", &manifest.proof_archive_sha256),
-        ("identity", &manifest.proof_identity),
-    ] {
-        let sidecar = fetched.join(format!("proof-image.tar.{suffix}"));
-        fs::write(&sidecar, format!("{value}\n"))
-            .map_err(|error| format!("{}: {error}", sidecar.display()))?;
+        .map_err(|error| error.to_string())?,
+        output: Output::new(
+            StdinPolicy::Null,
+            StreamPolicy::CaptureTail {
+                limit: OUTPUT_LIMIT,
+            },
+            StreamPolicy::CaptureTail {
+                limit: OUTPUT_LIMIT,
+            },
+        ),
+        redaction: Redaction::None,
+        grace: GRACE,
+    };
+    let running =
+        sill::spawn(spec).map_err(|error| format!("cannot launch docker pull: {error}"))?;
+    let outcome = running
+        .wait()
+        .map_err(|error| format!("cannot wait for docker pull: {error}"))?;
+    if let Some(stdout) = outcome.stdout() {
+        output
+            .write_all(stdout.bytes())
+            .map_err(|error| format!("cannot write docker pull output: {error}"))?;
     }
-    crate::proof_image::load_proof_image(inputs.tree(), &archive, output, error_output)
-        .map_err(|error| error.to_string())
+    if let Some(stderr) = outcome.stderr() {
+        error_output
+            .write_all(stderr.bytes())
+            .map_err(|error| format!("cannot write docker pull errors: {error}"))?;
+    }
+    match outcome.completion() {
+        Completion::Exited(status) if status.success() => Ok(()),
+        Completion::Exited(status) => Err(format!("docker pull refused with {status}")),
+        Completion::TimedOut(_) => Err(format!(
+            "docker pull exceeded its {} second deadline",
+            IMAGE_PULL_RUNTIME.as_secs()
+        )),
+        Completion::Cancelled(_) => Err("docker pull was cancelled".to_owned()),
+    }
 }
 
 /// The image ID `tag` names in the local Docker store, when it names one.
 fn local_image(tag: &str) -> Option<String> {
-    let inspected = Process::new("docker")
-        .args(["image", "inspect", "--format", "{{.Id}}", tag])
-        .output()
-        .ok()?;
-    inspected
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&inspected.stdout).trim().to_owned())
+    command_text("docker", &["image", "inspect", "--format", "{{.Id}}", tag])
+        .ok()
+        .map(|identity| identity.trim().to_owned())
 }
 
 /// The request parts one admitted bundle published as OCI manifest
