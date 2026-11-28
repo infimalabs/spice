@@ -891,6 +891,12 @@ canvas the stage adopts, and its executed version report must name the
 release, as on the built route; the candidate is digested again before the
 target payload publishes. The stage layout and payload are the built route's.
 
+The provider artifact admits the Windows result, runner, payload, and objects
+before the coordinator can derive detached proof evidence. After it admits the
+attested battery outputs, the coordinator publishes the proof receipt into the
+canonical stage. The provider inventory therefore never requires or fabricates
+a receipt for replay that has not yet been admitted.
+
 GitHub registers `workflow_dispatch` only from the default branch. The
 repository command therefore becomes live only after
 `.github/workflows/windows.yml` has landed there; a checkout that has the
