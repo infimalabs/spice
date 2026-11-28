@@ -564,16 +564,16 @@ The summary names the critical path, the
 chain of latest-finishing dependencies, and its duration, so an avoidable
 serialization or idle handoff is directly inspectable. Native stages wait only
 on the admitted inputs, never on a sibling; only receipt composition and plan
-capture join them. The request stays pinned; a later ordinary resume
-re-admits the receipts and re-captures the plan, refuses if any byte moved, and
-publishes exactly the staged assets.
-`publish-hosted-release --abandon COMMIT`
-drops a pin naming exactly that commit, with its recorded preflight, only while
-no publishing invocation can have reached a tag or release mutation: no plan
-exists, or only `--stage-only` persisted it. A publishing invocation withdraws
-that stage-only mark before its first effect, after which the request
-converges only by resumption. A changed
-bound identity refuses before a provider dispatch: only a new dispatch requires
+capture join them. An exact-source request resumes retained authority and
+re-admits the receipts before re-capturing the plan, refusing if any byte
+moved, then publishes exactly the staged assets. A complete admitted request
+for another source removes that retained authority only while no publishing
+invocation can have reached a tag or release mutation: no plan exists, or only
+`--stage-only` persisted it. Once a publishing invocation withdraws that
+stage-only mark before its first effect, the request converges only by
+resumption. `publish-hosted-release --abandon COMMIT` provides the same safe
+cutover explicitly for a pin naming exactly that commit.
+A changed bound identity refuses before a provider dispatch: only a new dispatch requires
 `main` to carry the source's workflow blob, while an attached run is admitted
 against the blob its own workflow commit carries, so a later landing never
 strands a recorded session. Each native workflow writes `subjects.json`, the
