@@ -45,7 +45,7 @@ def locators:
     or (.manifests | type != "array")
     or (.tags | type != "array")
     or (all(.manifests[]; type == "string" and test("^sha256:[0-9a-f]{64}$")) | not)
-    or (all(.tags[]; type == "string" and test("^[0-9a-f]{64}$")) | not)
+    or (all(.tags[]; type == "string" and test("^(proof-)?[0-9a-f]{64}$")) | not)
   then error("current prepared locator file is malformed")
   else {
     schema,
@@ -54,7 +54,7 @@ def locators:
   } end;
 
 def add_locator:
-  if ($ARGS.named.tag | test("^[0-9a-f]{64}$")) | not
+  if ($ARGS.named.tag | test("^(proof-)?[0-9a-f]{64}$")) | not
   then error("derived prepared locator is malformed")
   else .tags = ((.tags + [$ARGS.named.tag]) | unique | sort) end;
 
@@ -87,14 +87,25 @@ def plan:
   | ($ARGS.named.observed_at | fromdateiso8601) as $observed
   | ($ARGS.named.keep_days | tonumber) as $keep_days
   | ($ARGS.named.keep_count | tonumber) as $keep_count
+  | ($ARGS.named.proof_keep_days | tonumber) as $proof_keep_days
+  | ($ARGS.named.proof_keep_count | tonumber) as $proof_keep_count
   | ($observed - ($keep_days * 86400)) as $cutoff
+  | ($observed - ($proof_keep_days * 86400)) as $proof_cutoff
   | ($versions
       | sort_by(.updated_at, .id)
       | reverse
       | to_entries
       | map({key: (.value.id | tostring), value: .key})
       | from_entries) as $ranks
+  | ($versions
+      | map(select(.metadata.container.tags | any(.[]; startswith("proof-"))))
+      | sort_by(.updated_at, .id)
+      | reverse
+      | to_entries
+      | map({key: (.value.id | tostring), value: .key})
+      | from_entries) as $proof_ranks
   | [ $versions[] as $version
+      | ($version.metadata.container.tags | any(.[]; startswith("proof-"))) as $proof_image
       | ([ $references[]
             | select(.digest == $version.name)
             | .reason ]
@@ -108,10 +119,16 @@ def plan:
         + [ $legacy[]
             | select(($version.created_at | fromdateiso8601) <= (.published_at | fromdateiso8601))
             | ("legacy-release-closure:" + .tag_name) ]
-        + [ if ($version.updated_at | fromdateiso8601) >= $cutoff
-            then "recent-age" else empty end ]
-        + [ if $ranks[($version.id | tostring)] < $keep_count
-            then "recent-count" else empty end ]
+        + [ if $proof_image and ($version.updated_at | fromdateiso8601) >= $proof_cutoff
+            then "proof-image-recent-age"
+            elif ($proof_image | not) and ($version.updated_at | fromdateiso8601) >= $cutoff
+            then "recent-age"
+            else empty end ]
+        + [ if $proof_image and $proof_ranks[($version.id | tostring)] < $proof_keep_count
+            then "proof-image-recent-count"
+            elif ($proof_image | not) and $ranks[($version.id | tostring)] < $keep_count
+            then "recent-count"
+            else empty end ]
         | unique | sort) as $reasons
       | {
           id: $version.id,
@@ -128,7 +145,12 @@ def plan:
       repository: $ARGS.named.repository,
       package: $ARGS.named.package,
       observed_at: $ARGS.named.observed_at,
-      policy: {keep_days: $keep_days, keep_count: $keep_count},
+      policy: {
+        keep_days: $keep_days,
+        keep_count: $keep_count,
+        proof_image_keep_days: $proof_keep_days,
+        proof_image_keep_count: $proof_keep_count
+      },
       authority: {
         live_releases: $releases,
         release_references: $references,

@@ -12,6 +12,8 @@ const DOMAIN: &[u8] = b"spice.proof.vendor-set.v1\0";
 const MAX_LOCK_BYTES: u64 = 16 * 1024 * 1024;
 /// OCI image label carrying the vendored source-set digest.
 pub const VENDOR_SET_LABEL: &str = "org.spice.vendor-set";
+/// OCI image label carrying the prepared build key for a hosted proof image.
+pub const PROOF_IMAGE_BUILD_KEY_LABEL: &str = "org.spice.build-key";
 /// Local OCI repository whose tag is the vendor-set digest.
 pub const PROOF_IMAGE_REPOSITORY: &str = "spice-proof-image";
 

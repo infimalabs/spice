@@ -19,7 +19,7 @@ const USAGE: &str = concat!(
     "[-- UP-OPTION...]|",
     "build-cache [--dry-run|--apply] [--max-bytes BYTES] ",
     "[--free-space-floor BYTES] [--retain-live-worktrees N]|",
-    "proof-image <build [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|vendor-set Cargo.lock|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|fetch-extract REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>|",
+    "proof-image <build [--cache-from SPEC] [--cache-to SPEC] [--build-key SHA256] [ARCHIVE]|load ARCHIVE|verify [ARCHIVE]>|prepared-artifact <build-key BUILD_KEY.json|vendor-set Cargo.lock|manifest KIND PLATFORM BUILD_KEY.json MEDIA_TYPE PAYLOAD INVENTORY_ROOT RUNTIME|- MANIFEST.json|publish REPOSITORY TAG MANIFEST.json PAYLOAD|resolve REPOSITORY:TAG BUILD_KEY|resolve-image[-if-present] REPOSITORY:proof-TAG|REPOSITORY@DIGEST BUILD_KEY|fetch REPOSITORY@DIGEST BUILD_KEY OUT|fetch-extract REPOSITORY@DIGEST BUILD_KEY OUT|pack ROOT ARCHIVE|admit-tree MANIFEST.json ROOT>|",
     "declare-native-stage TARGET ROOT|prove-staged-target TARGET|",
     "release-inputs OUT|seal-darwin [--output DIR] [--unsigned]|source-archive [OUT]|",
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
@@ -1117,22 +1117,75 @@ fn build_cache_request(arguments: &[OsString]) -> Option<xtask::BuildCacheReques
     Some(request)
 }
 
+#[derive(Default)]
+struct ProofImageBuildArguments {
+    archive: Option<PathBuf>,
+    cache_from: Option<OsString>,
+    cache_to: Option<OsString>,
+    build_key: Option<OsString>,
+}
+
+fn proof_image_build_arguments(arguments: &[OsString]) -> Option<ProofImageBuildArguments> {
+    let [operation, arguments @ ..] = arguments else {
+        return None;
+    };
+    if operation != OsStr::new("build") {
+        return None;
+    }
+    let mut request = ProofImageBuildArguments::default();
+    let mut arguments = arguments.iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("--cache-from") => {
+                let value = arguments.next()?.clone();
+                if value.is_empty() || request.cache_from.replace(value).is_some() {
+                    return None;
+                }
+            }
+            Some("--cache-to") => {
+                let value = arguments.next()?.clone();
+                if value.is_empty() || request.cache_to.replace(value).is_some() {
+                    return None;
+                }
+            }
+            Some("--build-key") => {
+                let value = arguments.next()?.clone();
+                if value.is_empty() || request.build_key.replace(value).is_some() {
+                    return None;
+                }
+            }
+            Some(value) if value.starts_with('-') => return None,
+            _ if request.archive.is_none() => request.archive = Some(PathBuf::from(argument)),
+            _ => return None,
+        }
+    }
+    Some(request)
+}
+
 fn run_proof_image(arguments: Vec<OsString>) -> ExitCode {
-    let (operation, archive) = match arguments.as_slice() {
-        [operation] if operation == OsStr::new("build") => ("build", None),
-        [operation] if operation == OsStr::new("verify") => ("verify", None),
-        [operation, archive] if operation == OsStr::new("build") => {
-            ("build", Some(PathBuf::from(archive)))
-        }
-        [operation, archive] if operation == OsStr::new("load") => {
-            ("load", Some(PathBuf::from(archive)))
-        }
-        [operation, archive] if operation == OsStr::new("verify") => {
-            ("verify", Some(PathBuf::from(archive)))
-        }
-        _ => {
-            eprintln!("{}", help());
-            return ExitCode::from(USAGE_EXIT);
+    let (operation, archive, cache_from, cache_to, build_key) = if let Some(request) =
+        proof_image_build_arguments(&arguments)
+    {
+        (
+            "build",
+            request.archive,
+            request.cache_from,
+            request.cache_to,
+            request.build_key,
+        )
+    } else {
+        match arguments.as_slice() {
+            [operation] if operation == OsStr::new("verify") => ("verify", None, None, None, None),
+            [operation, archive] if operation == OsStr::new("load") => {
+                ("load", Some(PathBuf::from(archive)), None, None, None)
+            }
+            [operation, archive] if operation == OsStr::new("verify") => {
+                ("verify", Some(PathBuf::from(archive)), None, None, None)
+            }
+            _ => {
+                eprintln!("{}", help());
+                return ExitCode::from(USAGE_EXIT);
+            }
         }
     };
     let repository = match spice::repository::Repository::discover(Path::new(".")) {
@@ -1153,6 +1206,9 @@ fn run_proof_image(arguments: Vec<OsString>) -> ExitCode {
         "build" => xtask::build_proof_image(
             repository.worktree_root(),
             &archive,
+            cache_from.as_deref(),
+            cache_to.as_deref(),
+            build_key.as_deref(),
             &mut stdout,
             &mut stderr,
         ),
@@ -1165,6 +1221,9 @@ fn run_proof_image(arguments: Vec<OsString>) -> ExitCode {
         "verify" => xtask::build_proof_image(
             repository.worktree_root(),
             &archive,
+            None,
+            None,
+            None,
             &mut stdout,
             &mut stderr,
         )

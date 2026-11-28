@@ -44,6 +44,8 @@ jobs:
           PREPARED_DELETE: ${{ github.event_name == 'schedule' || inputs.delete }}
           PREPARED_KEEP_COUNT: '50'
           PREPARED_KEEP_DAYS: '30'
+          PREPARED_PROOF_KEEP_COUNT: '3'
+          PREPARED_PROOF_KEEP_DAYS: '7'
         run: .github/scripts/prepared-retention.sh '${{ runner.temp }}/retention-target/debug/prepared-artifact'
 
       - name: Preserve exact retention plan

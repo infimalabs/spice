@@ -23,6 +23,27 @@ const TOOL_CHECK: &str = concat!(
     "test \"$(wasm-opt --version)\" = \"wasm-opt version 131 (version_131)\"",
 );
 
+#[derive(Clone, Copy, Default)]
+struct BuildOptions<'a> {
+    cache_from: Option<&'a OsStr>,
+    cache_to: Option<&'a OsStr>,
+    build_key: Option<&'a OsStr>,
+}
+
+impl BuildOptions<'_> {
+    fn cache_configured(self) -> bool {
+        self.cache_from.is_some() || self.cache_to.is_some()
+    }
+
+    fn without_cache(self) -> Self {
+        Self {
+            cache_from: None,
+            cache_to: None,
+            ..self
+        }
+    }
+}
+
 /// Build, admit, exercise, and export the pinned Linux proof image.
 ///
 /// # Errors
@@ -32,11 +53,25 @@ const TOOL_CHECK: &str = concat!(
 pub fn build_proof_image(
     root: &Path,
     archive: &Path,
+    cache_from: Option<&OsStr>,
+    cache_to: Option<&OsStr>,
+    build_key: Option<&OsStr>,
     output: &mut impl Write,
     diagnostic: &mut impl Write,
 ) -> Result<(), ProofImageError> {
     let archive = resolve_archive(root, archive);
-    build_with(&mut SystemRunner, root, &archive, output, diagnostic)
+    build_with(
+        &mut SystemRunner,
+        root,
+        &archive,
+        BuildOptions {
+            cache_from,
+            cache_to,
+            build_key,
+        },
+        output,
+        diagnostic,
+    )
 }
 
 /// Verify and restore one exported proof-image archive.
@@ -67,6 +102,7 @@ fn build_with<R: Runner>(
     runner: &mut R,
     root: &Path,
     archive: &Path,
+    cache: BuildOptions<'_>,
     output: &mut impl Write,
     diagnostic: &mut impl Write,
 ) -> Result<(), ProofImageError> {
@@ -74,15 +110,7 @@ fn build_with<R: Runner>(
     let context = state.join("context");
     let vendor_set = prepare_build_context(runner, root, archive, &context, output, diagnostic)?;
     let tag = vendor_set.image_tag();
-    run_image_build(
-        runner,
-        root,
-        &state,
-        &context,
-        &vendor_set,
-        &tag,
-        diagnostic,
-    )?;
+    run_image_build(runner, root, &vendor_set, &tag, cache, diagnostic)?;
 
     let identity = admit_built_image(runner, root, &vendor_set, &tag)?;
     exercise_built_image(runner, root, &identity, output, diagnostic)?;
@@ -149,34 +177,110 @@ fn prepare_build_context<R: Runner>(
 fn run_image_build<R: Runner>(
     runner: &mut R,
     root: &Path,
-    state: &Path,
+    vendor_set: &proof::VendorSet,
+    tag: &str,
+    cache: BuildOptions<'_>,
+    diagnostic: &mut impl Write,
+) -> Result<(), ProofImageError> {
+    let state = root.join("target/proof-image");
+    let context = state.join("context");
+    let build = run_image_build_once(runner, root, &context, vendor_set, tag, cache)?;
+    let build_log = process_log(&build);
+    if build.success || !cache.cache_configured() {
+        record_image_build(&state, &build, &build_log)?;
+        diagnostic
+            .write_all(&build_log)
+            .map_err(ProofImageError::Output)?;
+        return require_image_build_success(&build, &build_log, &context);
+    }
+
+    const RETRY: &[u8] = b"proof-image cache unavailable; retrying one cold build\n";
+    diagnostic
+        .write_all(&build_log)
+        .and_then(|()| diagnostic.write_all(RETRY))
+        .map_err(ProofImageError::Output)?;
+    let cold = run_image_build_once(
+        runner,
+        root,
+        &context,
+        vendor_set,
+        tag,
+        cache.without_cache(),
+    )?;
+    let cold_log = process_log(&cold);
+    diagnostic
+        .write_all(&cold_log)
+        .map_err(ProofImageError::Output)?;
+    let mut complete_log = Vec::with_capacity(build_log.len() + RETRY.len() + cold_log.len());
+    complete_log.extend_from_slice(&build_log);
+    complete_log.extend_from_slice(RETRY);
+    complete_log.extend_from_slice(&cold_log);
+    record_image_build(&state, &cold, &complete_log)?;
+    require_image_build_success(&cold, &complete_log, &context)
+}
+
+fn run_image_build_once<R: Runner>(
+    runner: &mut R,
+    root: &Path,
     context: &Path,
     vendor_set: &proof::VendorSet,
     tag: &str,
-    diagnostic: &mut impl Write,
-) -> Result<(), ProofImageError> {
-    let build = runner.run(
+    options: BuildOptions<'_>,
+) -> Result<ProcessOutput, ProofImageError> {
+    let mut arguments = Vec::with_capacity(
+        17 + usize::from(options.cache_from.is_some()) * 2
+            + usize::from(options.cache_to.is_some()) * 2
+            + usize::from(options.build_key.is_some()) * 2,
+    );
+    arguments.extend([
+        "buildx".into(),
+        "build".into(),
+        "--load".into(),
+        "--platform".into(),
+        "linux/amd64".into(),
+        "--provenance=false".into(),
+        "--sbom=false".into(),
+        "--build-arg".into(),
+        format!("{VENDOR_SET_BUILD_ARGUMENT}={vendor_set}").into(),
+        "--tag".into(),
+        tag.into(),
+    ]);
+    if let Some(cache_from) = options.cache_from {
+        arguments.push("--cache-from".into());
+        arguments.push(cache_from.to_owned());
+    }
+    if let Some(cache_to) = options.cache_to {
+        arguments.push("--cache-to".into());
+        arguments.push(cache_to.to_owned());
+    }
+    if let Some(build_key) = options.build_key {
+        let mut label = OsString::from(format!("{}=", proof::PROOF_IMAGE_BUILD_KEY_LABEL));
+        label.push(build_key);
+        arguments.push("--label".into());
+        arguments.push(label);
+    }
+    arguments.push(context.as_os_str().to_owned());
+    runner.run(
         "docker buildx build",
         OsStr::new("docker"),
-        &[
-            "buildx".into(),
-            "build".into(),
-            "--load".into(),
-            "--platform".into(),
-            "linux/amd64".into(),
-            "--provenance=false".into(),
-            "--sbom=false".into(),
-            "--build-arg".into(),
-            format!("{VENDOR_SET_BUILD_ARGUMENT}={vendor_set}").into(),
-            "--tag".into(),
-            tag.into(),
-            context.as_os_str().to_owned(),
-        ],
+        &arguments,
         root,
-    )?;
-    let mut build_log = build.stdout.clone();
-    build_log.extend_from_slice(&build.stderr);
-    write(&state.join("build.log"), &build_log)?;
+    )
+}
+
+fn process_log(process: &ProcessOutput) -> Vec<u8> {
+    let mut log = Vec::with_capacity(process.stdout.len() + process.stderr.len());
+    log.extend_from_slice(&process.stdout);
+    log.extend_from_slice(&process.stderr);
+    log
+}
+
+fn record_image_build(
+    state: &Path,
+    build: &ProcessOutput,
+    build_log: &[u8],
+) -> Result<(), ProofImageError> {
+    write(&state.join("build.log"), build_log)?;
     write(
         &state.join("build.status"),
         format!(
@@ -186,23 +290,27 @@ fn run_image_build<R: Runner>(
                 .map_or_else(|| "signal".to_owned(), |code| code.to_string())
         )
         .as_bytes(),
-    )?;
-    diagnostic
-        .write_all(&build_log)
-        .map_err(ProofImageError::Output)?;
-    if !build.success {
-        if contains(&build_log, b"unexpected EOF") {
-            return Err(ProofImageError::DroppedBuild {
-                code: build.code,
-                context: context.to_path_buf(),
-            });
-        }
-        return Err(ProofImageError::Exit {
-            operation: "docker buildx build",
+    )
+}
+
+fn require_image_build_success(
+    build: &ProcessOutput,
+    build_log: &[u8],
+    context: &Path,
+) -> Result<(), ProofImageError> {
+    if build.success {
+        return Ok(());
+    }
+    if contains(build_log, b"unexpected EOF") {
+        return Err(ProofImageError::DroppedBuild {
             code: build.code,
+            context: context.to_path_buf(),
         });
     }
-    Ok(())
+    Err(ProofImageError::Exit {
+        operation: "docker buildx build",
+        code: build.code,
+    })
 }
 
 fn admit_built_image<R: Runner>(
@@ -776,6 +884,8 @@ mod tests {
 
     const IDENTITY: &str =
         "sha256:2d5976ad79b7a4e929a115d8d10ab7b8bd00bb633b5ad6d459d048eb2f817f8a";
+    const BUILD_KEY: &str =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     #[test]
     fn build_records_the_streamed_archive_checksum_and_admitted_identity() {
         let fixture = Fixture::new();
@@ -799,6 +909,7 @@ mod tests {
             &mut runner,
             &fixture.root,
             &archive,
+            BuildOptions::default(),
             &mut output,
             &mut diagnostic,
         )
@@ -860,6 +971,129 @@ mod tests {
     }
 
     #[test]
+    fn cache_options_reach_buildx_without_changing_identity_admission() {
+        let fixture = Fixture::new();
+        let archive = fixture.archive();
+        let vendor_set = fixture.vendor_set();
+        fs::write(&archive, b"abc").expect("write fixture archive");
+        let mut runner = FakeRunner::new([
+            success(b"", b""),
+            success(b"cached build\n", b""),
+            success(
+                format!("{IDENTITY} {IMAGE_PLATFORM} {vendor_set}\n").as_bytes(),
+                b"",
+            ),
+            success(b"", b""),
+            success(b"", b""),
+        ]);
+
+        build_with(
+            &mut runner,
+            &fixture.root,
+            &archive,
+            BuildOptions {
+                cache_from: Some(OsStr::new("type=gha,scope=proof-image")),
+                cache_to: Some(OsStr::new(
+                    "type=gha,mode=max,scope=proof-image,ignore-error=true",
+                )),
+                build_key: Some(OsStr::new(BUILD_KEY)),
+            },
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("cached proof image builds");
+
+        let build = &runner.calls[1].arguments;
+        for expected in [
+            ["--cache-from", "type=gha,scope=proof-image"],
+            [
+                "--cache-to",
+                "type=gha,mode=max,scope=proof-image,ignore-error=true",
+            ],
+            [
+                "--label",
+                "org.spice.build-key=sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            ],
+        ] {
+            assert!(
+                build
+                    .windows(2)
+                    .any(|arguments| arguments == expected.map(OsString::from)),
+                "image build omitted {expected:?}"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(sidecar(&archive, "identity")).unwrap(),
+            format!("{IDENTITY}\n")
+        );
+    }
+
+    #[test]
+    fn unavailable_cache_retries_one_cold_build() {
+        let fixture = Fixture::new();
+        let archive = fixture.archive();
+        let vendor_set = fixture.vendor_set();
+        fs::write(&archive, b"abc").expect("write fixture archive");
+        let mut runner = FakeRunner::new([
+            success(b"", b""),
+            failed(1, b"", b"cache service unavailable\n"),
+            success(b"cold build\n", b""),
+            success(
+                format!("{IDENTITY} {IMAGE_PLATFORM} {vendor_set}\n").as_bytes(),
+                b"",
+            ),
+            success(b"", b""),
+            success(b"", b""),
+        ]);
+
+        build_with(
+            &mut runner,
+            &fixture.root,
+            &archive,
+            BuildOptions {
+                cache_from: Some(OsStr::new("type=gha,scope=proof-image")),
+                cache_to: Some(OsStr::new(
+                    "type=gha,mode=max,scope=proof-image,ignore-error=true",
+                )),
+                build_key: Some(OsStr::new(BUILD_KEY)),
+            },
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )
+        .expect("cache outage degrades to a cold build");
+
+        assert!(
+            runner.calls[1]
+                .arguments
+                .contains(&OsString::from("--cache-from"))
+        );
+        assert!(
+            !runner.calls[2]
+                .arguments
+                .contains(&OsString::from("--cache-from"))
+        );
+        assert!(
+            !runner.calls[2]
+                .arguments
+                .contains(&OsString::from("--cache-to"))
+        );
+        assert!(runner.calls[2].arguments.windows(2).any(|arguments| {
+            arguments
+                == [
+                    OsString::from("--label"),
+                    OsString::from(format!(
+                        "{}={BUILD_KEY}",
+                        proof::PROOF_IMAGE_BUILD_KEY_LABEL
+                    )),
+                ]
+        }));
+        let log = fs::read_to_string(fixture.root.join("target/proof-image/build.log")).unwrap();
+        assert!(log.contains("cache service unavailable"));
+        assert!(log.contains("retrying one cold build"));
+        assert!(log.contains("cold build"));
+    }
+
+    #[test]
     fn build_inspection_requires_an_exact_image_id() {
         let fixture = Fixture::new();
         let vendor_set = fixture.vendor_set();
@@ -876,6 +1110,7 @@ mod tests {
             &mut runner,
             &fixture.root,
             &fixture.archive(),
+            BuildOptions::default(),
             &mut Vec::new(),
             &mut Vec::new(),
         )
@@ -900,6 +1135,7 @@ mod tests {
             &mut runner,
             &fixture.root,
             &fixture.archive(),
+            BuildOptions::default(),
             &mut Vec::new(),
             &mut Vec::new(),
         )
@@ -921,6 +1157,7 @@ mod tests {
             &mut runner,
             &fixture.root,
             &fixture.archive(),
+            BuildOptions::default(),
             &mut Vec::new(),
             &mut Vec::new(),
         )
@@ -955,6 +1192,7 @@ mod tests {
             &mut runner,
             &fixture.root,
             &fixture.archive(),
+            BuildOptions::default(),
             &mut Vec::new(),
             &mut Vec::new(),
         )

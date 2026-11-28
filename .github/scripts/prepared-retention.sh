@@ -13,6 +13,8 @@ prepared_artifact="$1"
 
 keep_days="${PREPARED_KEEP_DAYS:-30}"
 keep_count="${PREPARED_KEEP_COUNT:-50}"
+proof_keep_days="${PREPARED_PROOF_KEEP_DAYS:-7}"
+proof_keep_count="${PREPARED_PROOF_KEEP_COUNT:-3}"
 delete="${PREPARED_DELETE:-false}"
 observed_at="${PREPARED_OBSERVED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 plan="${PREPARED_RETENTION_PLAN:-prepared-retention-plan.json}"
@@ -21,6 +23,8 @@ policy=".github/scripts/prepared-retention.jq"
 
 [[ "$keep_days" =~ ^[1-9][0-9]*$ ]]
 [[ "$keep_count" =~ ^[1-9][0-9]*$ ]]
+[[ "$proof_keep_days" =~ ^[1-9][0-9]*$ ]]
+[[ "$proof_keep_count" =~ ^[1-9][0-9]*$ ]]
 [[ "$delete" == "true" || "$delete" == "false" ]]
 [[ "$observed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
 
@@ -57,7 +61,7 @@ key_line="$("$prepared_artifact" build-key "$scratch/proof-image-build-key.json"
 # env-policy: allow
 [[ "$key_line" =~ ^build\ key\ sha256:[0-9a-f]{64}$ ]]
 # env-policy: allow
-proof_tag="${key_line#build key sha256:}"
+proof_tag="proof-${key_line#build key sha256:}"
 
 fetch_versions() {
   local destination="$1"
@@ -139,6 +143,8 @@ jq -n --arg mode plan \
   --arg observed_at "$observed_at" \
   --arg keep_days "$keep_days" \
   --arg keep_count "$keep_count" \
+  --arg proof_keep_days "$proof_keep_days" \
+  --arg proof_keep_count "$proof_keep_count" \
   -f "$policy" \
   "$scratch/versions.json" "$scratch/releases.json" "$scratch/references.json" \
   "$scratch/legacy-releases.json" "$scratch/locators.json" > "$plan"

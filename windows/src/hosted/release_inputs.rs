@@ -29,6 +29,9 @@ pub struct ResultManifest {
     pub proof_build_key: String,
     pub proof_manifest: String,
     pub proof_identity: String,
+    #[serde(default)]
+    pub proof_config_sha256: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub proof_archive_sha256: String,
     pub workflow: String,
     pub workflow_ref: String,
@@ -76,6 +79,21 @@ impl ResultManifest {
 }
 
 impl ResultManifest {
+    /// Current layered config digest, migrated from the exact proof identity
+    /// when this is a retained archive-era provider result.
+    #[must_use]
+    pub fn proof_config_sha256(&self) -> &str {
+        if self.proof_config_sha256.is_empty() {
+            self.proof_identity
+                .strip_prefix("sha256:")
+                .unwrap_or_default()
+        } else {
+            &self.proof_config_sha256
+        }
+    }
+}
+
+impl ResultManifest {
     /// Refuse malformed, incomplete, or internally inconsistent provider output.
     pub fn admit(&self) -> Result<(), AdmissionError> {
         require_hex("challenge", &self.challenge, DIGEST_HEX_LENGTH)?;
@@ -97,11 +115,31 @@ impl ResultManifest {
             .strip_prefix("sha256:")
             .ok_or_else(|| AdmissionError::new("proof_identity must be a sha256 digest"))?;
         require_hex("proof_identity", proof, DIGEST_HEX_LENGTH)?;
-        require_hex(
-            "proof_archive_sha256",
-            &self.proof_archive_sha256,
-            DIGEST_HEX_LENGTH,
-        )?;
+        let proof_config = match (
+            self.proof_config_sha256.is_empty(),
+            self.proof_archive_sha256.is_empty(),
+        ) {
+            (false, true) => &self.proof_config_sha256,
+            (true, false) => {
+                require_hex(
+                    "proof_archive_sha256",
+                    &self.proof_archive_sha256,
+                    DIGEST_HEX_LENGTH,
+                )?;
+                proof
+            }
+            _ => {
+                return Err(AdmissionError::new(
+                    "exactly one proof config or legacy archive identity is required",
+                ));
+            }
+        };
+        require_hex("proof_config_sha256", proof_config, DIGEST_HEX_LENGTH)?;
+        if proof != proof_config {
+            return Err(AdmissionError::new(
+                "proof_config_sha256 must equal proof_identity",
+            ));
+        }
         require_nonempty("workflow", &self.workflow)?;
         if !self
             .workflow_ref
@@ -201,3 +239,39 @@ impl fmt::Display for AdmissionError {
 }
 
 impl Error for AdmissionError {}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn archive_era_result_migrates_its_proof_config_from_the_image_identity() {
+        let digest = "a".repeat(64);
+        let manifest: ResultManifest = serde_json::from_value(json!({
+            "challenge": digest,
+            "source_commit": "b".repeat(40),
+            "source": "c".repeat(64),
+            "archive_sha256": "d".repeat(64),
+            "tree": "e".repeat(64),
+            "app": "f".repeat(64),
+            "canvas": "1".repeat(64),
+            "proof_build_key": format!("sha256:{}", "2".repeat(64)),
+            "proof_manifest": format!("sha256:{}", "3".repeat(64)),
+            "proof_identity": format!("sha256:{}", "4".repeat(64)),
+            "proof_archive_sha256": "5".repeat(64),
+            "workflow": ".github/workflows/input.yml",
+            "workflow_ref": "owner/repo/.github/workflows/input.yml@refs/heads/main",
+            "workflow_sha": "6".repeat(40),
+            "run_id": 1,
+            "runner": {"image_os": "ubuntu", "image_version": "1", "architecture": "X64"},
+            "toolchain": {"rustc": "rustc", "cargo": "cargo", "trunk": "trunk"},
+            "artifacts": [],
+        }))
+        .unwrap();
+
+        assert!(manifest.proof_config_sha256.is_empty());
+        assert_eq!(manifest.proof_config_sha256(), "4".repeat(64));
+    }
+}

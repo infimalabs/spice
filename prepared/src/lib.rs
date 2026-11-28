@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tar::Archive;
 
+mod image;
 mod oras;
 
 pub use oras::exact_oras_command;
@@ -80,6 +81,12 @@ pub fn prepared_artifact(
         [command, repository, tag, manifest, payload] if command == "publish" => {
             let digest = publish(repository, tag, Path::new(manifest), Path::new(payload))?;
             writeln!(output, "published {digest}").map_err(PreparedArtifactError::Output)
+        }
+        [command, reference, build_key] if command == "resolve-image" => {
+            image::resolve(reference, build_key, false, output)
+        }
+        [command, reference, build_key] if command == "resolve-image-if-present" => {
+            image::resolve(reference, build_key, true, output)
         }
         [command, reference, build_key] if command == "resolve" => {
             let (digest, manifest) = resolve(reference, build_key)?;

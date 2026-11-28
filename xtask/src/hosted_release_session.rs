@@ -485,6 +485,8 @@ struct ReleaseInputIdentity {
     #[serde(default)]
     proof_manifest: String,
     proof_identity: String,
+    // Historical persisted spelling. New sessions store the layered config
+    // digest here so an in-flight archive session observes the authority change.
     proof_archive_sha256: String,
     workflow_sha: String,
     run_id: u64,
@@ -504,7 +506,7 @@ impl From<&ReleaseInputs> for ReleaseInputIdentity {
             proof_build_key: manifest.proof_build_key.clone(),
             proof_manifest: manifest.proof_manifest.clone(),
             proof_identity: manifest.proof_identity.clone(),
-            proof_archive_sha256: manifest.proof_archive_sha256.clone(),
+            proof_archive_sha256: manifest.proof_config_sha256().to_owned(),
             workflow_sha: manifest.workflow_sha.clone(),
             run_id: manifest.run_id,
         }
@@ -617,7 +619,7 @@ mod tests {
             proof_build_key: "proof-build-key".to_owned(),
             proof_manifest: "proof-manifest".to_owned(),
             proof_identity: "proof".to_owned(),
-            proof_archive_sha256: "proof-archive".to_owned(),
+            proof_archive_sha256: "proof-config".to_owned(),
             workflow_sha: "workflow".to_owned(),
             run_id: 41,
         }
