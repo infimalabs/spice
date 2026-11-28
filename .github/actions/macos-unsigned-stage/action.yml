@@ -133,6 +133,7 @@ runs:
             stage-target aarch64-apple-darwin --unsigned \
             --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
         fi
+        candidate_seconds=$(($(date +%s) - candidate_started))
         transition_started=$(date +%s)
 
         payload="dist/stage/targets/aarch64-apple-darwin/payload.json"
