@@ -200,9 +200,9 @@ and the PE digest on Windows. Scratch and build outputs never enter the
 canonical release stage.
 
 Linux symbol rebuilds mount their private Cargo target as the sealed
-container's only writable host target. Before the mount, the host recursively
-admits that target for a remapped container user; no other host path gains
-write access.
+container's only writable host target. After any root-owned dependency restore,
+the workflow transfers that target to the runner, which recursively admits it
+for a remapped container user; no other host path gains write access.
 
 `dispatch-hosted-release --symbols` sets the explicit `release_symbols` input.
 After canonical release completion, `release.yml` dispatches one independent
