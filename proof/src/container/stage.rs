@@ -157,10 +157,13 @@ impl Container {
             source,
         })?;
         if redirected {
-            Self::make_cross_output_writable(&stage)?;
+            Self::make_bind_source_writable(&stage)?;
         }
         let (target, notice) = match target {
-            Some(path) => (SealedTarget::Host(representable(path)?), None),
+            Some(path) => {
+                Self::make_bind_source_writable(path)?;
+                (SealedTarget::Host(representable(path)?), None)
+            }
             None => self.persistent_target(LINUX_STAGE_PURPOSE, self.image.as_str()),
         };
         let mut runtime_arguments = self.sealed_release_arguments(
@@ -220,7 +223,7 @@ impl Container {
             path: stage.to_path_buf(),
             source,
         })?;
-        Self::make_cross_output_writable(stage)?;
+        Self::make_bind_source_writable(stage)?;
         let (target, notice) = self.persistent_target(WINDOWS_CROSS_PURPOSE, cross_image);
         let mut runtime_arguments = self.sealed_release_arguments(
             git_common,
@@ -288,7 +291,7 @@ impl Container {
             path: out.to_path_buf(),
             source,
         })?;
-        Self::make_cross_output_writable(out)?;
+        Self::make_bind_source_writable(out)?;
         let out = representable(out)?;
         let (target, notice) = self.persistent_target(WINDOWS_CROSS_PURPOSE, cross_image);
         let mut runtime_arguments =
@@ -320,7 +323,7 @@ impl Container {
     }
 
     #[cfg(unix)]
-    fn make_cross_output_writable(out: &Path) -> Result<(), ContainerError> {
+    fn make_bind_source_writable(out: &Path) -> Result<(), ContainerError> {
         fn make_directory_writable(path: &Path) -> Result<(), ContainerError> {
             let mut permissions = fs::metadata(path)
                 .map_err(|source| ContainerError::InspectWorkspace {
@@ -365,7 +368,7 @@ impl Container {
     }
 
     #[cfg(not(unix))]
-    fn make_cross_output_writable(_out: &Path) -> Result<(), ContainerError> {
+    fn make_bind_source_writable(_out: &Path) -> Result<(), ContainerError> {
         Ok(())
     }
 

@@ -199,6 +199,11 @@ exactly, together with the Mach-O UUID on macOS, the ELF build ID on Linux,
 and the PE digest on Windows. Scratch and build outputs never enter the
 canonical release stage.
 
+Linux symbol rebuilds mount their private Cargo target as the sealed
+container's only writable host target. Before the mount, the host recursively
+admits that target for a remapped container user; no other host path gains
+write access.
+
 `dispatch-hosted-release --symbols` sets the explicit `release_symbols` input.
 After canonical release completion, `release.yml` dispatches one independent
 `symbols.yml` run per platform and does not wait for them. Each run uses the
