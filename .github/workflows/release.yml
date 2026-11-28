@@ -68,6 +68,21 @@ jobs:
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
 
+      - name: Start exact proof image preparation
+        shell: bash
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          url="$(
+            gh workflow run proof-image.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main \
+              --raw-field "source_commit=$SOURCE_COMMIT"
+          )"
+          [[ "$url" == https://github.com/*/actions/runs/* ]]
+          printf '### Proof image preparation\n\n- run: %s\n' "$url" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Restore prior attempt authority
         id: state
         shell: bash

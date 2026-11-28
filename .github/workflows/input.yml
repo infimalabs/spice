@@ -91,6 +91,8 @@ jobs:
         env:
           GHCR_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
+          PROOF_IMAGE_WAIT_SECONDS: 2700
+          PROOF_IMAGE_POLL_SECONDS: 15
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/prepared"
@@ -100,10 +102,28 @@ jobs:
           key="$($xtask prepared-artifact build-key "$root/build-key.json" | sed -n 's/^build key sha256://p')"
           [[ "$key" =~ ^[0-9a-f]{64}$ ]]
           printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          "$xtask" prepared-artifact resolve-image \
-            "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:proof-$key" "sha256:$key" \
-            | tee "$root/resolve.out"
-          read -r label manifest config identity < "$root/resolve.out"
+          resolution=
+          deadline=$((SECONDS + PROOF_IMAGE_WAIT_SECONDS))
+          while test -z "$resolution"; do
+            candidate="$("$xtask" prepared-artifact resolve-image-if-present \
+              "ghcr.io/${GITHUB_REPOSITORY,,}/prepared:proof-$key" "sha256:$key")"
+            if test "$candidate" != absent; then
+              resolution="$candidate"
+              break
+            fi
+            remaining=$((deadline - SECONDS))
+            if ((remaining <= 0)); then
+              printf 'exact proof image resolution exceeded its %s second deadline for sha256:%s\n' \
+                "$PROOF_IMAGE_WAIT_SECONDS" "$key" >&2
+              exit 75
+            fi
+            delay=$PROOF_IMAGE_POLL_SECONDS
+            if ((delay > remaining)); then
+              delay=$remaining
+            fi
+            sleep "$delay"
+          done
+          read -r label manifest config identity <<< "$resolution"
           test "$label" = resolved
           [[ "$manifest" =~ ^sha256:[0-9a-f]{64}$ ]]
           test "$config" = "$identity"
