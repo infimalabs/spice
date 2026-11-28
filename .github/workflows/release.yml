@@ -314,10 +314,17 @@ jobs:
               > "$complete.tmp"
             mv "$complete.tmp" "$complete"
           fi
+          hosted="$(git rev-parse --git-common-dir)/.spice/authority/releases/hosted"
+          sessions=("$hosted"/*.json)
+          test "${#sessions[@]}" = 1
+          session="${sessions[0]}"
+          test "$(jq -r .release_inputs.source_commit "$session")" = "$source_commit"
           jq -n --sort-keys --arg source_commit "$source_commit" --arg tag "$tag" \
             --arg plan_sha256 "$plan_sha256" \
             --slurpfile release "$RUNNER_TEMP/release-readback.json" \
-            '{schema:1,source_commit:$source_commit,tag:$tag,plan_sha256:$plan_sha256,release:$release[0]}' \
+            --slurpfile session "$session" \
+            '{schema:1,source_commit:$source_commit,tag:$tag,plan_sha256:$plan_sha256,
+              release:$release[0],release_inputs:$session[0].release_inputs}' \
             > "$RUNNER_TEMP/final-release.json"
           {
             printf '### Complete release\n\n'

@@ -86,7 +86,7 @@ pub use share_darwin_stage::{
 pub use source_archive::source_archive;
 #[cfg(not(target_arch = "wasm32"))]
 pub use stage_proof::{StageProofError, prove_staged_target};
-pub use windows_cross::{WindowsCrossError, windows_cross};
+pub use windows_cross::{WindowsCrossError, windows_cross, windows_cross_symbols};
 #[cfg(target_os = "macos")]
 pub use windows_guest::{WindowsGuestError, windows_guest};
 pub use windows_hosted::{

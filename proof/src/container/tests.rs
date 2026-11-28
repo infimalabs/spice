@@ -613,7 +613,7 @@ fn sealed_runs_reuse_one_persistent_target_per_purpose_and_image() {
 
     for _ in 0..2 {
         let stage = container
-            .stage_release(&git_common, None, None, None)
+            .stage_release(&git_common, None, None, None, None, false)
             .expect("sealed stage");
         assert!(stage.success);
     }
@@ -698,7 +698,7 @@ fn an_unavailable_persistent_target_compiles_in_fresh_scratch() {
     fs::create_dir_all(&git_common).expect("fixture Git common directory");
 
     let stage = container
-        .stage_release(&git_common, None, None, None)
+        .stage_release(&git_common, None, None, None, None, false)
         .expect("a refused volume never refuses the stage");
 
     assert!(stage.success);
@@ -718,7 +718,7 @@ fn a_named_host_target_replaces_the_persistent_volume() {
     fs::create_dir_all(&target).expect("fixture host target");
 
     container
-        .stage_release(&git_common, None, None, Some(&target))
+        .stage_release(&git_common, None, None, Some(&target), None, false)
         .expect("sealed stage");
 
     let target = fs::canonicalize(&target).expect("canonical host target");

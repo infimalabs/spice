@@ -29,6 +29,18 @@ inputs:
     description: Whether the admitted proof Cargo products and vendor tree were restored
     required: false
     default: "false"
+  symbol-recipe:
+    description: Authenticated release recipe to rebuild, or empty for canonical staging
+    required: false
+    default: ""
+  released-binary:
+    description: Public released binary admitted by the symbol recipe
+    required: false
+    default: ""
+  symbol-output:
+    description: Private detached symbol output path
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -101,12 +113,26 @@ runs:
         printf '1\n' > "$dependency_marker"
         candidate_started=$(date +%s)
         runner="$GITHUB_WORKSPACE/target/proof-native-darwin/bin/spice-proof-darwin-runner"
-        SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
-          SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
-          "$xtask" \
-          stage-target aarch64-apple-darwin --unsigned \
-          --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
-        candidate_seconds=$(($(date +%s) - candidate_started))
+        symbol_recipe='${{ inputs.symbol-recipe }}'
+        released_binary='${{ inputs.released-binary }}'
+        symbol_output='${{ inputs.symbol-output }}'
+        symbol_inputs=0
+        test -z "$symbol_recipe" || symbol_inputs=$((symbol_inputs + 1))
+        test -z "$released_binary" || symbol_inputs=$((symbol_inputs + 1))
+        test -z "$symbol_output" || symbol_inputs=$((symbol_inputs + 1))
+        test "$symbol_inputs" = 0 -o "$symbol_inputs" = 3
+        if test "$symbol_inputs" = 3; then
+          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
+            SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
+            "$xtask" rebuild-release-symbols \
+            "$symbol_recipe" "$released_binary" "$symbol_output"
+        else
+          SPICE_SOURCE_ARCHIVE="$EXPECTED_ARCHIVE" \
+            SPICE_RELEASE_CANVAS="$RELEASE_CANVAS" SPICE_RELEASE_APP="$RELEASE_APP" \
+            "$xtask" \
+            stage-target aarch64-apple-darwin --unsigned \
+            --proof-container "$PROOF_CONTAINER" --proof-runner "$runner"
+        fi
         transition_started=$(date +%s)
 
         payload="dist/stage/targets/aarch64-apple-darwin/payload.json"

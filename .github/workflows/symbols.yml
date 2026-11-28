@@ -26,13 +26,14 @@ permissions: {}
 jobs:
   symbols:
     name: Rebuild ${{ inputs.target }} symbols
-    runs-on: ${{ inputs.target == 'aarch64-apple-darwin' && 'macos-15' || inputs.target == 'x86_64-pc-windows-msvc' && 'windows-2025' || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.target == 'aarch64-apple-darwin' && 'macos-15' || 'ubuntu-24.04' }}
     timeout-minutes: 90
     permissions:
       actions: read
       attestations: write
       contents: read
       id-token: write
+      packages: read
     steps:
       - name: Check out the exact released source
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
@@ -48,7 +49,7 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/release
 
-      - name: Admit the released source and fetch its public assets
+      - name: Admit the release, its canonical inputs, and public executable
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,34 +61,96 @@ jobs:
           [[ "$RELEASE_RUN" =~ ^[1-9][0-9]*$ ]]
           [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          result="$RUNNER_TEMP/release/final-release.json"
-          test "$(jq -r .source_commit "$result")" = "$SOURCE_COMMIT"
-          tag="$(jq -r .tag "$result")"
-          test -n "$tag"
+          completed="$RUNNER_TEMP/release/final-release.json"
+          test "$(jq -r .source_commit "$completed")" = "$SOURCE_COMMIT"
+          tag="$(jq -r .tag "$completed")"
+          inputs_run="$(jq -r .release_inputs.run_id "$completed")"
+          challenge="$(jq -r .release_inputs.challenge "$completed")"
+          [[ "$inputs_run" =~ ^[1-9][0-9]*$ ]]
+          [[ "$challenge" =~ ^[0-9a-f]{64}$ ]]
           root="$RUNNER_TEMP/symbol-input"
-          mkdir -p "$root"
+          mkdir -p "$root/input" "$root/public"
+          gh run download "$inputs_run" --repo "$GITHUB_REPOSITORY" \
+            --name "input-$challenge" --dir "$root/input"
+          result="$root/input/result.json"
+          test "$(jq -r .run_id "$result")" = "$inputs_run"
+          test "$(jq -r .challenge "$result")" = "$challenge"
+          test "$(jq -r .source_commit "$result")" = "$SOURCE_COMMIT"
+          test "$(jq -r .source "$result")" = "$(jq -r .release_inputs.source "$completed")"
+          test "$(jq -r .app "$result")" = "$(jq -r .release_inputs.app "$completed")"
+          test "$(jq -r .canvas "$result")" = "$(jq -r .release_inputs.canvas "$completed")"
+          test "$(jq -r .proof_build_key "$result")" = "$(jq -r .release_inputs.proof_build_key "$completed")"
+          test "$(jq -r .proof_manifest "$result")" = "$(jq -r .release_inputs.proof_manifest "$completed")"
+          test "$(jq -r .proof_identity "$result")" = "$(jq -r .release_inputs.proof_identity "$completed")"
+          archive_sha256="$(sha256sum "$root/input/source.tar" | cut -d' ' -f1)"
+          test "$archive_sha256" = "$(jq -r .archive_sha256 "$result")"
           suffix=""
           test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$root" \
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$root/public" \
             --pattern "spice-$TARGET$suffix" \
             --pattern spice-release-evidence.zip
-          unzip -p "$root/spice-release-evidence.zip" \
+          unzip -p "$root/public/spice-release-evidence.zip" \
             "targets/$TARGET/symbols/recipe.json" > "$root/recipe.json"
-          test -s "$root/recipe.json"
+          recipe="$root/recipe.json"
+          test "$(jq -r .target "$recipe")" = "$TARGET"
+          test "$(jq -r .source_commit "$recipe")" = "$SOURCE_COMMIT"
+          test "$(jq -r .source_archive "$recipe")" = "$(jq -r .source "$result")"
+          test "$(jq -r .proof_container "$recipe")" = "$(jq -r .proof_identity "$result")"
+          {
+            printf 'RELEASE_TAG=%s\n' "$tag"
+            printf 'RELEASE_SOURCE=%s\n' "$(jq -r .source "$result")"
+            printf 'RELEASE_ARCHIVE_SHA256=%s\n' "$archive_sha256"
+            printf 'RELEASE_TREE=%s\n' "$(jq -r .tree "$result")"
+            printf 'RELEASE_APP=%s\n' "$(jq -r .app "$result")"
+            printf 'RELEASE_PROOF_BUILD_KEY=%s\n' "$(jq -r .proof_build_key "$result")"
+            printf 'RELEASE_PROOF_MANIFEST=%s\n' "$(jq -r .proof_manifest "$result")"
+            printf 'RELEASE_PROOF_IDENTITY=%s\n' "$(jq -r .proof_identity "$result")"
+          } >> "$GITHUB_ENV"
 
-      - name: Install the exact Rust toolchain
+      - name: Install exact ORAS
+        uses: oras-project/setup-oras@ac735097e22fe643015b0d19645f7c9a69942128
+        with:
+          version: 1.3.0
+
+      - name: Admit macOS host and install exact tools
+        if: ${{ inputs.target == 'aarch64-apple-darwin' }}
+        uses: ./.github/actions/macos-toolchain
+
+      - name: Restore exact macOS candidate
+        if: ${{ inputs.target == 'aarch64-apple-darwin' }}
+        uses: ./.github/actions/macos-candidate-prebuild
+        id: candidate_prebuild
+        with:
+          source_commit: ${{ inputs.source_commit }}
+          source: ${{ env.RELEASE_SOURCE }}
+          tree: ${{ env.RELEASE_TREE }}
+          archive_sha256: ${{ env.RELEASE_ARCHIVE_SHA256 }}
+          cargo_home: ${{ runner.temp }}/symbol-cargo
+          target_dir: ${{ runner.temp }}/symbol-target
+          token: ${{ github.token }}
+
+      - name: Rebuild with the declared native candidate environment
+        if: ${{ inputs.target == 'aarch64-apple-darwin' }}
+        uses: ./.github/actions/macos-unsigned-stage
+        with:
+          cargo-home: ${{ runner.temp }}/symbol-cargo
+          target-dir: ${{ runner.temp }}/symbol-target
+          archive: ${{ env.RELEASE_SOURCE }}
+          proof-container: ${{ env.RELEASE_PROOF_IDENTITY }}
+          canvas: ${{ runner.temp }}/symbol-input/input/canvas.zip
+          app: ${{ env.RELEASE_APP }}
+          proof-dependencies-restored: ${{ steps.candidate_prebuild.outputs.hit == '1' }}
+          symbol-recipe: ${{ runner.temp }}/symbol-input/recipe.json
+          released-binary: ${{ runner.temp }}/symbol-input/public/spice-${{ inputs.target }}
+          symbol-output: ${{ runner.temp }}/spice-${{ inputs.target }}.symbols
+
+      - name: Install exact Rust
+        if: ${{ inputs.target != 'aarch64-apple-darwin' }}
         shell: bash
         run: rustup toolchain install --no-self-update
 
-      - name: Install the Linux native linker
-        if: ${{ inputs.target == 'x86_64-unknown-linux-musl' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools
-
-      - name: Restore detached symbol tooling
+      - name: Restore canonical builder tooling
+        if: ${{ inputs.target != 'aarch64-apple-darwin' }}
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
         with:
           path: |
@@ -95,33 +158,101 @@ jobs:
             ${{ runner.temp }}/symbol-target
           key: release-symbols-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml') }}
 
-      - name: Build the repository-owned symbol driver and app tools
+      - name: Build the repository-owned symbol driver
+        if: ${{ inputs.target != 'aarch64-apple-darwin' }}
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/symbol-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/symbol-target
+        run: cargo build --locked --package xtask
+
+      - name: Pull and admit the exact proof image
+        if: ${{ inputs.target != 'aarch64-apple-darwin' }}
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          cargo install --locked --version 0.22.1 trunk
-          cargo install --locked --version 0.2.126 wasm-bindgen-cli
-          cargo build --locked --package xtask
+          xtask="$RUNNER_TEMP/symbol-target/debug/xtask"
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}/prepared"
+          reference="$repository@$RELEASE_PROOF_MANIFEST"
+          printf '%s' "$GHCR_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          read -r label manifest config identity < <(
+            "$xtask" prepared-artifact resolve-image "$reference" "$RELEASE_PROOF_BUILD_KEY"
+          )
+          test "$label" = resolved
+          test "$manifest" = "$RELEASE_PROOF_MANIFEST"
+          test "$config" = "$RELEASE_PROOF_IDENTITY"
+          test "$identity" = "$RELEASE_PROOF_IDENTITY"
+          docker pull "$reference"
+          vendor_set="$("$xtask" prepared-artifact vendor-set Cargo.lock | sed -n 's/^vendor set //p')"
+          read -r observed architecture os observed_vendor observed_key < <(
+            docker image inspect --format \
+              '{{.Id}} {{.Architecture}} {{.Os}} {{index .Config.Labels "org.spice.vendor-set"}} {{index .Config.Labels "org.spice.build-key"}}' \
+              "$reference"
+          )
+          test "$observed" = "$RELEASE_PROOF_IDENTITY"
+          test "$architecture $os" = "amd64 linux"
+          test "$observed_vendor" = "$vendor_set"
+          test "$observed_key" = "$RELEASE_PROOF_BUILD_KEY"
+          docker tag "$observed" "spice-proof-image:${vendor_set#sha256:}"
+          common="$(git rev-parse --git-common-dir)"
+          mkdir -p "$common/.spice"
+          printf '[proof]\ncontainer = "%s"\n' "$(command -v docker)" > "$common/.spice/config.toml"
+          docker logout ghcr.io
+          oras logout ghcr.io
 
-      - name: Rebuild and package detached symbols
+      - name: Install the pinned Windows cross input
+        if: ${{ inputs.target == 'x86_64-pc-windows-msvc' }}
+        shell: bash
+        env:
+          WINDOWS_MSVC_ACCEPTANCE: ${{ secrets.WINDOWS_MSVC_ACCEPTANCE }}
+        run: |
+          set -euo pipefail
+          version=0.10.0
+          name="xwin-$version-x86_64-unknown-linux-musl"
+          archive="$RUNNER_TEMP/$name.tar.gz"
+          curl -fsSL -o "$archive" \
+            "https://github.com/Jake-Shadle/xwin/releases/download/$version/$name.tar.gz"
+          printf '%s  %s\n' d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88 "$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          sudo install -D -m 0755 "$RUNNER_TEMP/$name/xwin" "/opt/spice/xwin/$version/xwin"
+          test -n "$WINDOWS_MSVC_ACCEPTANCE"
+          jq -rn --arg statement "$WINDOWS_MSVC_ACCEPTANCE" \
+            '"statement = \($statement | tojson)"' > dist/windows/msvc.local.toml
+
+      - name: Rebuild in the canonical sealed builder
+        if: ${{ inputs.target != 'aarch64-apple-darwin' }}
         shell: bash
         env:
           CARGO_HOME: ${{ runner.temp }}/symbol-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/symbol-target
+          SPICE_SOURCE_ARCHIVE: ${{ env.RELEASE_SOURCE }}
+          SPICE_RELEASE_CANVAS: ${{ runner.temp }}/symbol-input/input/canvas.zip
+          SPICE_RELEASE_APP: ${{ env.RELEASE_APP }}
+          SPICE_SEALED_TARGET: ${{ runner.temp }}/sealed-symbol-target
           TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+          suffix=""
+          test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
+          "$CARGO_TARGET_DIR/debug/xtask" rebuild-release-symbols \
+            "$RUNNER_TEMP/symbol-input/recipe.json" \
+            "$RUNNER_TEMP/symbol-input/public/spice-$TARGET$suffix" \
+            "$RUNNER_TEMP/spice-$TARGET.symbols"
+
+      - name: Package detached symbols and binding
+        shell: bash
+        env:
           SOURCE_COMMIT: ${{ inputs.source_commit }}
+          TARGET: ${{ inputs.target }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/symbol-input"
-          suffix=""
-          test "$TARGET" != x86_64-pc-windows-msvc || suffix=.exe
-          binary="$root/spice-$TARGET$suffix"
           raw="$RUNNER_TEMP/spice-$TARGET.symbols"
-          "$CARGO_TARGET_DIR/debug/xtask" rebuild-release-symbols \
-            "$root/recipe.json" "$binary" "$raw"
           archive="$RUNNER_TEMP/spice-$TARGET-symbols.tar.gz"
           tar -czf "$archive" -C "$RUNNER_TEMP" "$(basename "$raw")"
           bytes="$(wc -c < "$archive" | tr -d ' ')"
@@ -146,12 +277,14 @@ jobs:
             --arg target "$TARGET" \
             --arg source_commit "$SOURCE_COMMIT" \
             --arg released_binary "$(jq -r .released_binary "$root/recipe.json")" \
+            --arg built_binary "$(jq -r .built_binary "$root/recipe.json")" \
             --arg build_id "$(jq -r .build_id "$root/recipe.json")" \
             --arg toolchain "$(jq -r .toolchain "$root/recipe.json")" \
             --arg symbol_sha256 "$symbol_sha256" \
             --arg archive_sha256 "$archive_sha256" \
             --argjson compressed_bytes "$bytes" \
-            '{schema:1,target:$target,source_commit:$source_commit,released_binary:$released_binary,
+            '{schema:1,target:$target,source_commit:$source_commit,
+              released_binary:$released_binary,built_binary:$built_binary,
               build_id:$build_id,toolchain:$toolchain,symbol_sha256:$symbol_sha256,
               archive_sha256:$archive_sha256,compressed_bytes:$compressed_bytes}' \
             > "$RUNNER_TEMP/spice-$TARGET-symbols.json"

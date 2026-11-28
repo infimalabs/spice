@@ -28,7 +28,7 @@ const USAGE: &str = concat!(
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
     "rebuild-release-symbols RECIPE RELEASED_BINARY OUTPUT|",
-    "stage-hosted-release INPUTS_RUN|admit-hosted-release-notes RECORD COMMIT IDENTITY|dispatch-hosted-release --notes FILE [--stage-only] [--symbols]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|admit-hosted-release-notes RECORD COMMIT IDENTITY|dispatch-hosted-release --notes FILE [--stage-only] [--symbols]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only] [--symbols]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -140,7 +140,7 @@ fn main() -> ExitCode {
             &mut io::stderr().lock(),
         ),
         Some(value) if value == OsStr::new("rebuild-release-symbols") => {
-            release_cli::run_rebuild_release_symbols(arguments.collect(), &ambient, &mut output)
+            run_rebuild_release_symbols(arguments.collect(), &ambient, &mut output)
         }
         Some(value) if value == OsStr::new("windows-appliance") => {
             run_windows_appliance(arguments.collect(), &ambient, &mut output)
@@ -169,6 +169,14 @@ fn main() -> ExitCode {
         }
     };
     finish(result)
+}
+
+fn run_rebuild_release_symbols(
+    arguments: Vec<OsString>,
+    ambient: &Ambient,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    release_cli::run_rebuild_release_symbols(arguments, ambient, output, &mut io::stderr().lock())
 }
 
 fn is_exact_command(

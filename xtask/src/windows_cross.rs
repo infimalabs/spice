@@ -66,6 +66,7 @@ pub enum WindowsCrossError {
     App(AppBuildError),
     SourceArchive,
     ProviderCanvas,
+    SymbolInputs,
     Run(proof::ContainerError),
     Output(io::Error),
     Build(Option<i32>),
@@ -112,6 +113,9 @@ impl fmt::Display for WindowsCrossError {
                 "SPICE_RELEASE_CANVAS and SPICE_RELEASE_APP name a provider canvas only ",
                 "together, as Unicode, for a delivered source archive"
             )),
+            Self::SymbolInputs => formatter.write_str(
+                "Windows symbol staging requires a delivered source archive and provider canvas",
+            ),
             Self::Run(error) => write!(formatter, "Windows cross build did not run: {error}"),
             Self::Output(error) => write!(formatter, "cannot write cross build output: {error}"),
             Self::Build(Some(code)) => write!(formatter, "Windows cross build exited {code}"),
@@ -139,6 +143,7 @@ impl Error for WindowsCrossError {
             | Self::ImageBuildTimeout { .. }
             | Self::SourceArchive
             | Self::ProviderCanvas
+            | Self::SymbolInputs
             | Self::Build(_) => None,
         }
     }
@@ -182,6 +187,43 @@ pub fn windows_cross(
         ambient,
         &repository,
         source,
+        CrossOperation::Bundle,
+        output,
+        error_output,
+    )
+}
+
+/// Rebuild the Windows candidate and PDB in the canonical cross image.
+///
+/// The delivered source and provider canvas are required; the resulting
+/// private stage is never published as a canonical release payload.
+pub fn windows_cross_symbols(
+    environment: &ReleaseEnvironment,
+    ambient: &sill::Environment,
+    stage: &Path,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsCrossError> {
+    let repository = spice::repository::Repository::discover(Path::new("."))
+        .map_err(|error| WindowsCrossError::Repository(Box::new(error)))?;
+    let delivered = environment
+        .source_archive
+        .as_ref()
+        .and_then(|identity| identity.to_str())
+        .ok_or(WindowsCrossError::SymbolInputs)?;
+    let canvas = provider_canvas(environment, true)?.ok_or(WindowsCrossError::SymbolInputs)?;
+    let source = CrossSource {
+        workspace: repository.worktree_root(),
+        git_common: repository.common_dir(),
+        delivered: Some(delivered),
+        canvas: Some(canvas),
+    };
+    cross_build(
+        environment,
+        ambient,
+        &repository,
+        source,
+        CrossOperation::Symbols(stage),
         output,
         error_output,
     )
@@ -222,6 +264,7 @@ pub(crate) fn windows_cross_release(
         ambient,
         &repository,
         source,
+        CrossOperation::Bundle,
         output,
         error_output,
     )
@@ -263,11 +306,18 @@ struct CrossSource<'a> {
     canvas: Option<proof::ProviderCanvas<'a>>,
 }
 
+#[derive(Clone, Copy)]
+enum CrossOperation<'a> {
+    Bundle,
+    Symbols(&'a Path),
+}
+
 fn cross_build(
     environment: &ReleaseEnvironment,
     ambient: &sill::Environment,
     repository: &spice::repository::Repository,
     source: CrossSource<'_>,
+    operation: CrossOperation<'_>,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), WindowsCrossError> {
@@ -311,30 +361,52 @@ fn cross_build(
     )?;
     writeln!(output, "[windows-cross] image={cross_image}").map_err(WindowsCrossError::Output)?;
 
-    if source.delivered.is_none() {
-        crate::app(environment, output).map_err(WindowsCrossError::App)?;
+    match operation {
+        CrossOperation::Bundle => {
+            if source.delivered.is_none() {
+                crate::app(environment, output).map_err(WindowsCrossError::App)?;
+            }
+            let out = build_root.join(CROSS_OUTPUT);
+            let run = container
+                .cross_build_windows(proof::WindowsCross {
+                    cross_image: &cross_image,
+                    msvc_generation: &msvc.generation,
+                    git_common: source.git_common,
+                    out: &out,
+                    delivered: source.delivered,
+                    canvas: source.canvas,
+                })
+                .map_err(WindowsCrossError::Run)?;
+            write_stage(&run, output, error_output)?;
+            record_bundle(&out, output)
+        }
+        CrossOperation::Symbols(stage) => {
+            let delivered = source.delivered.ok_or(WindowsCrossError::SymbolInputs)?;
+            let canvas = source.canvas.ok_or(WindowsCrossError::SymbolInputs)?;
+            let run = container
+                .stage_windows_symbols(&cross_image, source.git_common, stage, delivered, canvas)
+                .map_err(WindowsCrossError::Run)?;
+            write_stage(&run, output, error_output)
+        }
     }
-    let out = build_root.join(CROSS_OUTPUT);
-    let run = container
-        .cross_build_windows(proof::WindowsCross {
-            cross_image: &cross_image,
-            msvc_generation: &msvc.generation,
-            git_common: source.git_common,
-            out: &out,
-            delivered: source.delivered,
-            canvas: source.canvas,
-        })
-        .map_err(WindowsCrossError::Run)?;
+}
+
+fn write_stage(
+    run: &proof::ReleaseStage,
+    output: &mut impl Write,
+    error_output: &mut impl Write,
+) -> Result<(), WindowsCrossError> {
     output
         .write_all(&run.stdout)
         .map_err(WindowsCrossError::Output)?;
     error_output
         .write_all(&run.stderr)
         .map_err(WindowsCrossError::Output)?;
-    if !run.success {
-        return Err(WindowsCrossError::Build(run.code));
+    if run.success {
+        Ok(())
+    } else {
+        Err(WindowsCrossError::Build(run.code))
     }
-    record_bundle(&out, output)
 }
 
 /// The image build context for `msvc`'s generation: the tracked definition

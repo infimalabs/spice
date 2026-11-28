@@ -114,6 +114,7 @@ impl Error for LinuxSealedError {
 /// runtime failure, or the in-image staging exit.
 pub fn linux_sealed_stage(
     environment: &ReleaseEnvironment,
+    capture_symbols: bool,
     output: &mut impl Write,
     error_output: &mut impl Write,
 ) -> Result<(), LinuxSealedError> {
@@ -151,8 +152,18 @@ pub fn linux_sealed_stage(
     };
     let canvas = provider_canvas(environment, delivered.is_some())?;
     let target = environment.sealed_target.as_deref().map(Path::new);
+    let symbol_stage = capture_symbols
+        .then(|| environment.stage_root.as_deref().map(Path::new))
+        .flatten();
     let stage = container
-        .stage_release(repository.common_dir(), delivered, canvas, target)
+        .stage_release(
+            repository.common_dir(),
+            delivered,
+            canvas,
+            target,
+            symbol_stage,
+            capture_symbols,
+        )
         .map_err(LinuxSealedError::Run)?;
     output
         .write_all(&stage.stdout)
