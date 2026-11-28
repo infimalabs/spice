@@ -555,10 +555,13 @@ and resumes the pinned commit. A completed attempt records the notes-record
 and publication-plan digests; later attempts re-admit those bytes and freshly
 read the public release instead of publishing again. The final readback is the
 workflow's one result artifact. Notes admission and input production overlap,
-then Linux,
-Darwin, and Windows stage concurrently; each platform's tool and dependency
-preparation waits only for the immutable input record it consumes, never for
-a sibling.
+then Linux, Darwin, and Windows stage concurrently; each platform's tool and
+dependency preparation waits only for the immutable input record it consumes,
+never for a sibling. The Windows phase begins with Linux-hosted cross
+preparation, continues through sealed bundle publication and native Windows
+provider execution, and ends only after the provider output is admitted. Its
+reported duration therefore covers the platform's complete critical path,
+rather than only the short native workflow.
 Each platform executes the complete proof battery in its provider-specific sealed
 environment and returns its detached receipt with the staged bytes. When a
 battery refuses, its displayed error names every non-clean member, its

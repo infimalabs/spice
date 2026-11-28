@@ -119,6 +119,11 @@ pub(super) fn release_bundle(
             admit().map_err(|error| refused(error.to_string()))?
         }
     };
+    writeln!(
+        output,
+        "Windows staging phase: sealed cross-built bundle publication"
+    )
+    .map_err(WindowsHostedError::Output)?;
     let digest = with_ghcr_login(&host.ambient, inputs.tree(), || {
         publish_bundle(
             &prepared_repository(repository),
