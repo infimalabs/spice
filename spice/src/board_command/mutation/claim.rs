@@ -496,9 +496,7 @@ impl<'a> PreparedClaim<'a> {
                 origin_context,
                 room_context,
             },
-            self.prepared_git
-                .as_ref()
-                .and_then(spice::task_git::ClaimPreparation::transplant),
+            self.prepared_git.as_ref(),
             false,
         )
     }
@@ -577,7 +575,7 @@ fn claim_answer(
     selected: &Entry,
     snapshot: &ValidatedSnapshot,
     reading: ClaimReading,
-    transplant: Option<&wire::intent::ClaimTransplant>,
+    prepared: Option<&spice::task_git::ClaimPreparation<'_>>,
     nothing_stolen: bool,
 ) -> wire::intent::ClaimAnswer {
     let ClaimReading {
@@ -633,8 +631,13 @@ fn claim_answer(
             command.actor(),
             &snapshot.answer.addresses,
         )),
-        transplant: transplant.cloned(),
+        transplant: prepared
+            .and_then(spice::task_git::ClaimPreparation::transplant)
+            .cloned(),
         parked: None,
+        uncarried: prepared
+            .and_then(|prepared| prepared.uncarried.as_deref())
+            .map(Box::from),
     }
 }
 
@@ -744,9 +747,7 @@ pub(in crate::board_command) fn commit_claim(
             origin_context,
             room_context,
         },
-        prepared_git
-            .as_ref()
-            .and_then(spice::task_git::ClaimPreparation::transplant),
+        prepared_git.as_ref(),
         nothing_stolen,
     );
     if let Err(error) = write.command_result(
@@ -1234,12 +1235,20 @@ pub(in crate::board_command) fn claim_git_boundary<'a>(
                 }),
             }
         }
-        Possession::Steal => {
-            spice::task_git::prepare_explicit_claim(&lane, ambient).map(|prepared| ClaimGit {
-                boundary: prepared.boundary.clone(),
-                prepared: Some(prepared),
-            })
+        Possession::Steal => match stolen_work(resident, snapshot, command, selected) {
+            Ok(Some(work)) => spice::task_git::prepare_task_claim(&lane, ambient, Some(&work)),
+            Ok(None) => spice::task_git::prepare_explicit_claim(&lane, ambient),
+            Err(reason) => {
+                spice::task_git::prepare_explicit_claim(&lane, ambient).map(|mut prepared| {
+                    prepared.uncarried = Some(reason);
+                    prepared
+                })
+            }
         }
+        .map(|prepared| ClaimGit {
+            boundary: prepared.boundary.clone(),
+            prepared: Some(prepared),
+        }),
         Possession::Next | Possession::Capture | Possession::Join => {
             spice::task_git::prepare_task_claim(&lane, ambient, parked).map(|prepared| ClaimGit {
                 boundary: prepared.boundary.clone(),
@@ -1260,6 +1269,40 @@ pub(in crate::board_command) fn claim_git_boundary<'a>(
         }
     };
     result.map(Some).map_err(task_git_outcome)
+}
+
+/// The displaced holder's unpublished commits and dirty work, copied from its
+/// lane for a steal to replay; `Err` names why none could be carried.
+fn stolen_work(
+    resident: Host<'_>,
+    snapshot: &ValidatedSnapshot,
+    command: &wire::AdmittedCommand,
+    selected: &Entry,
+) -> Result<Option<wire::body::TaskParkedCommits>, String> {
+    let Some(victim) = selected
+        .active_claims()
+        .find(|held| held.claim().actor != *command.actor())
+    else {
+        return Ok(None);
+    };
+    let Some(won) = snapshot
+        .facts
+        .at(victim.claimed())
+        .and_then(|envelope| envelope.fact.read::<body::ClaimWon>())
+    else {
+        return Ok(None);
+    };
+    let Some(row) = snapshot
+        .answer
+        .residency
+        .body
+        .lanes
+        .iter()
+        .find(|row| row.lane == won.lane)
+    else {
+        return Ok(None);
+    };
+    crate::board_command::copy_holder_work(resident, &row.worktree, won.git.as_ref())
 }
 
 fn recovery_git_boundary(

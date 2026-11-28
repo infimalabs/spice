@@ -135,6 +135,8 @@ mod automatic_lifecycle;
 pub(crate) use automatic_lifecycle::{
     AutomaticClaim, AutomaticSeat, claim_automatic, is_automatic_claim, release_automatic,
 };
+mod holder_work;
+pub(crate) use holder_work::copy_holder_work;
 pub(crate) mod drive;
 mod mutation;
 mod placement;

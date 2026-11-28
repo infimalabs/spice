@@ -1196,7 +1196,7 @@ impl Wakes {
         let bus = command_surface.bus();
         let fired = self
             .timers
-            .consume(bus, timer, Some(command_surface.repository()))?;
+            .consume(bus, timer, Some(command_surface.host()))?;
         accept_timer_fired(bus, command_surface, &mut self.lifecycle, fired)?;
         self.settle(command_surface, seats, diagnostic)
     }

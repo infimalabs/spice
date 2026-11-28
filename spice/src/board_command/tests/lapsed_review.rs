@@ -134,3 +134,41 @@ fn a_lapsed_review_is_reallocated_and_its_verdict_moves_with_the_assignment() {
     ));
     clean(&root, bus);
 }
+
+/// A lapse's copied work is the task's parked authority for exactly its next
+/// claim, whichever lane takes it.
+#[test]
+fn a_lapsed_holders_work_is_parked_for_the_next_claim_only() {
+    let (root, bus, epoch, seats) = fixture("lapsed-work", 2);
+    let departed = Actor::Lane(seats[0].lane);
+    let successor = Actor::Lane(seats[1].lane);
+    let task = add(
+        &bus,
+        epoch,
+        Actor::TEST_PRINCIPAL,
+        "LAPSE-work00001",
+        "Carry the work whose holder left",
+        None,
+    );
+    let open = board(&bus, epoch, departed);
+    take_next(&bus, epoch, &seats[0], &open, &task);
+    let parked = wire::body::TaskParkedCommits {
+        baseline: "1".repeat(40),
+        head: "2".repeat(40),
+        commits: vec!["2".repeat(40)],
+        snapshot: Some("3".repeat(40)),
+    };
+
+    lapse_claim_carrying(&bus, epoch, &seats[0], &task, Some(parked.clone()));
+    let released = board(&bus, epoch, successor.clone());
+    assert_eq!(at(&released, &task).parked_commits, Some(parked));
+
+    take_next(&bus, epoch, &seats[1], &released, &task);
+    let retaken = board(&bus, epoch, successor);
+    assert_eq!(
+        at(&retaken, &task).parked_commits,
+        None,
+        "the claim that replays parked work consumes it"
+    );
+    clean(&root, bus);
+}

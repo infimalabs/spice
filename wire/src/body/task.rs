@@ -877,6 +877,14 @@ pub struct ClaimLapsed {
     pub occupant: CanonicalUuid,
     /// Lease deadline that passed.
     pub expiry: Instant,
+    /// The holder's unpublished commits and dirty work, copied for the next
+    /// claim of the task; the holder lane itself is left untouched.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::optional::present"
+    )]
+    pub parked: Option<TaskParkedCommits>,
 }
 
 /// The resident extended a live, epoch-bound lease within its maximum.

@@ -281,7 +281,7 @@ fn select_task(
 
 /// The lane's own repository, refused unless it is still the resident's worktree.
 /// A refusal parks only this lane; a fault would end the resident for every lane.
-fn lane_repository(
+pub(super) fn lane_repository(
     repository: Host<'_>,
     worktree: &str,
 ) -> Result<Repository, Outcome<CommandAnswer>> {
@@ -345,6 +345,7 @@ fn automatic_answer(
         nothing_stolen: false,
         transplant: transplant.cloned(),
         parked: None,
+        uncarried: None,
     }
 }
 
@@ -415,6 +416,7 @@ pub(crate) fn release_automatic(
     }
     let answer = wire::intent::ClaimAnswer {
         parked: parked_answer(&handle, parked.as_ref()),
+        uncarried: None,
         ownership: Some(ownership),
         task: handle,
         statement: None,

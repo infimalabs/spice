@@ -378,37 +378,22 @@ pub fn prepare_free<'a>(
 ) -> Result<Option<ParkedRelease<'a>>, Error> {
     let root = Worktree::new(repository.worktree_root(), ambient);
     recover_pending(root)?;
-    snapshot::require_releasable(root)?;
-    let before = required_read(root, &["rev-parse", "HEAD"], "read lane HEAD")?;
-    let snapshot = snapshot::capture(root, &before)?;
-    let published = match published_reference(root, opening)? {
-        Some(published) => published,
-        None if snapshot.is_some() => before.clone(),
-        None => return Ok(None),
-    };
-    let commits = rev_list(root, &published, &before)?;
-    if commits.is_empty() && snapshot.is_none() {
+    let Some(carry::Collected { parked, snapshot }) = carry::collect(root, opening)? else {
         return Ok(None);
-    }
-    let baseline = required_read(
-        root,
-        &["merge-base", &published, &before],
-        "find the newest published lane commit",
-    )?;
+    };
+    let before = parked.head.clone();
     if let Some(snapshot) = &snapshot {
-        materialize_release(root, &baseline, &before, snapshot)?;
+        materialize_release(root, &parked.baseline, &before, snapshot)?;
     } else {
-        materialize_and_update(root, &baseline, &before, "return lane to published history")?;
+        materialize_and_update(
+            root,
+            &parked.baseline,
+            &before,
+            "return lane to published history",
+        )?;
     }
     Ok(Some(ParkedRelease {
-        parked: wire::body::TaskParkedCommits {
-            baseline,
-            head: before.clone(),
-            commits,
-            snapshot: snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.commit().to_owned()),
-        },
+        parked,
         root: root.to_path_buf(),
         ambient,
         before,
@@ -484,6 +469,7 @@ pub fn prepare_explicit_claim(
     Ok(ClaimPreparation {
         boundary,
         restore: None,
+        uncarried: None,
     })
 }
 /// Claim-side Git work prepared before the guarded claim fact commits.
@@ -491,6 +477,8 @@ pub fn prepare_explicit_claim(
 pub struct ClaimPreparation<'a> {
     pub boundary: GitBoundary,
     restore: Option<ParkedRestore<'a>>,
+    /// Why a steal could not copy the displaced holder's work onto this lane.
+    pub uncarried: Option<String>,
 }
 
 #[derive(Debug)]
@@ -562,6 +550,7 @@ pub fn prepare_task_claim<'a>(
         return Ok(ClaimPreparation {
             boundary,
             restore: None,
+            uncarried: None,
         });
     };
     let replayed = match transplant::replay(
@@ -593,6 +582,7 @@ pub fn prepare_task_claim<'a>(
             restored: replayed.head,
             report: replayed.report,
         }),
+        uncarried: None,
     })
 }
 
@@ -1456,6 +1446,8 @@ fn is_push_race(output: &GitOutput) -> bool {
 
 mod admission;
 use admission::*;
+mod carry;
+pub use carry::copy_parked;
 mod dirty;
 use dirty::dirty_paths;
 mod landing;

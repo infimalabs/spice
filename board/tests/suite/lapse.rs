@@ -191,6 +191,7 @@ fn claim_opening(journal: &mut Journal, command: u8, source: body::SourceBoundar
                 nothing_stolen: false,
                 transplant: None,
                 parked: None,
+                uncarried: None,
             },
         )
         .expect("the claim receipt builds");
@@ -288,6 +289,7 @@ fn free(journal: &mut Journal, command: u8) {
                 nothing_stolen: false,
                 transplant: None,
                 parked: None,
+                uncarried: None,
             },
         )
         .expect("the release receipt builds");
@@ -334,6 +336,7 @@ fn lapse_request(command: u8, expiry: u8) -> Request {
         expiry: instant(expiry),
         at: instant(expiry),
         intent: intent::TaskRef { task: task() },
+        parked: None,
     }
 }
 
@@ -1117,6 +1120,7 @@ fn a_task_command_that_appends_no_fact_is_refused_instead_of_receipted() {
                 nothing_stolen: false,
                 transplant: None,
                 parked: None,
+                uncarried: None,
             },
         )
         .expect("the receipt itself is well formed");

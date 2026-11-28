@@ -120,6 +120,12 @@ flowchart LR
 - `task free`, self-deferral and plan completion park work. Peer deferral changes
   scheduling, never possession; deferring another holder's open Design
   [asks it to free](invariants/identity.md#work-deferral-stops-an-open-design).
+- An involuntary release copies the holder's work and never modifies its lane:
+  a lease lapse records the copy on its lapse fact as parked work for the next
+  claim, and a steal replays it onto the stealer before its claim commits. An
+  open merge, paused replay or unfinished task transaction in the holder lane
+  carries nothing; the lapse notice or steal answer names why, and the claim
+  still moves.
 - A refused guarded write restores claim and lane, including staged/worktree
   separation.
 - Existing-task capture, new-task capture, and `--steal` acquire work through

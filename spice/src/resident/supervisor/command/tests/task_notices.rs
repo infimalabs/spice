@@ -249,6 +249,8 @@ fn an_ended_claim_withdraws_only_its_own_queued_assignment_notice() {
         occupant: notice.occupant,
         task: notice.task.clone(),
         expiry: "2026-10-12T17:25:28.368Z".parse().expect("fixture instant"),
+        parked: false,
+        uncarried: None,
     });
     driver.withdraw_task_assignment(&ended(33));
     let frames = sink.answered(3);
@@ -268,6 +270,8 @@ fn claim_lapse_notices_are_private_and_deduplicated_by_lapse() {
         occupant: crate::resident::new_uuid(),
         task: "CLAIM-1kKRRsDPx".to_owned(),
         expiry: "2026-10-12T17:25:28.368Z".parse().expect("fixture instant"),
+        parked: false,
+        uncarried: None,
     };
 
     driver.deliver_claim_lapse(&notice);

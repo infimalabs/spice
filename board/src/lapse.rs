@@ -32,6 +32,8 @@ pub struct Request {
     pub at: Instant,
     /// Exact task named by the lapse command.
     pub intent: intent::TaskRef,
+    /// The holder's work copied for the next claim, when it had any.
+    pub parked: Option<body::TaskParkedCommits>,
 }
 
 /// The lapsed task and its one-fact committed range.
@@ -400,6 +402,7 @@ fn build_write(
                 task: stamp.clone(),
                 occupant: request.occupant,
                 expiry: request.expiry,
+                parked: request.parked.clone(),
             },
             FactCause::Root,
         )
@@ -454,6 +457,7 @@ fn build_write(
                 nothing_stolen: false,
                 transplant: None,
                 parked: None,
+                uncarried: None,
             },
         )
         .map_err(LapseError::Build)?;
@@ -566,6 +570,7 @@ mod tests {
             expiry: instant(20),
             at: instant(20),
             intent: intent::TaskRef { task: task() },
+            parked: None,
         }
     }
 
@@ -661,6 +666,7 @@ mod tests {
                     nothing_stolen: false,
                     transplant: None,
                     parked: None,
+                    uncarried: None,
                 },
             )
             .expect("the claim receipt builds");

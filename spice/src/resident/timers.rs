@@ -67,12 +67,15 @@ struct ClaimAuthority {
     expiry: Instant,
 }
 
-/// One claim this resident just lapsed, with the lane that held it.
+/// One claim this resident just lapsed, with the lane that held it and what
+/// became of the work that lane held for it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct LapsedClaim {
     lane: CanonicalUuid,
     task: TaskHandle,
     expiry: Instant,
+    parked: bool,
+    uncarried: Option<String>,
 }
 
 impl LapsedClaim {
@@ -94,6 +97,8 @@ impl LapsedClaim {
                 occupant,
                 task: self.task.to_string(),
                 expiry: self.expiry,
+                parked: self.parked,
+                uncarried: self.uncarried.clone(),
             },
         ))
     }
@@ -407,7 +412,7 @@ impl Runtime {
         &mut self,
         bus: &Bus,
         event: TimerEvent,
-        repository: Option<&spice::repository::Repository>,
+        host: Option<crate::command_client::Host<'_>>,
     ) -> CommandResult<Fired> {
         match event.kind() {
             TimerKind::TaskWake
@@ -423,7 +428,7 @@ impl Runtime {
             TimerKind::SteerEscalate | TimerKind::SteerLapse => {
                 self.consume_steering(bus, event).map(|()| Fired::Steering)
             }
-            TimerKind::ClaimLapse => self.consume_claim(bus, event, repository),
+            TimerKind::ClaimLapse => self.consume_claim(bus, event, host),
             TimerKind::ClaimRenew => self.consume_renewal(bus, event),
             kind => Err(environment_fault(
                 "bus::timer-kind-unhandled",
@@ -531,7 +536,7 @@ impl Runtime {
         &mut self,
         bus: &Bus,
         event: TimerEvent,
-        repository: Option<&spice::repository::Repository>,
+        host: Option<crate::command_client::Host<'_>>,
     ) -> CommandResult<Fired> {
         let Some(key) = self
             .claims
@@ -544,7 +549,7 @@ impl Runtime {
             .claims
             .remove(&key)
             .expect("event claim came from the armed map");
-        let (task, _) = key;
+        let (task, claimed) = key;
         if event.owner() != armed.authority.task.to_string()
             || event.deadline() != armed.authority.expiry
         {
@@ -554,20 +559,23 @@ impl Runtime {
             ));
         }
         let at = current_instant()?;
-        let request = board::lapse::Request {
+        let mut request = board::lapse::Request {
             command: new_uuid(),
             occupant: armed.authority.occupant,
             epoch: armed.authority.epoch,
             expiry: armed.authority.expiry,
             at,
             intent: intent::TaskRef { task: task.clone() },
+            parked: None,
         };
         let observed = bus
             .task_snapshot()
             .map_err(|error| store_fault("bus::timer-policy-read", &error.to_string()))?;
-        let (policy, owners) =
-            crate::board_command::ownership::capture_required(repository, &observed)
-                .map_err(typed_outcome)?;
+        let (policy, owners) = crate::board_command::ownership::capture_required(
+            host.map(|host| host.repository),
+            &observed,
+        )
+        .map_err(typed_outcome)?;
         let residency = observed
             .residency()
             .expect("ownership capture requires residency")
@@ -579,6 +587,15 @@ impl Runtime {
             return Ok(Fired::ClaimLapse(None));
         };
         let topic = heads.statement().body().topic.clone();
+        let uncarried = match host.map(|host| lapsed_work(host, &observed, claimed)) {
+            Some(Ok(parked)) => {
+                request.parked = parked;
+                None
+            }
+            Some(Err(reason)) => Some(reason),
+            None => None,
+        };
+        let parked = request.parked.is_some();
         let authority = journal::JournalGuard::new(move |read| {
             policy.require_current()?;
             if !read
@@ -612,6 +629,8 @@ impl Runtime {
                 lane: armed.authority.lane,
                 task,
                 expiry: armed.authority.expiry,
+                parked,
+                uncarried,
             }))),
             Err(
                 board::lapse::LapseError::Refused(_)
@@ -711,6 +730,31 @@ impl Runtime {
     }
 }
 
+/// The lapsing holder's work, copied from its lane for the task's next claim;
+/// `Err` names why none could be carried.
+fn lapsed_work(
+    host: crate::command_client::Host<'_>,
+    observed: &bus::TaskSnapshot,
+    claimed: wire::Seq,
+) -> Result<Option<wire::body::TaskParkedCommits>, String> {
+    let Some(won) = observed
+        .facts()
+        .at(claimed)
+        .and_then(|envelope| envelope.fact.read::<wire::body::ClaimWon>())
+    else {
+        return Ok(None);
+    };
+    let Some(row) = observed.residency().and_then(|residency| {
+        residency
+            .body()
+            .lanes
+            .iter()
+            .find(|row| row.lane == won.lane)
+    }) else {
+        return Ok(None);
+    };
+    crate::board_command::copy_holder_work(host, &row.worktree, won.git.as_ref())
+}
 fn renew_claim(
     bus: &Bus,
     authority: RenewalAuthority,

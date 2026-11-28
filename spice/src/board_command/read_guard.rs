@@ -233,11 +233,15 @@ impl TaskProjection<'_> {
         let completion = positioned(heads.completion());
         let claims = board_claims(heads);
         let latest = claims.last().map(|held| &held.claim);
-        let freed = latest
-            .and_then(|head| self.facts.at(head.position))
-            .and_then(|envelope| envelope.fact.read::<body::ClaimFreed>());
+        let ended = latest.and_then(|head| self.facts.at(head.position));
+        let freed = ended.and_then(|envelope| envelope.fact.read::<body::ClaimFreed>());
         let explicit_release = freed.is_some();
-        let parked_commits = freed.and_then(|freed| freed.parked);
+        let parked_commits = match freed {
+            Some(freed) => freed.parked,
+            None => ended
+                .and_then(|envelope| envelope.fact.read::<body::ClaimLapsed>())
+                .and_then(|lapsed| lapsed.parked),
+        };
         let phase_handoff = phase_handoff(self.facts, heads)?;
         let claim_context = current_claim_context(
             &statement.body.born,
