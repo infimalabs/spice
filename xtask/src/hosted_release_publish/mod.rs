@@ -130,7 +130,7 @@ pub fn publish_hosted_release(
                 )
             })
         });
-        let inputs = scope.spawn(|| timed(|| admit_inputs(&session, input_commit)));
+        let inputs = scope.spawn(|| timed(|| admit_inputs(&session, input_commit, host)));
         (
             notes.join().expect("release notes admission panicked"),
             inputs.join().expect("release input staging panicked"),
@@ -279,10 +279,11 @@ fn admit_notes_source(notes: &wire::ReleaseNotes, source_commit: &str) -> Result
 fn admit_inputs(
     session: &PublicationSession,
     source_commit: String,
+    host: &CrossHost,
 ) -> Result<ReleaseInputs, PublishError> {
     let inputs = match session.inputs_run()? {
         Some(run) => hosted_release_inputs(Attach::Run(run))?,
-        None => hosted_release_inputs_dispatch(source_commit)?,
+        None => hosted_release_inputs_dispatch(source_commit, host)?,
     };
     if inputs.manifest().source_commit != session.source_commit() {
         return Err(PublishError::Refused(format!(

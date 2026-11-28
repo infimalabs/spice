@@ -6,6 +6,7 @@
 //! host holding that acceptance builds; the published bundle carries compiled
 //! executables, never the sysroot.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -22,7 +23,7 @@ use windows_execution::hosted::release_inputs::ResultManifest;
 use windows_execution::protocol::{BUNDLE_PROGRAM, BundleProgram, Command};
 
 use super::{
-    ReleaseInputs, WindowsHostedError, command_text, prepared_repository, with_ghcr_login,
+    ReleaseInputs, WindowsHostedError, command, command_text, prepared_repository, with_ghcr_login,
 };
 use crate::ReleaseEnvironment;
 use crate::prepared_artifact::WindowsReleaseBundle;
@@ -36,6 +37,8 @@ const RUNNER_PROGRAM: &str = "runner/windows-hosted.exe";
 /// A layered image normally transfers in seconds; this bound also covers a
 /// cold multi-gigabyte pull without letting provider staging wait forever.
 const IMAGE_PULL_RUNTIME: Duration = Duration::from_secs(30 * 60);
+const LOCAL_IMAGE_RUNTIME: Duration = Duration::from_secs(2 * 60);
+const PREPARED_REGISTRY_RUNTIME: Duration = Duration::from_secs(30 * 60);
 const OUTPUT_DRAIN: Duration = Duration::from_secs(10);
 const REAP: Duration = Duration::from_secs(10);
 const GRACE: Duration = Duration::from_secs(5);
@@ -116,13 +119,15 @@ pub(super) fn release_bundle(
             admit().map_err(|error| refused(error.to_string()))?
         }
     };
-    let digest = with_ghcr_login(|| {
-        crate::prepared_artifact::publish_bundle(
+    let digest = with_ghcr_login(&host.ambient, inputs.tree(), || {
+        publish_bundle(
             &prepared_repository(repository),
             &manifest,
             &payload,
+            &bundle,
+            &host.ambient,
+            inputs.tree(),
         )
-        .map_err(|error| error.to_string())
     })
     .map_err(refused)?;
     writeln!(output, "[windows-cross] published {digest}").map_err(WindowsHostedError::Output)?;
@@ -146,7 +151,11 @@ fn admitted_proof_image(
         .map_err(|error| refused(error.to_string()))?;
     let tag = vendor_set.image_tag();
     let manifest = inputs.manifest();
-    if local_image(&tag).as_deref() == Some(manifest.proof_identity.as_str()) {
+    if local_image(&tag, ambient, inputs.tree())
+        .map_err(&refused)?
+        .as_deref()
+        == Some(manifest.proof_identity.as_str())
+    {
         return Ok(());
     }
     let mut operation = || -> Result<(), String> {
@@ -155,17 +164,18 @@ fn admitted_proof_image(
             prepared_repository(repository),
             manifest.proof_manifest
         );
-        let mut resolution = Vec::new();
-        with_ghcr_login(|| {
-            crate::prepared_artifact::prepared_artifact(
+        with_ghcr_login(ambient, inputs.tree(), || {
+            let resolution = prepared_artifact(
+                "layered proof image resolution",
+                PREPARED_REGISTRY_RUNTIME,
                 vec![
                     "resolve-image".into(),
                     reference.clone().into(),
                     manifest.proof_build_key.clone().into(),
                 ],
-                &mut resolution,
-            )
-            .map_err(|error| error.to_string())?;
+                ambient,
+                inputs.tree(),
+            )?;
             admit_resolution(&resolution, manifest)?;
             pull_image(&reference, ambient, inputs.tree(), output, error_output)
         })?;
@@ -177,6 +187,10 @@ fn admitted_proof_image(
             proof::PROOF_IMAGE_BUILD_KEY_LABEL
         );
         let inspected = command_text(
+            "layered proof image inspection",
+            LOCAL_IMAGE_RUNTIME,
+            ambient,
+            inputs.tree(),
             "docker",
             &["image", "inspect", "--format", &format, &reference],
         )?;
@@ -209,8 +223,15 @@ fn admitted_proof_image(
                 manifest.proof_build_key
             ));
         }
-        command_text("docker", &["tag", identity, &tag])?;
-        if local_image(&tag).as_deref() != Some(identity) {
+        command_text(
+            "layered proof image tagging",
+            LOCAL_IMAGE_RUNTIME,
+            ambient,
+            inputs.tree(),
+            "docker",
+            &["tag", identity, &tag],
+        )?;
+        if local_image(&tag, ambient, inputs.tree())?.as_deref() != Some(identity) {
             return Err(format!("local proof image tag {tag} differs after tagging"));
         }
         Ok(())
@@ -241,6 +262,58 @@ fn admit_resolution(resolution: &[u8], manifest: &ResultManifest) -> Result<(), 
         ));
     }
     Ok(())
+}
+fn prepared_artifact(
+    operation: &str,
+    runtime: Duration,
+    mut arguments: Vec<OsString>,
+    ambient: &Environment,
+    cwd: &Path,
+) -> Result<Vec<u8>, String> {
+    arguments.insert(0, "prepared-artifact".into());
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot resolve repository-owned producer: {error}"))?;
+    command::run(
+        operation, runtime, executable, arguments, ambient, cwd, None,
+    )
+    .map(|output| output.stdout().to_vec())
+}
+
+fn publish_bundle(
+    repository: &str,
+    manifest: &Path,
+    payload: &Path,
+    bundle: &WindowsReleaseBundle,
+    ambient: &Environment,
+    cwd: &Path,
+) -> Result<String, String> {
+    let tag = bundle
+        .build_key
+        .strip_prefix("sha256:")
+        .ok_or_else(|| "Windows bundle build key is not SHA-256".to_owned())?;
+    let output = prepared_artifact(
+        "prepared Windows bundle publication",
+        PREPARED_REGISTRY_RUNTIME,
+        vec![
+            "publish".into(),
+            repository.into(),
+            tag.into(),
+            manifest.as_os_str().to_owned(),
+            payload.as_os_str().to_owned(),
+        ],
+        ambient,
+        cwd,
+    )?;
+    let output = std::str::from_utf8(&output)
+        .map_err(|error| format!("prepared Windows bundle publication is not UTF-8: {error}"))?;
+    let fields = output.split_whitespace().collect::<Vec<_>>();
+    let ["published", digest] = fields.as_slice() else {
+        return Err(format!(
+            "prepared Windows bundle publication returned invalid output: {:?}",
+            output.trim()
+        ));
+    };
+    Ok((*digest).to_owned())
 }
 
 fn pull_image(
@@ -302,10 +375,17 @@ fn pull_image(
 }
 
 /// The image ID `tag` names in the local Docker store, when it names one.
-fn local_image(tag: &str) -> Option<String> {
-    command_text("docker", &["image", "inspect", "--format", "{{.Id}}", tag])
-        .ok()
-        .map(|identity| identity.trim().to_owned())
+fn local_image(tag: &str, ambient: &Environment, cwd: &Path) -> Result<Option<String>, String> {
+    let identity = command_text(
+        "local proof image lookup",
+        LOCAL_IMAGE_RUNTIME,
+        ambient,
+        cwd,
+        "docker",
+        &["image", "ls", "--quiet", "--no-trunc", tag],
+    )?;
+    let identity = identity.trim();
+    Ok((!identity.is_empty()).then(|| identity.to_owned()))
 }
 
 /// The request parts one admitted bundle published as OCI manifest
