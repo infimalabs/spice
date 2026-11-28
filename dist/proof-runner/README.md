@@ -11,10 +11,12 @@ dist/proof-runner/build.sh
 ```
 
 An optional first argument names the Cargo target directory both runner builds
-share; it defaults to the worktree's `target/`. The hosted macOS job uses the
-dedicated `release-target/proof-native-dependencies` root so an admitted layer
-can restore only source-independent Cargo products without overlapping the
-candidate target. `--reuse-vendor` explicitly preserves an already admitted
+share; it defaults to the worktree's `target/`. The hosted macOS job passes its
+release driver's target directory with `--release-driver CONFIG` and the
+candidate environment: the runner then builds for `aarch64-apple-darwin` under
+that Cargo configuration beside the xtask library with `spice/canvas`, so Cargo
+resolves the driver's features and recompiles only the runner.
+`--reuse-vendor` explicitly preserves an already admitted
 `target/proof-native-darwin/vendor/` tree while deleting and rebuilding the
 runner binary, generated pins, and every other bundle entry.
 

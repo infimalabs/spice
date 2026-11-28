@@ -254,7 +254,6 @@ jobs:
               && [[ "$baseline" =~ ^[0-9]+$ ]] \
               && test -d "$root/restored/target/release-appliance" \
               && test -d "$root/restored/target/release-appliance-build" \
-              && test -d "$root/restored/target/proof-native-dependencies" \
               && test -d "$root/restored/proof-native-darwin/vendor"
           }
           hit=0
@@ -348,6 +347,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Upload release driver compile timings
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-timings-${{ inputs.challenge }}
+          path: ${{ runner.temp }}/release-target/release-appliance/cargo-timings/cargo-timing.html
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Publish or record native dependency layer
         if: ${{ always() && steps.candidate_prebuild.outputs.hit != '1' }}
         shell: bash
@@ -398,7 +406,6 @@ jobs:
                   'import tomllib; print(tomllib.load(open("dist/release/candidate.toml", "rb"))["debug_config"])')
                 release_target="$CARGO_TARGET_DIR/$release_name"
                 build_dir="$CARGO_TARGET_DIR/$build_name"
-                proof_target="$CARGO_TARGET_DIR/proof-native-dependencies"
                 candidate_env_file="$state/candidate.env"
                 packages_file="$state/workspace-packages"
                 "$python" - "$(pwd -P)" "$CARGO_TARGET_DIR" > "$candidate_env_file" <<'PY'
@@ -428,8 +435,6 @@ jobs:
                 env "${candidate_env[@]}" "$cargo" clean --release \
                   --target aarch64-apple-darwin --target-dir "$release_target" \
                   --config "$debug_config" "${packages[@]}"
-                phase='clean proof workspace packages'
-                "$cargo" clean --release --target-dir "$proof_target" "${packages[@]}"
 
                 phase='assemble dependency payload'
                 root="$state/publish"
@@ -437,7 +442,6 @@ jobs:
                 mkdir -p "$root/target" "$root/proof-native-darwin"
                 mv "$release_target" "$root/target/release-appliance"
                 mv "$build_dir" "$root/target/release-appliance-build"
-                mv "$proof_target" "$root/target/proof-native-dependencies"
                 cp -pR "$GITHUB_WORKSPACE/target/proof-native-darwin/vendor" \
                   "$root/proof-native-darwin/"
                 # Cold hosted run 45989936318 spent 23m30s in this native build.

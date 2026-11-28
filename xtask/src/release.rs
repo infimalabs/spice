@@ -68,6 +68,8 @@ pub struct CommandRecord {
     pub program: PathBuf,
     pub arguments: Vec<OsString>,
     pub code: Option<i32>,
+    /// Wall time from launch to exit.
+    pub elapsed: Duration,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
 }
@@ -1219,6 +1221,7 @@ impl Executor for SystemExecutor {
             redaction: Redaction::None,
             grace: GRACE,
         };
+        let started = std::time::Instant::now();
         let running = sill::spawn(spec).map_err(|source| TargetBuildError::Launch {
             label: command.label,
             source,
@@ -1237,6 +1240,7 @@ impl Executor for SystemExecutor {
             program: command.program,
             arguments: command.arguments,
             code: outcome.completion().status().code(),
+            elapsed: started.elapsed(),
             stdout,
             stderr,
         };
@@ -1267,7 +1271,7 @@ fn successful(record: CommandRecord) -> Result<CommandRecord, TargetBuildError> 
     if record.success() {
         Ok(record)
     } else {
-        Err(TargetBuildError::CommandFailed(record))
+        Err(TargetBuildError::CommandFailed(Box::new(record)))
     }
 }
 
