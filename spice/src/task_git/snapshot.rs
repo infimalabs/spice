@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use wire::intent::TransplantConflict;
 
+mod index;
 mod started;
 pub(super) use started::Started;
 
@@ -121,6 +122,7 @@ pub(super) fn capture(root: Worktree<'_>, head: &str) -> Result<Option<Captured>
                 "initialize snapshot index",
             )?;
         }
+        let message = index::message(root, original.is_some())?;
         checked(
             run_with_environment(root, &["add", "-A", "--", "."], &environment)?,
             "capture dirty worktree",
@@ -130,17 +132,7 @@ pub(super) fn capture(root: Worktree<'_>, head: &str) -> Result<Option<Captured>
             "write snapshot tree",
         )?;
         checked(
-            run(
-                root,
-                &[
-                    "commit-tree",
-                    &tree,
-                    "-p",
-                    head,
-                    "-m",
-                    "Spice parked worktree snapshot (uncommitted work)",
-                ],
-            )?,
+            run(root, &["commit-tree", &tree, "-p", head, "-m", &message])?,
             "write dangling worktree snapshot",
         )
     })();
@@ -225,6 +217,7 @@ pub(super) fn apply(root: Worktree<'_>, commit: &str) -> Result<Option<Transplan
     };
     cleanup.finish(root, &marker)?;
     if picked.success() {
+        index::restore(root, commit)?;
         return Ok(None);
     }
     Ok(Some(TransplantConflict {
