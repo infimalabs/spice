@@ -72,10 +72,11 @@ pub enum PublishEffect {
 /// and shared sealed evidence, then read the public release back from fresh
 /// storage. [`PublishEffect::StageOnly`] stops at the persisted plan.
 ///
-/// A new request reads `main` once and pins that commit. While it is pending,
-/// an invocation must name the pinned commit to resume it or abandon it; a
-/// bare invocation or another commit refuses. The local checkout never
-/// selects the release.
+/// A new Markdown request reads `main` once; a source-bound admitted notes
+/// record pins the commit it already names. While a request is pending, an
+/// invocation must name the pinned commit to resume it or abandon it; a bare
+/// invocation or another commit refuses. The local checkout never selects the
+/// release.
 pub fn publish_hosted_release(
     request: &PublishRequest,
     effect: PublishEffect,
@@ -101,17 +102,29 @@ pub fn publish_hosted_release(
         path: candidate_path.to_path_buf(),
         source,
     })?;
-    let source_commit = match publications.admit(request)? {
-        Some(commit) => commit,
-        None => landed_commit()?,
-    };
+    let admitted_notes = request
+        .notes_are_admitted()
+        .then(|| decode_admitted_notes(&candidate, None))
+        .transpose()?;
+    let source_commit =
+        match recorded_source_commit(publications.admit(request)?, admitted_notes.as_ref()) {
+            Some(commit) => commit,
+            None => landed_commit()?,
+        };
     let session = publications.begin(&source_commit)?;
     let unpublished = !session.publication_may_have_started()?;
     let input_commit = source_commit.clone();
-    let admitted = request.notes_are_admitted();
     let (notes, inputs) = std::thread::scope(|scope| {
         let notes = scope.spawn(|| {
-            timed(|| admit_notes(&worktree, &candidate, &source_commit, &session, admitted))
+            timed(|| {
+                admit_notes(
+                    &worktree,
+                    &candidate,
+                    &source_commit,
+                    &session,
+                    admitted_notes,
+                )
+            })
         });
         let inputs = scope.spawn(|| timed(|| admit_inputs(&session, input_commit)));
         (
@@ -188,15 +201,23 @@ fn timed<T>(operation: impl FnOnce() -> Result<T, PublishError>) -> Timed<T> {
     }
 }
 
+fn recorded_source_commit(
+    pinned: Option<String>,
+    admitted_notes: Option<&wire::ReleaseNotes>,
+) -> Option<String> {
+    pinned.or_else(|| admitted_notes.map(|notes| notes.release_commit.clone()))
+}
+
 fn admit_notes(
     worktree: &Path,
     candidate: &str,
     source_commit: &str,
     session: &PublicationSession,
-    admitted: bool,
+    admitted: Option<wire::ReleaseNotes>,
 ) -> Result<wire::ReleaseNotes, PublishError> {
-    let notes = if admitted {
-        decode_admitted_notes(candidate, source_commit, None)?
+    let notes = if let Some(notes) = admitted {
+        admit_notes_source(&notes, source_commit)?;
+        notes
     } else {
         let canonical = spice::release_history::draft(worktree, Some(source_commit))
             .map_err(|error| PublishError::Refused(error.to_string()))?;
@@ -218,30 +239,35 @@ pub fn admit_hosted_release_notes(
         path: path.to_path_buf(),
         source,
     })?;
-    decode_admitted_notes(&candidate, source_commit, Some(identity))
+    let notes = decode_admitted_notes(&candidate, Some(identity))?;
+    admit_notes_source(&notes, source_commit)?;
+    Ok(notes)
 }
 
 fn decode_admitted_notes(
     candidate: &str,
-    source_commit: &str,
     expected_identity: Option<&str>,
 ) -> Result<wire::ReleaseNotes, PublishError> {
     let notes: wire::ReleaseNotes =
         serde_json::from_str(candidate).map_err(PublishError::Decode)?;
     dist::admit_curated_release_notes(&notes)
         .map_err(|error| PublishError::Refused(error.to_string()))?;
-    if notes.release_commit != source_commit {
-        return Err(PublishError::Refused(format!(
-            "release notes name {}, not the requested {source_commit}",
-            notes.release_commit
-        )));
-    }
     if expected_identity.is_some_and(|identity| identity != notes.identity.to_string()) {
         return Err(PublishError::Refused(
             "dispatched release-note identity does not match the admitted document".to_owned(),
         ));
     }
     Ok(notes)
+}
+
+fn admit_notes_source(notes: &wire::ReleaseNotes, source_commit: &str) -> Result<(), PublishError> {
+    if notes.release_commit != source_commit {
+        return Err(PublishError::Refused(format!(
+            "release notes name {}, not the requested {source_commit}",
+            notes.release_commit
+        )));
+    }
+    Ok(())
 }
 
 /// Attach to the session's recorded provider preflight or dispatch it and
@@ -434,11 +460,18 @@ mod tests {
         };
         let encoded = serde_json::to_string(&notes).expect("record encodes");
 
-        let error = decode_admitted_notes(&encoded, &"b".repeat(40), None)
-            .expect_err("another commit refuses");
+        let decoded = decode_admitted_notes(&encoded, None).expect("admitted record decodes");
+        assert_eq!(
+            recorded_source_commit(None, Some(&decoded)),
+            Some("a".repeat(40)),
+            "a new admitted record carries its source pin"
+        );
+
+        let error =
+            admit_notes_source(&decoded, &"b".repeat(40)).expect_err("another commit refuses");
         assert!(error.to_string().contains("not the requested"));
 
-        let error = decode_admitted_notes(&encoded, &"a".repeat(40), Some(&"c".repeat(64)))
+        let error = decode_admitted_notes(&encoded, Some(&"c".repeat(64)))
             .expect_err("another identity refuses");
         assert!(error.to_string().contains("identity"));
     }
