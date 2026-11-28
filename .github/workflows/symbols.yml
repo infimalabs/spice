@@ -126,16 +126,18 @@ jobs:
           source: ${{ env.RELEASE_SOURCE }}
           tree: ${{ env.RELEASE_TREE }}
           archive_sha256: ${{ env.RELEASE_ARCHIVE_SHA256 }}
-          cargo_home: ${{ runner.temp }}/symbol-cargo
-          target_dir: ${{ runner.temp }}/symbol-target
+          # The canonical macOS stage paths: Cargo hashes link arguments under the
+          # target directory, and dependency paths are not remapped.
+          cargo_home: ${{ runner.temp }}/release-cargo
+          target_dir: ${{ runner.temp }}/release-target
           token: ${{ github.token }}
 
       - name: Rebuild with the declared native candidate environment
         if: ${{ inputs.target == 'aarch64-apple-darwin' }}
         uses: ./.github/actions/macos-unsigned-stage
         with:
-          cargo-home: ${{ runner.temp }}/symbol-cargo
-          target-dir: ${{ runner.temp }}/symbol-target
+          cargo-home: ${{ runner.temp }}/release-cargo
+          target-dir: ${{ runner.temp }}/release-target
           archive: ${{ env.RELEASE_SOURCE }}
           proof-container: ${{ env.RELEASE_PROOF_IDENTITY }}
           canvas: ${{ runner.temp }}/symbol-input/input/canvas.zip
