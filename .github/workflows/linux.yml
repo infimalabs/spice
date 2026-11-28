@@ -238,6 +238,9 @@ jobs:
           contract_entries=$(git ls-files --stage -- prepared)
           test -n "$contract_entries"
           contract=$(printf '%s\n' "$contract_entries" | LC_ALL=C sort | digest_text)
+          # The sealed image fixes these absolute paths for every dependency build.
+          layout=$(printf '%s' 'workspace=/workspace;home=/cargo-home;target=/cargo-target' \
+            | digest_text)
           # Bind the executable workflow contract by content, not the commit
           # which happened to dispatch it.
           workflow=$(file_digest .github/workflows/linux.yml)
