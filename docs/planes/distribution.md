@@ -488,10 +488,12 @@ engine. Its supported entry point is the local journal-backed
 `dispatch-hosted-release` command. The workflow runs only by manual dispatch
 from the exact landed `main` revision named by the admitted notes; ordinary
 pushes cannot start it. One repository-wide concurrency group serializes
-public release effects. Before any native stage, the coordinator requires the
-structured note record's source commit and domain-separated document identity,
-then re-admits its schema, curated Highlights, inventory boundary, and exact
-bytes without opening or reconstructing the local journal. The workflow
+public release effects. Immediately after building the coordinator and before
+proof-image or platform setup, the coordinator requires the structured note
+record's source commit and domain-separated document identity, then re-admits
+its schema, curated Highlights, inventory boundary, and exact bytes without
+opening or reconstructing the local journal. The publisher repeats the same
+admission before any native stage. The workflow
 preserves the Git-common publication authority after every attempt under a
 run- and attempt-scoped artifact, validates and restores only regular files
 beneath `releases/`, and resumes the pinned commit on a rerun. A completed

@@ -23,7 +23,7 @@ const USAGE: &str = concat!(
     "share-darwin EXECUTABLE --identity IDENTITY --notary-profile PROFILE|",
     "sign-staged-darwin INPUT OUTPUT --identity IDENTITY --notary-profile PROFILE|",
     "finalize-staged-darwin INPUT SIGNED_NATIVE OUTPUT|verify-staged-darwin STAGE|",
-    "stage-hosted-release INPUTS_RUN|dispatch-hosted-release --notes FILE [--stage-only]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
+    "stage-hosted-release INPUTS_RUN|admit-hosted-release-notes RECORD COMMIT IDENTITY|dispatch-hosted-release --notes FILE [--stage-only]|publish-hosted-release <--notes FILE|--admitted-notes FILE|COMMIT --notes FILE|COMMIT --admitted-notes FILE> [--stage-only]|publish-hosted-release --abandon COMMIT|stage-target TARGET [--unsigned] [--proof-container IMAGE] [--proof-runner RUNNER] [--staged-app|--app-only]|stage-target x86_64-unknown-linux-musl --unsigned --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target aarch64-apple-darwin --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --hosted --release-inputs RUN [--attach [RUN_ID]]|stage-target x86_64-pc-windows-msvc --unsigned --proof-container IMAGE --prebuilt MANIFEST ROOT|windows-appliance --unsigned|windows-cross|windows-cross-build OUT --cross-image IMAGE --msvc-generation GENERATION [--staged-app]|windows-msvc|windows-hosted -- PROGRAM [ARG...]|",
     "windows-guest <provision [--replace]|start|stop|status|reset|",
     "sync [--artifact PATH]... [--source PATH]...|",
     "run [--timeout SECONDS] [--output-bytes BYTES] -- PROGRAM [ARG...]>>"
@@ -504,6 +504,7 @@ fn run_prove_staged_target(arguments: Vec<OsString>, output: &mut impl io::Write
 
 fn is_hosted_release_command(command: &OsStr) -> bool {
     command == OsStr::new("stage-hosted-release")
+        || command == OsStr::new("admit-hosted-release-notes")
         || command == OsStr::new("dispatch-hosted-release")
         || command == OsStr::new("publish-hosted-release")
 }
@@ -517,6 +518,7 @@ fn run_hosted_release_command(
 ) -> CommandResult {
     match command.to_str().expect("exact command is Unicode") {
         "stage-hosted-release" => run_hosted_release(arguments, ambient, output, error_output),
+        "admit-hosted-release-notes" => run_admit_hosted_release_notes(arguments, output),
         "dispatch-hosted-release" => run_dispatch_hosted_release(arguments, output),
         "publish-hosted-release" => run_publish_hosted_release(arguments, ambient, output),
         _ => unreachable!("predicate admits only hosted release commands"),
@@ -546,6 +548,25 @@ fn cross_host(ambient: &Ambient) -> Result<xtask::CrossHost, Box<dyn std::error:
         release: release_environment(ambient),
         ambient: ambient.environment()?,
     })
+}
+
+fn run_admit_hosted_release_notes(
+    arguments: Vec<OsString>,
+    output: &mut impl io::Write,
+) -> CommandResult {
+    let [record, commit, identity] = arguments.as_slice() else {
+        eprintln!("{}", help());
+        return Err(usage_error().into());
+    };
+    let commit = commit.to_str().ok_or_else(usage_error)?;
+    let identity = identity.to_str().ok_or_else(usage_error)?;
+    let notes = xtask::admit_hosted_release_notes(Path::new(record), commit, identity)?;
+    writeln!(
+        output,
+        "admitted release notes {} for {}",
+        notes.identity, notes.release_commit
+    )
+    .map_err(Into::into)
 }
 
 fn run_dispatch_hosted_release(
