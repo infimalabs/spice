@@ -344,6 +344,7 @@ fn automatic_answer(
         phase: None,
         nothing_stolen: false,
         transplant: transplant.cloned(),
+        parked: None,
     }
 }
 
@@ -413,6 +414,7 @@ pub(crate) fn release_automatic(
         ));
     }
     let answer = wire::intent::ClaimAnswer {
+        parked: parked_answer(&handle, parked.as_ref()),
         ownership: Some(ownership),
         task: handle,
         statement: None,

@@ -116,6 +116,22 @@ fn append_release(
     Ok(freed)
 }
 
+/// The parked authority a free answer returns, with the claim that restores it.
+pub(in crate::board_command) fn parked_answer(
+    task: &TaskHandle,
+    parked: Option<&spice::task_git::ParkedRelease>,
+) -> Option<wire::intent::ClaimParked> {
+    parked.map(|parked| wire::intent::ClaimParked {
+        commits: parked.parked().clone(),
+        restore: parked_restore(task).into_boxed_str(),
+    })
+}
+
+/// The claim that replays a task's parked commits and snapshot onto a lane.
+pub(in crate::board_command) fn parked_restore(task: &TaskHandle) -> String {
+    format!("spice task capture {task}")
+}
+
 fn finish_release(
     bus: &Bus,
     command: &wire::AdmittedCommand,
@@ -240,6 +256,7 @@ pub(in crate::board_command) fn claim_free(
         phase: None,
         nothing_stolen: false,
         transplant: None,
+        parked: parked_answer(entry.handle(), parked.as_ref()),
     };
     finish_release(bus, command, task, write, answer, parked)
 }

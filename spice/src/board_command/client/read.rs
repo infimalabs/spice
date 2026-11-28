@@ -967,6 +967,10 @@ fn parked_commit_lines(task: &BoardTask) -> Vec<String> {
     if let Some(snapshot) = &parked.snapshot {
         lines.push(format!("parked_snapshot {snapshot}"));
     }
+    lines.push(format!(
+        "parked_restore {}",
+        crate::board_command::parked_restore(&task.statement.body.handle)
+    ));
     lines
 }
 

@@ -453,6 +453,7 @@ fn build_write(
                 phase: None,
                 nothing_stolen: false,
                 transplant: None,
+                parked: None,
             },
         )
         .map_err(LapseError::Build)?;
@@ -659,6 +660,7 @@ mod tests {
                     phase: None,
                     nothing_stolen: false,
                     transplant: None,
+                    parked: None,
                 },
             )
             .expect("the claim receipt builds");

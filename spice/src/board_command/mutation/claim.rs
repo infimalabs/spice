@@ -634,6 +634,7 @@ fn claim_answer(
             &snapshot.answer.addresses,
         )),
         transplant: transplant.cloned(),
+        parked: None,
     }
 }
 
