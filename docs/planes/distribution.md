@@ -203,6 +203,9 @@ Linux symbol rebuilds mount their private Cargo target as the sealed
 container's only writable host target. After any root-owned dependency restore,
 the workflow transfers that target to the runner, which recursively admits it
 for a remapped container user; no other host path gains write access.
+Before returning, that sealed identity makes only its newly created private
+stage and target directories removable by the host, so successful and refused
+rebuilds leave no container-owned symbol scratch behind.
 
 `dispatch-hosted-release --symbols` sets the explicit `release_symbols` input.
 After canonical release completion, `release.yml` dispatches one independent
