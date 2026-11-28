@@ -197,7 +197,6 @@ jobs:
           PROOF_IMAGE: ${{ steps.image.outputs.identity }}
         run: |
           set -euo pipefail
-          [[ "${GITHUB_WORKFLOW_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
           xtask="$RUNNER_TEMP/bootstrap-target/debug/xtask"
           root="$RUNNER_TEMP/linux-dependencies"
           target="$RUNNER_TEMP/sealed-target"
@@ -231,12 +230,14 @@ jobs:
           # both the dev xtask build and the release candidate.
           profile=$(python3 -c 'import json, tomllib; print(json.dumps(tomllib.load(open("Cargo.toml", "rb")).get("profile", {}), sort_keys=True))' \
             | digest_text)
-          contract=$(cat prepared/Cargo.toml prepared/src/lib.rs | digest_text)
-          # The image fixes rustc, Cargo, the vendored sources, and the
-          # absolute paths every sealed run compiles under.
-          layout=$(printf '%s' 'workspace=/workspace;home=/cargo-home;target=/cargo-target' \
-            | digest_text)
-          workflow=$(printf '%s' "$GITHUB_WORKFLOW_SHA" | digest_text)
+          # The prepared client interprets and admits the layer. Bind every
+          # tracked implementation file by path, mode, and Git blob identity.
+          contract_entries=$(git ls-files --stage -- prepared)
+          test -n "$contract_entries"
+          contract=$(printf '%s\n' "$contract_entries" | LC_ALL=C sort | digest_text)
+          # Bind the executable workflow contract by content, not the commit
+          # which happened to dispatch it.
+          workflow=$(file_digest .github/workflows/linux.yml)
           jq -n --sort-keys \
             --arg target "$(printf '%s' x86_64-unknown-linux-musl | digest_text)" \
             --arg image "$PROOF_IMAGE" --arg layout "$layout" \

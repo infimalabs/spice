@@ -680,6 +680,15 @@ regular file, refuses before mutation. Bytes and their exact mode land in a
 private same-directory file that replaces the destination only once complete,
 so an interrupted publication leaves the prior file or none.
 
+The hosted Linux stage publishes its third-party Cargo target directories as
+an admitted prepared layer. Its key binds the proof image, lockfile, Cargo
+configuration, candidate settings, resolved external feature graph, profiles,
+fixed build paths, exact Linux workflow bytes, and the complete tracked
+prepared-client implementation tree. It does not bind the release commit, so
+source-only releases reuse one layer while any execution-contract change
+selects another. A restored layer must carry the exact key and cold-build
+record before Cargo may use it.
+
 ### Ephemeral signed macOS staging
 
 `.github/workflows/macos.yml` runs the Darwin release only on the exact arm64
